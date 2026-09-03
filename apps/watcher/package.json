@@ -1,0 +1,41 @@
+{
+  "name": "watcher",
+  "version": "0.28.1",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "bin": {
+    "zero-memory-watcher": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun --watch src/index.ts watch",
+    "start": "ZM_SKIP_WATCHER_VERSION_GATE=1 OUT=\"$HOME/.local/bin/zero-memory-watcher\" bash ../../scripts/build-watcher.sh && bash ../../scripts/wire-hooks.sh full",
+    "build": "bash ../../scripts/build-watcher.sh",
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
+    "format": "bunx prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "test:vitest": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@workspace/client-adapter-claude": "workspace:*",
+    "@workspace/client-adapter-codex": "workspace:*",
+    "@workspace/client-adapter-cursor": "workspace:*",
+    "@workspace/client-adapter-hermes": "workspace:*",
+    "@workspace/client-core": "workspace:*",
+    "@workspace/client-runtime": "workspace:*",
+    "@workspace/contracts": "workspace:*",
+    "@workspace/logger": "workspace:*",
+    "@workspace/mcp-oauth-client": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workspace/eslint-config": "workspace:^",
+    "@workspace/typescript-config": "workspace:^",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

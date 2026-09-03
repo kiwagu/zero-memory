@@ -1,0 +1,97 @@
+# Zero-memory edge: TLS termination + reverse proxy (Caddy).
+#
+# Hostnames are read from the container environment ({$VAR} is Caddy's
+# runtime env interpolation) — set ZM_SERVER_HOST / ZM_WEB_HOST in
+# infra/prod/.env. For public DNS names Caddy provisions and renews
+# certificates automatically (ACME / Let's Encrypt) and redirects
+# http -> https on its own. X-Forwarded-For / -Proto / -Host are set by
+# `reverse_proxy` by default; WebSocket upgrades are proxied transparently.
+
+{
+	# Optional: ACME account email for expiry notices.
+	# email admin@example.com
+
+	# Local / self-signed variant: uncomment to have Caddy sign all sites
+	# with its internal CA instead of ACME. Works for *.localhost hostnames
+	# out of the box (e.g. zm.localhost) — handy for testing the full TLS
+	# path without DNS. Clients must trust the CA or skip verification
+	# (curl -k).
+	# local_certs
+}
+
+# ── MCP server: https://{$ZM_SERVER_HOST} == ZM_PUBLIC_URL (OAuth issuer) ──
+{$ZM_SERVER_HOST} {
+	# Operational counters are unauthenticated, and this site proxies every
+	# path — so without this line /metrics would be world-readable. Scrape it
+	# from inside the compose network (http://zm-server:8787/metrics) instead;
+	# remove this only if your scraper is external and you guard it yourself.
+	respond /metrics 404
+
+	reverse_proxy zm-server:8787 {
+		# Streamable HTTP MCP responds with text/event-stream; never
+		# buffer, so events (initialize result, tool progress) flush
+		# immediately.
+		flush_interval -1
+	}
+}
+
+# ── Web dashboard ───────────────────────────────────────────────────────────
+{$ZM_WEB_HOST} {
+	# Legal texts, for a deployment that publishes any: whatever is bound at
+	# /srv/legal (ZM_LEGAL_DIR, empty by default) is served here, so a file
+	# named terms.html answers at /terms. Those are the addresses
+	# ZM_TERMS_URL / ZM_PRIVACY_URL then name for the sign-up form. They live
+	# at the EDGE rather than inside the dashboard image because the texts
+	# belong to the operator, not to the product: publishing them, changing
+	# them, or having none at all must never require a rebuild. An instance
+	# that publishes nothing serves 404 here, which is the honest answer.
+	handle /terms* {
+		root * /srv/legal
+		try_files {path}.html {path}/index.html {path}
+		file_server
+	}
+
+	handle /privacy* {
+		root * /srv/legal
+		try_files {path}.html {path}/index.html {path}
+		file_server
+	}
+
+	handle {
+		reverse_proxy zm-web:3100
+	}
+}
+
+# ── Documentation site ──────────────────────────────────────────────────────
+# Public and unauthenticated — the reference the other two hostnames are
+# explained in. Hostname from ZM_DOCS_HOST, like the sites above.
+{$ZM_DOCS_HOST} {
+	# The site can write markdown into its own content tree through /upload,
+	# and that path is guarded by an environment variable (ZM_DOCS_UPLOAD_TOKEN,
+	# unset = every request refused). An env var is the wrong place for that
+	# decision on a public edge: setting the token once for convenience would
+	# publish a filesystem-write endpoint. Deciding it here means the write path
+	# is absent from the public surface no matter how the container is
+	# configured. Remove this line only if you deliberately want to author pages
+	# over the internet.
+	respond /upload* 404
+
+	reverse_proxy zm-docs:3200
+}
+
+# ── Supabase API gateway (optional) ─────────────────────────────────────────
+# The dashboard runs in the browser, so Kong must be reachable from users'
+# machines (NEXT_PUBLIC_SUPABASE_URL at web build time = this external URL).
+# Uncomment to expose Kong through this proxy (set SUPABASE_HOST in .env);
+# skip if your Supabase stack is already published elsewhere — a hosted
+# Supabase project is reachable on its own domain and needs nothing here.
+# SUPABASE_UPSTREAM defaults to the self-hosted stack's service name, which
+# resolves only with the attach overlay; for a host-published stack set it to
+# host.docker.internal:<port>.
+#
+# {$SUPABASE_HOST} {
+# 	reverse_proxy {$SUPABASE_UPSTREAM} {
+# 		# Realtime uses WebSockets (transparent); auth/rest are plain HTTP.
+# 		flush_interval -1
+# 	}
+# }

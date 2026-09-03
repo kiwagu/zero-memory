@@ -1,0 +1,130 @@
+---
+title: Install the client
+description: Connect a coding agent to a zero-memory instance someone else runs — an account, one MCP registration, and the optional client bundle that makes memory automatic.
+---
+
+This page is for using an instance that is already running: a hosted one, or a
+colleague's self-hosted server. Nothing on it requires Docker, Supabase, a
+server host, or a checkout of this repository — that is the
+[deployment](/docs/getting-started/deployment) path, and you do not need it to
+be a user.
+
+There are two levels, and the first one is complete on its own:
+
+1. **Register the MCP endpoint.** Your agent gets `recall`, `build_context`,
+   `remember` and the server's standing rules. Two minutes, no download.
+2. **Install the client bundle.** Adds the parts that make memory automatic
+   rather than remembered: a briefing at session start, a session receipt at
+   the end, a recall-first nudge on code search, and — only if you turn it on —
+   transcript capture.
+
+## 1. Get an account
+
+Open the dashboard at <HostedDashboardLink />, switch the form to sign-up, and
+confirm the address from the mail that arrives. The same account is what the
+agent authorizes with later, and what owns every memory you store.
+
+## 2. Register the MCP endpoint
+
+The server is reached over HTTP MCP at <HostedMcpEndpoint />. Register it once,
+at user scope, so every project on the machine sees it:
+
+<HostedConnectCommand client="claude" />
+
+Then start the agent, run `/mcp`, pick `zero-memory` and authorize. The browser
+opens the instance's own login page; on success the client stores a token and
+refreshes it on its own. No API key is issued and no password is shared with
+the client: the server is an OAuth 2.1 authorization server, and the client
+registers itself dynamically with PKCE.
+
+`/mcp` should now show `zero-memory` as connected, and the memory tools appear
+as `mcp__zero-memory__*`. Cursor and Codex CLI register the same endpoint their
+own way — see [client adapters](/docs/getting-started/client-adapters).
+
+## 3. Install the client bundle
+
+The bundle carries one self-contained binary (`zero-memory-watcher`) plus
+the installers for **all four** supported clients (Claude Code, Codex, Cursor,
+Hermes) — including their re-home variants for a bundle that lives on a
+shared or removable mount. It is what turns memory from something you invoke
+into something that is already there when the session opens.
+
+<ClientBundleDownload />
+
+Every release attaches its bundles to the release page, in two formats —
+`zm-bundle-<version>-<platform>.tar.gz` and `.zip`, each with a `.sha256`
+next to it. A version-free copy of each is attached as well, so
+`…/releases/latest/download/zm-bundle-linux-x86_64.tar.gz` stays a working
+address across releases.
+
+The archive is per-platform, because it carries a compiled binary, and its name
+says which one. The same answer is inside, in `bundle.json`, and the installer
+reads it: run a bundle built for another machine and it stops before touching
+anything, naming the file you actually want. Linux and Windows builds are
+published; a checkout builds any other platform the compile table knows (see
+below).
+
+**On Windows**, run the installers from Git Bash — they are shell scripts, and
+the binary they install (`zero-memory-watcher.exe`) is reached from that shell
+without anything else on the machine.
+
+Unpack it, run the installer for your client, and authorize the machine:
+
+<ClientBundleInstall client="claude" />
+
+The installer asks for the server URL if you have not given one, checks that it
+answers before writing anything, and stores it in
+`~/.config/zero-memory/config.json`. Every client path on the machine — the MCP
+registration, the hooks, the ingest daemon — reads that one file, which is what
+keeps your editor and your briefings from ending up on different servers.
+`zero-memory-watcher login <url>` does the same thing later if you move to
+another instance.
+
+Reload the client fully afterwards (Claude Code: **Developer: Reload Window**)
+and open a new session: hooks are loaded at startup.
+
+## 4. Check what you got
+
+```sh
+zero-memory-watcher status --json
+```
+
+It prints the state, the endpoint it is talking to, and whether that address
+came from the stored config or an environment override — the first thing to
+look at if memory works in chat but briefings look stale. A machine with no
+server configured says exactly that instead of guessing an address.
+
+## What is captured
+
+Nothing, until you say so. The tools store only what the agent consciously
+sends: a `remember` call, and the queries behind `recall` / `build_context`.
+And a `remember` needs a target: a session that has not attached to a
+project (via `build_context` or a project hint) gets a refusal naming the
+ways out — never a silent write to somewhere unexpected.
+Transcript capture is a separate opt-in — the `ingest` hook is wired only by
+`deploy-zm-claude.sh --with-ingest`, and even then it stays off until a consent
+config lists a project. A `.zero-memory-ignore` file in a repository (or any
+folder above it) keeps that project out of every server-touching hook,
+including the briefing. See
+[Claude Code](/docs/getting-started/claude-code#privacy--per-project-capture-control)
+for the exact settings.
+
+## Building the client yourself
+
+The bundle is a convenience, not a requirement. From a checkout,
+`bash scripts/build-watcher.sh` compiles the same binary and
+`bash scripts/plugin-bundle/build-zm-bundle.sh <dir>` stages the same folder
+the installers expect — the download above is only that folder, packed:
+
+```sh
+bash scripts/plugin-bundle/build-zm-bundle.sh ./out --tar ./dist --zip ./dist
+# dist/zm-bundle-<version>-<platform>.tar.gz  (+ .sha256)
+# dist/zm-bundle-<version>-<platform>.zip     (+ .sha256)
+```
+
+Both formats pack the same staged folder, so they can never hold different
+trees. The build names the archive for the platform it ran on, and
+`--target <platform>` cross-compiles for another one — that is how the Windows
+bundle is produced on a Linux machine. A platform with no compile target is
+refused rather than half-built, so an unusable download is never published by
+accident.

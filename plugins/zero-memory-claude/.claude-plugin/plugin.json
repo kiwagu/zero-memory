@@ -1,0 +1,10 @@
+{
+  "name": "zm",
+  "displayName": "zero-memory-claude",
+  "version": "0.28.1",
+  "description": "Persistent cross-session memory (zero-memory) for Claude Code: /zm:brief, /zm:receipt and /zm:triage commands, auto-briefing at session start and on the first task prompt, automatic transcript capture on Stop, and memory-first working rules. The zero-memory MCP server (recall, build_context, remember) is registered at user scope by the deploy script, keeping the plain mcp__zero-memory__* tool names.",
+  "author": {
+    "name": "zero-memory"
+  },
+  "keywords": ["memory", "mcp", "hooks", "briefing", "context"]
+}

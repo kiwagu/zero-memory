@@ -1,0 +1,98 @@
+---
+title: End-to-end testing
+description: The Playwright-based e2e harness, the test-id contract, and the isolated test stack.
+---
+
+zero-memory ships with a single end-to-end test workspace, `tests/e2e`, built on Playwright. It exercises the system the way real clients do — over HTTP and through a real browser — against a fully isolated, disposable copy of the stack. The working norm is simple: **every feature lands with two to three end-to-end specs** covering its critical flows.
+
+## Why it exists
+
+Retrofitting e2e coverage onto a grown UI means threading test ids through every screen and rebuilding the environment for determinism — so the harness exists from the start, and every large cross-cutting change (UI migrations, schema migrations, localization) runs against a verifiable behavioral contract instead of being checked by eye. The CI gate catches regressions in the critical flows — OAuth, MCP tools, and scope visibility — before they ship.
+
+## How it works
+
+### Two projects, one config
+
+The Playwright config defines two projects:
+
+- **`api` — the protocol layer, no browser.** A Playwright request context drives the live stack directly: the OAuth flow (dynamic client registration → authorize → token, including negative cases and rate limiting), MCP tools over HTTP (`recall`, `build_context`, `remember`, `share`), and row-level-security visibility of [scopes](/docs/concepts/scopes-and-isolation) as seen by an external client.
+- **`web` — the browser layer, chromium.** Dashboard flows: the login form, the memory feed rendering records, the memory card with its [provenance](/docs/concepts/provenance), and filter and scope controls.
+
+The browser matrix is chromium-only; it widens only if real usage demands it.
+
+### The test-id contract
+
+Key controls and outcomes carry `data-testid` attributes from the first screen onward, and specs select by test id rather than by text. This is a contract: any change that touches a covered surface must either preserve the test ids or migrate the affected specs **in the same change**. The reconcile rule is absolute — if you change covered behavior, you update the spec with it; specs are never `.skip`ped to get a change through.
+
+### The test pyramid
+
+Browser tests are reserved for flows where visible user value is being verified. Exhaustive matrices — allow/deny permission combinations, input validation — belong in integration tests; the e2e layer proves the critical paths end to end, not every case.
+
+### Smoke and full runs
+
+Specs are split into two suites:
+
+- `test:e2e:smoke` — fast, critical flows only; the quick local iteration
+  loop.
+- `test:e2e:full` — the complete suite.
+
+In CI the complete suite is the acceptance gate, split by Playwright project
+(`api` and `web`) into two parallel jobs so each half fits a standard runner
+— and a failure names which half broke.
+
+### Determinism
+
+Flake resistance is engineered in, not hoped for:
+
+- A dedicated e2e user is provisioned through the password-grant flow, so setup needs no interactive OAuth.
+- A fixed set of memories is seeded before each run.
+- CI runs with `retries: 2` and `trace: on-first-retry`, so a failing retry always leaves a trace to inspect.
+- Test-id selectors remove the largest source of browser-layer flakiness.
+
+### The isolated stacks
+
+E2e runs get their own dedicated Supabase stack with a distinct project id — which means its own Docker network, volumes, and containers. Test users, test memories, and container logs cannot leak into a development or staging environment.
+
+The launcher (`tests/e2e/scripts/run-e2e.ts`) drives **two contours** from one script:
+
+- **`test`** (the default) — the suite's stand: a dedicated server (`:8788`) and web app (`:3102`). Every run begins with a fast database reset — migrations produce a clean schema, then fresh fixtures are seeded — which is the condition of determinism.
+- **`review`** — the acceptance stand: a second, equally isolated stack with its own server (`:8789`) and web app (`:3103`), booted from the same working tree. Its database is a clone of the live cluster with the branch's pending migrations applied on top — applying them is the pre-promote rehearsal — and it stays up, accumulating state, because manual acceptance needs real data left standing. Both its halves hot-reload the working tree, so the stand keeps tracking what you edit.
+
+The two loads are incompatible on one stack — any suite run would wipe the standing data, and standing data blocks the reset — so each contour gets its own stack, and `--target=both` does both in one command.
+
+The launcher is **persistent by default**, because cold starts are slow and runs are frequent:
+
+- A stack is reused if already up; the cold start is paid once.
+- The dedicated server and web instances are reused if alive — and the test server is rebooted automatically when sources changed since it booted, so a warm rerun never exercises stale code.
+- Everything **stays up after the run**; a warm rerun is roughly twice as fast as a cold one.
+
+Controls and escape hatches: `--ephemeral` tears the test contour down at the end, and `bun run e2e:down` stops it explicitly; `--target=review --persist` stands the review stand up (the suite refuses to run against the review clone), `--refresh` re-clones live data into it, and `--status` reports what is up, on what data, and whether a reused process still matches the tree. As a belt-and-suspenders guard, global setup verifies that test accounts use the reserved `@zm.e2e` email domain.
+
+Runs can also target an already-running stack by setting `E2E_SERVER_URL` / `E2E_WEB_URL` — process environment variables take precedence over each application's `.env` file, so development configuration is never touched.
+
+### Documentation screenshots
+
+The images the documentation site ships are captured by a dedicated spec in
+the web project, tagged `@docs-shot`. The tag keeps them **out of every
+routine run**: the launcher excludes them unless a run asks for them by
+name, so no suite run can overwrite a shipped image as a side effect — their
+framing is a human decision. The workflow when a screenshotted screen
+changes:
+
+```sh
+cd tests/e2e
+bun run e2e:stack       # the test contour, up
+bun run demo:seed       # the curated showcase corpus the shots portray
+bun run e2e:screenshots # re-capture, straight into the docs site's images
+```
+
+The scene is prepared entirely by the seed — the capture spec only
+photographs — and the corpus it loads is a committed, human-reviewed set of
+real statements about the product itself, so a re-shoot never leaks private
+content into a public image.
+
+## Design notes
+
+- **Deterministic Playwright only in the gate.** LLM-driven browser automation is available as a local exploratory tool, but it never gates CI: model-dependent checks bring flakiness, per-run cost, and nondeterminism exactly where a gate needs none of them.
+- **A real stack, not an in-process substitute.** An embedded Postgres cannot provide the auth, REST, and realtime services that the `api` project exists to test, and re-assembling that topology by hand would reinvent what the Supabase CLI already starts correctly.
+- **One workspace, not per-app suites.** Spreading e2e across applications duplicates configuration and fragments the harness; a single workspace keeps one config, one launcher, and one contract.

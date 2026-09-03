@@ -1,0 +1,57 @@
+---
+description: Use when: writing RLS policies that rely on `auth.uid()`, `auth.jwt()`, team membership claims, or MFA assertions.
+alwaysApply: false
+---
+
+# RLS Policies: Helper Functions and JWT Claims
+
+## Pyramid Layer
+
+- Layer: L3 SQL leaf.
+
+## Use This When
+
+- Load this after the RLS router when the policy logic depends on auth helper functions or JWT claims.
+
+## Stop Here If
+
+- Stop once the right auth helper and trust boundary are clear.
+
+## Descend To
+
+- Return to `/.cursor/rules/create-rls-policies.mdc` for authoring or performance siblings.
+
+## `auth.uid()`
+
+Use `auth.uid()` for the canonical authenticated user ID.
+
+## `auth.jwt()`
+
+Use `auth.jwt()` when authorization depends on app metadata claims.
+
+Important distinction:
+
+1. `raw_user_meta_data` can be changed by the user and should not hold authorization facts.
+2. `raw_app_meta_data` is the safer place for authorization data.
+
+Example:
+
+```sql
+create policy "User is in team"
+on my_table
+to authenticated
+using ( team_id in (select auth.jwt() -> 'app_metadata' -> 'teams') );
+```
+
+## MFA Example
+
+```sql
+create policy "Restrict updates"
+on profiles
+as restrictive
+for update
+to authenticated
+using ( (select auth.jwt()->>'aal') = 'aal2' );
+```
+
+Even here, keep `restrictive` exceptional. Use it only when you deliberately need it and can explain why.

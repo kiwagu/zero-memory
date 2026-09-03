@@ -1,0 +1,14 @@
+{
+  "name": "zero-memory",
+  "version": "0.28.1",
+  "description": "Persistent cross-session memory for Codex: auto-briefing at session start, a health warning when the server is unreachable, transcript auto-capture on stop, and the memory-first working skill. The zero-memory MCP server (recall, build_context, remember) is registered by `codex mcp add` at user scope, keeping plain tool names (a plugin-bundled server would namespace them).",
+  "author": { "name": "zero-memory" },
+  "keywords": ["memory", "mcp", "hooks", "briefing", "context"],
+  "hooks": "./hooks/hooks.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "zero-memory",
+    "shortDescription": "Persistent cross-session memory (briefing + capture).",
+    "category": "Productivity"
+  }
+}

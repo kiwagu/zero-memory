@@ -1,0 +1,118 @@
+---
+description: Use when: finishing any implementation work — merging, promoting, or applying anything to the live stack.
+alwaysApply: true
+---
+
+# Release Approval Flow
+
+## Pyramid Layer
+
+- Layer: L0 core rule.
+
+## Use This When
+
+Any change is ready to leave its feature branch: merging to `dev`,
+promoting stage, restarting services, or touching the live database.
+
+## The Rule
+
+1. **One epic — one branch — one merge.** All work of an epic, including
+   every review fix that surfaces while it awaits approval, lands as
+   commits on the SAME feature branch. Never spawn micro fix-branches for
+   review feedback; they bloat history and dilute the epic.
+2. **Validate on the isolated test stack** (units + integration + e2e).
+   Real data only via a live clone restored into a non-live stack — never
+   by touching live.
+3. **Stand up the review stand — unprompted.** Before asking for
+   approval, from the epic branch: `bun --cwd tests/e2e run
+   test:e2e:stands`. One command stands up BOTH contours from the same
+   commit — the test stack runs the suite off a `db reset`, and the review
+   stack (`zero-memory-review`, server `:8789` / web `:3103`) comes up on a
+   fresh clone of live with the branch's pending migrations applied, and
+   stays up. Hand the reviewer the web URL; the owner signs in with LIVE
+   credentials, since a physical clone carries the real accounts. Do not
+   make them ask for this stand each time. `bun --cwd tests/e2e run
+   stands:down` when it is no longer needed.
+
+   **Which stand answers which question — the division is by what the data
+   is, not by what is convenient.** The review stand carries a STABLE CLONE
+   of production and is therefore the one to review on, to audit against,
+   and to point a client at: it is the only contour where behaviour can be
+   judged on real volume and real shapes. The dev and test stands are
+   DEVELOPMENT contours whose databases get reformatted — `db reset` is
+   routine there and destroys nothing anyone needs — so they answer "does
+   the code run" and never "is the result any good".
+
+   Two consequences worth stating, because both have cost time:
+   - A branch carrying a MIGRATION can only be reviewed on real data here.
+     Feature-branch DDL must never touch a stand that holds the corpus the
+     deployment was migrated from, so the review stand's clone — where the
+     launcher applies the branch's pending migrations as a rehearsal — is
+     the only place the change and the data meet before promotion.
+   - Reviewing on a reset-able stand answers a weaker question than it
+     appears to. An empty corpus makes retrieval, ranking and anchoring
+     look fine because there is nothing for them to get wrong.
+4. **STOP at the approval gate.** Present the validated result and wait
+   for the owner's explicit merge/promote command. A go-ahead to
+   implement, in any wording, authorizes implementation only — it is never
+   authorization to merge or promote. There is no "finalization"
+   exemption.
+5. **After approval — the feature's path to production, and what is tested
+   where.** Each step tests the thing that is new at that step; testing the
+   same combination twice is waste, and skipping the step where a NEW
+   combination first exists is the actual risk.
+
+   a. **Cut the branch from `main`.** It is stable by definition.
+
+   b. **On the feature branch — the ordinary gates:** `check` (format,
+      lint, typecheck, env templates), units, the feature's own e2e specs
+      and `test:e2e:smoke`. Fast feedback on the change itself. The full
+      suite here would only re-test `main`, which the last release already
+      proved.
+
+   c. **Merge into `dev` — and run the FULL e2e there. This step is
+      mandatory.** `dev` is the compatibility contour: it is the only place
+      where this feature meets the others still in flight, so it is the
+      only place that combination has ever existed. Conflicts are resolved
+      here too, on `dev`, not later.
+
+   d. **Merge the SAME feature branch into `main`. No test run is owed
+      here.** `main` gains nothing that was not already exercised: the
+      branch was tested on its own, and its combination with everything
+      in flight was tested on `dev`. THIS HOLDS ONLY BECAUSE NOTHING
+      REACHES `main` WITHOUT PASSING `dev` — that condition is what makes
+      the step safe, so never let a branch skip (c) to save time.
+
+   e. **Release** — `run.sh sync` re-runs check, units and the full e2e
+      before it cuts the tag, so the published tree is proved once more at
+      the moment of publication.
+
+   `dev` and `main` therefore carry DIFFERENT merge commits for the same
+   work and drift apart permanently. That is the model working, not a
+   defect: do not try to make one an ancestor of the other, and do not
+   "repair" the divergence.
+
+   Every merge records a merge commit, so a branch stays one object in
+   history and `git revert -m 1` can take a whole epic back out. You do not
+   pass a flag for this — `merge.ff=false` is set in the repository config
+   by `scripts/setup-git-merge-policy.sh`, which `prepare`/`postinstall`
+   run. A policy that depends on remembering a flag at the moment of
+   typing is not a policy; fast-forward is git's silent default and it is
+   most likely exactly where it hurts most — a branch cut from an unmoved
+   `main`.
+
+   Applying a schema change to a serving deployment and any data one-shots
+   there are the owner's manual steps — hand over exact commands, and
+   rehearse a migration before proposing it rather than overriding a
+   refusal.
+6. **Post-approval follow-ups** go through the same cycle as a new
+   deliberate branch (batched, not one branch per tweak). Applied
+   migrations are never edited — forward migrations only; never roll the
+   database back for code-level fixes.
+
+## Why
+
+The live stack serves the owner's real memory; the owner reviews before
+anything reaches it. Two epics were once merged and promoted without
+approval by over-reading a go-ahead — this rule is the fix, settled
+deliberately; do not re-litigate it per session.

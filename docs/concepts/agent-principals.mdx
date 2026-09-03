@@ -1,0 +1,98 @@
+---
+title: Agent principals
+description: How non-human writers are identified, where that identity comes from, and what it enables across memories, activity, and metrics.
+---
+
+Most writes into zero-memory are made by agents — a coding assistant in a
+terminal session, a background watcher extracting facts from conversations, a
+chat agent doing triage. zero-memory records **which principal produced each
+memory and each call**: an author kind, an agent name, and an owner. Identity
+is derived by the server from the connection, never taken as a tool argument.
+(The `thread` parameter some tools accept is not a counter-example: it is a
+state selector _inside_ the already-authenticated caller — every lookup is
+additionally filtered by the caller's own account, so another account's
+token resolves to nothing. It selects which conversation's project applies;
+it never says who is calling.)
+
+## Why a principal and not an anonymous write
+
+A memory that only says "an agent wrote this" cannot support the three things
+the system does with authorship:
+
+- **Rank.** Trust differs by role. An in-band agent that had the whole
+  conversation in view is a stronger author than a background extractor, and
+  ranking depends on being able to tell them apart — see
+  [Provenance](/docs/concepts/provenance).
+- **Attribute.** "Which of my tools recalled this, and what did it get back?"
+  is the question the activity feed exists to answer; it needs an actor per
+  call, not per session.
+- **Separate measurement from use.** The dashboard talks to the same server as
+  an ordinary MCP client, so effectiveness metrics have to distinguish an
+  agent's call from a person clicking Search in the browser.
+
+## How it works
+
+- **Two fields on every memory.** `author_kind` (`human` or `agent`) says what
+  kind of writer produced it; `agent_name` names the specific one. Agent is
+  the default for writes arriving over the tool surface.
+- **The name comes from the handshake.** For a direct `remember`, the server
+  stamps the connecting client's self-declared name from the MCP initialize
+  exchange (`clientInfo.name`). There is no `agent_name` parameter on any
+  tool: a caller cannot claim to be a different principal, and a client that
+  declares no name leaves the field empty rather than guessing.
+- **Reserved names mark provisional writers.** Two names are the server's own
+  and carry a trust meaning rather than a brand: `watcher` for out-of-band
+  transcript extraction and `bootstrap` for a one-time repository harvest.
+  Memories under either are provisional. Ingested memories keep that name and
+  carry the tool the transcript came from in a separate provenance field, so
+  trust and attribution never collide in one column.
+- **Ownership, not accounts.** An agent acts for a human and holds no
+  credentials of its own. Everything it writes lands in its owner's scopes
+  under the owner's rights, and row-level security is enforced on the owner —
+  so a memory written by an agent is always visible to the person it belongs
+  to. (A separate service account was rejected: it adds credential management
+  and splits identity, so memory written by the agent could become invisible
+  to the owner's own sessions.)
+- **One display label per tool.** Raw client identifiers are normalized to
+  stable brand labels in a single place, so every surface shows a tool under
+  the same name however its client string was spelled.
+
+## How a principal comes into being
+
+There is no registration step: an agent becomes a principal by connecting.
+The identity is established once per connection, during the MCP initialize
+exchange, and then rides every tool call of that session — the memory rows it
+writes, the metered events its calls emit, and the activity rows the read
+tools produce. Nothing has to be provisioned in advance, and connecting a new
+client is enough to make its writes distinguishable from the ones you already
+have.
+
+## What you see as a user
+
+Agent identity surfaces wherever a write or a call is shown. A memory card
+renders `author_kind · client` — for example `agent · Claude Code` —
+alongside the kind, scope, and visibility badges, and the activity feed shows
+each `recall` or `build_context` call under the principal that ran it,
+together with the query it sent and what came back. Metered work carries the
+same name, which is what lets the effectiveness figures on
+[Insights](/docs/dashboard/insights) count agent traffic and leave the
+dashboard's own connection out of it.
+
+See [Usage events](/docs/platform/usage-events) for the metered record and
+the [audit log](/docs/platform/audit-log) for the mutation trail, which
+records the acting user and the command rather than the client.
+
+## Design notes
+
+- **Identity now, authorization later.** The model deliberately stops at
+  identity: no per-agent tokens, no narrowed database roles, no agent
+  management screen. Those all need a principal to exist first, and every one
+  of them can attach to the fields that already carry it.
+- **Role over model identity.** Ranking by which model wrote a memory would be
+  brittle — models are swapped routinely. The stable invariant is the role a
+  writer played: human, in-band agent, or provisional extraction.
+- **Server-stamped, never client-claimed.** The same rule governs the rest of
+  a memory's provenance: the session id, the session marker of the
+  conversation the memory was born in, and the routing record are all written
+  by the server, so an audit of who wrote what, where it came from, and how it
+  was routed cannot be forged from tool input.

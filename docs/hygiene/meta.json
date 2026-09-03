@@ -1,0 +1,10 @@
+{
+  "title": "Memory Hygiene",
+  "pages": [
+    "index",
+    "content-guard",
+    "false-invalidation",
+    "queue-throughput",
+    "decay-and-reinforcement"
+  ]
+}

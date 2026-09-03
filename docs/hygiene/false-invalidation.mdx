@@ -1,0 +1,133 @@
+---
+title: False-invalidation safeguards
+description: Why hygiene never auto-hides durable, authoritative knowledge, and how to restore anything that was invalidated by mistake.
+---
+
+Automatic conflict resolution has an asymmetric failure mode. A false
+_duplicate_ verdict sits visibly in the review queue where a human can veto
+it. A false _invalidation_ silently removes a memory from `recall` — the
+knowledge effectively disappears, and nobody is told. zero-memory treats this
+asymmetry as a first-class design constraint: a set of safeguards makes the
+dangerous direction strictly harder to trigger, and a restore path exists for
+anything that slips through.
+
+## Why it exists
+
+The risk is concrete, not hypothetical: an LLM judge comparing a broad summary
+against a narrow, precise gotcha can plausibly rule that the broad record
+"supersedes" the narrow one — even though the broad record contains none of
+the narrow one's actionable detail (exact diagnostic steps, the difference
+between two environment switches, the command that fixes the problem). Acting
+on that verdict hides the specific record and produces a net loss of
+information, which undermines the product's core promise that memory is a
+reliable first source. The safeguards below exist to make that outcome
+structurally impossible for the knowledge that matters most.
+
+## The safeguards
+
+**Protected kinds are never auto-invalidated.** A memory of kind `gotcha`,
+`convention`, `decision`, or `preference` with an authoritative
+[provenance rank](/docs/concepts/provenance) (rank 1 or higher — written
+deliberately by an agent or a human, not provisionally captured by the
+watcher) can never lose an automatic resolution. Whatever the judge's verdict
+— duplicate or supersedes — the pair goes to the review queue. A false
+duplicate in the queue is visible; a silent invalidation is not.
+
+**Rank-based auto-supersede only demotes provisional records.** Authority
+short-circuits the judge only when the losing side is rank 0 (provisional
+watcher capture). Pairs where both sides carry real authority — a
+human-ranked record against an agent-ranked one — always go through the
+judge's verdict plus the protected-kind guard, and when such a pair _is_ a
+duplicate, the more authoritative side wins, not merely the newer one.
+The one lane that acts on any relation at any confidence is the
+**both-provisional collapse**: two rank-0 captures of the same thing merge
+with the newest winning — safe by construction, because no authoritative
+knowledge is involved on either side.
+
+**Invalidation demands more confidence than deduplication.** Auto-superseding
+requires judge confidence of at least **0.95**, while auto-forgetting an
+exact-duplicate pair keeps the standard **0.9** threshold. Hiding a record
+whose content _differs_ from the survivor's is a more destructive act than
+collapsing two records that say the same thing, so it must clear a higher
+bar.
+
+**The judge distinguishes "replaces" from "complements".** The judge's
+prompt carries an explicit coverage clause: a `supersedes` verdict is only
+valid if the replacement covers _all_ of the actionable specifics of the
+record it replaces — diagnostic steps, commands, configuration differences.
+A broad summary and a specific diagnosis of the same topic is
+`complementary`, not `supersedes`. High-confidence complementary pairs get a
+`relates_to` link between them and both records stay live; nothing is hidden.
+
+## Restoring an invalidated memory
+
+If a memory was invalidated — by an automatic action, a review decision, or
+your own earlier `forget` — the `restore_memory` MCP tool brings it back:
+
+- clears the invalidation and supersession marks, so the memory reappears in
+  `recall` and briefings;
+- removes the supersede links pointing at it;
+- writes an audit entry recording the restore.
+
+Restore works even for memories that were hidden inline at write time and
+therefore never had a review-queue entry — no dispute record is required.
+Records that are merely _disputed_ (a pending conflict in the queue) remain
+visible in `recall` with a dispute flag and are resolved through
+`list_conflicts` / `resolve_conflict` instead — for example with a
+`keep_both` resolution.
+
+## Challenging a memory that misled you
+
+The safeguards above protect knowledge from the judge; the `challenge` MCP
+tool covers the opposite direction — a memory the safeguards keep alive but
+that reality contradicts. The moment a recalled memory proves wrong against
+the world (a stored fix that fails, a decision the code contradicts), an
+agent calls `challenge(memory_id, reason)` — used when the corrected fact is
+not yet known; when it is, writing it with a `supersedes` link is the right
+move instead.
+
+A challenge raises a **single-subject dispute** (verdict `challenged`) in the
+review queue: one memory, no counterpart. The challenged memory stays live
+and visible in `recall` — it only ranks lower until adjudicated, because
+recorded doubt beats silently ignoring a memory. Challenging is idempotent
+while the dispute is open. The dispute is settled with `resolve_conflict`:
+uphold the memory (`winner` = its id, or `keep_both`), or `retire: true` — a
+reversible retirement with no successor, undone by `restore_memory` exactly
+like any other invalidation. Nothing ever retires a challenged memory
+automatically.
+
+Hygiene raises the same dispute shape on its own evidence: a memory whose
+misled signals (explicit challenges plus judge-attributed misled verdicts)
+cross a threshold is queued as a **stale suspect**, and an external re-check
+that finds a world fact outdated files one too (see
+[world-fact freshness](/docs/hygiene/decay-and-reinforcement)). In every
+case the flag is a question for review, never an invalidation. A dismissed
+suspicion is only re-raised by evidence newer than the dismissal. The
+dashboard's review page shows pair conflicts; single-subject disputes are
+triaged through the conflict tools.
+
+## How to use it
+
+- `restore_memory` — soft-recover a hidden memory by id.
+- `challenge` — dispute one of your memories as wrong, stale, or misleading.
+- `list_conflicts`, `get_conflict`, `resolve_conflict` — inspect and settle
+  pending disputes; `keep_both` is the right resolution when both sides are
+  true, `retire: true` reversibly retires a single-subject dispute's memory.
+- The dashboard review queue is the visual surface for pair decisions —
+  see the [hygiene overview](/docs/hygiene).
+
+## Design notes
+
+- **Two invalidation paths, one dangerous.** A record can be contested via
+  the review queue (visible, flagged in recall, reversible through
+  `resolve_conflict`) or hidden directly by a confident automatic verdict
+  (invisible). The safeguards deliberately push every ambiguous case onto the
+  first path; `restore_memory` exists for the second.
+- **Thresholds are asymmetric on purpose.** The cost of a false positive is
+  not symmetric across actions, so the confidence bars are not either. The
+  real-world incident that motivated this work would have been stopped by the
+  0.95 threshold alone — and by the protected-kind guard independently.
+- **Restored memories are respected downstream.** The
+  [queue-throughput](/docs/hygiene/queue-throughput) machinery treats a
+  previously restored memory as settled: triage keeps both sides, and
+  already-adjudicated pairs are never re-judged by a later sweep.

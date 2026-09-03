@@ -1,0 +1,192 @@
+---
+title: Client adapters
+description: How Cursor, Codex CLI, Hermes, and VS Code connect to zero-memory, what each adapter provides, and where their capabilities differ.
+---
+
+Any MCP-compatible client can use zero-memory out of the box: register the
+HTTP endpoint, log in once over OAuth, and the `recall` / `remember` /
+`build_context` tools are available, along with server-sent instructions that
+prime the agent on connect. That baseline needs no adapter at all.
+
+What an adapter adds on top is the part that makes memory automatic: hooks
+that brief the agent at session start, capture transcripts on session end,
+and enforce the memory-first discipline without the user having to remember
+it. Native MCP remains the primary surface: every client gets tools and
+standing-rule delivery without an adapter, while hooks add automatic timing,
+offline cache, capture, health nudges, and receipts.
+
+MCP rule delivery is adaptive. Clients without a documented instructions cap
+receive the full applicable rules on `initialize`. Claude Code, whose MCP
+instructions are silently capped at 2 KB, receives a compact router and rule
+inventory instead; the full texts arrive through `build_context.rules[]` and
+its hooks. MCP instructions do not update in place, so reconnect after a rule
+catalog change if that is the delivery path you rely on.
+
+## The adapter model
+
+Every integration is measured against six touchpoints:
+
+1. **MCP registration** — the memory tools themselves.
+2. **Standing rules** — native MCP delivery, with a client rule file as an
+   optional fallback (see the
+   [rules incubator](/docs/guides/rules-incubator)).
+3. **Session briefing** — inject the project briefing when a session opens.
+4. **Task briefing** — brief on the task at the first substantive prompt.
+5. **Transcript capture** — opt-in ingest of the conversation into memory.
+6. **Session receipt** — the end-of-session value summary.
+
+All adapters are thin wiring around one shared client core: the same domain
+logic (briefing, dedup, receipt aggregation, consent, offline cache) drives
+every client, and an adapter only maps client events and formats onto it —
+never a fork of the logic. The installers are symmetric too: one
+`deploy-zm-<client>.sh` per client in `scripts/plugin-bundle/` (Claude Code,
+Codex, Cursor, Hermes), runnable from the repository or from an exported
+multi-client bundle, each installing the shared watcher binary, the client's
+plugin, and the MCP registration in one pass. Two shared helpers make the
+symmetry real: the server URL is **one asked-for, health-checked, stored
+answer** (`~/.config/zero-memory/config.json`) that every adapter reads, and
+the bundle's platform is one name checked in one place — so no two clients on
+a machine can end up talking to different servers.
+
+One capability difference worth knowing: how a session learns **which
+project it belongs to** depends on the client. Hook-capable clients get the
+project (and its durable thread token) re-stated on every user message;
+clients whose instruction channel is capped receive the guidance through the
+briefing and the tool descriptions instead. Either way the write default is
+the attached project — see
+[Scopes and isolation](/docs/concepts/scopes-and-isolation).
+
+## Capability matrix
+
+| Touchpoint           | Claude Code                              | Cursor                               | Codex CLI                                  | Hermes                                             | VS Code / Copilot      |
+| -------------------- | ---------------------------------------- | ------------------------------------ | ------------------------------------------ | -------------------------------------------------- | ---------------------- |
+| MCP registration     | user scope, `mcp__zero-memory__*` prefix | `~/.cursor/mcp.json`, raw tool names | `codex mcp add`, user scope                | `mcp_servers.zero-memory` in `config.yaml`         | `.vscode/mcp.json`     |
+| Always-on rule       | `CLAUDE.md` (opt-in) + skill             | always-apply rule in the plugin      | memory-first skill in the plugin           | memory-first skill in the plugin                   | instructions files     |
+| Session briefing     | hook                                     | hook                                 | hook                                       | hook (`pre_llm_call`, first turn)                  | pull only              |
+| Task briefing        | hook                                     | not injected (no channel)            | hook                                       | hook (`pre_llm_call`)                              | no stable event        |
+| Transcript capture   | Stop hook (opt-in)                       | stop hook + transcript path (opt-in) | Stop hook + session rollout files (opt-in) | `post_llm_call` + a plugin-written mirror (opt-in) | manual export + import |
+| Compaction capture   | `PreCompact` hook                        | `preCompact` hook                    | `PreCompact` hook                          | not needed — captured every turn                   | —                      |
+| Compaction anchor    | yes — output reaches the summary         | — (observational hook)               | — (output not read as context)             | — (no plugin-facing compaction event)              | —                      |
+| Session receipt      | hook (SessionEnd)                        | — (stop is fire-and-forget)          | —                                          | hook (`on_session_end`, logged)                    | —                      |
+| Recall-usage scoring | ids from the transcript                  | — (results not recorded)             | ids from the rollout tool stream           | ids from `post_tool_call` results                  | —                      |
+
+The two compaction rows are one boundary and two different questions. The
+three hook-driven editors announce a compaction before it happens, so each can
+have the epoch that is about to be condensed captured while it is still whole.
+Hermes reaches the same result by a different route: it captures every
+completed turn, so nothing is left pending when a compaction arrives — the
+boundary has nothing to rescue. Whether anything a hook prints can also reach
+the model writing the summary is a separate capability, and only Claude Code
+has it. Cursor's event is explicitly observational, and its shipped code reads
+a single user-facing field from the hook's reply; Codex parses the reply as
+structured output and lists context injection for other events only; Hermes
+exposes no compaction event to a general plugin at all. Where the anchor
+cannot land it is not attempted, so no client pays a round trip to write into
+nothing.
+
+The recall-usage row is the recall-usefulness judge's input: when a captured
+transcript records which memory ids `recall` / `build_context` actually
+showed the agent, the server can score how useful each recall was. Claude
+Code transcripts carry the tool results inline, Codex rollout files let the
+call be correlated with its output, and the Hermes plugin records them from
+its `post_tool_call` hook. Cursor's transcripts record neither tool results
+nor a correlation id, so the judge has no input there — a structural gap of
+the client, reported honestly as such rather than approximated.
+
+## Cursor
+
+The Cursor integration ships as a Cursor plugin, installed by
+`scripts/plugin-bundle/deploy-zm-cursor.sh` into `~/.cursor/plugins/local`:
+lifecycle hooks plus an always-apply memory-first rule. The session briefing,
+the health warning, the recall reminder, and capture run through Cursor's
+Agent Hooks; transcript capture reads the transcript path the stop hook
+provides, gated by the same opt-in consent as everywhere else. The MCP
+server is registered in `~/.cursor/mcp.json` rather than bundled in the
+plugin, and Cursor exposes the tools under **raw names** (no `mcp__`
+prefix), so enforcement texts are phrased per client. Two honest gaps:
+Cursor's prompt-submit event offers no channel for injecting context, so the
+task briefing does not fire there — the session briefing and the
+always-apply rule cover for it — and its stop event is fire-and-forget with
+no render channel, so the end-of-session receipt cannot be shown either.
+Cursor does announce a compaction, so the boundary capture runs here like
+everywhere else; what it cannot do is influence the summary, because that
+event is observational by design.
+
+## Codex CLI
+
+Codex CLI mirrors the Claude Code integration closely and ships as a Codex
+plugin (hooks plus a memory-first skill), installed by
+`scripts/plugin-bundle/deploy-zm-codex.sh` from a generated local
+marketplace: session briefing on session start, task briefing and the health
+status on prompt submit, and opt-in capture on stop and at a compaction
+boundary, reading transcripts from Codex's on-disk session rollout files.
+Codex records a compaction in the rollout under its own record type rather
+than as a replayed message, so the condensed restatement is never mistaken
+for something a human said. MCP is registered with
+`codex mcp add` at user scope rather than bundled in the plugin — bundling
+would namespace the tool names under the plugin. Note that Codex requires
+you to review and trust hooks (via `/hooks`) before they fire — a fresh or
+updated install stays inert until you do.
+
+## Hermes
+
+Hermes ships as a **Python plugin** (`plugin.yaml` + `register(ctx)`) rather
+than a JSON hook manifest, installed by
+`scripts/plugin-bundle/deploy-zm-hermes.sh` into the active profile's
+`plugins/` directory. Hermes plugins are opt-in by design, so the installer
+also adds the name to `plugins.enabled` — an installed but unlisted plugin
+never runs. The MCP server is declared under `mcp_servers.zero-memory` in
+`config.yaml`, keeping the plain tool names.
+
+The lifecycle maps onto Hermes' own hooks: `pre_llm_call` is the only one
+whose return value reaches the model, so both briefings and the health warning
+are injected there; `post_llm_call` captures the turn; `post_tool_call` records
+recall results for the usefulness judge; `on_session_end` renders the receipt.
+`/zm status | receipt | capture` covers in-session diagnostics.
+
+One structural difference is worth stating plainly, because it is the only
+place this adapter does more than map events. **Hermes keeps its sessions in
+SQLite, not in a transcript file**, so there is no append-only stream for
+ingest to tail by byte offset. Reading another product's private schema — and
+re-diffing the whole conversation each turn to find what is new — was rejected
+as the wrong dependency. Instead the plugin mirrors each completed turn into
+its own append-only JSONL file under
+`~/.local/state/zero-memory/hermes-transcripts/` (0700 directory, 0600 files),
+which the shared ingest path then consumes like any other transcript. Capture
+stays opt-in: with `capture: false` (the default) the mirror is never created
+and the session is read-only.
+
+Two gotchas of the environment are handled rather than documented as caveats.
+Hermes runs its agent with `HOME` pointed at a per-profile sandbox, which would
+hide the watcher's stored server URL and OAuth token and leave briefing silently
+dead on a fully authorized machine; both the plugin and the installer restore the
+real home from the password database. And `HERMES_HOME` may name either the
+Hermes root or a profile directory — the installer distinguishes them instead of
+appending a profile name twice.
+
+## VS Code and Copilot
+
+VS Code with Copilot is an **instruction-only** integration today: register
+the MCP server in `.vscode/mcp.json`, install the memory-first rule through
+Copilot's instructions files (VS Code also natively discovers `CLAUDE.md`),
+and use the `zm` quick-capture CLI plus [manual import](/docs/guides/import)
+for getting facts in. The stable extension API exposes neither agent
+lifecycle events nor the chat transcript, so automatic briefing and capture
+are not possible on a publishable extension — and zero-memory deliberately
+prefers this honest degradation over fragile workarounds that break with an
+editor update. Running Claude Code inside VS Code's terminal or extension is
+the full-capability path in that editor.
+
+## Shared behavior across adapters
+
+- **Privacy is uniform.** The consent config and the
+  `.zero-memory-ignore` / `.zero-memory-allow` project markers apply to
+  every adapter; no client may bypass them. A client without a reliable
+  transcript path is simply a read-mostly client — a valid level.
+- **The client is visible in provenance.** Every memory and briefing records
+  which client produced it, so [provenance](/docs/concepts/provenance) and
+  the dashboard can attribute activity per tool.
+- **Honest degradation over emulation.** A missing touchpoint is declared
+  missing and compensated with existing means (server instructions, the
+  rules file, the `zm` CLI, manual import) — never emulated with fragile,
+  undocumented workarounds.

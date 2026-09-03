@@ -1,0 +1,25 @@
+-- Migration: enable the banded similarity boost — measured, no trade-off
+--
+-- Purpose:
+--   Second accepted value through the fusion_config knobs. On a clone of the
+--   production corpus (2030 live memories), an additive boost of 0.005 —
+--   about a quarter of a rank-1 leg contribution (1/61) — over the measured
+--   similarity band (0.80..0.92) cut the briefing junk share 0.458 → 0.417
+--   with the present-hit set IDENTICAL to baseline (23/25), ROI hit@10 held
+--   at 1.0 and MRR up 0.935 → 0.938. The whole [0.003, 0.007] band behaves
+--   identically, so the value sits on a plateau, not a knife edge.
+--
+-- Special considerations:
+--   - Leg re-weighting was measured first and rejected: every junk gain it
+--     offered cost recall of paraphrase-style queries, because it only shifts
+--     weight between two rank-flattened legs. The boost adds discrimination
+--     INSIDE the vector leg instead, which is why it takes the precision win
+--     without that price.
+--   - Larger weights keep raising paraphrase MRR (0.975 at 0.033) but crowd
+--     legitimate rank-edge targets out of briefing packs (present 23 → 21);
+--     values are accepted only through the retrieval-eval harness.
+--   - Combining the boost with a sharpened RRF constant was measured and
+--     rejected: targets lost to sharpening sit at the pack's rank edge, not
+--     in the vector-similarity band, so the boost does not bring them back.
+update public.fusion_config
+set similarity_boost_weight = 0.005, updated_at = now();

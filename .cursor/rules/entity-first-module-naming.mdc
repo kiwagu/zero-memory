@@ -1,0 +1,52 @@
+---
+description: Use when: naming new modules or files so entity-first naming stays consistent.
+alwaysApply: true
+---
+
+# Entity-First Module Naming
+
+## Pyramid Layer
+
+- Layer: L1 core naming rule.
+
+## Use This When
+
+- Keep this rule active when creating or renaming feature files.
+
+## Stop Here If
+
+- Stop here once the naming shape is clear; this is a leaf rule.
+
+## Descend To
+
+- No sibling descent required. Apply the naming pattern directly.
+
+Use entity-first modular filenames for feature artifacts to keep related files grouped and discoverable.
+
+## Required naming pattern
+
+- Prefer `<entity>.<artifact>.<ext>` instead of `<artifact>-<entity>.<ext>`.
+- Keep all files for one feature near its route/module folder.
+
+## Standard artifacts
+
+- Form UI: `<entity>.form.tsx`
+- Server actions: `<entity>.actions.ts`
+- Validation schema: `<entity>.schema.ts` or `<entity>.schema.tsx` (match project/file usage)
+- View-only component: `<entity>.view.tsx`
+- **Client-only module** (Next.js `'use client'` boundary, client mount gates, etc.): `<entity>.client.tsx` (or `<entity>.client.ts` when there is no JSX). Prefer this over ad-hoc names such as `<entity>.shell.tsx`.
+- Helpers/utils: `<entity>.utils.ts`
+- Constants: `<entity>.constants.ts`
+- Types: `<entity>.types.ts`
+
+## Examples
+
+- `profile.form.tsx`
+- `profile.actions.ts`
+- `profile.schema.tsx`
+
+## Refactoring rule
+
+- For touched modules, prefer renaming old patterns (for example `profile-form.tsx`, `actions.ts`, `schema.ts`) to entity-first names.
+- When renaming client-only boundaries, prefer `<entity>.client.tsx` over `*.shell.tsx` (or other vague suffixes).
+- After rename, always update imports in the same change.

@@ -1,0 +1,43 @@
+# Zero-memory transcript watcher — systemd USER unit template.
+#
+# Optional: only needed to capture transcripts CONTINUOUSLY (e.g. sessions from
+# clients that don't run the zero-memory plugin). If you use the plugin, its
+# Stop hook already ingests your own sessions and you do NOT need this daemon.
+#
+# The watcher is a client-side daemon: it runs on a developer machine, tails
+# local Claude Code transcripts and pushes chunks to the zero-memory MCP
+# server. It does NOT run on the server host. Auth is OAuth — run
+# `zero-memory-watcher login` once before starting the service (the token store
+# is shared with the plugin hooks).
+#
+# Install:
+#   install -m 0755 dist/zero-memory-watcher ~/.local/bin/zero-memory-watcher
+#   cp infra/prod/watcher.service ~/.config/systemd/user/zero-memory-watcher.service
+#   # the server address: stored by `zero-memory-watcher login <url>` in
+#   # ~/.config/zero-memory/config.json, or overridden per-service below
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now zero-memory-watcher
+#   journalctl --user -u zero-memory-watcher -f
+#
+# To keep it running after logout: loginctl enable-linger $USER
+
+[Unit]
+Description=Zero-memory transcript watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Runs the installed, self-contained binary — no repo checkout or bun needed.
+# `watch` launches the daemon explicitly (a bare invocation never starts one).
+ExecStart=%h/.local/bin/zero-memory-watcher watch
+# Optional env (only ZM_SERVER_URL / ZM_WATCH_CHUNK_CHARS; auth is OAuth, so no
+# Supabase URL or credentials). The leading '-' makes a missing file non-fatal:
+# with no file the watcher uses the server stored by `login <url>`; with none
+# stored either it exits saying so rather than guessing an address.
+EnvironmentFile=-%h/.config/zero-memory/watcher.env
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

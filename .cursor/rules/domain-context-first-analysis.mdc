@@ -1,0 +1,66 @@
+---
+description: Use when: analyzing or designing any non-trivial feature so the agent starts from domain intent before application flow or infrastructure details.
+alwaysApply: true
+---
+
+# Domain-context-first feature analysis
+
+## Pyramid Layer
+
+- Layer: L0 architecture orientation rule.
+
+## Use This When
+
+- Start here before implementing, refactoring, or reviewing any non-trivial feature.
+- Use this rule to decide where analysis should begin and how to split domain, application, and infrastructure concerns.
+
+## Stop Here If
+
+- Stop once the bounded context, source of truth, and context split are clear.
+- Descend into narrower rules or skills only after the domain starting point is explicit.
+
+## Descend To
+
+- Process router: `/.cursor/rules/process-check-rules-skills.mdc`
+- Schema-first contract rule: `/.cursor/rules/zod-schema-first-contracts.mdc`
+
+## Core rule
+
+- Start feature analysis in the **domain context** first. The first question is not "which route, component, RPC, or table changes?" but "which business capability, invariant, permission, lifecycle, or event is this feature about?"
+- Treat the **domain** as the source of intent. The application layer coordinates that intent. Infrastructure makes it executable.
+- In DDD terms, the domain should be understandable without framework, HTTP, queue, UI, or database details.
+
+## Context split
+
+- **Domain context** — business language, ownership rules, permissions, lifecycle states, idempotency semantics, events, and invariants.
+- **Application context** — use-case orchestration: request parsing, auth/session-to-domain mapping, transaction boundaries, dedupe wiring, event dispatch, server actions, workers, and route handlers.
+- **Infrastructure context** — concrete delivery and persistence: Postgres tables/RLS/RPC, Supabase Auth, HTTP/MCP transport, storage, and framework config.
+
+## Interpretation for this project
+
+- In this repository, domain purity is **conceptual first**, not folder-first. Do not force an artificial `src/domain` structure where the codebase does not use one.
+- Domain logic may be expressed through shared contracts, policy helpers, event schemas, SQL invariants, RLS assumptions, and documentation-backed ownership rules.
+- The absence of a dedicated domain folder does **not** mean the domain is absent. It means the agent must identify the real source of business truth before touching adapters.
+
+## Required analysis order
+
+1. Name the **bounded context** and business capability.
+2. State the **invariant** or policy that must hold.
+3. Identify the **authoritative domain source** for that feature.
+4. Map the **application flow** that coordinates the change.
+5. Inspect the **infrastructure adapters** that persist, transport, or expose the result.
+
+## Questions to answer first
+
+- Which bounded context owns this feature: identity, memory capture, recall/search, sharing and scopes, entity graph, ingestion, or audit?
+- What must remain true after the change?
+- Which state transitions, permissions, events, or idempotency guarantees matter?
+- Which module is the source of truth, and which modules are mirrors or adapters?
+
+## Anti-patterns
+
+- Starting from a UI component or route handler when the feature is really about a domain rule.
+- Letting database shape or route layout define the business model.
+- Mixing domain policy with transport or framework code in one function.
+- Treating mirrors, caches, or downstream consumers as authoritative writers.
+- Forcing heavy clean-architecture ceremony onto simple CRUD or presentation-only work.

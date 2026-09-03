@@ -1,0 +1,73 @@
+---
+description: Use when: authoring new RLS policies and deciding operation-specific `using`, `with check`, and `to` clause structure.
+alwaysApply: false
+---
+
+# RLS Policies: Authoring Basics
+
+## Pyramid Layer
+
+- Layer: L3 SQL leaf.
+
+## Use This When
+
+- Load this after the RLS router when the task is to write the actual policy statement shape.
+
+## Stop Here If
+
+- Stop once the operation-specific policy contract is clear.
+
+## Descend To
+
+- Return to `/.cursor/rules/create-rls-policies.mdc` for helper-function or performance siblings.
+
+## Authoring Contract
+
+- Generate only `create policy` or `alter policy` statements.
+- Use `auth.uid()` rather than `current_user`.
+- Keep explanations outside SQL blocks.
+- Avoid `for all`; create separate policies per operation.
+- Prefer `permissive` policies over `restrictive` unless there is a very specific reason.
+
+## Default Posture — Fail-Closed (private-by-default)
+
+The default access posture is **fail-closed**: a row is invisible unless a predicate **deliberately** admits it, and new user content defaults to **private (owner-only)** — sharing is an **additive, deliberate widening**, never the baseline.
+
+- When choosing a default for a visibility/ownership column or a new `select` predicate, **err toward private**. The forgotten case must fail **closed** (un-shared, recoverable) — never **open** (leaked, irrecoverable). A missing sharing decision means private, not exposed.
+- The guarantee is an **RLS fact, not an application filter.** Never rely on an app-side `where owner = me` or a `status='draft'` view filter as the privacy boundary — the stack exposes direct PostgREST access that bypasses it (`poc-no-fallbacks`: no fake fence). The fence is the policy predicate.
+- Compose audience as **OR'd grants on top of a floor** (owner → scope/role/user grants → supervisory), each an independent disjunct that only **widens**.
+
+Operation rules:
+
+1. `select` policies use `using` and not `with check`.
+2. `insert` policies use `with check` and not `using`.
+3. `update` policies usually need both `using` and `with check`.
+4. `delete` policies use `using` and not `with check`.
+
+## Roles and Ordering
+
+Supabase maps requests to `anon` or `authenticated`, and the `to` clause should appear after `for`.
+
+```sql
+create policy "Public profiles are viewable only by authenticated users"
+on profiles
+for select
+to authenticated
+using ( true );
+```
+
+## Separate Policies per Operation
+
+```sql
+create policy "Profiles can be created by any user"
+on profiles
+for insert
+to authenticated
+with check ( true );
+
+create policy "Profiles can be deleted by any user"
+on profiles
+for delete
+to authenticated
+using ( true );
+```

@@ -1,0 +1,40 @@
+# Attach overlay: the Supabase stack runs in Docker on THIS host.
+#
+# Joins the application containers to that stack's existing network, so
+# SUPABASE_URL can address Kong by service name (http://supabase-kong:8000)
+# instead of going out and back through a published port. Set
+# SUPABASE_DOCKER_NETWORK in `infra/prod/.env`:
+#
+#   self-hosted supabase docker compose (project `supabase`) → supabase_default
+#   Supabase CLI stack                                       → supabase_network_<project>
+#
+#   docker compose --project-directory infra/prod \
+#     -f docker-compose.yml -f docker-compose.supabase-network.yml up -d --build
+#
+# Skip this overlay for a hosted Supabase project, or for a local stack you
+# reach through its published port — `host.docker.internal:<port>` works out of
+# the box via the base file's extra_hosts entry.
+#
+# `default` is listed explicitly because declaring any network on a service
+# opts it out of the project's default one, which is how Caddy resolves
+# zm-server and zm-web by name.
+#
+# Proxying Kong through our Caddy while attached this way also needs the caddy
+# service on this network — add it here too, or point that optional site at the
+# stack's published port instead (see caddy/Caddyfile.template).
+
+services:
+  zm-server:
+    networks:
+      default: {}
+      supabase: {}
+
+  zm-web:
+    networks:
+      default: {}
+      supabase: {}
+
+networks:
+  supabase:
+    external: true
+    name: ${SUPABASE_DOCKER_NETWORK:-supabase_default}

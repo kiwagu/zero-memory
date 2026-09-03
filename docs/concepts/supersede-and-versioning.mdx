@@ -1,0 +1,133 @@
+---
+title: Supersede and versioning
+description: How a writer that knows it is updating a fact declares the replacement explicitly, and how superseded memories form version history.
+---
+
+Facts evolve: a deploy window moves, a plan becomes an implementation, a
+diagnosis is refined into a root cause. In zero-memory the writer that knows
+it is updating a fact says so **at write time**: `remember` accepts a declared
+supersede, which atomically stores the new memory and retires the old one —
+no duplicate, no conflict queue, and a clean version chain behind every
+current fact.
+
+## Why declare instead of detect
+
+Without a declaration, an update lands as a second memory about the same
+topic, and resolution falls to the automatic
+[hygiene pipeline](/docs/hygiene): a small judge model compares the
+pair and, when its confidence clears the auto-resolve threshold, retires the
+older one. That safety net works, but for one common class it is backwards —
+**same-rank refinement**, where two _authoritative_ memories describe one
+evolving topic. The judge's confidence on these pairs tends to land just
+below the auto-resolve bar, so they queue up for a human.
+
+The absurdity: a strong writing agent that _knows_ it is updating a fact
+defers the decision to a weaker probabilistic judge, which then misses the
+threshold. The writer has ground truth and intent; the declaration hands the
+decision to the party that has both. In practice most queued refinement pairs
+are written by the very agent that already knows about the replacement — see
+[queue throughput](/docs/hygiene/queue-throughput).
+
+## How it works
+
+The declaration rides the existing links vocabulary — one syntax for one
+intent. Arguments to the `remember` tool:
+
+```json
+{
+  "content": "Deploy window is Friday 14:00 UTC (moved from Monday).",
+  "kind": "fact",
+  "links": [{ "type": "supersedes", "dst": "mem_..." }]
+}
+```
+
+On a write that declares `supersedes` links, the server, in one operation:
+
+- stores the new memory as usual;
+- retires each named target: sets its `superseded_by` to the new memory's id
+  and marks it invalidated — the same reversible lifecycle used by `forget`.
+  Nothing is deleted; the store is forward-only and the retirement can be
+  undone with `restore_memory`;
+- records the `supersedes` link (new → old) so the version chain is explicit;
+- **skips hygiene for this pair** — the intent is declared, so no judge runs
+  and no conflict is queued.
+
+Guardrails:
+
+- **Ownership and liveness are validated.** Each target is handled
+  best-effort: a dead, missing, or self-referencing target is skipped with a
+  log and the write still succeeds. A target that is invisible to you under
+  row-level security (someone else's private memory) rejects the link and
+  fails the whole write.
+- **Capped.** At most 10 declared supersedes per write — an update names its
+  predecessors, it does not mass-retire.
+- **Authoritative writers only.** The background watcher, whose captures are
+  provisional (see [Provenance](/docs/concepts/provenance)), cannot declare
+  supersedes; the declaration is reserved for in-band writers with ground
+  truth.
+- **Closes open loops.** Superseding a `task` or `open-question` also closes
+  the loop (see [Open loops](/docs/concepts/open-loops)).
+- **Composes with dedup.** When an incoming write is absorbed into an
+  existing near-duplicate, the absorbing memory becomes the successor for any
+  declared targets.
+
+## How to use it
+
+The workflow leans on a habit agents should already have: recall before
+writing.
+
+1. `recall` the topic before storing — the stale version usually surfaces.
+2. Recognize that the new statement replaces it, not complements it.
+3. Write the new memory with a `supersedes` link naming the old id.
+
+The server also meets the writer halfway: a `remember` that did **not**
+declare anything returns `similar_existing` — the live same-owner memories
+nearest to what was just written, ranked by distance and capped at ten, each
+with its age and a content preview, filtered so memories from a different
+project never appear — plus a `hint` telling the agent what to do about them.
+A writer that skipped the recall still sees, in the write's own response, the
+predecessor it probably just rewrote, and can follow up with a declared
+supersede immediately.
+
+The list is bounded by rank rather than by a similarity window, and that is a
+deliberate correction. A window has two edges and both of them hid real
+predecessors: a precision floor high enough to stay quiet also discards
+roughly two fifths of the memories a write genuinely replaces, and an upper
+edge — added on the assumption that anything that similar is a duplicate the
+server collapses on its own — hid another quarter, because that automatic
+collapse only fires for a near-verbatim restatement written in the _same_
+session. The most similar memory in the store, written last month in another
+conversation, is exactly what a rewrite replaces, and it was the one thing the
+window could not show. Ranking has no second edge, and the cap keeps the reply
+a glance rather than a reading list. Candidates may come from your personal
+scope as well as the project you are writing into: the portable layer holds
+operating truth that project work routinely supersedes.
+
+If no supersede is declared — the writer did not recall, or the fact is
+genuinely new — nothing degrades: the write goes through the normal dedup
+cascade and hygiene pipeline. Declaration is an optimization on top of the
+safety net, not a replacement for it.
+
+Superseded pairs do not appear in the conflict review queue — an intentional
+update is not a dispute. They appear as **version history**: the chain of
+`supersedes` links behind a current fact, browsed rather than adjudicated.
+The dashboard feed keeps that history out of the way — its default
+lifecycle filter hides superseded versions, and a memory's detail page shows
+the full chain.
+
+![A memory's version history showing the chain of superseded predecessors behind the current fact](/img/memory-version-history.png)
+
+## Design notes
+
+- **Rejected: lowering the judge's auto-resolve bar for authoritative
+  pairs.** The judge often labels genuinely complementary facts as
+  supersedes; loosening the threshold risks silently losing distinguishable
+  facts. An explicit declaration from the writer is safer than a bolder
+  guess from the judge.
+- **Rejected: manual `recall` → `forget` → `remember`.** Already possible,
+  but it is three calls, non-atomic, and leaves no `supersedes` link — the
+  history disappears. The declaration makes the intent first-class and
+  atomic.
+- **Reversibility is preserved by construction.** Because retirement uses the
+  same add-only lifecycle as `forget`, a mistaken supersede is recoverable
+  and the superseded content remains readable in history.

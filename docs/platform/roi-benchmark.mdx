@@ -1,0 +1,137 @@
+---
+title: ROI benchmark
+description: A counterfactual benchmark that measures what you would lose without memory, run on your own data.
+---
+
+The ROI benchmark answers the one question the other metrics cannot: **what
+would you lose without memory?** It generates a holdout of questions from
+your own stored knowledge, runs a real recall for each one, and has a judge
+decide two things per question — could it be answered _with_ what memory
+surfaced, and could a competent agent have answered it _without_ your project
+memory, from general knowledge alone. The headline number is the
+**exclusive rate**: the share of questions answerable only with memory.
+
+## Why it exists
+
+Every other measure on the [insights dashboard](/docs/dashboard/insights)
+describes what memory _did_ — recalls served, facts captured, briefings
+delivered. None of them establishes a counterfactual. Research on agent
+memory measures this by running the same tasks with and without memory; the
+ROI benchmark is a built-in, inexpensive analogue that runs on your own data
+instead of a synthetic task suite.
+
+## How it works
+
+### Probes
+
+Probes are generated from your live memories of kind `decision`, `gotcha`,
+and `convention` — knowledge, not episodes (see the
+[memory model](/docs/concepts/memory-model)). For each selected memory, an
+LLM writes one question to which that memory is the ground-truth answer. The
+pool is topped up to a target of 20 active probes, and a probe is retired
+when its source memory is invalidated, so the benchmark tracks your memory as
+it evolves.
+
+Because probe questions are derived from memory content, they are stored in
+server-only tables that no client can read directly; only aggregate results
+reach you, through an owner-scoped dashboard query.
+
+### Runs
+
+A run is triggered with the `benchmark_memory` MCP tool:
+
+1. **Recall in your context.** For each active probe, a real recall executes
+   under your authenticated identity, with row-level security fully applied.
+   This is a hard requirement, not an optimization: the search function
+   honors the caller's permissions, and running it with elevated privileges
+   would see memories you cannot — producing flattering, dishonest results.
+   Each probe's recall is **pinned to the read set of a session working
+   where its ground truth lives** — the source's project or team scope plus
+   your personal layer. Without the pin, the score would be a property of
+   the calling session: an unattached one reads all visible scopes and
+   inflates the metric, while an attached one structurally misses every
+   probe whose source lives in another project. Pinned per probe, the
+   result measures the corpus, not where you happened to run the benchmark
+   from.
+2. **Judging in the background.** For each probe, a judge receives the
+   question, the ground-truth memory, and the surfaced results, and returns
+   `with_memory`, `without_memory`, and a confidence. Results are appended to
+   a run record; nothing about your memories is modified. A probe whose
+   judgment fails is skipped rather than failing the run — a partial run is
+   still a usable measurement.
+3. **Top-up for next time.** Once judging finishes, the pool is topped back
+   up from knowledge that has never been probed, newest first, so the next
+   benchmark reaches what you have learned in the meantime instead of asking
+   the same questions forever.
+
+The call itself returns as soon as the recalls are done, reporting how many
+probes went into the run; the verdicts land on the dashboard shortly after.
+The first call may need to build the probe pool first; it then returns
+immediately with a "generating" status — call again once generation finishes.
+Only one run executes at a time per owner; a concurrent call reports that a
+run is already in progress rather than stacking a second one.
+
+### The metric
+
+For each run:
+
+- `with_memory` — the surfaced facts answer the question;
+- `without_memory` — a competent agent would have answered anyway;
+- **exclusive** — `with_memory` and not `without_memory`.
+
+The exclusive rate is the fraction of probes that are exclusive: "this much
+of your working knowledge exists only in memory."
+
+### Deterministic mode
+
+With `ZM_EXTRACTOR=deterministic`, the full cycle — generation, run, results
+— works without any LLM key. Probes fall back to templated questions, and the
+judge becomes a strict retrieval check: `with_memory` is true only if the
+ground-truth memory id is among the surfaced results, and `without_memory` is
+always false. This is an honest lower bound on retrieval success, and it
+keeps the benchmark usable on a fully offline deployment.
+
+## How to use it
+
+`benchmark_memory` is an MCP tool, not a shell command — there is nothing to
+type into a terminal. Ask the agent in any connected client to run it:
+
+> Run the `benchmark_memory` tool.
+
+The first call may return a "generating" status while it builds the probe
+pool; ask again once that finishes and the run itself starts. Only one run
+executes at a time per owner.
+
+Then open the [insights dashboard](/docs/dashboard/insights). The
+**Only memory knows** tile shows the latest run's exclusive rate with a hint
+like "7 of 20 project questions a bare agent could not answer". A trend
+sparkline appears once there is more than one run to compare. Before the
+first run, the tile shows an invitation to run the benchmark rather than a
+misleading 0%.
+
+![Insights dashboard "Only memory knows" tile with exclusive rate, hint line, and trend sparkline after a completed run](/img/roi-benchmark-tile.png)
+
+Runs are manually triggered; repeat the run after significant memory growth
+or a [recall-quality](/docs/guides/recall-quality) change to see the trend
+move. Results are strictly per-owner: your probes and results are never
+visible to another user.
+
+## Design notes
+
+- **Periodic benchmark, not live A/B cohorts.** Splitting real sessions into
+  with-memory and without-memory cohorts would double cost and deliberately
+  degrade half of your actual work. A periodic holdout run measures the same
+  thing without touching live sessions.
+- **Judge, not full agent tasks.** Replaying complete agent tasks with and
+  without memory would be the gold standard but requires an agent runner and
+  many model calls per probe. One judge call per probe captures most of the
+  signal at a fraction of the cost.
+- **Dedicated result tables.** Runs and results live in their own append-only
+  tables rather than in [usage events](/docs/platform/usage-events) — a
+  benchmark result is not metered work, and keeping the domains separate
+  keeps both schemas honest. The model calls the benchmark makes, however,
+  _are_ metered as usage events: both question generation and judging, tagged
+  by purpose and attributed to the owner whose corpus was measured. Calls that
+  ran on the owner's own provider key are marked and left out of the
+  deployment's token totals, exactly as everywhere else — see
+  [Value metering](/docs/platform/value-metering).

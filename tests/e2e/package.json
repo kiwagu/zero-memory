@@ -1,0 +1,41 @@
+{
+  "name": "@workspace/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
+    "format": "bunx prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "test:e2e": "bun scripts/run-e2e.ts",
+    "test:e2e:smoke": "bun scripts/run-e2e.ts --grep @smoke",
+    "test:e2e:full": "bun scripts/run-e2e.ts",
+    "test:e2e:headed": "bun scripts/run-e2e.ts --headed",
+    "test:integration": "bun scripts/run-e2e.ts --project=api",
+    "e2e:stack": "bun scripts/run-e2e.ts --persist",
+    "e2e:down": "bun scripts/run-e2e.ts --down",
+    "review:stack": "bun scripts/run-e2e.ts --target=review --persist",
+    "review:down": "bun scripts/run-e2e.ts --target=review --down",
+    "stands:up": "bun scripts/run-e2e.ts --target=both --persist --refresh",
+    "stands:down": "bun scripts/run-e2e.ts --target=both --down",
+    "stands:status": "bun scripts/run-e2e.ts --status",
+    "test:e2e:stands": "bun scripts/run-e2e.ts --target=both --refresh",
+    "demo:seed": "bun scripts/seed-local-demo.ts",
+    "pw": "E2E_SERVER_URL=http://localhost:8788 E2E_WEB_URL=http://localhost:3102 playwright test --config=playwright.config.ts",
+    "e2e:screenshots": "eval \"$(bunx supabase status -o env --workdir .)\" && E2E_SERVER_URL=http://localhost:8788 E2E_WEB_URL=http://localhost:3102 SUPABASE_URL=$API_URL SUPABASE_ANON_KEY=$ANON_KEY SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY playwright test --config=playwright.config.ts --project=web --grep @docs-shot"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@playwright/test": "^1.57.0",
+    "@supabase/supabase-js": "catalog:",
+    "@types/node": "catalog:",
+    "@workspace/db": "workspace:*",
+    "@workspace/eslint-config": "workspace:^",
+    "@workspace/typescript-config": "workspace:^",
+    "dotenv": "^17.2.4",
+    "eslint": "catalog:",
+    "typescript": "catalog:"
+  }
+}

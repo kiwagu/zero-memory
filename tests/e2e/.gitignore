@@ -1,0 +1,8 @@
+.env
+.runtime/
+test-results/
+playwright-report/
+supabase/.temp/
+supabase/.branches/
+review/supabase/.temp/
+review/supabase/.branches/

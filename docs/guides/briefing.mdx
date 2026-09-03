@@ -1,0 +1,209 @@
+---
+title: Briefings
+description: How sessions open with the right context, and how the briefing pack is composed, budgeted, and kept free of noise.
+---
+
+A briefing is a context pack that zero-memory assembles for the start of work:
+standing rules, the most relevant memories for a topic, the entities involved,
+live relations between them, recent changes, and
+[open loops](/docs/concepts/open-loops). It is produced by the `build_context`
+MCP tool called with `briefing: true`, so an agent gets its working context in
+one call instead of many recalls.
+
+## Why it exists
+
+The rule "memory first, before code search or the web" is easy to state and
+easy to forget. Briefings make it mechanical: context unfolds by itself at the
+moments it matters, instead of depending on agent discipline. And because a
+briefing is injected context — not conversation — every token in it competes
+with the task itself, so the pack has to be ranked, budgeted, and noise-free.
+
+## Session and task briefings
+
+Two briefing kinds cover two different questions:
+
+- A **session briefing** answers "where are you": at session start, a hook
+  briefs on the current project (and, where applicable, the working-branch
+  topic) and injects the pack as additional context.
+- A **task briefing** answers "is anything still missing": on the first
+  substantive prompt of a session, a hook calls `build_context` for the project
+  and injects whatever the session briefing did not already deliver. It is the
+  second chance for a session whose start briefing failed — that call is where
+  the project scope and the conversation's thread token are recovered — and the
+  second delivery for standing rules that missed the context window.
+
+The prompt itself never leaves the machine. It decides only WHETHER the
+briefing is worth spending: short prompts, common one-word confirmations, and
+slash commands are skipped without any server call. What to ask about is not
+taken from it — subject-specific retrieval is the agent's own `recall`, in
+English, per the tool contract.
+
+Task briefings fire once per context window (see below), keyed by session id
+in a local state file. A client without a per-prompt context channel skips task
+briefings entirely — the session briefing and mid-session `recall` still apply;
+see [Client adapters](/docs/getting-started/client-adapters).
+
+The two kinds deduplicate on the client: the session hook records which memory
+ids it injected, and the task hook filters those out of its own pack, so the
+same memory never arrives twice.
+
+Stored content is canonical English, so an English topic retrieves best. The
+server never translates a topic to get there: what a caller sends is what is
+searched. Writing the topic in English is the caller's job, and the tool
+contract says so.
+
+Both hooks are best-effort and never block the client. A successful session
+briefing is cached per project; if the server is unreachable later, the hook
+serves the last cache entry with an explicit **OFFLINE** header and timestamp,
+up to 7 days by default (`ZM_BRIEF_CACHE_TTL_DAYS`). Even with no usable
+cache the hook still states what it knows locally: the project line persisted
+for this repository, so the session is never left guessing its project.
+Writes are never queued offline. Each live briefing also emits a metering
+event tagged with its kind, so session and task hit-rate can be tracked
+separately — see [Value metering](/docs/platform/value-metering).
+
+## Project attachment and the session thread
+
+The briefing is also how a session learns **where it is**. The session hook
+resolves the project from the working directory and leads the injected pack
+with a `PROJECT:` line naming the resolved scope, instructing the agent to
+pass `project_hint` on its first memory call. The briefing call itself
+carries that hint, which pins the reads **and attaches the agent's MCP
+session** to the project — later scope-less writes land there, and a write
+from a session that never attached is refused rather than mis-filed (see
+[Scopes and isolation](/docs/concepts/scopes-and-isolation)).
+
+A briefing that carries a conversation id also mints a durable **thread**:
+the pack returns `session: { attached_project, thread }`, and the task hook
+re-states `PROJECT: … · THREAD: …` on **every user message** — deliberately
+above its early returns, so even a session restored mid-conversation, or one
+whose context was compacted, is re-told its project. The two halves are
+stored differently, and the difference matters: the resolved **scope** is
+shared by the repository and persists across sessions, while the **thread**
+token belongs to one conversation and is kept with that session's own state.
+A repository routinely has several sessions open at once; a token held per
+repository would be overwritten by whichever briefed last, and the others
+would then quote a conversation that is not theirs. A session that has not
+resolved a token yet is told its project alone — no token is the honest
+state. The hook's assertion wins over a stale echoed thread when the working
+directory disagrees.
+Clients without a per-prompt channel lose this line along with task
+briefings — for them, attachment rests on the session briefing and the tool
+results' session state.
+
+**Echoing the thread is not the same as naming the project**, and the line
+says so because the difference is easy to miss. `project_hint` answers where
+knowledge belongs; the thread answers which conversation produced it, and on
+a write it is what stamps the stored memory with its birth conversation. A
+`remember` that passes only the hint lands in the right project and records
+no conversation at all — an absence no later pass can reconstruct, which
+costs exactly the questions the marker exists to answer ("what did this
+conversation produce", "were these facts born in one reasoning", "is this a
+refinement or a drift").
+
+## How the pack is composed
+
+The pack has several legs:
+
+- **Standing rules** — promoted General rules plus rules addressed to the
+  briefed project. `rules[]` carries `{ text, pinned }` objects, pinned first.
+  Pinned rules are exempt from the 12-rule unpinned cap and the 90-day
+  delivery TTL. Hook-capable clients render them above the JSON pack as an
+  imperative **STANDING RULES** section.
+
+- **Memories** — top-ranked hits for the topic, scope-isolated by default.
+  A briefing with **no resolvable project** narrows to the personal root and
+  core scope rather than assembling from every visible scope — "everything
+  you have ever touched" is not a working context. Point reads (`recall`,
+  `entities`) keep the wide degrade, and `scopes: ["*"]` is honored
+  verbatim.
+- **Linked memories** — memories reached through the graph, from two sources
+  sharing one cap. Most arrive by **entity co-mention**, scored with the same
+  ranker as the hits. A small reserved share is claimed by **typed-link
+  neighbours** of the hits — what supersedes or contradicts a hit, what it was
+  derived from, what its author linked to it — ranked among themselves and
+  followed in both directions. The reservation displaces entity co-mentions
+  rather than enlarging the leg, and an unused reservation returns to the
+  entity source, so a corpus without links yields the pack it always did. The
+  leg excludes the lifecycle kinds (`episode`, `task`, `open-question` — loops
+  have their own leg) and caps long content, marking truncated entries.
+- **Entities and edges** — entities are collapsed by normalized name; edges
+  drop self-loops and below-threshold weights.
+- **Recent** — briefing mode only: a handful of live decisions, facts,
+  gotchas, and conventions from the last two weeks, selected by recency and
+  independent of topic similarity. This is the "what changed since your last
+  visit" leg, deduplicated against the memories leg. It takes authoritative
+  writes only (the watcher's provisional captures do not qualify), and its
+  scope restriction keeps another project's freshest memory out of an
+  unpinned briefing. Window and size are instance-tunable.
+- **Open loops** — active tasks and open questions of the briefed scopes,
+  oldest first, limited by the 14-day soft briefing TTL. A loop that ages out
+  remains open and recallable.
+
+Every section inlines content only up to its own cap and marks the row as
+`truncated` past it; the full text stays one id away through `recall` or the
+`zm://memory/{id}` resource. The caps differ by what a section is for: a hit
+carries the substance of a fact, while `recent` answers "what changed". Row
+counts and ranking are unaffected — a cap changes how much of a memory is
+inlined, never which memories arrive.
+
+The `memories` section spends its budget the same way. The top hits arrive
+whole; below them a hit arrives as an excerpt taken from the part of it that
+matched your topic, rather than from its first paragraph — which for a long
+record is often about something else entirely. An excerpt that does not begin
+at the start of the record, or does not run to its end, is marked with an
+ellipsis so it is never mistaken for the opening. What this delivers is the
+matched **region**: the excerpt begins where the matching window begins, and
+that window is wider than the excerpt itself.
+
+Open loops are the exception in the other direction, because a uniform cap
+served them badly: a
+handover record states the situation first and what to do on return last, so
+truncating from the front dropped the actionable half of every one of them.
+The section therefore spends its budget unevenly — the loops **nearest** the
+topic arrive whole, the rest keep a headline. Which loops surface, and in
+what order, is unchanged and still relevance-free; only depth follows the
+topic, and it is judged against the whole loop rather than its opening.
+
+The `max_tokens` budget shapes composition (fewer items) on top of that. Both
+mechanisms exist because a pack is delivered through channels that impose their
+own limits: past a client's threshold an oversized result is spilled to a file
+and replaced by a short preview, which is the worst outcome available — the
+briefing looks delivered while its most valuable payload goes unread.
+
+## Noise control
+
+Two mechanisms keep briefings from becoming an encyclopedia of a project's
+early days:
+
+- **Promoted content is filtered.** A memory whose content has been distilled
+  into standing agent rules (see the
+  [rules incubator](/docs/guides/rules-incubator)) is excluded from briefing
+  packs entirely — it already reaches the agent through its rules layer.
+- **The usage loop does the rest.** Briefed memories generate usage signals;
+  memories that prove useful are reinforced, and stale ones sink through
+  decay. See [Recall quality](/docs/guides/recall-quality) and
+  [Decay and reinforcement](/docs/hygiene/decay-and-reinforcement). The
+  design preference is gradual, signal-driven improvement over one-off manual
+  curation.
+
+The two mandatory reads have different jobs: a briefing is a broad session
+broadcast, while `recall` answers the specific sub-problems that arise during
+work. Receiving a briefing never removes the need to recall before deriving a
+new answer.
+
+The write path guards the same property from the other side: entity creation
+matches existing entities before creating new ones, extraction policy rejects
+facts derivable from the code itself and unanchored episode fragments, and
+corrections declare an explicit supersede instead of leaving two competing
+versions — see
+[Supersede and versioning](/docs/concepts/supersede-and-versioning).
+
+## Design notes
+
+- Recipe quality is measured before it is tuned: a holdout set of briefing
+  probes — memories that must appear for a topic, and anti-probes that must
+  not — tracks pack hit-rate and junk share across changes.
+- Mechanism fixes are preferred over data cleanup: an unranked leg or a
+  duplicate-producing write path would reproduce the same drift in any
+  project, so the recipe is fixed first and corpus cleanup follows.

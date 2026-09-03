@@ -1,0 +1,42 @@
+# Mail overlay for a SELF-HOSTED Supabase stack: points Auth at our exported
+# templates and their subjects.
+#
+# Why an overlay and not two edits to `infra/dev/supabase/docker-compose.yml`:
+# that tree is a vendored upstream mirror, re-synced from supabase/docker. Lines
+# added there disappear on the next sync — and they would disappear SILENTLY,
+# with Auth quietly falling back to GoTrue's built-in templates. Our
+# customization therefore lives in our own artifact.
+#
+# Apply it alongside the stack's own compose file, from the stack directory so
+# its relative volume paths keep resolving:
+#
+#   docker compose -f infra/dev/supabase/docker-compose.yml \
+#                  -f ../../prod/docker-compose.supabase-mail.yml up -d
+#
+# or from the repository root with the same two -f flags in that order.
+#
+# NOT needed for a hosted Supabase project (paste the HTML into its Auth
+# settings) and not needed for the Supabase CLI stacks (they take the templates
+# from `[auth.email.template.*]` in config.toml).
+#
+# GoTrue FETCHES templates over HTTP — it cannot read a mounted file — so the
+# URLs below must be reachable from the auth container. Left relative, GoTrue
+# resolves them against SITE_URL, which is the dashboard that serves these files
+# from its static assets. Set ZM_MAIL_TEMPLATE_BASE_URL only when the templates
+# are served somewhere other than SITE_URL.
+#
+# Subjects are generated from the mail catalog. Re-run
+# `bun run --cwd packages/email mail:export` after changing copy;
+# `mail:check` fails when a subject here drifts from the catalog.
+
+services:
+  auth:
+    environment:
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: ${ZM_MAIL_TEMPLATE_BASE_URL:-}/email-templates/confirmation.en.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: ${ZM_MAIL_TEMPLATE_BASE_URL:-}/email-templates/recovery.en.html
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: ${ZM_MAIL_TEMPLATE_BASE_URL:-}/email-templates/email_change.en.html
+      GOTRUE_MAILER_TEMPLATES_INVITE: ${ZM_MAIL_TEMPLATE_BASE_URL:-}/email-templates/invite.en.html
+      GOTRUE_MAILER_SUBJECTS_CONFIRMATION: Confirm your email address
+      GOTRUE_MAILER_SUBJECTS_RECOVERY: Reset your password
+      GOTRUE_MAILER_SUBJECTS_EMAIL_CHANGE: Confirm your new email address
+      GOTRUE_MAILER_SUBJECTS_INVITE: You have been invited to zero-memory

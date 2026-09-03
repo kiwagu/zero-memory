@@ -1,0 +1,53 @@
+---
+description: Use when: editing AI-facing artifacts such as rules, skills, prompts, AGENTS, or CLAUDE docs so wording stays generic and reusable across project renames.
+alwaysApply: true
+---
+
+# Generic wording in AI artifacts
+
+## Pyramid Layer
+
+- Layer: L0 authoring rule.
+
+## Use This When
+
+- Keep this rule active when writing or editing AI-facing artifacts.
+- Apply it to `.cursor/rules`, `.claude/skills`, `AGENTS.md`, `.claude/CLAUDE.md`, prompt files, smoke-test docs, and related agent-context documentation.
+
+## Stop Here If
+
+- Stop once the wording is generic and non-branded.
+- Do not apply this rule to runtime config, real filesystem paths, or product documentation unless the task explicitly asks for that.
+
+## Descend To
+
+- No sibling descent required. Apply this rule directly when editing AI artifacts.
+
+## Core rule
+
+- Do **not** anchor AI artifacts to the current project name when a generic phrase works.
+- Prefer neutral wording such as:
+  - `this project`
+  - `the repository`
+  - `the server app`
+  - `the MCP server`
+  - `the ingestion worker`
+- Avoid branded examples like project-specific hostnames, product names, or titles unless the exact brand is required for a real technical reason.
+
+## Use branded wording only when required
+
+- Keep real filesystem paths unchanged when they are functional.
+- Keep actual env vars, service names, container names, stream names, or URLs when they are real runtime contracts.
+- If an example hostname or title is only illustrative, use a neutral placeholder instead of a project-specific brand.
+
+## Why this matters
+
+- Project names change more often than architecture rules.
+- Brand-specific wording in AI artifacts creates instruction drift and makes reusable guidance look more concrete than it really is.
+- Generic wording keeps the rules portable and focused on behavior instead of branding.
+
+## Anti-patterns
+
+- Putting the current project name in a rule or skill title when the title is really about architecture or workflow.
+- Using a branded hostname in an example where any local hostname would work.
+- Referring to `ProjectName conventions` when the rule is really `this project's conventions`.

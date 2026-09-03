@@ -1,0 +1,28 @@
+services:
+  studio:
+    # Use the prebuilt prod image from the base compose (this repo has no apps/studio
+    # source to build from). Studio listens on 3000 inside the container; expose it on
+    # host 8082 → open http://localhost:8082.
+    ports:
+      - 8082:3000
+
+  functions:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  meta:
+    ports:
+      - 5555:8080
+  db:
+    restart: 'no'
+    # Loopback-only: Makefile db-push/db-diff/db-pull connect as postgres on this port.
+    # Keep in sync with POSTGRES_DIRECT_PORT in .env.
+    ports:
+      - '127.0.0.1:55432:5432'
+    volumes:
+      # Always use a fresh database when developing
+      - /var/lib/postgresql/data
+      # Seed data should be inserted last (alphabetical order)
+      - ./dev/data.sql:/docker-entrypoint-initdb.d/seed.sql
+  storage:
+    volumes:
+      - /var/lib/storage

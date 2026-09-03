@@ -1,0 +1,56 @@
+{
+  "name": "server",
+  "version": "0.17.2",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "mcp:stdio": "bun src/mcp-stdio.ts",
+    "hygiene:scan": "bun src/hygiene-scan.ts",
+    "hygiene:retro": "bun src/hygiene-retro.ts",
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
+    "format": "bunx prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "test:vitest": "vitest run"
+  },
+  "bin": {
+    "zero-memory-mcp": "./src/mcp-stdio.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@workspace/audit": "workspace:*",
+    "@workspace/command-handlers": "workspace:*",
+    "@workspace/context": "workspace:*",
+    "@workspace/contracts": "workspace:*",
+    "@workspace/cqrs": "workspace:*",
+    "@workspace/di": "workspace:*",
+    "@workspace/domain": "workspace:*",
+    "@workspace/embedding": "workspace:*",
+    "@workspace/extraction": "workspace:*",
+    "@workspace/hygiene": "workspace:*",
+    "@workspace/llm": "workspace:*",
+    "@workspace/logger": "workspace:*",
+    "@workspace/mcp": "workspace:*",
+    "@workspace/mcp-auth": "workspace:*",
+    "@workspace/memory": "workspace:*",
+    "@workspace/persistence": "workspace:*",
+    "@workspace/policy": "workspace:*",
+    "@workspace/query-handlers": "workspace:*",
+    "@workspace/translation": "workspace:*",
+    "@workspace/usage": "workspace:*",
+    "elysia": "catalog:",
+    "nanoid": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workspace/eslint-config": "workspace:^",
+    "@workspace/typescript-config": "workspace:^",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

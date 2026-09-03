@@ -1,0 +1,38 @@
+# Isolated production-path rehearsal only.
+#
+# The three *.localhost names resolve to loopback. Caddy signs them with its
+# internal CA, so automated probes use curl --insecure; no public DNS, ACME
+# account or production certificate is touched.
+#
+# The database is deliberately treated as EXTERNAL here — SUPABASE_UPSTREAM
+# points at the isolated stack's published port, not at a container name on a
+# shared network — so this rehearses the same path a hosted Supabase project
+# takes.
+
+{
+	local_certs
+}
+
+zm.localhost {
+	reverse_proxy zm-server:8787 {
+		flush_interval -1
+	}
+}
+
+memory.localhost {
+	reverse_proxy zm-web:3100
+}
+
+docs.localhost {
+	# Mirrors the production template: the site's only write path is closed at
+	# the edge, and the rehearsal asserts it.
+	respond /upload* 404
+
+	reverse_proxy zm-docs:3200
+}
+
+supabase.localhost {
+	reverse_proxy {$SUPABASE_UPSTREAM} {
+		flush_interval -1
+	}
+}

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "command": "zero-memory-watcher brief session-start --client cursor"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "type": "command",
+        "command": "zero-memory-watcher status --client cursor"
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "command": "zero-memory-watcher nudge --client cursor",
+        "matcher": "Grep|Glob"
+      }
+    ],
+    "stop": [
+      {
+        "type": "command",
+        "command": "zero-memory-watcher ingest --client cursor"
+      }
+    ],
+    "preCompact": [
+      {
+        "type": "command",
+        "command": "zero-memory-watcher checkpoint --client cursor"
+      }
+    ]
+  }
+}

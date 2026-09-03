@@ -1,0 +1,37 @@
+---
+description: Use when: deciding whether a new environment variable is justified in the monorepo.
+alwaysApply: false
+---
+
+# Monorepo environment variables — keep the surface small
+
+## Pyramid Layer
+
+- Layer: L1 operational rule.
+
+## Use This When
+
+- Start here whenever a task proposes a new env var, alias, or shared runtime setting.
+
+## Stop Here If
+
+- Stop once it is clear whether a new env name is justified.
+
+## Descend To
+
+- Continue within this file for naming and reuse guidance.
+
+## When to add a new `process.env` / compose key
+
+- Add a **new** variable name only when **two or more** runtime or deployment pieces must read the **same** value (server + worker, CI + app, etc.), **or** you already have (or plan) a **single** operator/settings layer that injects it.
+- **Do not** introduce parallel aliases for the same concept in one process unless each name is **actually** read by a different shared integration and cannot be unified.
+
+## Prefer reuse
+
+- Reuse **existing** monorepo names (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `PORT`, …) so `.env` stays copy-paste aligned across apps.
+- Fixed infrastructure contracts (queue/stream names, durable consumer names, subject prefixes) belong in **code** (a shared package, local `const`) — not in env — unless multiple repos or operators must diverge without redeploying code.
+
+## Agent checklist
+
+1. Before adding `FOO_SERVICE_URL`, check whether **`BAR` already used elsewhere** can carry the same value.
+2. Before env-toggling a constant, ask: will **another** service read this same key? If no, prefer a **typed constant** in the package.

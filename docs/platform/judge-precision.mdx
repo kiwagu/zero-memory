@@ -1,0 +1,177 @@
+---
+title: Judge precision
+description: How the hygiene judge stays accurate on pairs of authoritative, closely related memories.
+---
+
+When [hygiene](/docs/hygiene) finds two similar memories, an LLM judge
+decides how they relate — the same fact, one replacing the other, a
+contradiction, two complementary facets, or nothing in common.
+That works well for the high-volume stream of provisional captures. The hard
+cases are pairs where **both sides are authoritative** — high
+[provenance](/docs/concepts/provenance) rank, similarity inside the review
+band. This page describes the mechanisms that keep the judge trustworthy on
+exactly those pairs.
+
+## Why it exists
+
+Authoritative memories about the same project naturally share vocabulary. Two
+facts can cover different facets of one topic — a status and a design, a
+platform choice and an analytics choice — and both be valid. Measured on a
+manual review of such pairs, the judge's `supersedes` verdicts were wrong
+about 94% of the time: the correct resolution was to keep both.
+
+The root cause was the verdict vocabulary itself. With only
+`{duplicate, supersedes, contradiction, unrelated}` to choose from, a judge
+looking at two related-but-both-valid facts has no honest option: they are
+clearly not `unrelated`, so it gets squeezed into `supersedes` — and a false
+replacement, if auto-applied, would silently lose a valid fact.
+
+## How it works
+
+### The complementary verdict
+
+The judge's vocabulary includes `complementary`: related by topic, but both
+valid — no replacement. It maps to _keep both_; nothing is queued and nothing
+is superseded. The routing applies `complementary` **before** provenance and
+flood overrides, so a complementary fact survives even against a more
+authoritative neighbor.
+
+The verdict is deliberately narrow: `complementary` requires the two memories
+to be about the **same subject**. Facts that merely share a domain default to
+`unrelated` when in doubt. On a mirror of real data, every queued false
+replacement was reclassified as `complementary` — removed from the human
+review queue — while producing zero new automatic actions.
+
+### Queue self-healing
+
+A better judge fixes future verdicts, but rows already sitting in the review
+queue were produced by the old one. A re-adjudication pass sweeps pending
+rows, and it is **always loss-free**: it can dismiss a row as _keep both_ or
+leave it for a human, but it never invalidates a memory on its own. It splits
+into two jobs:
+
+- **Stale sweep (no LLM, nightly).** A pending pair where one side has
+  already been invalidated elsewhere — a declared supersede, a merge, another
+  auto-resolution — is moot and is dismissed automatically. This is a cheap
+  database check, so it runs on every nightly hygiene tick.
+- **Re-judge (LLM, on demand).** Still-live pairs are re-judged with the
+  current judge, and pairs that no longer look like conflicts are dismissed.
+  This pays off right after a judge upgrade and would only re-confirm the
+  same verdicts on a stable judge, so it runs on demand — via the hygiene
+  scan CLI, the `scan_hygiene` MCP tool, or the scan action in the dashboard
+  — never on the nightly schedule.
+
+Every dismissal is recorded in the [audit log](/docs/platform/audit-log).
+
+### Judge re-examination
+
+Two rules keep the ordinary sweep cheap and respectful: it takes only
+_recent_ memories as scan subjects, and it never re-judges a pair that has
+already reached the review queue. Their intersection has a cost, though —
+every older memory stays frozen at the judgement of whichever judge was
+configured when it was written, and a memory that surfaces in `recall` every
+week is exactly the one that never gets a second look.
+
+Re-examination adds the missing axis: **a memory is eligible for one
+re-examination per judge model**. A guard row per memory and judge model
+records that this judge has looked, written whichever way the scan went — a
+look that found nothing is still a look. A stable deployment therefore falls
+silent after a bounded burst, and only a change to the configured judge
+(`ZM_HYGIENE_MODEL`) re-opens the population. Judges are compared as exact
+strings: "this one has not spoken about this memory yet" is a fact, while
+ranking judges by strength would be a guess.
+
+Which memories, and how many:
+
+- **A traffic floor.** Candidates are live memories that `recall` actually
+  returned to a client at least ten times within a 90-day window (the
+  defaults), most-surfaced first. Traffic is the proxy for _this
+  knowledge is in use_, so the spend follows what the corpus actually serves
+  instead of sweeping everything.
+- **A subject cap per run**, since each subject costs a few judge calls over
+  its near neighbors.
+- **A cap on new review-queue rows** — the brake that matters most, because
+  the scarce resource is a person's attention, not tokens. Re-examining
+  neighborhoods the sweep never reached does surface genuinely new pairs, so
+  a run stops as soon as it has handed over its share of hand-triage work.
+  Subjects it did not reach stay unstamped and lead the next run: paced, not
+  dropped. Filtering by the judge's confidence instead was measured and
+  rejected — on resolved history, confidence does not separate real
+  supersedes from pairs a person waved through, so the honest control is a
+  count.
+
+Re-examination is not a new verdict path. Each subject goes through the
+ordinary single-memory scan with its queue guard, its cross-project filter,
+and its confidence gates intact — a decision a person already made is never
+revisited, and the only outcomes are the same reversible ones the scan
+already produces. It runs as part of every full hygiene cycle: the scheduled
+sweep and the on-demand scan (`scan_hygiene`, the dashboard scan action, the
+hygiene scan CLI). Write-triggered scans stay narrow and skip it. Every
+examination — and every run that stopped on the queue cap — is recorded in
+the audit log, and the judge call is attributed to the owner of the memory
+under review, exactly like every other sweep judgement.
+
+### Deterministic cross-project filtering
+
+A distinct failure class appears when memories from different projects meet
+in one owner's view — for example, a rule imported from another project
+against a fact of the current one. The contents can be word-for-word about
+"the same" file path or convention while belonging to different codebases,
+and no prompt can fix that: the text simply does not carry project identity.
+
+Project identity is therefore resolved **deterministically from provenance,
+before the judge runs**: a project scope pins a memory to that scope's
+project slug (within its owner's namespace, so two owners' identically named
+projects are still different projects), and an imported memory is pinned to
+the source directory it was imported from. A pair is skipped only when _both_
+sides resolve and provably differ; anything unresolved is judged as usual.
+One predicate serves every place a pair can form — the scan paths, the no-LLM
+nightly re-adjudication pass, and the supersede candidates `remember` hands
+back at write time, so a write is never nudged to replace a memory belonging
+to a different project. Validated against
+human-resolved ground truth, the filter matched 25 of 26 pairs — and the one
+divergence had an operationally identical outcome (both memories stay alive,
+nothing queued) — while letting every legitimate cross-scope supersede
+through. It costs zero LLM calls.
+
+## How to use it
+
+All of this is built in — there is nothing to configure for normal operation.
+After upgrading a deployment (which may ship a better judge), trigger one
+re-judge pass over the pending queue via `scan_hygiene` or the dashboard scan
+action to clear verdicts the old judge got wrong. Live memories that recall
+serves often need no trigger: re-examination picks them up on the following
+hygiene cycles, a bounded batch at a time, until the new judge has seen them.
+
+When a judgement still lands wrong, the correction depends on where it went:
+a pair sitting in the queue is settled with `resolve_conflict` (`keep_both`
+when both are true), and an automatic resolution is undone with
+`restore_memory`. A memory that is wrong against the _world_ rather than
+against a neighbor is a different problem — that is what `challenge` is for.
+For both, and for the wider queue picture, see
+[false invalidation](/docs/hygiene/false-invalidation) and
+[queue throughput](/docs/hygiene/queue-throughput).
+
+## Design notes
+
+- **Prompting scope awareness fails measurably.** An attempt to solve
+  cross-project pairs by showing the judge scope labels made overall accuracy
+  worse: it taught the judge to release _legitimate_ cross-scope supersedes
+  while the target class did not improve. Deterministic provenance-based
+  filtering replaced it.
+- **Complementary pairs get a graph edge — carefully.** Since a
+  `complementary` verdict proves two facts are related, a link edge is
+  recorded between them, but only at high confidence: low-confidence
+  complementary drifts toward genuinely-unrelated, and noisy edges would
+  degrade the graph.
+- **Two judging paths.** Adjudication is low-volume and
+  correctness-sensitive — a wrong supersede direction invalidates the wrong
+  memory — so authoritative pairs are judged by a stronger default model,
+  while the high-volume provisional capture stream stays on the cheap path.
+  The two are configured independently on purpose: tuning extraction for cost
+  must not be able to quietly downgrade adjudication.
+- **Refinement declared at write time is a separate mechanism.** When an
+  agent updates its own earlier fact, it declares the supersede while
+  [writing](/docs/concepts/supersede-and-versioning) — no judge involved.
+  Judge precision targets the remaining class: false replacements between
+  _different_ complementary facts, where there is nothing to declare.

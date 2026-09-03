@@ -1,0 +1,36 @@
+{
+  "name": "@workspace/command-handlers",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
+    "format": "bunx prettier --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@workspace/commands": "workspace:*",
+    "@workspace/contracts": "workspace:*",
+    "@workspace/cqrs": "workspace:*",
+    "@workspace/di": "workspace:*",
+    "@workspace/domain": "workspace:*",
+    "@workspace/extraction": "workspace:*",
+    "@workspace/memory": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workspace/eslint-config": "workspace:^",
+    "@workspace/typescript-config": "workspace:^",
+    "eslint": "catalog:",
+    "typescript": "catalog:"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  }
+}

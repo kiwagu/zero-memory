@@ -1,0 +1,119 @@
+---
+title: Review queue throughput
+description: How the hygiene review queue stays tractable — declared supersedes at the source, bulk agent triage, and no re-judging of settled pairs.
+---
+
+The [false-invalidation safeguards](/docs/hygiene/false-invalidation)
+deliberately trade throughput for safety: any pair whose loser is durable,
+authoritative knowledge goes to the review queue instead of being resolved
+automatically. That means the queue grows _by design_. zero-memory restores
+throughput with three mechanisms that reduce inflow and cheapen triage —
+without weakening the safeguards.
+
+## Why it exists
+
+Analysis of real queues shows that most pending pairs are not hard
+judgment calls at all. The dominant classes are:
+
+- **Checkpoint chains** — "planned → implemented → merged → deployed"
+  status updates about the same piece of work (roughly half of a typical
+  queue);
+- **Refinement chains** — "symptom → root cause → verified final fix" for
+  the same problem (roughly a quarter);
+- **Cross-scope restatements** of one rule, and **complementary
+  general-vs-specific** pairs (most of the rest).
+
+The striking property of the first two classes: the _same agent_ that writes
+the update usually knows, at write time, that it is an update — "MERGED",
+"FIXED", "DONE" with a reference to the previous state. The queue is mostly
+paying later for information the writer had earlier. Meanwhile, resolving
+what does land in the queue requires context the pair-wise LLM judge does
+not have — which is exactly what a chat agent with full session context does
+have.
+
+## Mechanism 1: declared supersede on write
+
+The `remember` tool accepts a `supersedes` link, and its guidance instructs
+agents explicitly: **when writing a status update to something previously
+recorded, first `recall` the earlier record, then pass its id in
+`supersedes`.** The old checkpoint is superseded at the source — reversibly,
+through the normal [version history](/docs/concepts/supersede-and-versioning)
+— and the pair never enters the queue at all. A declared supersede also
+closes the matching [open loop](/docs/concepts/open-loops) when the update
+completes a tracked task.
+
+This is the highest-leverage mechanism: the checkpoint and refinement
+classes, the large majority of queue inflow, are exactly the writes where
+the author already knows the answer.
+
+Refinements the author _forgot_ to declare are caught deterministically when
+possible: a pair of authoritative memories written in the **same session**,
+similar enough to sit in the dedup band, is a refinement by construction —
+same writer, same conversation, same ground truth. The newer side supersedes
+the older one with no judge call and no queue row, reversibly, exactly as if
+the supersede had been declared. The rule is deliberately never extended
+across sessions, where "newer" stops being proof of "more correct".
+
+## Mechanism 2: bulk agent triage
+
+For what still accumulates, `resolve_conflicts` supports two mutually
+exclusive modes per call:
+
+- a **policy** applied across pending conflicts (`newest_wins`,
+  `oldest_wins`, or `keep_both`, optionally limited to one verdict class), or
+- an explicit **triage list**: `resolutions: [{dispute_id, winner?,
+retire?}]` — omitting both means keep both, `retire: true` reversibly
+  retires a single-subject dispute's memory — up to 100 items per call.
+  Per-item failures are reported in a `failed[]` array without aborting the
+  batch.
+
+The queue also carries single-subject disputes (a challenged memory, a stale
+suspect); winner policies skip those — there is nothing to pick between —
+so a bulk policy can never retire a memory on its own.
+
+A full queue triage is therefore one MCP call instead of one call per pair.
+The intended operator is an agent with full context, applying meta-rules
+that hold up in practice:
+
+- a completion report beats the plan or brief for the same work;
+- the newer checkpoint of one rollout beats the older (shared branch/commit
+  anchors identify "one rollout");
+- a canonical, verified fix beats a draft diagnosis of the same problem;
+- a general rule and its specific application are **both kept**;
+- a memory previously restored after a false invalidation is always kept.
+
+The queue's pending count is always visible on the dashboard's review page,
+and the server ships a `triage` prompt that walks the pending conflicts,
+applies these meta-rules, and submits every decision in one bulk call.
+
+## Mechanism 3: settled pairs stay settled
+
+Before invoking the judge, the scanner checks whether a candidate pair
+already has a queue row in _any_ status. Already-adjudicated counterparts are
+skipped entirely. This closes a real hazard: without the check, a keep-both
+decision made by a human or by triage would be re-judged on the next sweep,
+and a non-deterministic judge could clear the confidence bar and
+auto-supersede _over_ the human decision (protected kinds were guarded;
+plain facts, episodes, and references were not). The skip also stops the
+scheduler from burning judge tokens re-classifying the same neighbors every
+night.
+
+## Design notes
+
+- **Deterministic logic stays outside the judge.** Encoding triage
+  meta-rules as prose in the judge's prompt was measured and rejected: it
+  degrades the judge's precision on the verdicts it already handles well.
+  Everything that can be decided deterministically is decided before the
+  LLM; the judge remains a pair classifier.
+- **Work-item anchors are precise; topic anchors are dangerous.** A
+  deterministic checkpoint-chain detector was evaluated against ground-truth
+  pairs: matching on shared work-item anchors (branch name, commit hash) is
+  extremely precise but fires too rarely to matter, while loosening to
+  topic-level anchors (a document or ticket number shared by many distinct
+  facts) collapses precision and starts hitting exactly the complementary
+  keep-both pairs the safeguards protect. The detector was therefore not
+  shipped as an auto-action — declared supersedes already remove that class
+  at the source.
+- **Adoption is observable.** The share of writes carrying a declared
+  supersede is visible in [usage events](/docs/platform/usage-events), so
+  drift back toward queue-heavy behavior shows up in the data.

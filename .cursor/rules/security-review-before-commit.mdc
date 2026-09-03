@@ -1,0 +1,66 @@
+---
+description: "Use when: about to commit feature work, or finishing an implementation that touched auth, access control, RLS, SQL, endpoints, user input, secrets, or dependencies — run a vulnerability/security review FIRST."
+globs: ["apps/**", "packages/**", "supabase/migrations/**"]
+alwaysApply: true
+---
+
+# Security review is a mandatory pre-commit close-out
+
+## Pyramid Layer
+
+- Layer: L1 core rule.
+
+## Use This When
+
+- Keep this rule active for any work that produces COMMITTABLE code, and ALWAYS at the
+  moment before a feature commit. Highest priority when the change touches auth, access
+  control / RLS, SQL / migrations / RPCs, HTTP endpoints, user input handling, secrets /
+  env, or third-party dependencies.
+
+## Stop Here If
+
+- Stop after the close-out obligation is clear; this is a leaf rule.
+
+## Descend To
+
+- Access posture: the `create-rls-policies.mdc` rules (RLS is the sole authority;
+  fail-closed, private-by-default).
+
+## The mandate
+
+A vulnerability/security review is a mandatory feature close-out. It is easy to forget by
+hand — this rule makes it non-optional.
+
+1. **Before committing feature work, run the `/security-review` skill** over the pending
+   branch diff. It reviews the staged/working changes for vulnerabilities (injection,
+   auth/access bypass, RLS gaps, secret leakage, unsafe deserialization, SSRF, missing
+   authz on endpoints, service-role on a user path, …). Treat a confirmed finding as a
+   blocker: fix it (or surface it as an explicit, justified decision) BEFORE the commit.
+   Because skills run in the MAIN conversation, this step is the COORDINATOR's — a
+   sub-agent cannot invoke it.
+
+2. **Sub-agents do an inline security self-check + FLAG.** A feature/implementer sub-agent
+   cannot run the skill, so before it reports done it self-reviews what it landed against
+   the access/RLS rules and explicitly FLAGS any
+   security-sensitive surface it touched (a new endpoint, an RLS policy, a SECURITY DEFINER
+   function, raw SQL, an input parser, a secret/env read, a dependency bump) in its report,
+   so the coordinator runs `/security-review` on the full diff before committing.
+
+3. **DB migration → also run the Supabase advisors.** If the change includes a Postgres
+   migration, the diff-level `/security-review` is NOT enough — run the live-DB advisors
+   (`mcp__supabase-self-hosted__get_advisors`, security + performance) after applying it and
+   fix new WARN/ERROR (missing RLS, anon/authenticated-exposed `security definer` functions,
+   mutable `search_path`, public-bucket listing, GraphQL exposure). See `create-migration.mdc`'s
+   "Post-apply" close-out. Don't let them accumulate.
+
+4. **Exemptions.** A change with NO security surface (pure copy, a comment, a docs
+   tweak) is exempt — say so. Never skip the review for anything touching the
+   surfaces in "Use This When".
+
+## Rationale
+
+Security is the review with the most asymmetric cost: a single un-reviewed
+auth/RLS/endpoint change can ship a real vulnerability, while the review itself is the
+manual step most easily dropped under time pressure. Wiring the `/security-review` skill
+into the pre-commit close-out makes coverage a property of the process, not of
+remembering.

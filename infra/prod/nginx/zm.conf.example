@@ -1,0 +1,154 @@
+# Zero-memory edge: nginx alternative to the Caddy overlay, for operators who
+# already run their own gateway on the host.
+#
+# Copy into your nginx conf.d (or sites-enabled), then replace:
+#   - server_name values (zm.example.com / memory.example.com / docs.example.com / ...),
+#   - certificate paths (Let's Encrypt, corporate CA, ...),
+#   - upstream addresses if the compose ports differ from the defaults
+#     (ZM_SERVER_PORT=8787, ZM_WEB_PORT=3100, ZM_DOCS_PORT=3200 published on
+#     localhost).
+#
+# Invariant: https://zm.example.com must equal ZM_PUBLIC_URL exactly
+# (scheme, host, port) — it is the OAuth issuer embedded in all discovery
+# metadata and 401 challenges (see infra/prod/README.md, "Edge / TLS").
+
+# WebSocket upgrade helper (Connection: upgrade only when the client asks).
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# ── MCP server: https://zm.example.com == ZM_PUBLIC_URL (OAuth issuer) ──────
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name zm.example.com;
+
+    ssl_certificate     /etc/nginx/certs/zm.example.com.fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/zm.example.com.privkey.pem;
+
+    # Operational counters are unauthenticated, and this server block proxies
+    # every path — without this the /metrics endpoint would be world-readable.
+    # Scrape it from the host instead (http://127.0.0.1:8787/metrics); remove
+    # this only if your scraper is external and you guard it yourself.
+    location = /metrics {
+        return 404;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        # WebSockets (transport upgrades).
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        # Streamable HTTP MCP responds with text/event-stream — events must
+        # reach the client immediately, and long-lived streams must not be
+        # cut by the default 60s read timeout.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+}
+
+# ── Web dashboard ────────────────────────────────────────────────────────────
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name memory.example.com;
+
+    ssl_certificate     /etc/nginx/certs/memory.example.com.fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/memory.example.com.privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:3100;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+
+# ── Documentation site: https://docs.example.com ─────────────────────────────
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name docs.example.com;
+
+    ssl_certificate     /etc/nginx/certs/docs.example.com.fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/docs.example.com.privkey.pem;
+
+    # The site can write markdown into its own content tree through /upload,
+    # guarded only by an environment variable inside the container. Deciding it
+    # here keeps the write path off the public surface however the container is
+    # configured. Remove only if you deliberately author pages over the
+    # internet.
+    location /upload {
+        return 404;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3200;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+    }
+}
+
+# ── Supabase API gateway (optional) ──────────────────────────────────────────
+# The dashboard runs in the browser, so Kong must be reachable from users'
+# machines (NEXT_PUBLIC_SUPABASE_URL at web build time = this external URL).
+# Point the upstream at your published Kong port. Realtime uses WebSockets.
+#
+# server {
+#     listen 443 ssl;
+#     listen [::]:443 ssl;
+#     http2 on;
+#     server_name supabase.example.com;
+#
+#     ssl_certificate     /etc/nginx/certs/supabase.example.com.fullchain.pem;
+#     ssl_certificate_key /etc/nginx/certs/supabase.example.com.privkey.pem;
+#
+#     location / {
+#         proxy_pass http://127.0.0.1:8000;
+#         proxy_http_version 1.1;
+#
+#         proxy_set_header Host              $host;
+#         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_set_header X-Forwarded-Host  $host;
+#
+#         proxy_set_header Upgrade    $http_upgrade;
+#         proxy_set_header Connection $connection_upgrade;
+#
+#         proxy_buffering off;
+#         proxy_read_timeout 1h;
+#         proxy_send_timeout 1h;
+#     }
+# }
+
+# ── http -> https ────────────────────────────────────────────────────────────
+server {
+    listen 80;
+    listen [::]:80;
+    server_name zm.example.com memory.example.com docs.example.com supabase.example.com;
+    return 301 https://$host$request_uri;
+}

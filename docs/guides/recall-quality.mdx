@@ -1,0 +1,136 @@
+---
+title: Recall quality
+description: How the system learns which recalled memories were actually used, and feeds that signal back into ranking.
+---
+
+Every `recall` and `build_context` call records which memories it returned.
+But "returned" is not "helped": an agent uses some of the facts it is shown
+and ignores the rest. Recall quality is the machinery that closes this gap —
+a **usefulness signal** that distinguishes memories that influenced the work
+from memories that merely appeared, and a feedback loop that ranks the useful
+ones higher next time.
+
+## Why it exists
+
+Surfaced-count — how often a memory came back from search — measures
+visibility, not value. A critical fact recalled once and acted on is more
+valuable than a fact recalled five times and ignored. Usefulness is a latent
+variable ("did the agent apply this?"), so the system captures it through
+honest proxies and labels them as such, rather than presenting a guess as
+truth.
+
+## How it works
+
+One event type, `recall_used`, is fed from three sources — two positive, one
+negative:
+
+- **In-band confirmation** — high precision, partial coverage. When an agent
+  writes a new memory with a `supersedes` or `derived_from` link pointing at a
+  memory it previously recalled, that link is proof of use. The server records
+  usefulness for the referenced ids automatically; no extra tool call and no
+  extra tokens are involved.
+- **A usefulness judge** — full coverage, probabilistic. The capture path
+  already re-reads session transcripts; a small model additionally judges, for
+  each memory the session recalled, whether it influenced the agent's
+  subsequent output or actions, and emits a verdict with a confidence score.
+  Judge verdicts count above a confidence threshold (0.6).
+- **An explicit challenge** — the negative counterpart, and just as
+  deterministic as the in-band channel. When an agent calls `challenge` on a
+  memory it found wrong or stale, the outcome is recorded with a `misled`
+  valence. See
+  [False invalidation](/docs/hygiene/false-invalidation).
+
+The judge scores two independent axes per recalled memory: whether the agent
+actually **used** the fact (cited it, folded it into a decision, changed
+course), and whether the fact was at least **relevant** to what the session
+was doing even if unused — the second axis is what makes context precision
+measurable. It can also mark a memory as `misled` when the transcript shows
+the agent followed it and had to correct course.
+
+The correlation between "shown" and "used" is exact, not statistical: recalled
+memory ids are read out of the transcript's own record of the recall call, so
+the judge evaluates precisely the facts that this session saw.
+
+### Which clients feed the judge
+
+Recording that correlation is a client capability, not a server one, so
+coverage differs — and the docs say so rather than implying a uniform signal:
+
+- **Claude Code** records the call under its namespaced tool name
+  (`mcp__zero-memory__recall`) and inlines the result, so a result can be tied
+  back to the call that produced it.
+- **Codex CLI** records the call bare, with the mount in a field of its own,
+  and its session rollout carries the result — in either of two envelopes,
+  both of which are mined, so a session is not silently lost when it lands in
+  one and not the other.
+- **Cursor** records neither tool results nor any id linking a call to its
+  spilled output, so there is nothing to correlate. The channel reports an
+  empty set instead of approximating one — an honest gap, not a measured zero.
+
+Recognizing a recall call is shared logic rather than per-client guesswork:
+the tool name is compared on its last `__` segment, so every mount — bare,
+namespaced, or plugin-bundled — resolves to the same tool, and ids are
+accepted only in this store's own id format. Both capture routes forward what
+they found: the session-end ingest hook and the transcript-tailing daemon
+alike. When a slice surfaced no memories the field is omitted entirely, since
+"nothing was shown" is a different claim from "nothing was useful".
+
+Every source writes the same event, so there is one metric, not several. The
+**usefulness hit-rate** is the share of distinct surfaced memories that were
+distinct-counted as useful over a period. Distinct counting makes double
+emission harmless — a fact confirmed by both positive sources counts once —
+and where both exist for the same session and memory, the in-band signal is
+authoritative. Events are content-free: only ids, flags, and confidence, never
+memory text. Emission is fire-and-forget — a failed usefulness write never
+breaks `recall`, `remember`, or ingest. See
+[Usage events](/docs/platform/usage-events) for the event model.
+
+## Feeding ranking
+
+The usefulness signal is wired into retrieval as reinforcement: a periodic
+hygiene job precomputes per-memory multipliers from accumulated `recall_used`
+events, and search applies them alongside relevance and decay. In-band
+confirmations carry full weight; judge verdicts contribute weighted by their
+own confidence; the multiplier is capped so no memory can dominate on
+reinforcement alone. The negative half mirrors it: misled evidence demotes on
+the same curve, floored so a memory loses rank without ever being buried —
+retirement stays a review decision. Memories whose content has been promoted
+into standing rules are demoted too, since they already reach agents through
+another channel. Surfaced-but-unused memories are not demoted at all: only
+positive proof of use and explicit misled evidence move ranking. See
+[Decay and reinforcement](/docs/hygiene/decay-and-reinforcement) for the
+ranking mechanics and [Briefings](/docs/guides/briefing) for how the same
+loop shapes briefing packs.
+
+## Reading the numbers
+
+Usefulness metrics are computed server-side with plain SQL over usage events
+and surface in the [insights dashboard](/docs/dashboard/insights): the
+usefulness hit-rate itself, and **context precision** — the relevant share of
+the facts a judge actually scored. Until the judge has produced enough
+verdicts to carry a rate, the quality tile shows the weaker "recurring facts"
+proxy instead — memories that keep coming back across separate recalls, which
+is not the same as used and is labeled separately. Privacy follows the rest of
+the dashboard: you only ever see usefulness for your own memories. The same
+per-day series — judged, relevant, used — also comes back from the
+`export_metrics` tool, so an agent can compare periods without the UI.
+
+## Design notes
+
+- **Anti-gaming.** Hit-rate is a precision-style metric and can be inflated
+  by narrowing results — show fewer, safer facts and the rate rises while
+  coverage falls. It is therefore watched together with the absolute volume
+  of useful recalls (the numerator must not shrink), and reinforcement
+  changes are validated against a holdout before they ship.
+- **Proxy honesty.** Every usefulness number is a measurable proxy for
+  intent, and the UI marks it that way. Judge noise is damped by the
+  confidence threshold and by aggregation, not hidden.
+- **Two sources beat one.** In-band alone gives precision without coverage
+  (it depends on agent discipline); the judge alone gives coverage without
+  certainty. Together, with in-band taking precedence where present, they
+  cover each other's weakness.
+- **Coverage is reported, not assumed.** Where a client cannot record which
+  memories a recall showed, the signal is absent and says so. Filling that
+  gap by guessing — scanning every stored tool output, say — would count
+  facts the agent was never shown and inflate the very metric it is meant to
+  measure.

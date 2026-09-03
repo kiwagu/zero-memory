@@ -1,0 +1,128 @@
+---
+description: "Use when: about to answer a question OR at ANY point you reach for grep/glob/Read/web to chase a NEW sub-question mid-task (a bug, 'is this already decided/designed', a design choice) — query zero-memory (ZM) FIRST. Not once at the start: it re-triggers on every fresh knowledge lookup in the flow. ZM is the first source, not the last. Automatic; never wait to be told."
+alwaysApply: true
+---
+
+# ZM-knowledge-first — recall before you read
+
+## Applies only when ZM is available — verified, stated, never assumed
+
+- Active ONLY if the session exposes zero-memory tools (`mcp__zero-memory__*`). If they are
+  absent (a fork/clone without a running ZM server), this rule is a **no-op** — proceed
+  normally, do not attempt ZM calls, do not wait. ZM is an optional augmentation, never a hard
+  dependency of this repo. (For consumer projects, this rule belongs in the user-global
+  `~/.claude/CLAUDE.md`, not a committed per-repo rule — see `docs/getting-started/claude-code.mdx`.)
+- **Verify absence before concluding it.** Tool lists can be deferred/lazily loaded — not
+  seeing `mcp__zero-memory__*` in the visible tool list is NOT proof of absence. Actively
+  check once per session (e.g. a tool-search for `zero-memory`) before deciding ZM is
+  unavailable.
+- **An empty check is NOT conclusive.** A tool-search that returns "no match" at task start is
+  inconclusive: MCP/deferred tools frequently register a few calls into the session and surface
+  only in a later tool round. Do not lock in "absent" from one empty check — treat it as "not
+  yet visible", re-verify after the next tool round, and the moment `mcp__zero-memory__*`
+  appears, switch to ZM-first for the rest of the task (including any sub-question already in
+  flight).
+- **The first reply carries a ZM-status line — in BOTH directions.** The violation is not only
+  "silently grep when ZM is down"; it is equally "run one empty check and then edit/grep without
+  a word about ZM". Before any non-ZM tool touches the task, the first reply states ONE of:
+  (a) ZM visible → going through ZM first, with the `build_context`/`recall` call; or
+  (b) ZM not yet visible → say so explicitly and fall through to code/docs. Silence in either
+  direction is the process violation — the user must always know whether the answer was
+  produced with memory or without it.
+
+## Pyramid Layer
+
+- Layer: L0 process gate. Runs at the START of any task or question, before any other
+  knowledge lookup (code, docs, web, training memory).
+- Sibling of `reuse-first-discovery.mdc`: that rule reuses existing CODE before writing new;
+  this rule reuses existing KNOWLEDGE before deriving it again. Knowledge-reuse comes first,
+  because a stored decision changes WHAT code you even look for.
+
+## Use This When
+
+- The moment a task, question, or investigation begins — feature, refactor, migration, bug,
+  design choice, "why is it this way", "should it be X or Y".
+- Before you grep the repo, open docs, search the web, or answer from training knowledge.
+
+## Re-trigger IN-FLIGHT — not just at the start (the common miss)
+
+The gate is not a one-time thing you satisfy once per task and then stop. It **re-fires every
+time a NEW sub-question surfaces mid-task** — the moment your hand reaches for grep / glob /
+Read (source or docs) / web to answer something you did not already have in context. The
+failure mode this rule most often loses to is: query ZM at task start, then, three steps deep,
+chase a fresh question straight into `grep` because "I'm already in the flow". Being deep in a
+task does not exempt the next lookup — it IS the next lookup.
+
+Concrete mid-task triggers (each one → ZM BEFORE the tool):
+- **Diagnosing a bug / surprising behavior** → `recall(symptom, kinds:["gotcha"])` before
+  forming a hypothesis. The gotcha is often already recorded from the moment it was first hit.
+- **"Is this already decided — is there a prior decision/design for it?"** → `recall` before
+  reading through docs or design notes. One `recall` returns the decision AND its linked
+  context in a single call; grep finds one file and misses the web of related facts.
+- **Reuse check before writing** (`reuse-first-discovery` sibling) → `recall` the capability
+  before searching the code for it: a stored decision changes WHAT you grep for.
+- **Picking a value / name / threshold / config shape** → `recall` for a prior decision-with-why
+  before choosing from "what looks reasonable".
+
+## Self-check gate (say it before the tool)
+
+Before typing `grep` / `glob` / `Read`-of-source / a web search for a NEW question, answer:
+"Have I asked ZM *this specific question*?" If no → `recall`/`build_context` first, then the
+tool. This is a hard gate, not a nicety: reaching for code/docs/web on an un-ZM'd question is
+the process violation, exactly like writing new code without searching for an existing one.
+
+## Stop Here If
+
+- Stop once ZM has been queried for the topic AND the relevant hits are in context (or you
+  have confirmed by actually querying that ZM holds nothing on it). Only THEN fall through to
+  code / docs / web.
+
+## Core rule
+
+- **ZM is the FIRST place you look, not a fallback.** Before code, docs, or web, query it.
+  Answering a project question, or starting work, without having asked ZM is a process
+  violation — the same class of miss as writing new code without searching for an existing one.
+- **Task/topic start → `build_context(topic)`.** One call returns the relevant memories,
+  entities, graph edges, and linked memories for the topic. Do this reflexively, like `git status`.
+- **Point question / debugging → `recall(query)`.** Filter with `kinds` (e.g. `["gotcha"]`
+  when chasing a bug, `["decision"]` when questioning a design) and `scopes` when you know the
+  bounded context.
+- **Before linking entities → `entities(query)`** to see what a name already resolves to.
+- **Order of precedence when sources disagree:** a ZM `decision`/`convention` for THIS project
+  outranks generic training knowledge and outranks what "looks reasonable". If ZM records a
+  decision-with-why, follow it or explicitly challenge it — do not silently re-derive a
+  different answer. (Example: a stored "config is instance-level, not per-user" decision must
+  shape the schema you write, not be discovered after the fact.)
+
+## Close the loop (so first-source stays worth it)
+
+- ZM is only a useful first source if it is fed. The instant a durable fact surfaces — a
+  decision WITH its why, a preference, a gotcha, or a convention not enforced by tooling —
+  call `remember` NOW, at the moment of discovery, not at session end. One atomic fact per
+  memory. See the memory policy in the ZM tool descriptions for what does and does not belong.
+
+## Anti-patterns
+
+- **Grepping code / reading docs / searching the web before asking ZM.** ZM is the pre-step,
+  not the retrofit. When ZM is connected, the literal FIRST tool call of a task is
+  `build_context`/`recall` — a task whose first call is grep/Read has already violated this.
+- **Silently skipping ZM because the tools "aren't in the list".** Deferred tool loading makes
+  the visible list unreliable; verify, and if truly absent — announce the fallback, don't
+  bury it.
+- **Running one empty check, then proceeding without a word about ZM.** An empty tool-search
+  is not proof, and going straight to edit/grep with no ZM-status line in the first reply is
+  the same violation as never checking — the user is left unable to tell if memory was used.
+- **Treating the gate as one-and-done.** Querying ZM at task start, then grepping straight into
+  every later sub-question because you're "already in the flow". The gate re-fires per lookup.
+- **Searching through docs or design notes to find whether something is already decided.**
+  `recall` first — it surfaces the decision-with-why and its linked context in one call; the
+  file you land on is the tail end, found faster and richer through memory.
+- **Debugging from a fresh hypothesis without `recall`-ing the symptom.** Gotchas are stored at
+  the instant of first discovery; the bug in front of you may already be solved.
+- **Answering a project question from training memory** when ZM holds a project-specific
+  decision or gotcha on it.
+- **Re-deriving a decision that is already stored** — and, worse, deriving a *different* one,
+  silently contradicting a recorded decision-with-why.
+- **Waiting for the user to say "check ZM first."** The query is YOUR default obligation;
+  needing to be told is the failure this rule exists to remove.
+- **Consuming without feeding:** discovering a durable fact and moving on without `remember`.

@@ -1,0 +1,10 @@
+{
+  "extends": "@workspace/typescript-config/base.json",
+  // Bun resolves this tsconfig for entrypoints run from the repo root (e.g.
+  // scripts/smoke-mcp.ts spawning apps/server/src/mcp-stdio.ts): tsyringe
+  // needs legacy decorators + emitted metadata at runtime.
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  }
+}

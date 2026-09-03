@@ -1,0 +1,196 @@
+---
+title: Value metering
+description: Instrumentation that measures what memory contributes — briefing metering and recall-hit attribution.
+---
+
+Value metering is the instrumentation layer that records evidence of memory
+being useful: how large each briefing is, whether it came back empty, exactly
+which memories each read returned, and which of those the work went on to
+use. It extends the [usage events](/docs/platform/usage-events) record with
+result-aware emission points, and it is what powers the usefulness metrics on
+the [insights dashboard](/docs/dashboard/insights) — briefing hit rate, top
+surfaced facts, and estimated tokens saved.
+
+## Why it exists
+
+Usage events answer "how often is each tool called". They cannot answer the
+questions users actually care about:
+
+- **Briefing hit rate.** A session-start briefing is delivered as an ordinary
+  `build_context` call, so on the server it is indistinguishable from a
+  mid-session call — there is nothing to compute a hit rate from.
+- **Top surfaced facts.** The generic tool-call metering point fires before a
+  tool executes and sees only the tool name; the result — the list of memory
+  ids that were returned — is structurally out of reach.
+- **Tokens saved.** Estimating saved tokens requires knowing the briefing's
+  size in tokens, which is otherwise never recorded.
+
+Usage events are also unrecoverable: a day without these events permanently
+loses that day's history. Value metering therefore runs from the start,
+accumulating correct events even before any dashboard consumes them.
+
+## How it works
+
+### Briefing metering
+
+The `build_context` contract carries an optional `briefing?: boolean` input
+(default `false`). The session-start hook sets it to `true`; ordinary
+mid-session calls omit it. This is a deliberate, explicit signal in the
+contract itself rather than an inference from transport headers — the contract
+stays self-describing.
+
+When `briefing` is `true`, the `build_context` handler emits a
+`session_briefing` usage event after the result is known:
+
+- `unit` is `tokens` and `quantity` is the estimated token size of the
+  delivered briefing pack, from a fixed per-row estimate;
+- `metadata` records `topic_len`, `returned` (the number of memories in the
+  pack), and `empty` (`returned === 0`) — the raw material for briefing hit
+  rate;
+- `briefing_kind` records which briefing this was, the session-start unfold
+  or the task-aware pack, so hit rate is measurable per kind rather than
+  averaged across two different questions;
+- `conversation_id` is present when the caller supplied one. A hook-delivered
+  briefing runs in its own connection, so without it that briefing could not
+  be joined to the rest of the same conversation's activity.
+
+The `mcp_tool_call` event for `build_context` is still emitted, once. There
+is no double counting of value: `session_briefing` measures usefulness,
+`mcp_tool_call` measures call volume.
+
+Clients that predate the flag simply never set it; no event is written and
+nothing breaks — degradation is soft.
+
+### Recall-hit attribution
+
+`recall`, `build_context` and `remember` are **result-attributed**: instead of
+being counted before they run, their single `mcp_tool_call` event is emitted
+once the result is known, so it can carry that result. The pre-execution
+counter deliberately skips them, which is what keeps the count at one row per
+call.
+
+For a read, the event carries the surfaced ids and the scope-usage trail:
+
+```json
+{
+  "tool": "recall",
+  "returned_ids": ["mem_..."],
+  "returned": 3,
+  "read_mode": "session",
+  "returned_by_scope": { "proj.usr_....api": 3 }
+}
+```
+
+`read_mode` records how the read set was chosen — an explicit `scopes`
+argument, a project hint, the session's attachment, a deliberate
+all-visible-scopes read, or an open (unattached) degrade — and
+`returned_by_scope` counts what each scope contributed. `session_scope` is
+captured **before** any attach the call itself performs, so the row shows
+what the session knew when it asked. Together they answer the
+scope-attachment question at the heart of project isolation: did this read
+run pinned, or did it silently widen? A hint-pinned briefing also _attaches_
+the session as a side effect, and that transition is visible in these rows.
+
+`returned_ids` contains only memory identifiers, never content. Empty results
+are recorded too (`returned: 0`, `returned_ids: []`) — a miss is as much
+signal as a hit. A read that _fails_ still gets its row, flagged `error: true`
+and carrying no counters, so failures are visible in the activity feed without
+polluting hit-and-miss aggregates. Open-loop ids are left out of
+`returned_ids` on purpose: loops are lifecycle reminders rather than
+knowledge, and counting them would skew the metrics the ids feed.
+
+For a write, the event carries the supersede candidates the response surfaced
+(`similar_ids`). That is what lets the
+[session receipt](/docs/guides/session-receipt) report the rediscovery memory
+prevented — facts the store already held that a session was about to write
+from scratch — without inventing a new event type for it. An ordinary write
+with nothing similar stays a bare tool row.
+
+"Top surfaced facts" is then a plain aggregation: unnest `returned_ids` across
+a period and count how often each id appears. This **surfaced count** is a
+deliberate simplification — the true signal would be "this memory changed the
+outcome of the work", which requires an execution-success feedback loop.
+Surfaced count is an honest proxy and is labeled as such wherever it is shown.
+
+### Recall-outcome attribution
+
+Surfacing is not use. A separate event type, `recall_used`, records one row
+per memory whose _outcome_ is known, through three channels:
+
+- **In-band** — a later `remember` supersedes or derives from a recalled
+  memory. An explicit reference by the agent that had the fact in hand, so the
+  row is affirmative by construction (`useful: true`).
+- **Challenge** — the caller reports a recalled memory as wrong or stale. The
+  deterministic negative counterpart, tagged `valence: misled`; everything
+  that filters on usefulness ignores it, while the reinforcement and
+  stale-suspect rollups look for exactly it.
+- **Judge** — a background pass reads the conversation and rules on the
+  memories the session recalled, filling in the coverage the first two
+  channels cannot reach. These rows carry the verdict and a confidence; see
+  [Recall quality](/docs/guides/recall-quality).
+
+### Attribution
+
+Two rules keep the ledger describing what actually happened:
+
+- **Work is attributed to whoever it was for, not to whoever ran it.**
+  Background passes run outside any request, so there is no ambient user to
+  read — but upkeep of a corpus is always done for its owner, and the pass
+  names that owner explicitly on the event. Translation follows the same rule:
+  a translated recall or briefing is metered against the owner it ran for.
+  Without this, a large class of work would land with no subject at all and
+  any per-person view would disagree with reality.
+- **Calls made on a user's own provider key are marked and left out.** A
+  deployment can be configured so that a user's own provider key runs their
+  own calls. Those events are still recorded — the work happened — but they
+  carry an `own_key` marker, and the rollups that total the deployment's own
+  token volume skip them. The rows outlive the key, so without the marker
+  work the deployment never performed would start counting against the person
+  who performed it themselves.
+
+### Invariants
+
+- **No memory content in metering.** Event metadata carries identifiers,
+  counters and flags; memory content never enters the metering tables. The one
+  deliberate exception is the user's own `recall` query, kept to 200 characters
+  so the activity feed can explain an empty search. It is metered verbatim, and
+  since nothing rewrites a query it is also what the search ran on. See
+  [usage events](/docs/platform/usage-events).
+- **Fire-and-forget.** Recording an event is never in the critical path — if
+  the metering adapter fails, `recall`, `build_context`, and the briefing
+  still succeed.
+- **No direct reads.** The events table is deny-all under row-level security;
+  users see aggregates only through the dashboard's owner-scoped queries.
+
+## How to use it
+
+Nothing needs to be enabled — metering is on by default. If you use the
+standard session-start [briefing](/docs/guides/briefing) hook, it already
+passes `briefing: true`. If you build your own client integration, set
+`briefing: true` on the one `build_context` call that delivers your
+session-start pack, and leave it unset everywhere else; see
+[client adapters](/docs/getting-started/client-adapters). A briefing
+delivered for a specific task rather than at session start should also set
+`briefing_kind: 'task'`, so the two do not average into one hit rate; an
+omitted kind is recorded as `session`.
+
+The results surface on the [insights dashboard](/docs/dashboard/insights):
+recall hits over a period, top surfaced facts, briefing hit rate, and
+estimated tokens saved.
+
+## Design notes
+
+- **Array in metadata, not one row per hit.** A dedicated per-hit event type
+  would be cleaner to group by, but multiplies row volume by the result size
+  of every recall. One row per call with an id array keeps volume flat, and
+  unnesting an array in Postgres is cheap.
+- **Explicit flag, not header inference.** Detecting a session start from
+  transport provenance would work, but it hides semantics outside the
+  contract. An explicit boolean keeps the contract the single source of
+  truth for what a call means.
+- **Surfacing and use are separate events.** Folding "was it used" into the
+  tool-call row would mean rewriting a row that has already been written, in a
+  table whose whole value comes from being append-only. A second event type
+  keeps every fact immutable and lets the three outcome channels arrive
+  whenever they can — one during the call, one on a challenge, one long after
+  the session ended.

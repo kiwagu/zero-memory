@@ -1,0 +1,10 @@
+.next/
+out/
+build/
+next-env.d.ts
+
+# Generated email templates: rendered by packages/email and byte-compared by its
+# export gate. Prettier's HTML re-wrapping splits a GoTrue placeholder across
+# lines (`{{ .Email\n }}`), which breaks the substitution Auth performs at send
+# time — the root .prettierignore does not apply when Prettier runs from here.
+public/email-templates/

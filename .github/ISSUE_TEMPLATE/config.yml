@@ -1,0 +1,3 @@
+# The security policy appears in the issue chooser on its own because
+# SECURITY.md exists, so it needs no contact link here.
+blank_issues_enabled: false

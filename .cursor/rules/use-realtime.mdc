@@ -1,0 +1,35 @@
+---
+# Specify the following for Cursor rules
+description: Use when: adding or changing Supabase Realtime subscriptions, channels, or event handling.
+alwaysApply: false
+---
+
+# Supabase Realtime AI Assistant Guide
+
+## Pyramid Layer
+
+- Layer: L2 realtime router.
+
+## Use This When
+
+- Load this when a task is specifically about Supabase Realtime channels, presence, broadcasts, or realtime topic design.
+- Use this file to choose the narrowest realtime leaf before loading examples.
+
+## Stop Here If
+
+- Stop here once the task is clearly about client topology, database-triggered broadcasts and auth, or operations and migration.
+
+## Descend To
+
+- Topic design and client subscription patterns: `/.cursor/rules/realtime-topology-and-client-patterns.mdc`
+- Database triggers, broadcast changes, and authorization: `/.cursor/rules/realtime-database-broadcast-and-authorization.mdc`
+- Debugging, scaling, and migration: `/.cursor/rules/realtime-operations-and-migration.mdc`
+- Return to `/.cursor/rules/process-check-rules-skills.mdc` if broader cross-domain routing is needed.
+
+Supabase Realtime work now splits into three narrow concerns:
+
+1. Topic design and client subscription patterns.
+2. Database-triggered broadcasts and channel authorization.
+3. Debugging, scaling, and migration from `postgres_changes`.
+
+Load only the matching leaf above.

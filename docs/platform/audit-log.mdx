@@ -1,0 +1,154 @@
+---
+title: Audit log
+description: Every mutation recorded with its actor, outcome, and duration — at the intent level.
+---
+
+zero-memory keeps an append-only audit log of every **mutation**: who changed
+what, with what (sanitized) payload, whether it succeeded, and how long it
+took. Reads — `recall`, `build_context`, searches — are never audited; the
+log records intent to change state, not curiosity.
+
+## Why it exists
+
+A shared memory store needs accountability: when a memory appears, changes
+visibility, or disappears, there must be a durable answer to "who did that,
+when, and how it ended". The audit trail is also the foundation for memory
+hygiene — reviewing and rolling back bad writes requires knowing exactly
+which commands produced them. See [Hygiene](/docs/hygiene).
+
+## How it works
+
+### One choke point, one decorator
+
+Every mutation that reaches the server as a command flows through a single
+command bus. The audit log exploits that: a decorator (`AuditedCommandBus`)
+wraps the standard bus in the server's composition root, delegating execution
+and recording the result. The generic CQRS package itself is untouched —
+auditing is an infrastructure concern layered on at assembly time, so no
+individual write path carries audit code, and no new command can forget it.
+
+### The two paths that are not commands
+
+Some state changes never travel as a command, and each of them records
+itself where it happens rather than being left out of the trail:
+
+- **Hygiene and upkeep.** The hygiene paths write their own entries through
+  the privileged client: conflict resolutions, retirements and restores,
+  challenges, duplicate collapses and entity merges, kind corrections,
+  re-verification verdicts, portability and reflection proposals,
+  rule-incubator distillation and promotion, loop closures, and the
+  stale-suspect and reinforcement rollups. Each entry names the pass or agent
+  that acted, so an unattended night is reconstructible afterwards. See
+  [Hygiene](/docs/hygiene) and the
+  [rules incubator](/docs/guides/rules-incubator).
+- **Database routines.** Where the change is applied by a privileged database
+  routine — an owner approving or dismissing a portability proposal, an
+  account erasure — the entry is written inside the same transaction as the
+  change itself. The resolution and its record cannot diverge, even if the
+  process making the call dies mid-flight.
+
+Project moves (`move_memories`), writes, forgets, shares, links, imports and
+exports all remain plain commands and are covered by the decorator.
+
+### The record
+
+Each executed command becomes one row in `public.audit_log`:
+
+| Column        | Meaning                                                                                                                                |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `occurred_at` | When the command ran                                                                                                                   |
+| `actor_id`    | The user behind the command; null for paths with no authenticated user                                                                 |
+| `author_kind` | `human` or `agent`                                                                                                                     |
+| `agent_name`  | The agent principal or the named background pass, when there is one                                                                    |
+| `command`     | What was done — a command class name such as `RememberCommand`, or the dotted name of a non-command path such as `portability.approve` |
+| `payload`     | Sanitized command payload (see below)                                                                                                  |
+| `outcome`     | `ok` or `error`                                                                                                                        |
+| `error`       | Error message (no stack trace) when outcome is `error`                                                                                 |
+| `duration_ms` | Wall-clock duration of the execution                                                                                                   |
+| `request_id`  | Correlation id shared with logs and usage events                                                                                       |
+
+Actor identity comes from the authenticated command context — the same
+identity that stamps ownership on memories themselves, so the audit log and
+the data always agree about who acted. See
+[Identity](/docs/concepts/identity) and
+[Agent principals](/docs/concepts/agent-principals).
+
+Like [usage events](/docs/platform/usage-events), the table is indexed by
+time and by `(actor_id, occurred_at)`. Access is closed from both sides: end
+users hold no privileges on the table, and row-level security carries an
+explicit deny-all policy on top of that, so only the service role reads or
+writes it. The service role itself may only select and insert — there is no
+update or delete grant, which is what makes "append-only" a property of the
+schema rather than a convention. The audit log is operator data and is never
+exposed through the API.
+
+An account erasure is the one thing that touches existing rows, and it does
+not remove them: the actor reference is severed (`actor_id` becomes null) and
+the entry survives. The erasure itself is recorded as a content-free entry
+carrying the counts of what was deleted.
+
+### Payload sanitization
+
+The payload is a JSON snapshot of the command, sanitized before it is stored:
+
+- Every string is truncated to **500 characters**, at any depth — nested
+  objects and arrays are walked, not just top-level fields. A clipped value
+  keeps a marker of how much was dropped, so a truncated entry never looks
+  like a short one.
+- The whole payload is capped at **8 KB**; when a command exceeds it, the row
+  stores `{truncated: true, command_keys: [...]}` instead — the shape of the
+  intent survives even when the body does not.
+
+Commands carry no secrets by construction, but the limits are unconditional:
+the audit log records intent, not bulk content.
+
+### Failure semantics
+
+- A command that throws is recorded with `outcome: 'error'` and the error
+  message — and the exception is re-thrown to the caller **unchanged**.
+  Auditing never alters behavior.
+- The audit write itself is fire-and-forget: it is not awaited on the
+  critical path, and a failed audit write is logged as a warning while the
+  command completes normally.
+- Entries written by the hygiene paths follow the same rule from the other
+  side: a failed audit write is a warning, never a reason to abandon the work
+  it was describing.
+- Entries written inside a database routine are the deliberate exception.
+  They share the transaction with the change, so either both land or neither
+  does — the guarantee the two owner-facing resolutions are worth paying an
+  extra write for.
+
+## How to use it
+
+Query the table with operator (service-role) access. Typical questions:
+
+- **Who deleted this?** Filter by `command` (e.g. forget/supersede commands)
+  and a time window; `actor_id`, `author_kind`, and `agent_name` identify the
+  actor precisely.
+- **What did this agent do last night?** Filter by `agent_name` and
+  `occurred_at` for a complete, ordered mutation history — background passes
+  name themselves, so unattended upkeep reads the same way as agent work.
+- **Who approved this move?** Owner decisions taken in the dashboard —
+  approving or dismissing a portability proposal — carry `author_kind:
+'human'`, the deciding user, and the memory's before/after scopes in the
+  payload, which is also what makes the change reversible.
+- **Why did a write fail?** `outcome = 'error'` rows carry the message, and
+  `request_id` links to the full request in the logs — see
+  [Observability](/docs/platform/observability).
+- **Is something slow?** `duration_ms` per command name gives a latency
+  profile of the write path for free.
+
+## Design notes
+
+- **Commands, not triggers.** Database triggers audit rows, not intentions: a
+  `share` shows up as a bare update, and the connection to the actor and the
+  request is lost. Auditing at the command bus captures what was _meant_ —
+  the command name and its arguments — with actor and request attached.
+- **Decorator, not core hook.** Wrapping the bus in the composition root
+  keeps the CQRS package generic and reusable, and makes auditing a property
+  of the assembled application rather than of any individual handler.
+- **Coverage over uniformity.** Routing everything through the bus purely to
+  keep one writer would mean forcing background upkeep and atomic database
+  routines into a shape that does not fit them. A trail with three writers
+  and no gaps is worth more than a tidy one that quietly omits the changes
+  nobody watched happen.

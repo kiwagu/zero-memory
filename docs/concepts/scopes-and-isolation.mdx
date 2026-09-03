@@ -1,0 +1,204 @@
+---
+title: Scopes and isolation
+description: Personal, project, and team scopes, explicit membership, project-isolated reads, and how a session attaches to its project.
+---
+
+Access to memories in zero-memory is governed by **scopes** — hierarchical
+paths (`user.*`, `proj.*`, `team.*`) stored as Postgres `ltree` values. A
+memory lives in exactly one scope; ownership, explicit scope membership, and
+row-level security decide who can see and write it. Project-scope read
+isolation then keeps one project's context out of another project's sessions.
+
+## Scopes
+
+- `user.<id>` — a person's private root. A dedicated child,
+  `user.<id>.core`, holds **portable** knowledge (see below).
+- `proj.<owner>.<slug>` — an owner-namespaced project scope. Sessions resolve
+  it from the working directory or a project hint; `remember`, import,
+  bootstrap, and ingest write there by default. When no project resolves at
+  all, a write that names no target is **refused** — the server never picks a
+  scope on the caller's behalf, so a project fact can never accumulate
+  somewhere else while the caller believes otherwise.
+- `team.<owner>.<slug>` — an owner-namespaced team scope created deliberately
+  for sharing across people.
+
+Row-level security enforces visibility and write rights directly in the
+database: helper predicates compute the caller's visible scopes and
+write-permitted scopes, and every read and write — including graph traversals
+over entities and links — passes through them.
+
+Both shareable roots are namespaced by the creator's opaque user id. Two
+people who each have a repository named `api` therefore get different scopes;
+a name collision can never grant access. Collaboration is always explicit:
+the scope admin adds a member with the `reader`, `writer`, or `admin` role.
+The open-source schema does not currently contain an organization layer.
+
+Legacy two-label project names such as `proj.api` are accepted on memory read
+and write paths and canonicalized to the caller's own
+`proj.<owner>.api`. New code should use the canonical form — or omit `scope`
+and let project routing resolve it.
+
+## Project-scope read isolation
+
+The write path always knows the project; historically the read path did not.
+A `recall` or `build_context` with no explicit scopes used to search **all**
+scopes visible to the caller, ranked purely by relevance — legal under
+row-level security (they are all the caller's scopes), but wrong across
+_projects_: agents are instructed to follow stored decisions, so another
+project's `decision` surfacing unmarked in a briefing actively provokes wrong
+actions.
+
+The fix is a deterministic server-side default plus an explicit opt-out:
+
+- **Default read set.** When the caller passes no `scopes`, reads cover the
+  session's project scope plus the caller's personal root and core scope —
+  nothing else. This applies uniformly to `recall` and `build_context` and to
+  every leg of retrieval: memory search, entity matching, graph-linked
+  memories, recent changes, and open loops.
+- **Explicit widening.** Both tools accept `scopes: [...]`; the value `"*"`
+  means all visible scopes, for a deliberate cross-project search. The
+  shorthands `"core"` and `"personal"` also resolve inside a read's
+  `scopes`, so an agent can aim a read at the portable layer without
+  spelling out the owner-qualified path. Tool guidance tells agents when to
+  widen: a miss in the project set, or a user question that explicitly
+  references another project.
+- **Marked origin.** Every hit carries its scope. In cross-project mode, a
+  foreign project's `decision` or `convention` is to be treated as an
+  _analogy_, not as the current project's decision.
+- **Fail-safe, differently per read kind.** A **point read** (`recall`,
+  `entities`) from a session with no resolvable project degrades to all
+  visible scopes rather than silently narrowing results to nothing. A
+  **briefing** (`build_context` with `briefing: true`) does the opposite: an
+  unattached briefing narrows to the personal root and core scope, because a
+  briefing's job is to state the working context, and "every project you
+  have ever touched" is not a working context. Attach the session — a
+  project hint, an inherited thread, or explicit `scopes` — and the
+  briefing's project section (including its open loops) appears.
+
+Dashboard search is intentionally not isolated: a person searching by hand
+sees all their visible scopes, with each card labeled by scope.
+
+## Project pinning and repair
+
+An HTTP transport gives the server no way to ask a client where it is
+working, so the read and write tools accept a `project_hint` — a repo root
+path, git remote, or project name, resolved through the same routing ingest
+applies to a transcript working directory. A hint on `recall` or
+`build_context` pins the project-isolated default read set to that project.
+An unroutable hint behaves asymmetrically on purpose: on a **read** it is
+treated as absent (the read must not narrow below the no-hint behavior), on
+a **write** it is refused — a write aimed at a project that does not resolve
+must not land anywhere else.
+
+A briefing pinned by a hint answers with the resolved `project_scope`, and
+the server stashes it as the session's project: the session's later
+scope-less writes land in the project. Clients persist the resolved scope
+per repository, so the next session opens with the trusted project identity
+already known.
+
+### The session thread
+
+A transport session dies with the connection; the work does not. A briefing
+that carries a `conversation_id` therefore mints a durable **thread** — a
+server-side row keyed by that conversation, remembering which project the
+conversation works in for 24 hours. The thread's token (`thr_…`) comes back
+on read results as `session.thread`; the agent echoes it as the `thread`
+parameter on later `remember` / `recall` / `build_context` calls, and the
+project survives any reconnect in between. Hook-capable clients re-state
+`PROJECT: … · THREAD: …` on every user message, so even a session restored
+mid-conversation knows where it is; the hook's assertion also corrects an
+echoed token when the working directory disagrees.
+
+The token is a state selector, **not a credential**: every lookup is
+additionally filtered by the authenticated caller's own account, so another
+account's token resolves to nothing. In the write-target order it sits
+between the call's own `project_hint` and the transport session's attached
+project.
+
+### Write refusal is a contract
+
+Until a session is attached, `remember` requires an explicit target and
+refuses the write otherwise. The refusal names the ways out — `project_hint`,
+`thread`, `scope: "core"` for portable knowledge, `scope: "personal"` for a
+fact about you — and it is machine-readable: the `validation_failed` message
+starts with one of two **stable prefixes** that clients and tooling match on
+instead of the human wording:
+
+- `scope_target_required:` — the write named no target and the session has
+  no attached project;
+- `project_hint_unresolvable:` — the write named a `project_hint` that
+  resolves to nothing.
+
+Everything after the prefix is for humans and may be reworded in any
+release; the prefixes are API. Every `remember`, `recall`, and
+`build_context` result also carries `session: { attached_project, thread? }`
+plus a plain-text session line, so an agent can _see_ that its session lost
+the project before the next write fails.
+
+**Reading elsewhere never moves where you write.** A session attaches once:
+the first hint that resolves becomes its project, and a later hint naming a
+different project pins that read only. Looking into another project is
+deliberate and supported — a decision made there is often the answer here, and
+each hit carries its own scope — but the answer's origin must not become the
+session's destination. To store something in the project you read from, name
+it on that write.
+
+A memory that ended up in the wrong scope is moved explicitly: `move_memories`
+moves your memories into a project scope (named as a `scope` path or a
+`project_hint`), and the dashboard exposes the same operation per memory on
+its card. Per-memory failures are reported while the rest of the batch still
+moves, and re-moving to the same scope is a no-op. The move is a deliberate
+act by you or your agent — the server never re-scopes anything on its own.
+
+## The portable layer: core and personal
+
+Strict isolation would kill a stated value of shared memory: a gotcha about a
+tool, discovered in one project, is often true everywhere. Portable knowledge
+therefore gets a home that every session reads: `user.<id>.core`, a child of
+the personal scope and thus always inside the default read set. The personal
+root itself (`user.<id>`) plays the same role for facts about _you_ rather
+than about any work.
+
+The axis is project-specific vs portable:
+
+- a fact **about the project** (its decisions, conventions, structure) → the
+  project scope;
+- a fact **about a tool or technology**, true outside the project → core;
+- a fact **about the person** (a preference, a working agreement) → personal;
+- when in doubt → the project scope. Under-promoting costs one missed hit;
+  over-promoting injects one project's decision into every session.
+
+While a project is in scope, `scope: "core"` and `scope: "personal"` are
+**verified requests, not free choices**. The write goes through a two-stage
+gate: a deterministic kind prefilter first — only `fact`, `reference`, and
+`gotcha` are admissible for core, with `preference` additionally admissible
+for personal (and granted without a judge); `decision` and `convention` are
+rejected outright — then a model judge that must reach high confidence that
+the statement holds outside the project. The judge is **fail-closed**: no
+configured model, a timeout, or a malformed verdict all count as "not
+portable".
+
+A denial is not a refusal: the memory lands in the project, and the response
+says so (`routed_to_project`) with the reason — the fact is stored either
+way, and moving it later is a deliberate `move_memories`. The gate only runs
+while a project is known; on an unattached session an explicit
+`scope: "core"` / `"personal"` is taken at face value, since there is no
+project to protect. The nightly portability audit is the same judgement run
+in the opposite direction — proposing project memories _for_ the portable
+layer — see [Hygiene](/docs/hygiene).
+
+## Design notes
+
+- Guidance-only isolation ("please pass `scopes`") was rejected as the sole
+  mechanism: agents systematically omit optional parameters, and a context
+  leak is a correctness defect — the default must be safe. The guidance layer
+  remains as a complement, telling agents when widening is worth it.
+- Soft ranking (penalizing foreign scopes instead of filtering) was rejected
+  as the default: a highly relevant foreign decision still reaches the top.
+- Read isolation and write routing lean on the same resolved project scope,
+  keeping the two sides of the system symmetric.
+- Attachment guidance reaches agents through several channels — tool
+  descriptions, the briefing's project line, the per-message hook assertion,
+  and the connect-time instructions — because no single channel reaches every
+  client: the instructions channel is capped on some, and hooks exist only on
+  some. The redundancy is deliberate.

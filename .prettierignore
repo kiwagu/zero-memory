@@ -1,0 +1,23 @@
+dist/
+node_modules/
+.turbo/
+coverage/
+bun.lock
+
+# E2E generated artifacts (Playwright output + launcher runtime state)
+tests/e2e/.runtime/
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+
+# Generated email templates: rendered by packages/email and byte-compared by its
+# export gate, so reformatting them would fail that gate — and Prettier's HTML
+# re-wrapping is exactly what splits a GoTrue placeholder across lines.
+apps/web/public/email-templates/
+
+# Upstream mirrors / vendored trees — keep smallest possible diff, do not reformat
+infra/dev/supabase/
+.claude/skills/
+next-env.d.ts
+
+# Vendored agent skills (installed via skills CLI, keep byte-exact)
+.agents/

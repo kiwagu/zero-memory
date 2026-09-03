@@ -1,0 +1,62 @@
+name: Bug report
+description: Something behaves differently from what the documentation says
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never report a security problem here. Use the **Security** tab —
+        *Report a vulnerability* — as described in the repository's security
+        policy.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: |
+        The shortest path to the behaviour. If it involves a memory tool, the
+        call and its arguments help; if it involves the dashboard, the screen
+        and the action do.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag or commit you are running.
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How is it deployed
+      options:
+        - Self-hosted (compose stack from this repository)
+        - Self-hosted server, Supabase cloud backend
+        - Local development stack (bun run dev)
+        - Someone else's instance (I am only a client)
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Client
+      description: Claude Code, Cursor, Codex CLI, VS Code, other MCP client, or the dashboard.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant server or client output. Redact tokens, keys, and memory
+        content you would not publish — this issue is public.
+      render: text

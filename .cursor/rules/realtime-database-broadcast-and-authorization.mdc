@@ -1,0 +1,105 @@
+---
+description: Use when: implementing Supabase Realtime database triggers, `realtime.broadcast_changes`, private channels, or RLS policies on realtime messages.
+alwaysApply: false
+---
+
+# Supabase Realtime: Database Broadcast and Authorization
+
+## Pyramid Layer
+
+- Layer: L3 realtime leaf.
+
+## Use This When
+
+- Load this after the Realtime router when the task is about trigger functions, database-originated broadcasts, or channel authorization.
+
+## Stop Here If
+
+- Stop once the trigger and authorization model are clear.
+
+## Descend To
+
+- Return to `/.cursor/rules/use-realtime.mdc` for topology or migration siblings.
+
+## Database Broadcast Pattern
+
+Use `realtime.broadcast_changes` for database-originated events.
+
+```sql
+CREATE OR REPLACE FUNCTION room_messages_broadcast_trigger()
+RETURNS TRIGGER AS $$
+SECURITY DEFINER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  PERFORM realtime.broadcast_changes(
+    'room:' || COALESCE(NEW.room_id, OLD.room_id)::text,
+    TG_OP,
+    TG_OP,
+    TG_TABLE_NAME,
+    TG_TABLE_SCHEMA,
+    NEW,
+    OLD
+  );
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+```
+
+Use `realtime.send` only for custom non-table messages or explicitly public flows.
+
+## Conditional Broadcasting
+
+```sql
+IF TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status THEN
+  PERFORM realtime.broadcast_changes(
+    'room:' || NEW.room_id::text,
+    TG_OP,
+    TG_OP,
+    TG_TABLE_NAME,
+    TG_TABLE_SCHEMA,
+    NEW,
+    OLD
+  );
+END IF;
+```
+
+## Authorization and Private Channels
+
+Private channels require RLS on `realtime.messages`.
+
+```sql
+CREATE POLICY room_members_can_read ON realtime.messages
+FOR SELECT TO authenticated
+USING (
+  topic LIKE 'room:%' AND
+  EXISTS (
+    SELECT 1 FROM room_members
+    WHERE user_id = auth.uid()
+      AND room_id = split_part(topic, ':', 2)::uuid
+  )
+);
+
+CREATE INDEX idx_room_members_user_room
+ON room_members(user_id, room_id);
+```
+
+```sql
+CREATE POLICY room_members_can_write ON realtime.messages
+FOR INSERT TO authenticated
+USING (
+  topic LIKE 'room:%' AND
+  EXISTS (
+    SELECT 1 FROM room_members
+    WHERE user_id = auth.uid()
+      AND room_id = split_part(topic, ':', 2)::uuid
+  )
+);
+```
+
+## Rules
+
+1. Default to `private: true` for trigger-backed channels.
+2. Index every column used in RLS predicates.
+3. Keep topic shapes simple enough to parse safely in policies.
+4. Prefer one logical scope per channel over multiplexed mega-channels.

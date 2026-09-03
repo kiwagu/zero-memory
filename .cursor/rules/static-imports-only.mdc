@@ -1,0 +1,45 @@
+---
+description: Use when: adding imports so static top-level imports remain the default and dynamic import stays exceptional.
+globs: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs"]
+alwaysApply: true
+---
+
+# Static imports only
+
+## Pyramid Layer
+
+- Layer: L1 core rule.
+
+## Use This When
+
+- Keep this rule active for TypeScript and JavaScript implementation work.
+
+## Stop Here If
+
+- Stop here once the import policy is clear; this is a leaf rule.
+
+## Descend To
+
+- No sibling descent required. Apply the rule directly.
+
+Always use static top-level `import` statements. Never use `await import(...)` or `import(...)` by default.
+
+## Rule
+
+```ts
+// ✅ correct
+import { MongoClient } from 'mongodb';
+import { helper } from './helper.js';
+
+// ❌ forbidden by default
+const { MongoClient } = await import('mongodb');
+const mod = import('./helper.js');
+```
+
+## Allowed exceptions (require explicit justification in a comment)
+
+1. **Browser bundle lazy-loading** — route-level or component-level code splitting where the module must not be included in the initial bundle.
+2. **Conditional platform availability** — a module that only exists in one runtime (e.g. `node:fs` inside a Node-only branch of isomorphic code).
+3. **Circular dependency breaking** — when a static import would create an unresolvable cycle; restructure the modules instead if at all possible.
+
+If none of the above apply, move the import to the top of the file.

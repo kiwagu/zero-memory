@@ -1,0 +1,66 @@
+---
+description: Use when: optimizing RLS policies, adding supporting indexes, or rewriting joins and helper calls for better Postgres execution plans.
+alwaysApply: false
+---
+
+# RLS Policies: Performance Patterns
+
+## Pyramid Layer
+
+- Layer: L3 SQL leaf.
+
+## Use This When
+
+- Load this after the RLS router when the policy is functionally correct but needs better execution characteristics.
+
+## Stop Here If
+
+- Stop once the policy performance fix is clear.
+
+## Descend To
+
+- Return to `/.cursor/rules/create-rls-policies.mdc` for authoring or helper-function siblings.
+
+## Add Indexes
+
+Add indexes for columns referenced by policy predicates.
+
+```sql
+create policy "Users can access their own records" on test_table
+to authenticated
+using ( (select auth.uid()) = user_id );
+
+create index userid
+on test_table
+using btree (user_id);
+```
+
+## Wrap Stable Helpers in `select`
+
+```sql
+create policy "Users can access their own records" on test_table
+to authenticated
+using ( (select auth.uid()) = user_id );
+```
+
+This lets Postgres evaluate stable helper results per statement instead of per row.
+
+## Minimize Joins
+
+Prefer set-based membership checks over row-by-row joins to the source table.
+
+```sql
+create policy "Users can access records belonging to their teams" on test_table
+to authenticated
+using (
+  team_id in (
+    select team_id
+    from team_user
+    where user_id = (select auth.uid())
+  )
+);
+```
+
+## Specify Roles Explicitly
+
+Always use `to authenticated` or `to anon, authenticated` as needed so the predicate does not execute for irrelevant roles.

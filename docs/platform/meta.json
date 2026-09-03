@@ -1,0 +1,16 @@
+{
+  "title": "Platform",
+  "pages": [
+    "index",
+    "ui-stack",
+    "e2e-testing",
+    "observability",
+    "usage-events",
+    "audit-log",
+    "contracts-and-errors",
+    "../DEPRECATIONS",
+    "value-metering",
+    "judge-precision",
+    "roi-benchmark"
+  ]
+}

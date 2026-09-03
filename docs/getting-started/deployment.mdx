@@ -1,0 +1,303 @@
+---
+title: Deployment
+description: End-to-end guide for a production install — one host serving the MCP server, dashboard, and database, with watcher daemons on each developer machine.
+---
+
+A production(-ish) zero-memory install is one server host running three
+things — the MCP server, the dashboard, and Supabase — behind a TLS edge,
+plus a small client footprint (MCP registration, hooks, optionally a watcher
+daemon) on each developer machine. Detail lives next to the artifacts in the
+repository; this page is the map.
+
+```
+developer machines                        server host
+┌─────────────────────────┐   HTTPS   ┌──────────────────────────────────┐
+│ MCP clients (OAuth)     │──────────►│ edge (caddy/nginx, TLS)          │
+│ watcher (systemd user)  │──────────►│  ├─ zm-server  :8787 (MCP+OAuth) │
+│ SessionStart/Stop hooks │           │  ├─ zm-web     :3100 (dashboard) │
+└─────────────────────────┘           │  ├─ zm-docs    :3200 (this site) │
+                                      │  └─ supabase (kong/db/auth/…)    │
+                                      └──────────────────────────────────┘
+```
+
+## What you are taking on
+
+Running an instance makes you responsible for the data in it. The software
+carries no warranty and no liability for lost, corrupted, or disclosed data —
+that is what the licence says, and before 1.0 it is a practical warning as
+much as a legal one. Set up the backups described under
+[Operations](#operations) on day one, restore one into a scratch database
+before you are ever forced to, and treat every upgrade as something to
+snapshot first.
+
+If you run an instance for other people, whatever you promise them — about
+availability, retention, deletion, or how their data is handled — is between
+you and them. This project ships the mechanism, not the terms: publish your
+own documents and point `ZM_TERMS_URL` / `ZM_PRIVACY_URL` at them, and the
+sign-up form will require an explicit acceptance before it creates an account
+(see [Legal documents and consent](#legal-documents-and-consent)). Configure
+neither and the form asks for nothing, which is the right answer for an
+instance whose only user is you.
+
+## Prerequisites
+
+- A host with Docker + Docker Compose and ports 80/443 reachable.
+- DNS records for the public hosts (e.g. `zm.example.com` for the MCP
+  server, `memory.example.com` for the dashboard, `docs.example.com` for
+  this documentation; optionally `supabase.example.com` for Kong).
+- No model key is required for recall, remember, local embeddings, or search.
+  Configure an Anthropic/OpenAI-compatible provider only for model-backed
+  extraction, hygiene, translation, or rule distillation. Transcript
+  extraction is metrics-only by default (`ZM_INGEST_EXTRACT=off`).
+- A mail provider account and a sender domain whose DNS you control — see
+  the mail step below. Without it registration and password recovery do not
+  work at all, so it is a prerequisite rather than a finishing touch.
+
+## Database: Supabase
+
+The database is not part of this deployment — the app reaches it over the
+network — so pick either:
+
+- **a hosted Supabase project**: create it, note its URL and keys, done;
+- **your own self-hosted stack**: Supabase's self-hosting compose stack is
+  vendored at `infra/dev/supabase/`. The directory name says where we happen
+  to run it, not what it is worth — that is the stack production runs; follow
+  its README and configuration notes. (The Supabase **CLI** stack is the
+  dev-only one: it ships fixed development keys.)
+
+Either way, record the values you will need later: the Kong URL, the anon
+key, the service-role key, and the auth `SITE_URL`. The `SITE_URL` must be
+the external dashboard URL so that confirmation and recovery emails link to
+the right place.
+
+Apply the migrations from `supabase/migrations/` — with the Supabase CLI
+(`db push`) or through the stack's own migration path.
+
+## Mail — required, not optional
+
+Email confirmation is on, so an instance without a working relay is one where
+**nobody can register or recover a password**. Three dashboard flows depend
+on it: signup confirmation, password recovery, and address change. Nothing in
+the product sends mail itself — the database's Auth service does, through
+what you configure here.
+
+1. **Sender domain.** Verify a domain (or a subdomain such as `mail.` /
+   `notifications.`) with a mail provider and add its SPF, DKIM and DMARC
+   records to that DNS zone. Mail from an unverified domain is filed as spam
+   when it is delivered at all. Do not rely on a hosted Supabase project's
+   built-in sender: it is a test facility, rate-limited to a few messages an
+   hour and usually only to project members.
+2. **SMTP on the database side.** A hosted project: its Auth → SMTP settings.
+   Your own stack: `SMTP_HOST/PORT/USER/PASS`, `SMTP_ADMIN_EMAIL` (the From
+   address — it must be on the verified domain) and `SMTP_SENDER_NAME` in the
+   stack's `.env`.
+3. **`SITE_URL` and the redirect allow-list must be the external dashboard
+   URL** — that is where `/auth/callback` lives. The dashboard asks Auth to
+   return the user to `${window.location.origin}/auth/callback`, and an
+   origin missing from the allow-list is replaced by `SITE_URL` **silently**,
+   with no error anywhere: recovery mail then sends people to the wrong host.
+   Include every origin the dashboard is reached by.
+4. **Templates.** Export them, then give Auth the result:
+
+   ```sh
+   bun run --cwd packages/email mail:export   # → apps/web/public/email-templates/
+   ```
+
+   How Auth receives them depends on how it is hosted, because GoTrue
+   **fetches templates over HTTP and cannot read a mounted file**:
+
+   | Hosting                 | Wiring                                                                                                                                                                                                                                          |
+   | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | Hosted Supabase project | paste each exported `.html` into the project's Auth → Email Templates, subjects included                                                                                                                                                        |
+   | Your own stack          | add the mail overlay: `docker compose --project-directory infra/dev/supabase -f infra/dev/supabase/docker-compose.yml -f infra/prod/docker-compose.supabase-mail.yml up -d` — it points Auth at the copies the dashboard serves from `SITE_URL` |
+   | Supabase CLI stack      | already wired through `[auth.email.template.*]` in `config.toml` (dev and the e2e stand)                                                                                                                                                        |
+
+   The templates contain no secrets: Auth substitutes
+   `{{ .ConfirmationURL }}` and the addresses at send time. They are cached
+   for `GOTRUE_MAILER_TEMPLATE_MAX_AGE` (default 10 minutes), so an edit is
+   not instant.
+
+5. **Accept it on a real address outside your own domain.** Register a new
+   user and run a password recovery end to end: both mails arrive, the links
+   land on the dashboard, and neither is in the spam folder. This is the only
+   step that proves the whole chain — provider, DNS, SMTP, `SITE_URL`,
+   templates. The failure modes are no longer silent: a recovery link that is
+   expired or otherwise refused renders an explicit refusal screen instead of
+   a dead password form, and a fresh sign-up is told to check its inbox
+   rather than being dropped on a reset form — so if you see either screen,
+   read what it says before digging into logs.
+
+## Application images and compose
+
+`infra/prod/README.md` in the repository is the authoritative walkthrough.
+Before provisioning the real host, run its **isolated production-path
+rehearsal**: it builds the same Dockerfiles and Caddy topology against a
+dedicated, isolated review database restored from a snapshot, verifies the
+external OAuth issuer through TLS, and cannot create or modify a live
+snapshot. In outline:
+
+1. Build `apps/server/Dockerfile`, `apps/web/Dockerfile` and
+   `apps/docs/Dockerfile` — or skip building entirely and pull published
+   images by setting `ZM_IMAGE_PREFIX` and `ZM_IMAGE_TAG`. The server and
+   dashboard images are not deployment-specific: the browser-facing Supabase
+   URL and key are runtime environment, not build arguments. The
+   documentation image is the exception — the addresses its pages state
+   (`ZM_HOSTED_MCP_URL`, `ZM_HOSTED_WEB_URL`, `ZM_CLIENT_BUNDLE_URL`) are
+   rendered into the HTML when it is built, so changing one is a rebuild.
+2. `cp infra/prod/.env.example infra/prod/.env`, `chmod 600 infra/prod/.env`,
+   and fill it in. The mode matters: `cp` leaves the copy world-readable, and
+   this file ends up holding the secret API key, the model-provider key and a
+   service-account password — every secret the serving stack has. The critical
+   invariant: **`ZM_PUBLIC_URL` must equal the external HTTPS URL of the MCP
+   server exactly.** It is the OAuth issuer embedded in all metadata and
+   challenges, so a mismatch invalidates every client at once. With
+   `ZM_TRUST_PROXY=true` (which is what "deployed behind the edge" means)
+   the server refuses to start on a missing or non-HTTPS public URL rather
+   than booting into a silently broken issuer. Keep `ZM_TRUST_PROXY=true`
+   only when the server sits behind the edge.
+3. Bring the stack up:
+
+   ```sh
+   docker compose --project-directory infra/prod \
+     -f infra/prod/docker-compose.yml \
+     -f infra/prod/docker-compose.caddy.yml up -d
+   ```
+
+   Drop the caddy overlay if you terminate TLS at your own gateway — an
+   nginx example ships in `infra/prod/nginx/`. Add
+   `-f infra/prod/docker-compose.supabase-network.yml` only if your Supabase
+   stack runs in Docker on the same host and you address Kong by service
+   name.
+
+## Edge and TLS
+
+The caddy overlay handles ACME certificates automatically. If you run your
+own gateway instead, proxy `/mcp` with buffering **off** (the transport uses
+SSE) and long read timeouts; see `infra/prod/nginx/zm.conf.example`. A full
+verification checklist (DNS → certs → env → build → up → verify) lives in
+`infra/prod/README.md`.
+
+## Legal documents and consent
+
+An instance that strangers can register on usually needs terms of service and
+a privacy policy, and needs to be able to show that each account accepted
+them. Three variables in `infra/prod/.env` decide it, and leaving them empty
+is a valid choice:
+
+- **`ZM_TERMS_URL`, `ZM_PRIVACY_URL`** — where the documents are. Either an
+  https URL, or a site-root path such as `/terms` when the edge serves them
+  next to the dashboard. Setting either one turns on a required checkbox in
+  the sign-up form, with both names rendered as links; setting neither leaves
+  the form exactly as it is today.
+- **`ZM_TERMS_VERSION`** — an optional label (a date does the job) stored with
+  every acceptance alongside its timestamp, so "which text did they agree to"
+  has an answer later.
+
+The documents themselves are yours and never enter this repository. The Caddy
+edge serves whatever is in **`ZM_LEGAL_DIR`** (an empty `infra/prod/legal` by
+default) on the dashboard hostname, so a file `terms.html` there answers at
+`/terms`. Nothing about them is baked into an image: publishing, editing or
+withdrawing a document is a file change and a reload, never a rebuild.
+
+## Client machines
+
+The short path for a developer machine is
+[Install the client](/docs/getting-started/install-client): download the
+per-platform bundle, run one installer, sign in. The pieces it installs:
+
+- **MCP client** — register `{"type":"http","url":"https://zm.example.com/mcp"}`.
+  The client discovers OAuth via the 401 challenge, self-registers through
+  dynamic client registration, and opens the login page. Users sign up and
+  reset passwords in the dashboard.
+- **Watcher** (auto-capture of session transcripts) — run
+  `zero-memory-watcher login https://zm.example.com` once: it stores the
+  server address in `~/.config/zero-memory/config.json` — the one answer
+  every client path reads — and completes OAuth, so the watcher and hooks
+  need no Supabase keys or `ZM_EMAIL`/`ZM_PASSWORD`. Install it as a systemd
+  **user** unit per `infra/prod/watcher.service`; the unit's
+  `~/.config/zero-memory/watcher.env` is optional and exists only to
+  override the stored answer with `ZM_SERVER_URL` in scripted setups.
+- **Hooks and plugin** (auto-context at session start) — see
+  [Claude Code](/docs/getting-started/claude-code) for the plugin that wires
+  hooks, MCP registration, and the memory-first rule in one install, and
+  `scripts/plugin-bundle/README.md` in the repository for the per-client
+  installers (Claude Code, Codex, Cursor) and the multi-client bundle
+  builder for offline installs.
+
+## Operations
+
+`infra/prod/RUNBOOK.md` covers the operational surface:
+
+- health probes — the server's `/healthz` for liveness and `/readyz` for
+  readiness, **plus the dashboard's own `/healthz`**, which answers `503`
+  when the dashboard cannot reach the MCP server. Monitor both: the
+  web-to-server leg is the one that has failed while every outside check
+  stayed green;
+- built-in Prometheus-format counters at `/metrics`, including the
+  rule-delivery failure signal — see
+  [Observability](/docs/platform/observability) for their semantics;
+- daily backups and a restore drill in the two forms a deployment can take —
+  a logical dump you hold yourself when the database is a managed project
+  (`infra/prod/scripts/db-dump.sh` / `db-restore.sh`), a physical cluster
+  snapshot when it runs on your host. The systemd timer units live in
+  `infra/prod/backup/`. **A backup you never restored is a hope**: the
+  runbook's drill restores into a scratch database and checks row counts
+  before you ever need it in anger;
+- backup alerting: the dump script pings a dead-man URL
+  (`ZM_DUMP_PING_URL`) on success and its `/fail` variant
+  (`ZM_DUMP_PING_FAIL_URL`) immediately on failure, so a silently broken
+  backup becomes an incident within hours rather than at restore time;
+- key, JWT, and password rotation with the exact re-seed and restart order,
+  including procedures for a managed database project and the measured
+  client impact of each rotation — including the credentials that never reach
+  the containers (the mail provider, the image registry, the deployment
+  checkout), whose failure surfaces at the next deployment rather than in a
+  health check;
+- incident quick checks;
+- the security posture: Row Level Security as the data boundary, a
+  rate-limited OAuth surface, deny-all token tables, PKCE-only flows, and
+  single-use authorization codes.
+
+The deployment scripts under `infra/prod/scripts/` are inventoried in
+`infra/prod/README.md` — from `host-bootstrap.sh` through `db-provision.sh`
+and `auth-config.sh` to `verify-instance.sh`. Run `verify-instance.sh` as
+the acceptance step after any deploy or upgrade: it is read-only and safe
+against a live instance.
+
+## Releases and upgrades
+
+A release is a version bump in the root `package.json`: when it merges into
+the main branch, the publishing pipeline materializes the tree in the public
+repository and cuts the `v<version>` tag there. **The published repository's
+tags are the authority for what has been released** — that list is where the
+`[tag]` arguments below come from. An optional SSH deploy hook
+(`ZM_DEPLOY_HOST` / `ZM_DEPLOY_KEY` / `ZM_DEPLOY_HOST_KEY`, a forced command
+on the host) can turn a merge into an automatic upgrade; see
+`infra/prod/README.md`.
+
+To upgrade, pull the release and run `infra/prod/scripts/upgrade.sh [tag]` on
+the host — it updates the checkout, pins the tag in `infra/prod/.env`, pulls
+the images and waits for the containers to report healthy. Compose recreates
+only what changed. By default, apply any new migrations separately; they are
+forward-only.
+
+A host can manage the migrations itself: set `ZM_MIGRATE_ON_DEPLOY=1` in
+`infra/prod/.env` and point `ZM_DB_ENV_FILE` at an env file carrying
+`SUPABASE_DB_URL` (default `/etc/zero-memory/backup.env`, the same file the
+backup timer reads). Every deploy then takes a pre-schema dump into its own
+corner (`/var/backups/zero-memory/pre-deploy`, kept separate from the daily
+backups and never mirrored off-site), applies the pending migration tail
+strictly forward with the bookkeeping the Supabase CLI expects, verifies the
+watermark, and only then switches containers. Any failure — an unreadable
+credential, a diverged series, a failed statement — aborts the deploy while
+the previous containers still serve. A host that never sets the flag is
+unaffected.
+
+Rolling back is the same command with the previous tag, and it is fast: the
+rehearsed procedure measured under a minute in each direction. The pin
+persists — a later bare `upgrade.sh` re-run stays on the rolled-back version
+until you name a newer tag. The database does not roll back with it, and
+does not need to: the schema is ADD-only by design, so an older server
+against a newer schema is the designed case rather than a gamble.
+`infra/prod/RUNBOOK.md` covers the full procedure, including what a rollback
+does not undo.

@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+set -e
+. "$(dirname -- "$0")/ensure-path.sh"
+
+# Mandatory before code leaves the machine: the e2e smoke gate. It stands up a
+# dedicated, isolated Supabase CLI stack (project zero-memory-e2e, ports 5533x)
+# + its own server/web, runs the protocol + browser smokes, and tears the stack
+# down — nothing touches the dev/stage stack. Requires Docker to be running.
+#
+# Heavy (~1.5 min) by design, which is why it gates push, not every commit.
+# Emergency bypass (use sparingly): git push --no-verify
+echo "pre-push: running e2e smoke gate (isolated Supabase stack)…"
+bun run test:e2e:smoke

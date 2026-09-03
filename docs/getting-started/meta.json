@@ -1,0 +1,10 @@
+{
+  "title": "Getting Started",
+  "pages": [
+    "index",
+    "install-client",
+    "deployment",
+    "claude-code",
+    "client-adapters"
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zero-memory-watcher brief session-start --client codex",
+            "statusMessage": "zero-memory: briefing"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zero-memory-watcher brief task --client codex"
+          },
+          {
+            "type": "command",
+            "command": "zero-memory-watcher status --client codex"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zero-memory-watcher ingest --client codex"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zero-memory-watcher checkpoint --client codex",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zero-memory-watcher checkpoint post --client codex"
+          }
+        ]
+      }
+    ]
+  }
+}

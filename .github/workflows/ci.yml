@@ -1,0 +1,412 @@
+name: ci
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ['v*']
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: format · lint · typecheck · unit
+    # A branch push cannot produce anything that runs: no images, no deploy.
+    # Its tree was just gated locally by the sync preflight, so repeating that
+    # here buys minutes and no signal — full validation belongs where
+    # artifacts are born (tags) and where changes are reviewed (pull requests).
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run test
+
+  deployment-artifacts:
+    name: production compose + edge config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The deployment artifacts are what an operator runs first, and nothing
+      # else in CI parses them — a typo here reaches them instead of us.
+      - name: Compose files resolve with the documented env
+        working-directory: infra/prod
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.caddy.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.supabase-network.yml config -q
+      # The mail overlay patches the SELF-HOSTED Supabase stack rather than our
+      # own compose, so it is only ever exercised merged with that stack's file.
+      - name: Mail overlay merges into the self-hosted Supabase stack
+        working-directory: infra/dev/supabase
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml \
+            -f ../../prod/docker-compose.supabase-mail.yml config -q
+      - name: Caddy edge configs are valid
+        run: |
+          docker run --rm \
+            -e ZM_SERVER_HOST=zm.example.com \
+            -e ZM_WEB_HOST=memory.example.com \
+            -e ZM_DOCS_HOST=docs.example.com \
+            -v "$PWD/infra/prod/caddy:/etc/caddy:ro" \
+            caddy:2.10 caddy validate --adapter caddyfile \
+            --config /etc/caddy/Caddyfile.template
+          docker run --rm \
+            -e SUPABASE_UPSTREAM=host.docker.internal:55321 \
+            -v "$PWD/infra/prod/caddy:/etc/caddy:ro" \
+            caddy:2.10 caddy validate --adapter caddyfile \
+            --config /etc/caddy/Caddyfile.rehearsal
+
+  integration:
+    name: migrations + mcp smoke on a clean stack
+    # A branch push that rides along with a release tag is validated by the
+    # tag's own run; branch-only pushes ship config/docs and are covered by
+    # gates + deployment-artifacts. Full validation belongs where artifacts
+    # are produced (tags) and where changes are reviewed (pull requests).
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: gates
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: bun install --frozen-lockfile
+      - name: Cache embedding models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/zero-memory
+          key: zm-models-${{ runner.os }}-multilingual-e5-small
+      - name: Start clean Supabase stack (applies all migrations)
+        run: supabase start
+      - name: Export stack env
+        run: |
+          supabase status -o env | sed 's/^/export /' > /tmp/stack.env
+          . /tmp/stack.env
+          {
+            echo "SUPABASE_URL=$API_URL"
+            echo "SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "ZM_EMAIL=ci@zero-memory.local"
+            echo "ZM_PASSWORD=ci-password-1"
+            echo "ZM_EXTRACTOR=deterministic"
+            # Extraction defaults to metrics-only; the ingest smoke exercises
+            # the extraction path itself, so switch it on for this job.
+            echo "ZM_INGEST_EXTRACT=on"
+          } >> "$GITHUB_ENV"
+      - name: Provision CI user
+        run: bun packages/persistence/scripts/create-local-user.ts
+      # The db package is the one workspace consumed as dist/ at runtime, so a
+      # clean runner must build it before anything imports @workspace/db.
+      - name: Build the db runtime artifact
+        run: bunx turbo run build --filter=@workspace/db
+      - name: MCP smoke (remember → dedup → recall → forget)
+        run: bun scripts/smoke-mcp.ts
+      - name: Ingest smoke (extraction, routing, idempotency)
+        run: bun scripts/smoke-ingest.ts
+
+  # The acceptance suite is split by Playwright project because it does not fit
+  # a standard runner in one piece: measured peak is ~6.6 GiB of 7 GB with the
+  # browser in play, and the runner still has to hold the OS and the docker
+  # daemon. Split, each half sits comfortably — and a failure names which half
+  # broke without reading the log.
+  e2e:
+    name: acceptance (${{ matrix.project }})
+    # Same policy as `integration`: tags and pull requests only.
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: gates
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: bun install --frozen-lockfile
+      - name: Cache embedding models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/zero-memory
+          key: zm-models-${{ runner.os }}-multilingual-e5-small
+      # Only the browser half needs a browser, and it is ~120 MB to fetch.
+      - name: Install the browser
+        if: matrix.project == 'web'
+        run: bunx playwright install --with-deps chromium
+        working-directory: tests/e2e
+      # run-e2e owns the whole lifecycle: it boots its own isolated Supabase
+      # stack, applies migrations, starts the server and dashboard, runs the
+      # project and tears everything down.
+      - name: Run the ${{ matrix.project }} project
+        run: bun scripts/run-e2e.ts --project=${{ matrix.project }}
+        working-directory: tests/e2e
+      - name: Keep the failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.project }}-results
+          path: tests/e2e/test-results/
+          retention-days: 7
+
+  # The standing proof that the documented deployment path is walkable. Heavy
+  # (it builds both images), so it runs where it pays off — on the branches we
+  # promote from and on releases — rather than on every pull request.
+  rehearsal:
+    name: production-path rehearsal
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    needs: [gates, deployment-artifacts]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - run: bun install --frozen-lockfile
+      # The rehearsal addresses the review stack (its own project and ports),
+      # not the test stack — boot that contour's Supabase here.
+      - name: Boot the isolated stack the stand runs against
+        run: bunx supabase start --workdir ./review
+        working-directory: tests/e2e
+      # No `restore`: that step needs an explicit snapshot and exists to
+      # rehearse real data. Here the point is only that the path comes up.
+      - name: Stand up and verify the production path
+        run: bun run prod:rehearse up
+      - name: Tear it down
+        if: always()
+        run: bun run prod:rehearse down
+
+  # The thing a person actually downloads: the per-platform client bundle —
+  # watcher binary, every client plugin, every installer. It is built here
+  # rather than by hand so a release page can never lag the tag it names, and
+  # in both formats because the two audiences differ: tar.gz keeps unix modes
+  # and is what a Linux install expects, zip is what a Windows machine opens
+  # with nothing installed.
+  bundles:
+    name: client bundle (${{ matrix.target }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    # Same rule as the images: an artifact is only worth publishing once the
+    # acceptance suite has passed on the tree it came from.
+    needs: [gates, e2e]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The Windows binary is CROSS-COMPILED here — bun emits a PE from a
+        # Linux runner — so both bundles come off one machine and cannot drift
+        # in content. The installers inside are shell scripts; on Windows they
+        # are run from Git Bash, and the bundle's README says so.
+        target: [linux-x86_64, windows-x86_64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+      - run: bun install --frozen-lockfile
+      - name: Build and pack the ${{ matrix.target }} bundle
+        run: |
+          bash scripts/plugin-bundle/build-zm-bundle.sh \
+            "$RUNNER_TEMP/bundle-${{ matrix.target }}" \
+            --target "${{ matrix.target }}" \
+            --tar dist/bundles --zip dist/bundles
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.target }}
+          path: dist/bundles/
+          retention-days: 7
+
+  images:
+    name: publish images
+    # Only tags publish: a deployment names an immutable version, never a
+    # moving branch. The server and dashboard images are deployment-agnostic —
+    # the browser-facing Supabase values arrive as runtime environment. The
+    # documentation image is the exception: the addresses its pages state are
+    # rendered into the HTML at build time and arrive as build arguments below.
+    if: startsWith(github.ref, 'refs/tags/v')
+    # A released image is only worth publishing once the acceptance suite has
+    # passed on it.
+    needs: [gates, deployment-artifacts, e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image: [server, web, docs]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/zero-memory-${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.image }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Build identity shown by /healthz and the page footers, plus the
+          # addresses the documentation states. The bundle URL is a repository
+          # variable so a release can point at the current archive without a
+          # code change; unset, the install page renders a build-from-source
+          # note rather than a dead download button. The other two jobs ignore
+          # arguments their Dockerfile does not declare.
+          build-args: |
+            ZM_BUILD_VERSION=${{ github.ref_name }}
+            ZM_BUILD_COMMIT=${{ github.sha }}
+            ZM_CLIENT_BUNDLE_URL=${{ vars.ZM_CLIENT_BUNDLE_URL }}
+            ZM_CLIENT_BUNDLE_VERSION=${{ vars.ZM_CLIENT_BUNDLE_VERSION }}
+            ZM_HOSTED_MCP_URL=${{ vars.ZM_HOSTED_MCP_URL }}
+            ZM_HOSTED_WEB_URL=${{ vars.ZM_HOSTED_WEB_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  prune-images:
+    name: prune untagged image versions
+    # Every rebuild leaves the previous digest untagged; without this the
+    # registry silently accumulates them.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      matrix:
+        image: [server, web, docs]
+    steps:
+      - uses: actions/delete-package-versions@v5
+        with:
+          package-name: zero-memory-${{ matrix.image }}
+          package-type: container
+          min-versions-to-keep: 10
+          delete-only-untagged-versions: true
+
+  # The release page itself. Nothing else creates it, so a tag without this job
+  # publishes images and no place to download a client from.
+  release:
+    name: publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    # Images first: a release page that offers a client for an instance whose
+    # images do not exist yet is worse than one that appears a minute later.
+    needs: [bundles, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect the bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          merge-multiple: true
+          path: dist/bundles
+      # A versioned name says what a downloaded file is; a version-free copy
+      # gives the documentation an address that survives the next release
+      # (…/releases/latest/download/zm-bundle-<target>.tar.gz). Both are the
+      # same bytes — the copy is what makes the stable link possible at all.
+      - name: Add the version-free copies
+        working-directory: dist/bundles
+        run: |
+          set -euo pipefail
+          for f in zm-bundle-*.tar.gz zm-bundle-*.zip; do
+            case "$f" in *.sha256) continue ;; esac
+            rest="${f#zm-bundle-}"          # <version>-<target>.<ext>
+            alias="zm-bundle-${rest#*-}"    # <target>.<ext>
+            [ "$alias" = "$f" ] && continue
+            cp -- "$f" "$alias"
+            # The checksum file names the file it attests, so the copy needs
+            # its own or `sha256sum -c` fails on a correct download.
+            sha256sum "$alias" > "$alias.sha256"
+          done
+          ls -la
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # A re-run of the same tag replaces the assets rather than failing.
+            gh release upload "$TAG" dist/bundles/* --clobber
+          else
+            gh release create "$TAG" dist/bundles/* \
+              --title "$TAG" --generate-notes
+          fi
+
+  # A published release lands on the instance by itself. The job exists only
+  # where a deployment target is configured (repository variable
+  # ZM_DEPLOY_HOST plus the ZM_DEPLOY_KEY secret), so a fork or a checkout
+  # without an instance simply has no deploy stage.
+  deploy:
+    name: deploy the release
+    if: startsWith(github.ref, 'refs/tags/v') && vars.ZM_DEPLOY_HOST != ''
+    needs: images
+    runs-on: ubuntu-latest
+    # Two releases must never reconfigure the same host at once.
+    concurrency: deploy-${{ vars.ZM_DEPLOY_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authorize the deployment key
+        env:
+          DEPLOY_KEY: ${{ secrets.ZM_DEPLOY_KEY }}
+          HOST_KEY: ${{ secrets.ZM_DEPLOY_HOST_KEY }}
+          HOST: ${{ vars.ZM_DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$HOST_KEY" ]; then
+            printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
+          else
+            # Trust on first sight: acceptable only because the alternative
+            # is no deployment at all. Set ZM_DEPLOY_HOST_KEY to pin it.
+            echo "::warning::ZM_DEPLOY_HOST_KEY is unset — trusting the host on first sight"
+            ssh-keyscan -H "${HOST##*@}" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+      - name: Deploy
+        env:
+          HOST: ${{ vars.ZM_DEPLOY_HOST }}
+          VERSION: ${{ github.ref_name }}
+        # The host runs a forced command: this version string is its only
+        # input, and it is validated there before anything happens.
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$HOST" "$VERSION"
+      - name: Verify the deployed instance
+        if: vars.ZM_SERVER_URL != '' && vars.ZM_WEB_URL != ''
+        env:
+          SERVER_URL: ${{ vars.ZM_SERVER_URL }}
+          WEB_URL: ${{ vars.ZM_WEB_URL }}
+        # A deployment that cannot be verified from outside is not a
+        # deployment — this is the same acceptance an operator would run.
+        run: infra/prod/scripts/verify-instance.sh "$SERVER_URL" "$WEB_URL"

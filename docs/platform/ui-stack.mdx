@@ -1,0 +1,64 @@
+---
+title: UI stack
+description: The component system, theming, and localization runtime behind the zero-memory dashboard.
+---
+
+The zero-memory dashboard is built on a single, uniform UI stack: [shadcn/ui](https://ui.shadcn.com) components living in a dedicated workspace package, styled with Tailwind CSS v4, themed through CSS variables with a built-in dark mode, and localized by a minimal in-house i18n runtime. Every visible surface — the memory feed, memory cards, entities, scopes, the review and incubator queues, insights, settings, and the auth pages — is composed from this one component system.
+
+<Screenshot path="/memories">
+
+![Dashboard memory feed in dark theme showing the shadcn-based component system](/img/dashboard-dark-theme.png)
+
+</Screenshot>
+
+## Why a single stack
+
+A dashboard assembled from ad-hoc utility classes drifts fast: duplicated button and input styles, one-off badge components, no dark mode, hardcoded strings. zero-memory takes the opposite stance — if shadcn is the component system, it is the component system _everywhere_, and localization is part of the foundation rather than a retrofit. Two properties follow:
+
+- **Consistency by construction.** Pages cannot invent their own primitives, so visual and behavioral drift has nowhere to accumulate.
+- **Reusability across surfaces.** The dashboard is no longer the only application: the documentation site you are reading is a second one, and it adopts the same package — the same stylesheet, the same PostCSS config, the same primitives for its interactive pages. Components packaged once serve both. (The server's OAuth sign-in page is the deliberate exception: it is a single self-contained HTML page with inline styles, because it must render behind a strict content-security policy with no assets of any kind.)
+
+## How it works
+
+### The component package
+
+All UI lives in the workspace package `@workspace/ui` (`packages/ui`), not inside the app:
+
+- **Primitives are flat.** CLI-generated shadcn components (`button`, `dialog`, `select`, …) sit directly in `src/components/`.
+- **Compositions are grouped by feature.** Generic mechanisms (empty states, confirm dialogs, badge lists, search forms, dropzones, the theme switcher) live in `components/common/`; domain compositions in one folder per surface — `dashboard/`, `memory/`, `entity/`, `scope/`, `review/`, `rules/`, `reflections/`, `portability/`, `settings/`, and `auth/`. A new surface adds a folder; it does not add a second component system.
+- **Headless base is Base UI.** The stack uses `@base-ui/react` — the successor library from the ex-Radix team — as the headless primitive layer, with the same visual preset shadcn styles are generated against. Primitives are always added through the shadcn CLI; hand-written Radix imports do not appear in the package.
+- **Charts are a primitive too.** The insights charts and sparklines are built on a `chart` primitive wrapping `recharts`, themed from the same CSS variables as everything else, so a chart in dark mode is not a separate problem to solve.
+- Icons come from `lucide-react`; class composition uses `class-variance-authority`, `tailwind-merge`, and `clsx`.
+
+### Styling and theming
+
+Tailwind v4 runs CSS-first. The package's `globals.css` imports Tailwind, the animation layer, and the shadcn base styles, declares a `dark` custom variant, and defines the theme as CSS variables via `@theme inline`. An application adopts the whole system with two lines: importing `@workspace/ui/globals.css` in its root layout and re-exporting the package's PostCSS config.
+
+Dark mode is driven by `next-themes`; the theme switcher is a package component while the provider stays in the app. Colors are referenced only through theme CSS variables — never raw palette classes — so both themes stay complete by definition.
+
+### The package boundary
+
+The boundary of `@workspace/ui` is strict in both directions:
+
+- **No raw primitives outside the package.** Application code never renders a bare `<button>`, `<input>`, or `<table>`; pages are assembled exclusively from package components.
+- **Maximal transfer into the package.** Anything UI-pure — including heavy, product-specific components like the memory card or feed filters — belongs to the package.
+- **Infrastructure enters by inversion.** Network calls, database clients, and server actions never leak into the package. Components declare callback interfaces (`onSubmit`, `onSearch`, `loadMore`, …) and the application injects implementations. What remains in the app is wiring: data fetching, actions, routing, and auth.
+
+### Localization
+
+Instead of a heavyweight i18n framework, the stack uses a small purpose-built runtime in `@workspace/i18n-catalogs`:
+
+- **Flat JSON catalogs** map `key → template` with `{token}` interpolation, one file per locale.
+- **Lazy loading per locale** goes through a statically resolvable dynamic `import()`, so the client only ever downloads the locale it needs.
+- **A manifest** of domains × locales is the single source of truth, and a validation step in the lint gate checks that every locale of every domain carries the full key set — a partially translated catalog cannot land.
+- **More than one consumer.** Besides the dashboard catalog, the outgoing authentication mail has its own domain of the same shape. It is loaded with plain static imports rather than the chunked loader, because mail is rendered on the server and never reaches a browser bundle, and it declares a narrower locale list than the product's: those emails are rendered to fixed templates that are chosen without knowing the recipient's language, so they ship in English. Adding a language there is adding a locale to the manifest and a catalog file — not re-laying-out the emails.
+- **Missing keys are visible.** The translator `t(key, vars)` returns the key itself when a translation is absent — a broken string on screen instead of silent emptiness.
+- **No provider, no context.** A server component loads the catalog and passes a plain `messages` object as a prop; the client component memoizes a translator from it.
+- **`@workspace/ui` is i18n-agnostic.** Package components receive already-translated strings as props and never depend on the catalogs.
+
+Supported product locales are `en` (default) and `es`. The locale is resolved per request from the `Accept-Language` header — an exact match first, then the base language, then the default — and there is no locale segment in URLs.
+
+## Design notes
+
+- **Why a custom i18n runtime?** At dashboard scale — dozens of keys, not thousands — plural rules, ICU syntax, and localized routing are pure overhead. The runtime is on the order of a hundred lines, works natively with React Server Components, and if plurals or ICU ever become necessary, the runtime can be swapped while the catalogs stay unchanged.
+- **Why a package instead of an app folder?** Multiple UI surfaces share the components, and a hard package boundary is what makes the "no raw primitives" rule enforceable rather than aspirational.

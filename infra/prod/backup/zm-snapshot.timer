@@ -1,0 +1,19 @@
+# Zero-memory database backup — systemd timer template (daily).
+#
+# Schedules zm-snapshot.service. Install steps are in zm-snapshot.service;
+# enable with:
+#   systemctl enable --now zm-snapshot.timer
+#   systemctl list-timers zm-snapshot.timer
+
+[Unit]
+Description=Daily zero-memory Postgres backup
+
+[Timer]
+OnCalendar=daily
+# Spread the start over an hour so backups do not align with other 00:00
+# jobs on the host; Persistent catches up after downtime.
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

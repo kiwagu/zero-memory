@@ -1,0 +1,112 @@
+---
+title: Canonical language
+description: Why stored memory content is canonical English, and how other languages are handled on write, read, and in the dashboard.
+---
+
+Every memory in zero-memory is stored in **canonical English**, regardless of
+the language the fact was originally expressed in. The original phrasing is
+never lost: a translated memory keeps its pre-translation text and language
+alongside the canonical content, and a writer can additionally record the
+exact original wording in the memory's
+[provenance](/docs/concepts/provenance).
+
+## Why one canonical language
+
+Memory is written once and read many times — every session briefing and every
+`recall` re-reads the store. Keeping content in the language of origin has
+compounding costs:
+
+- **Cross-language duplicates.** Deduplication is language-sensitive: the same
+  fact stored once in English and once in another language produces different
+  embeddings and never collapses into one memory. Each duplicate pair becomes
+  work for the [hygiene pipeline](/docs/hygiene).
+- **More expensive reads.** Non-English text often tokenizes into
+  significantly more tokens than the equivalent English (roughly 1.5–2.5x for
+  some languages) — a surcharge paid on every briefing and every recall, not
+  once.
+- **Uneven retrieval.** The embedding model is English-specialized — the
+  stronger choice precisely because stored content is canonical English — so
+  text left in another language is matched weakly, and the full-text leg of
+  hybrid search cannot match across languages at all.
+- **Shared scopes.** Teams are often mixed-language; a shared scope has to be
+  readable by everyone in it.
+
+The economics point one way: translation on the write path is nearly free,
+because extraction already makes an LLM call per chunk — emitting canonical
+English is just an instruction. Translating on the read path would invert the
+write-once/read-many economics and add latency to session start. It would also
+cost the property that makes a search auditable: once the server may rewrite a
+query, what a caller asked for and what actually ran are two different strings,
+and every surface that reports a search has to keep both in step.
+
+## How it works
+
+### Write path
+
+- **Watcher and ingest.** The extractor emits memory content in English,
+  keeping code, identifiers, file paths, and quoted domain terms verbatim.
+  Any non-English content that still reaches the store goes through the same
+  canonicalization as any other write (below), so the original text is
+  preserved next to the English rendering.
+- **Explicit `remember`.** The tool contract asks the calling LLM to author
+  content in English. This costs nothing extra — the caller is already an LLM
+  with the full conversation in view, so its own English rendering usually
+  preserves intent better than a post-hoc server translation. Non-English
+  content is still accepted, never rejected: the write is stored immediately,
+  and a background pass canonicalizes the content to English right after it —
+  the original text and its detected language stay on the memory
+  (`content_original`), and an async worker retries any failed pass. When the
+  memory captures someone's exact words — a preference or decision phrased
+  just so — the caller can also pass `verbatim`: the operative phrase as
+  originally said, in any language, preserved in provenance next to the
+  canonical English content.
+
+### Read path
+
+The read path does not translate at all. A query is embedded and matched
+exactly as it arrived, so the string a caller sent, the string the search ran
+on, and the string the [activity log](/docs/dashboard/activity) shows are the
+same string — they cannot drift apart, because there is only one of them.
+
+- **Agent `recall` and `build_context`.** The tool contract asks for English
+  queries, and the calling LLM renders the user's intent for free: it holds the
+  whole conversation, so it translates better than the server could, and it
+  costs nothing extra. This is a discipline the contract states, not a
+  mechanism the server enforces — an agent that sends its user's language
+  verbatim will match poorly against an English corpus, and that is visible in
+  the activity log rather than silently patched.
+- **Human search in the dashboard.** A person typing in their own language gets
+  what they typed. [Dashboard search](/docs/dashboard/search) is the same
+  `recall` call with no translation gate: the query runs through the usual
+  hybrid vector + full-text search as written. Searching in a language the
+  corpus is not written in returns little — the remedy is to rephrase, which
+  the searcher can see the need for, rather than to have the server guess at
+  the intent behind the words.
+
+### Dashboard display
+
+The dashboard follows the browser's language for its own labels. Independently
+of that, every memory card can reveal its original-language source: the
+pre-translation text with its language for a memory that was canonicalized, or
+the writer-supplied `verbatim` phrase when one was recorded. The canonical
+English content stays the primary rendering; the original is one disclosure
+away, so nothing is flattened irreversibly.
+
+![A memory card in the dashboard with the original-language disclosure revealed for a non-English original](/img/memory-card-translate.png)
+
+## Design notes
+
+- **Deterministic server, probabilistic contract.** The "author in English"
+  instruction lives in the tool contract, which an LLM follows most but not
+  all of the time. The server therefore keeps a cheap deterministic fallback:
+  language detection on input, canonicalization by a write-triggered
+  background pass. This server-plus-contract pattern recurs across
+  zero-memory — the contract makes the common path free, the server makes the
+  invariant hold.
+- **Rejected: dual storage** (one record per language) — doubles embeddings
+  and storage, and complicates dedup and hygiene for no read-side gain.
+- **Rejected: translate-on-read** — an LLM call on every recall and every
+  briefing, in the critical path of session start.
+- **Nuance loss is bounded.** A translation can flatten domain phrasing, so
+  the original is always preserved and auditable; code, identifiers, and
+  quoted domain terms are kept verbatim.

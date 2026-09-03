@@ -1,0 +1,41 @@
+---
+description: Use when: suggesting install, run, or scaffold commands so Bun remains the only package runner in this monorepo.
+alwaysApply: true
+---
+
+# Bun for this repository
+
+## Pyramid Layer
+
+- Layer: L1 core tooling rule.
+
+## Use This When
+
+- Keep this rule active whenever scripts, installs, or one-off package binaries are mentioned in this repo.
+
+## Stop Here If
+
+- Stop here once the package-runner choice is clear; this is a leaf rule.
+
+## Descend To
+
+- No sibling descent required. Apply Bun-first tooling directly.
+
+The root **`package.json`** declares **`packageManager: bun@…`** and scripts use **`bun run`**. Treat **Bun** as the default for installs, scripts, and one-off CLI invocations.
+
+## Do
+
+- **`bun install`** — not `npm install`, `pnpm install`, **`yarn`** / **`yarn install`**, or Corepack-yarn.
+- **`bun run <script>`** for workspace and package scripts (e.g. `bun run build`, `bun run dev`, `bun run lint`).
+- **`bunx <pkg>`** where a one-off binary is needed (equivalent intent to `npx`); prefer **`bunx`** over **`npx`** unless the user or docs explicitly require Node-only tooling.
+- **`bun add` / `bun remove`** for dependency changes in this repo.
+
+## Do not (unless the user asks or upstream docs require it)
+
+- Suggest **`npm`**, **`pnpm`**, **`yarn`** (including **`yarn add`**, **`yarn run`**, **`yarn dlx`**, **`yarn workspace`**), or **`npx`** as the primary way to run this project.
+- Assume **Vite** as the app bundler: apps here use **Next.js** / **Turborepo**; do not propose Vite-specific setup unless the task is explicitly about a Vite app or file.
+
+## Notes
+
+- **`turbo`** is invoked via **`bunx turbo`** or **`bun run`** scripts that call `turbo` (see root `package.json`).
+- When showing commands in answers, prefer the **Bun** form so copy-paste matches repo conventions.

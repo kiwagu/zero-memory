@@ -1,0 +1,44 @@
+---
+description: Use when: starting any non-trivial task and choosing which project rule or skill to load first.
+alwaysApply: true
+---
+
+# Process: check rules/skills before changes
+
+## Pyramid Layer
+
+- Layer: L0 process router.
+
+## Use This When
+
+- **FIRST, before anything below: query zero-memory for the topic** (`build_context` at task
+  start, `recall` for a point question). ZM is the first knowledge source, ahead of code, docs,
+  and web. See `/.cursor/rules/zm-knowledge-first.mdc`.
+- Start here for any non-trivial implementation, refactor, migration, or investigation.
+- Use this file to choose the first domain rule or skill instead of loading many long docs at once.
+- Before descending into framework- or transport-specific guidance, establish the bounded context and domain source of truth.
+
+## Stop Here If
+
+- Stop after selecting the smallest relevant domain entry point below.
+- Do not keep unrelated domains in context once the right branch is chosen.
+
+## Descend To
+
+- Context-first architecture rule: `/.cursor/rules/domain-context-first-analysis.mdc`
+- Supabase skill routers: `/.claude/skills/supabase/SKILL.md`, `/.claude/skills/supabase-postgres-best-practices/SKILL.md`
+- Supabase runtime rules: `/.cursor/rules/use-realtime.mdc`
+- Database identity and table shape rules: `/.cursor/rules/db-domain-ids-and-naming.mdc`
+- Cross-cutting operational rules: `/.cursor/rules/standard-design-patterns.mdc`, `/.cursor/rules/monorepo-env-minimalism.mdc`, `/.cursor/rules/monorepo-new-workspace-scaffold.mdc`
+- Contract rule: `/.cursor/rules/zod-schema-first-contracts.mdc`
+- AI artifact wording rule: `/.cursor/rules/ai-artifacts-generic-wording.mdc`
+
+For migrations, RLS policies, database functions, or SQL style, enter through the database L1 rule first and then descend into the matching SQL leaf.
+
+- Before implementing feature work, refactors, or configuration changes — and especially **before commits** — quickly review relevant workspace guidance:
+  - `.cursor/rules/` (project-specific constraints, conventions, security notes — e.g. `monorepo-env-minimalism.mdc` for when to add shared `process.env` names; `security-review-before-commit.mdc` for the pre-commit security close-out)
+  - applicable skill packs (when the change matches a skill area: Supabase workflows, Postgres best practices, etc.)
+- **Before writing any NEW artifact** (component, hook, primitive, util, contract, server action, policy, pattern), first SCAN the repo for an existing one to reuse or extend — reuse-first is a mandatory pre-step, not a prompt the user should have to give. See `/.cursor/rules/reuse-first-discovery.mdc`.
+- For growing codepaths, explicitly choose a standard pattern before adding more branches: prefer `strategy + registry`, `adapter`, `policy object`, `factory`, or another named pattern that keeps responsibilities separated.
+- If you ask the agent for help on a topic, the agent should load the relevant rule/skill context first to avoid missing project-specific constraints.
+

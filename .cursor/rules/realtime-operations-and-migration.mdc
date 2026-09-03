@@ -1,0 +1,85 @@
+---
+description: Use when: debugging Supabase Realtime behavior, tuning reconnection and scaling, or migrating from `postgres_changes` to broadcast.
+alwaysApply: false
+---
+
+# Supabase Realtime: Operations and Migration
+
+## Pyramid Layer
+
+- Layer: L3 realtime leaf.
+
+## Use This When
+
+- Load this after the Realtime router when the problem is operational rather than structural: migration, reconnection, channel state, or scaling.
+
+## Stop Here If
+
+- Stop once the operational fix or migration plan is clear.
+
+## Descend To
+
+- Return to `/.cursor/rules/use-realtime.mdc` for topology or database siblings.
+
+## Reconnection and Channel State
+
+Supabase Realtime already handles reconnection. Monitor states rather than building a second reconnection stack.
+
+```javascript
+channel.subscribe((status, err) => {
+  switch (status) {
+    case 'SUBSCRIBED':
+      console.log('Connected')
+      break
+    case 'CHANNEL_ERROR':
+      console.error('Channel error', err)
+      break
+    case 'CLOSED':
+      console.log('Channel closed')
+      break
+  }
+})
+```
+
+## Debugging
+
+```javascript
+const supabase = createClient(url, key, {
+  realtime: {
+    params: { log_level: 'info' },
+  },
+})
+```
+
+## Performance Heuristics
+
+1. Use one channel per logical scope.
+2. Shard only genuinely high-volume topics.
+3. Keep payloads narrow.
+4. Tune the database connection pool if the workload justifies it.
+
+## Migration from `postgres_changes`
+
+Replace table mirroring subscriptions with `broadcast` plus triggers.
+
+```javascript
+const newChannel = supabase.channel(`messages:${roomId}:changes`, {
+  config: { private: true },
+})
+  .on('broadcast', { event: 'INSERT' }, callback)
+  .on('broadcast', { event: 'DELETE' }, callback)
+  .on('broadcast', { event: 'UPDATE' }, callback)
+```
+
+```sql
+CREATE TRIGGER messages_broadcast_trigger
+AFTER INSERT OR UPDATE OR DELETE ON messages
+FOR EACH ROW EXECUTE FUNCTION notify_table_changes();
+```
+
+Migration checklist:
+
+1. Replace client listeners.
+2. Add or adapt the broadcast trigger.
+3. Add RLS policies for `realtime.messages`.
+4. Verify private-channel auth before rollout.

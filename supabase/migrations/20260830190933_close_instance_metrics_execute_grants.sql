@@ -1,0 +1,53 @@
+-- Migration: close the EXECUTE grant on the operator-only definer RPCs
+--
+-- Purpose:
+--   public.instance_metrics(integer) and public.instance_metrics_series(integer)
+--   are SECURITY DEFINER and bypass RLS, so the EXECUTE grant is their ONLY
+--   access gate. That gate was open: the measured ACL on a freshly migrated
+--   stack was
+--     postgres=X/postgres, anon=X/postgres, authenticated=X/postgres, service_role=X/postgres
+--   i.e. any authenticated end user could read the whole-instance operator
+--   aggregate over PostgREST /rpc. This migration revokes those two explicit
+--   grants; service_role keeps its own explicit grant and is unaffected.
+--
+-- THE TRAP (read this before writing the next definer function):
+--   Closing a function with "revoke all on function ... from public" alone is
+--   NOT enough on Supabase. Two independent grant sources exist:
+--     1. Postgres grants EXECUTE to the PUBLIC pseudo-role at CREATE FUNCTION.
+--        "revoke ... from public" removes exactly that one.
+--     2. Supabase ships ALTER DEFAULT PRIVILEGES for role postgres on
+--        FUNCTIONS carrying anon=X and authenticated=X, so CREATE FUNCTION
+--        additionally hands anon and authenticated their OWN EXPLICIT grants.
+--        A revoke from PUBLIC does not touch those.
+--   Inspect the defaults with:
+--     select defaclrole::regrole, defaclacl from pg_default_acl
+--     where defaclobjtype = char 102 (the FUNCTIONS object type).
+--   Verify a function is actually closed by reading pg_proc.proacl (NOT
+--   information_schema, which only shows grants visible to the current role):
+--     select oid::regprocedure, proacl from pg_proc where proname = ...;
+--   The ACL of a genuinely operator-only function must list postgres and
+--   service_role only.
+--
+-- Affected objects (grants only; no behavioural change):
+--   - public.instance_metrics(integer)
+--   - public.instance_metrics_series(integer)
+--
+-- Audit of the whole class (performed against the migrated database: every
+-- prosecdef function in public and private inspected via pg_proc.proacl):
+--   these two are the ONLY operator-only definer functions that carried the
+--   leftover anon/authenticated grants. Every other server-only definer
+--   (hard_delete_user, policy_period, policy_spend, provider_credential_for,
+--   set_provider_credential, revoke_provider_credential, usage_daily_rollup,
+--   usage_events_ensure_partitions, private.dashboard_metrics_core,
+--   private.usage_daily_rows, private.handle_new_user) already reads as
+--   postgres + service_role only. The remaining definer functions that do
+--   carry authenticated=X are INTENDED authenticated-callable RPCs (the
+--   dashboard vitrine, scope management, promote_memory_to_rule,
+--   resolve_portability_candidate, session_receipt and the private RLS
+--   helpers) and are deliberately left as they are.
+--
+-- Safe: no live path calls these two as anon or authenticated. The operator
+-- reads them under the service key.
+
+revoke all on function public.instance_metrics(integer) from anon, authenticated;
+revoke all on function public.instance_metrics_series(integer) from anon, authenticated;

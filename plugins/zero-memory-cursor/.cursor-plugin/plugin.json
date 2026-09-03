@@ -1,0 +1,7 @@
+{
+  "name": "zero-memory",
+  "version": "0.28.1",
+  "description": "Persistent cross-session memory for Cursor: auto-briefing at session start, transcript auto-capture on stop, a health warning when the server is unreachable, a recall-first nudge on code search, and the memory-first working rule. The zero-memory MCP server (recall, build_context, remember) is registered in ~/.cursor/mcp.json at user scope, keeping plain tool names (a plugin-bundled server would namespace them).",
+  "author": { "name": "zero-memory" },
+  "keywords": ["memory", "mcp", "hooks", "briefing", "context"]
+}

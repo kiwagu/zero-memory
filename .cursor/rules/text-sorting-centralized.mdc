@@ -1,0 +1,65 @@
+---
+description: Use when: ordering human-facing text (names, titles, labels) so it goes through the centralized collator instead of a naive localeCompare or a default sort.
+globs: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs"]
+alwaysApply: true
+---
+
+# Centralized text sorting
+
+## Pyramid Layer
+
+- Layer: L1 core rule.
+
+## Use This When
+
+- Keep this rule active whenever code orders HUMAN-FACING text — names, titles,
+  labels, folder/file lists, table columns, picker options, autocomplete results.
+
+## Stop Here If
+
+- Stop here once the comparator choice is clear; this is a leaf rule.
+
+## Descend To
+
+- No sibling descent required. Apply the rule directly.
+
+Order human-facing text through ONE canonical collator, never an ad-hoc
+comparator. The single source of truth is a shared std utility package
+(create it on first need per `monorepo-new-workspace-scaffold.mdc`):
+
+- `compareText(a, b)` — the comparator (case-insensitive, natural: `Intl.Collator`
+  with `numeric: true`, `sensitivity: 'base'`). So `Item 2` sorts before `Item 10`,
+  and `a` next to `A`.
+- `byText(item => item.title)` — the key adapter: returns a comparator for
+  `array.sort(...)`.
+
+This is not a style preference: it keeps every surface that lists the SAME data
+ordered IDENTICALLY, and it should mirror the Postgres side when the database
+orders the same text (ICU collation + explicit `order by`) — the cross-tier half
+of the contract.
+
+## Rule
+
+```ts
+// ✅ correct — the canonical collator from the shared std utility
+import { byText, compareText } from '@workspace/std';
+
+nodes.sort(byText((n) => n.title));
+labels.sort(compareText);
+
+// ❌ forbidden — naive / ad-hoc comparators for human text
+nodes.sort((a, b) => a.title.localeCompare(b.title));
+labels.sort(); // default lexicographic (ASCII, case-sensitive)
+nodes.sort((a, b) => (a.title < b.title ? -1 : 1));
+```
+
+## Allowed exceptions (require explicit justification in a comment)
+
+1. **Non-human / opaque keys** — ordering ids, hashes, enum codes, or timestamps
+   where natural-language collation is meaningless (sort those by their own
+   semantics — numeric, chronological, etc.).
+2. **A different EXPLICIT locale/collation requirement** — when a surface must sort
+   under a specific locale or rule that `compareText` does not model; document the
+   requirement and the chosen comparator inline.
+
+If neither applies, route the comparison through the shared collator.

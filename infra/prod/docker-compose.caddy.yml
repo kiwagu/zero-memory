@@ -1,0 +1,59 @@
+# Edge overlay: Caddy reverse proxy with automatic TLS (ACME) in front of
+# zm-server and zm-web. Hostnames come from `infra/prod/.env` (see
+# .env.example, "Edge" section) and are interpolated by Caddy at runtime
+# from the container environment.
+#
+#   docker compose --project-directory infra/prod \
+#     -f infra/prod/docker-compose.yml -f infra/prod/docker-compose.caddy.yml \
+#     up -d --build
+#
+# Operators who already run their own gateway can skip this overlay and use
+# nginx/zm.conf.example instead (see README.md, "Edge / TLS").
+
+services:
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    ports:
+      # 80/443 by default; override for local testing on alternative ports.
+      # QUIC (HTTP/3) needs the UDP mapping.
+      - '${CADDY_BIND_HOST:-0.0.0.0}:${CADDY_HTTP_PORT:-80}:80'
+      - '${CADDY_BIND_HOST:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443'
+      - '${CADDY_BIND_HOST:-0.0.0.0}:${CADDY_HTTPS_PORT:-443}:443/udp'
+    environment:
+      # Interpolated inside the Caddyfile via {$VAR} placeholders.
+      ZM_SERVER_HOST: ${ZM_SERVER_HOST}
+      ZM_WEB_HOST: ${ZM_WEB_HOST}
+      ZM_DOCS_HOST: ${ZM_DOCS_HOST}
+      SUPABASE_HOST: ${SUPABASE_HOST:-}
+      # Upstream for the optional Supabase site: a service name when attached
+      # to the stack's network, or host:port for a published/hosted one.
+      SUPABASE_UPSTREAM: ${SUPABASE_UPSTREAM:-supabase-kong:8000}
+    volumes:
+      # Production uses the ACME template. The isolated review stand swaps in
+      # Caddyfile.rehearsal (internal CA + *.localhost) through this path only;
+      # the production default never changes.
+      - ${CADDYFILE_PATH:-./caddy/Caddyfile.template}:/etc/caddy/Caddyfile:ro
+      # Legal texts served on the dashboard hostname, read-only. The default
+      # is an empty directory next to this file: /terms and /privacy then 404
+      # and the dashboard asks for no consent, which is correct for an
+      # instance with no published documents.
+      - ${ZM_LEGAL_DIR:-./legal}:/srv/legal:ro
+      # Certificates + ACME account (must survive recreation to respect
+      # Let's Encrypt rate limits) and autosaved config.
+      - caddy_data:/data
+      - caddy_config:/config
+    extra_hosts:
+      # Lets the optional Supabase site proxy a stack published on the host.
+      - 'host.docker.internal:host-gateway'
+    healthcheck:
+      # Caddy admin endpoint (localhost-only inside the container).
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:2019/config/']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  caddy_data:
+  caddy_config:

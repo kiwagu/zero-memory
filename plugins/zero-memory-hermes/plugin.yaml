@@ -1,0 +1,45 @@
+name: zero-memory
+version: 0.28.1
+description: >-
+  Persistent cross-session memory (zero-memory) for Hermes: auto-briefing at
+  session start and on the first task prompt, a health warning when the server
+  is unreachable, a recall-first nudge on code search, opt-in transcript
+  capture, and the end-of-session value receipt. The zero-memory MCP server
+  (recall, build_context, remember) is registered separately under
+  mcp_servers.zero-memory in config.yaml, keeping the plain tool names.
+author: zero-memory
+license: MIT
+homepage: https://github.com/zero-memory/zero-memory
+manifest_version: 2
+api_version: 1
+tags: [memory, mcp, hooks, briefing, context]
+
+provides_hooks:
+  - on_session_start
+  - pre_llm_call
+  - post_llm_call
+  - post_tool_call
+  - on_session_end
+
+provides_commands:
+  - zm
+
+config_schema:
+  watcher_bin:
+    type: str
+    default: ''
+    description: >-
+      Path to the zero-memory-watcher binary. Empty = resolve it (PATH, then
+      ~/.local/bin/zero-memory-watcher).
+  capture:
+    type: bool
+    default: false
+    description: >-
+      Opt-in transcript capture. When false the plugin only READS memory
+      (briefing, nudges, receipt) and mirrors nothing to disk.
+  timeout_seconds:
+    type: int
+    default: 20
+    description: >-
+      Per-call timeout for the watcher. A memory server that is slow or down
+      must never hold up a turn.

@@ -1,0 +1,16 @@
+{
+  "name": "zero-memory",
+  "owner": {
+    "name": "zero-memory"
+  },
+  "metadata": {
+    "description": "Marketplace for the zero-memory Claude Code plugin — installable from a LAN bundle or a copied folder today, re-pointable to a repository/hosted source later without a rename."
+  },
+  "plugins": [
+    {
+      "name": "zm",
+      "source": "./plugins/zero-memory-claude",
+      "description": "Persistent cross-session memory (zero-memory) for Claude Code: /zm:brief, /zm:receipt and /zm:triage commands, auto-briefing hooks, transcript auto-capture, and the zero-memory MCP tools."
+    }
+  ]
+}

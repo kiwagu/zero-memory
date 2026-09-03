@@ -1,0 +1,42 @@
+---
+description: Use when: making implementation, migration, or cleanup decisions in this pre-production reset-mode repository.
+alwaysApply: true
+---
+
+# Reset-Mode By Default
+
+## Pyramid Layer
+
+- Layer: L0 core rule.
+
+## Use This When
+
+- Keep this rule active for normal repository work unless the user explicitly asks for a compatibility-preserving or production-style transition.
+
+## Stop Here If
+
+- Stop here after the reset-mode default is clear; this is a leaf rule.
+
+## Descend To
+
+- No sibling descent required. Apply the rule directly before choosing implementation shape.
+
+This repository runs in **reset-mode by default**.
+
+## Required behavior
+
+- Assume **direct replacement** is preferred over compatibility layering unless the user explicitly says otherwise.
+- Prefer **one current implementation path**. Remove superseded code paths, toggles, compatibility branches, fallback envs, and migration shims from touched code/docs.
+- For schema work, you may **rewrite existing migrations directly** instead of preserving a forward-only history for old local stacks.
+- When a local running database or generated types must reflect rewritten migrations, assume the correct fix is to **reset/reseed/regenerate** rather than preserve backward compatibility in code.
+- Do not introduce “legacy”, “old path”, “backfill-only”, or similar transitional mechanisms unless the user explicitly requests that operational shape.
+
+## Explicit override
+
+- Only leave reset-mode if the user explicitly requests one of these:
+  - backward compatibility
+  - phased rollout / migration window
+  - production-safe dual path
+  - historical migration preservation
+
+Until such an override is stated, choose the **clean reset-mode path**.

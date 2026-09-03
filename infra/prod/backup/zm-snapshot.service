@@ -1,0 +1,25 @@
+# Zero-memory cluster snapshot — systemd SYSTEM unit template (oneshot).
+#
+# Runs the snapshot once; scheduling comes from zm-snapshot.timer. It executes
+# on the server host (where the Supabase db container runs), as a user who
+# can talk to the docker daemon.
+#
+# Install (server host, as root; adjust the checkout path below first):
+#   install -m 0755 scripts/zm-cluster.sh /usr/local/bin/zm-cluster.sh
+#   cp infra/prod/backup/zm-snapshot.{service,timer} /etc/systemd/system/
+#   $EDITOR /etc/zero-memory/backup.env   # ZM_SNAPSHOT_DIR, LIVE_DB, …
+#   systemctl daemon-reload
+#   systemctl enable --now zm-snapshot.timer
+#   systemctl start zm-snapshot.service   # first run now, to verify
+#   journalctl -u zm-snapshot -n 20
+
+[Unit]
+Description=Zero-memory Postgres cluster snapshot (pg_basebackup, online)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# ZM_SNAPSHOT_DIR, ZM_SNAPSHOT_KEEP, LIVE_DB
+EnvironmentFile=-/etc/zero-memory/backup.env
+ExecStart=/usr/local/bin/zm-cluster.sh snapshot

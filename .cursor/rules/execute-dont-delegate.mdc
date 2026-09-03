@@ -1,0 +1,26 @@
+---
+description: Use when: deciding whether to perform work directly with tools instead of delegating steps to the user.
+alwaysApply: true
+---
+
+# Execution over delegation
+
+## Pyramid Layer
+
+- Layer: L1 core rule.
+
+## Use This When
+
+- Keep this rule active for any task where work can be executed directly with available tools.
+
+## Stop Here If
+
+- Stop here after the core behavior is clear; this is a leaf rule.
+
+## Descend To
+
+- No sibling descent required. Apply the rule directly.
+
+- When a task can be completed with available tools (read/edit repo, run shell commands, call MCP, verify output), **do it** and report the **outcome**.
+- Do **not** default to instructions like "run this yourself" / "you should…" unless something **cannot** be automated here (e.g. typing sudo passwords, secrets only on the user’s machine with no file access, irreversible production actions the user must explicitly choose).
+- If a step fails, **retry or adjust** (alternatives, diagnostics) before handing work back as a to-do list.

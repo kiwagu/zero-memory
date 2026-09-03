@@ -1,0 +1,116 @@
+# Dedicated Supabase CLI stack for the REVIEW contour — the stand the owner
+# accepts an epic on, standing next to the test contour rather than taking turns
+# with it.
+#
+# WHY A THIRD STACK. The test contour starts every run with `db reset` (clean
+# schema + fixtures — the condition of determinism, not negotiable), while
+# manual acceptance and the pre-promote migration rehearsal both need the
+# opposite: a physical clone of the live cluster with its real accounts, left
+# standing. On one stack those two evict each other — any suite run wipes the
+# clone, and while the clone is needed the suite cannot run. This stack carries
+# the clone; `tests/e2e/supabase/config.toml` stays the resettable one.
+#
+# Distinct project_id ⇒ own Docker network + volumes + container names
+# (supabase_db_zero-memory-review …); ports continue the row: live 5532x,
+# test 5533x, review 5534x. Migrations are the single root set, reached via the
+# ./migrations symlink — the same series, so the clone can be brought up to the
+# branch's pending DDL, which IS the rehearsal.
+#
+# THIS STAND CARRIES REAL DATA AND REAL CREDENTIALS on published host ports.
+# It is a clone, so writing to it is safe — but sign-in here uses live
+# passwords, and what is on screen is live content.
+project_id = "zero-memory-review"
+
+[api]
+enabled = true
+port = 55341
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 55342
+shadow_port = 55340
+major_version = 17
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+# No fixtures here on purpose: this stack's data comes from a clone of the live
+# cluster, never from a seed.
+[db.seed]
+enabled = false
+
+# Kept: the dashboard subscribes to it (RealtimeFeed), so switching it off would
+# offer a degraded product for acceptance.
+[realtime]
+enabled = true
+
+# Off for the same reason as on the test stack — nothing in the product needs
+# it, and the stand has to fit next to the live and test stacks on one machine.
+# Enable it here if inspecting the cloned corpus by hand is ever worth the RAM.
+[studio]
+enabled = false
+
+# On: with real accounts on the stand, any authentication mail the owner
+# triggers has to land in a local catcher instead of a real inbox.
+[local_smtp]
+enabled = true
+port = 55344
+
+# Not droppable: with storage off, the CLI's schema initialisation fails and the
+# stack never comes up (measured on the test stack, same failure applies here).
+[storage]
+enabled = true
+
+[auth]
+enabled = true
+# The review dashboard runs on :3103 (see tests/e2e/scripts/run-e2e.ts).
+# Loopback, like the other stacks: this is the fallback GoTrue substitutes for
+# an origin it does not recognise, so it must resolve wherever the stand runs.
+site_url = "http://127.0.0.1:3103"
+# The stand's apps listen on all interfaces, so it can also be browsed as
+# `zm.local` (this host's mDNS name). An origin absent from this list is
+# replaced by site_url SILENTLY, and mail then links back to a host the browser
+# is not on.
+additional_redirect_urls = [
+  "http://127.0.0.1:3103/**",
+  "http://localhost:3103/**",
+  "http://zm.local:3103/**",
+]
+jwt_expiry = 28800
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+
+# Same exported templates as every other stack, so acceptance sees the mail a
+# real user gets rather than GoTrue's built-in default.
+# Generated: `bun run --cwd packages/email mail:export`; paths are relative to
+# tests/e2e/review, which is this config.toml's project root.
+[auth.email.template.confirmation]
+subject = "Confirm your email address"
+content_path = "../../../apps/web/public/email-templates/confirmation.en.html"
+
+[auth.email.template.recovery]
+subject = "Reset your password"
+content_path = "../../../apps/web/public/email-templates/recovery.en.html"
+
+[auth.email.template.email_change]
+subject = "Confirm your new email address"
+content_path = "../../../apps/web/public/email-templates/email_change.en.html"
+
+[auth.email.template.invite]
+subject = "You have been invited to zero-memory"
+content_path = "../../../apps/web/public/email-templates/invite.en.html"
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false

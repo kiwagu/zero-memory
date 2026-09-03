@@ -1,0 +1,120 @@
+# Zero-memory production runtime: MCP server + web dashboard.
+#
+# Values are interpolated from `infra/prod/.env` (see .env.example).
+# The watcher is NOT part of this stack — it is a client-side daemon on each
+# developer machine (see watcher.service and README.md).
+#
+#   docker compose --project-directory infra/prod up -d --build
+#
+# THE DATABASE LIVES OUTSIDE THIS FILE. These services reach Supabase over the
+# network at SUPABASE_URL and nothing else — a hosted Supabase project, a stack
+# published on this host, or one in another datacentre are all the same to them.
+# That is the default because it is the case with the fewest moving parts.
+# Only when the Supabase stack runs in Docker on THIS host and you want to
+# address Kong by service name do you add the attach overlay:
+#
+#   docker compose --project-directory infra/prod \
+#     -f docker-compose.yml -f docker-compose.supabase-network.yml up -d --build
+
+name: zero-memory
+
+services:
+  zm-server:
+    build:
+      context: ../..
+      dockerfile: apps/server/Dockerfile
+    # Empty prefix = the locally built tag; set ZM_IMAGE_PREFIX (with its
+    # trailing slash) to deploy published images instead of building here.
+    image: ${ZM_IMAGE_PREFIX:-}zero-memory-server:${ZM_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      # Backends stay host-local; Caddy reaches them over the Docker network,
+      # and host nginx proxies to these loopback ports.
+      - '${ZM_BIND_HOST:-127.0.0.1}:${ZM_SERVER_PORT:-8787}:8787'
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      ZM_PUBLIC_URL: ${ZM_PUBLIC_URL}
+      # Revision of THIS checkout, stamped by the deploy script. The image and
+      # the checkout advance independently, so /healthz reports both.
+      ZM_CHECKOUT_SHA: ${ZM_CHECKOUT_SHA:-}
+      # Trust X-Forwarded-For only when an operator explicitly enables it.
+      # The Caddy/nginx production path sets this true; direct exposure must
+      # leave it false so callers cannot choose their rate-limit identity.
+      ZM_TRUST_PROXY: ${ZM_TRUST_PROXY:-false}
+      ZM_EMAIL: ${ZM_EMAIL}
+      ZM_PASSWORD: ${ZM_PASSWORD}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Refuse a user-supplied LLM endpoint that resolves into private space.
+      # Passed explicitly because these services take no env_file: without
+      # this line the variable an operator sets in .env would be documented,
+      # accepted, and silently ignored — the guard off on the one deployment
+      # shape it exists for.
+      ZM_POLICY_DENY_PRIVATE_ENDPOINTS: ${ZM_POLICY_DENY_PRIVATE_ENDPOINTS:-}
+    volumes:
+      # Embedding model cache (ZM_MODEL_CACHE_DIR=/models is baked into the
+      # image); survives container recreation, downloaded once.
+      - zm-models:/models
+    extra_hosts:
+      # Lets SUPABASE_URL point at a stack published on the host
+      # (e.g. the Supabase CLI stack) via host.docker.internal.
+      - 'host.docker.internal:host-gateway'
+
+  zm-web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    image: ${ZM_IMAGE_PREFIX:-}zero-memory-web:${ZM_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - '${ZM_BIND_HOST:-127.0.0.1}:${ZM_WEB_PORT:-3100}:3100'
+    environment:
+      # Server-side Next code uses the internal URL; the NEXT_PUBLIC_* pair is
+      # the EXTERNAL one the browser must reach, resolved per request and handed
+      # to the browser in the document — hence one image fits any deployment.
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      # Server-side admin client (user management) reads this at runtime.
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      # Server-side calls into the MCP server (account deletion, budget
+      # status) — the FULL /mcp endpoint. The code's localhost default is
+      # unreachable from inside this container, so point it at the service
+      # name; override only when the MCP server runs outside this project.
+      ZM_SERVER_URL: ${ZM_SERVER_URL:-http://zm-server:8787/mcp}
+      # Legal texts this instance publishes. Unset on a personal install, and
+      # then the sign-up form asks for no consent and shows no links — the
+      # product ships the mechanism, never the terms.
+      ZM_TERMS_URL: ${ZM_TERMS_URL:-}
+      ZM_PRIVACY_URL: ${ZM_PRIVACY_URL:-}
+      ZM_TERMS_VERSION: ${ZM_TERMS_VERSION:-}
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+
+  zm-docs:
+    build:
+      context: ../..
+      dockerfile: apps/docs/Dockerfile
+      # Unlike the other two, this image is NOT deployment-agnostic: the
+      # addresses its pages state are baked in at build time, so a local build
+      # takes them here and a published one takes them from the release job.
+      args:
+        ZM_CLIENT_BUNDLE_URL: ${ZM_CLIENT_BUNDLE_URL:-}
+        ZM_CLIENT_BUNDLE_VERSION: ${ZM_CLIENT_BUNDLE_VERSION:-}
+        ZM_HOSTED_MCP_URL: ${ZM_HOSTED_MCP_URL:-}
+        ZM_HOSTED_WEB_URL: ${ZM_HOSTED_WEB_URL:-}
+    image: ${ZM_IMAGE_PREFIX:-}zero-memory-docs:${ZM_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - '${ZM_BIND_HOST:-127.0.0.1}:${ZM_DOCS_PORT:-3200}:3200'
+    environment:
+      # Page uploads write into the content tree inside the container, which a
+      # deploy replaces. Left unset every request is refused — the route and
+      # its server action are still reachable, they just never accept
+      # anything. Leave it unset on a public site.
+      ZM_DOCS_UPLOAD_TOKEN: ${ZM_DOCS_UPLOAD_TOKEN:-}
+
+volumes:
+  zm-models:

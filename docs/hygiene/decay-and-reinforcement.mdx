@@ -1,0 +1,179 @@
+---
+title: Decay, reflection, and reinforcement
+description: How ranking evolves with age and usage — per-kind decay, episode consolidation into distilled facts, and usefulness-driven boosts.
+---
+
+Storing and retrieving memories is table stakes. What makes a memory corpus
+_improve_ with time is a set of feedback loops: old noise fades from the top
+of results, clusters of related episodes consolidate into single durable
+facts, and records that prove useful in practice surface earlier. zero-memory
+implements all three as ranking-time mechanics on top of the same add-only
+store.
+
+One invariant governs everything on this page: **decay is demotion in
+ranking, never invalidation of content.** No memory dies of old age. Durable
+kinds — `gotcha`, `convention`, `decision`, `preference` — decay slowly or
+not at all, and there is no age-based auto-invalidation for any kind.
+
+## Decay by kind
+
+A months-old episode should not outweigh a fresh convention, but until decay
+existed, age barely influenced score. Now every kind has a half-life profile,
+and `search_memories` (which also powers briefings) multiplies each
+candidate's score by an exponential age factor derived from its kind:
+
+- `episode` — fast decay (a 30-day half-life);
+- `task` / `open-question` — a 14-day half-life, deliberately aligned with
+  the briefing's soft TTL (below);
+- `fact` — a one-year half-life: facts go stale faster than judgments;
+- `gotcha` — about three years;
+- `preference` / `reference` — about five years;
+- `decision` / `convention` — about ten years: the slow group, since a
+  decision's _why_ rarely expires on its own.
+
+The multiplier is applied at ranking time, **not** as a filter: a direct
+query still finds an old episode — it just no longer crowds out fresher,
+more durable knowledge in top-k results.
+
+Half-life profiles live in a `ranking_config` table in the database rather
+than in application code, so ranking can be tuned without a release.
+The table is readable by authenticated clients; writes go through migrations
+or the service role only.
+
+The fusion side of ranking is data too: the parameters of hybrid search —
+the per-leg candidate pool size, the rank-fusion constant, and the leg
+weights — live in a single-row `fusion_config` table under the same access
+rules. Values change only after they beat the current ones on the
+retrieval-eval harness, never ad hoc.
+
+### Soft TTL for open loops
+
+[Open loops](/docs/concepts/open-loops) surface oldest-first in briefings,
+which is only safe if abandoned loops eventually stop resurfacing. Loops
+older than a configurable threshold (default 14 days, via the
+`zm.open_loop_ttl_days` database setting) drop out of the briefing's
+`open_loops` section — but remain live memories: they still appear in
+`recall`, in the dashboard feed, and `close_loop` still works on them.
+
+### Index hygiene
+
+Decay and consolidation multiply invalidated rows over time, so the hot
+search indexes — the HNSW vector index and the full-text index — are partial
+indexes covering only non-invalidated rows. History grows; search does not
+feel it.
+
+### Seeing it
+
+The [insights dashboard](/docs/dashboard/insights) has a "How it ages"
+section: median age of the live corpus, the _faded share_ (records older
+than their kind's half-life, i.e. ranking weight below 0.5), and age buckets
+from a week to over a year.
+
+![The "How it ages" section of the insights page with the median-age and faded-share tiles and the age-bucket strip](/img/insights-how-it-ages.png)
+
+## Reflection: consolidating episodes
+
+Related episodes accumulate around every piece of sustained work. Reflection
+turns each such cluster into one living fact:
+
+1. **Detection** runs inside the hygiene cycle (same triggers: scheduler
+   tick, `scan_hygiene`, dashboard button). A cluster is a group of at least
+   three episodes in one scope that share an entity and sit in a cosine band
+   of "similar but not duplicates". The shared-entity requirement is
+   load-bearing — without it, the similarity band alone merges unrelated
+   episodes into one blob.
+2. **Distillation.** An LLM distiller condenses the cluster into a single
+   consolidated fact (kind chosen from content, typically `fact` or
+   `convention`) with `derived_from` links to every source episode.
+3. **Approval.** The distillate is never written automatically. It enters an
+   approve / dismiss / snooze queue on the dashboard's reflections page;
+   only an approved distillate becomes a memory.
+
+<Screenshot path="/reflections">
+
+![The reflections queue with a pending distillate, its source episodes listed, and approve/dismiss/snooze actions](/img/reflections-queue.png)
+
+</Screenshot>
+
+Source episodes are **not** invalidated by approval. They fade naturally
+under episode decay while the distillate — fresher and more complete — wins
+ranking on merit. The `derived_from` edges keep full
+[provenance](/docs/concepts/provenance) traceable.
+
+## Usage reinforcement
+
+`recall` results that agents mark as actually useful generate a usefulness
+signal (see [recall quality](/docs/guides/recall-quality)). Reinforcement
+wires that signal into ranking:
+
+- The hygiene cycle precomputes per-memory multipliers into a dedicated
+  `memory_reinforcement` table. Search reads only the multipliers — the raw
+  usage-event stream stays inaccessible to query paths.
+- Directly reported usefulness counts at full weight; judge-attributed
+  usefulness counts weighted by its confidence (0.6 and up).
+- Boosts follow a smoothed curve **capped at 1.4** — no memory can ride
+  reinforcement to unbounded rank.
+- Facts promoted into standing rules are _demoted_ (×0.6): a fact the agent
+  already receives through the rules channel does not need a high retrieval
+  rank too.
+- **Misled evidence demotes.** The signal has a negative half: an explicit
+  `challenge` (see the
+  [false-invalidation safeguards](/docs/hygiene/false-invalidation)) counts
+  at full weight, and judge-attributed misled verdicts count weighted by
+  confidence (0.6 and up). The demotion mirrors the boost curve and is
+  **floored at 0.5** — a memory that misled its readers loses rank but is
+  never buried, because retirement must stay adjudicable through the review
+  queue.
+- There is deliberately **no demotion for surfaced-but-unused** memories:
+  only positive proof of use and explicit misled evidence move ranking, so
+  mere silence cannot bury knowledge.
+
+Misled evidence also feeds a review trigger: a memory whose qualifying
+misled signals cross a threshold within the window is queued as a **stale
+suspect** — a single-subject dispute flagged for review, never
+auto-invalidated. A dismissed suspicion is only re-raised by evidence newer
+than the dismissal.
+
+## World-fact freshness
+
+Decay ranks by age; freshness tracks something different — when a memory was
+last **checked** against the world it describes. Only the fast-moving layer
+participates, identified deterministically by scope and kind: core-scope
+memories of kind `fact` or `reference`, whose truth lives outside the store
+(library versions, ecosystem practice, API behavior). Conventions and
+preferences never expire on a timer — their oracle is you, not a document.
+
+- **Stale marker on recall.** A fast-layer hit past its per-kind freshness
+  budget (180 days for a fact, 90 for a reference; a never-checked memory
+  counts from its own creation) carries a `stale_days` field. It is a marker,
+  not a verdict: the fact still stands, it just has not been re-checked
+  lately. An agent that uses such a hit is asked to verify it against current
+  docs in passing — and either confirm it (re-stamping the check) or write
+  the corrected version with `supersedes`, or `challenge` it.
+- **External re-verification.** The scheduled hygiene sweep re-checks a
+  small, bounded batch of due fast-layer memories against the live web,
+  using the model provider's server-side web search. A check has three
+  honest outcomes: _current_ stamps the freshness ledger; _unverifiable_
+  stamps it too, so the web is not asked the same unanswerable question
+  every night; _outdated_ raises a single-subject review dispute carrying
+  what changed and the best supporting source — the check **never**
+  supersedes a memory on its own, and an inconclusive (low-confidence)
+  check records nothing at all. Owners whose configured provider has no
+  server-side web search are skipped, and the skip itself is recorded — an
+  unchecked record must look unchecked, never checked.
+
+## Design notes
+
+- **Reinforcement shipped last, behind a gate.** Decay and reflection came
+  first; the usefulness signal was allowed to accumulate for a long period
+  before it influenced ranking, and wiring was validated on a held-out
+  retrieval benchmark — retrieval quality did not regress, and the share of
+  reinforced records in top-k stayed low enough to preserve an exploration
+  floor for new, not-yet-reinforced facts.
+- **Pure exponential decay, no grace plateau.** Long half-lives on protected
+  kinds approximate a plateau where one is wanted, and a single curve keeps
+  the ranking function analyzable.
+- **Config in the database on purpose.** Ranking constants embedded in SQL
+  function bodies demonstrably drift when functions are recreated; a seeded
+  config table read via join makes tuning explicit, auditable, and
+  release-free.

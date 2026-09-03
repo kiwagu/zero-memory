@@ -1,0 +1,94 @@
+---
+title: Getting started
+description: What you need to run zero-memory, and the path from a fresh install to your first memory briefing.
+---
+
+zero-memory is a self-hosted, open-source memory server for AI coding agents.
+It exposes one shared, persistent memory over MCP, so any compatible tool —
+Claude Code, Cursor, Codex CLI, VS Code — reads and writes the same store
+instead of rebuilding context from scratch every session. Memory is organized
+into owner-namespaced personal, project, and team scopes. Access comes from
+explicit scope membership — matching names never imply sharing — and the
+database enforces it with Row Level Security.
+
+This section takes you from nothing to a working setup: a running server, a
+connected client, and a first session that starts already briefed.
+
+There are two paths through it, and they need very different amounts of
+kit:
+
+- **Using an instance someone already runs** — start at
+  [Install the client](/docs/getting-started/install-client). Nothing on
+  that path requires Docker, Supabase, a server host, or a checkout of this
+  repository: an account, the per-platform client bundle, and one installer
+  are the whole footprint.
+- **Running your own instance** — the rest of this page, and
+  [Deployment](/docs/getting-started/deployment).
+
+## What you need (to run your own instance)
+
+- **A Supabase backend** — self-hosted (the compose stack ships with the
+  project) or Supabase cloud. It provides Postgres with pgvector + full-text
+  hybrid retrieval, auth, and realtime updates.
+- **A server host** — a machine with Docker and Docker Compose to run the MCP
+  server and the dashboard. For anything beyond a trusted network you also
+  want ports 80/443 reachable and DNS names for TLS.
+- **Bun** — only if you build the `zero-memory-watcher` client binary from
+  source. Client machines install the published per-platform bundle
+  (`zm-bundle-<version>-<platform>.zip`) instead — see
+  [Install the client](/docs/getting-started/install-client).
+- **An MCP client** — Claude Code gets the deepest integration today; Cursor
+  and Codex CLI have plugins and one-script installers of their own; any
+  other MCP-compatible client can at least use the memory tools directly.
+
+Core memory — `recall`, `remember`, search, scopes, and briefings — runs
+locally and needs no model-provider key. Model-backed features such as
+repository bootstrap, hygiene judgments, translation, rule distillation, and
+optional transcript extraction need a configured provider credential.
+Transcript extraction is metrics-only by default; enabling the watcher does
+not silently turn model extraction on.
+
+## The path
+
+1. **[Deploy the server](/docs/getting-started/deployment)** — bring up
+   Supabase, apply migrations, build the two application images, and put an
+   edge with TLS in front. One critical invariant to get right:
+   `ZM_PUBLIC_URL` must exactly equal the external URL of the MCP server,
+   because it is the OAuth issuer embedded in every challenge.
+
+2. **[Connect a client](/docs/getting-started/claude-code)** — for Claude
+   Code, one script installs the plugin (briefing hooks, health trailer,
+   slash commands, memory-first skill) and registers the MCP server; the only
+   manual step is a one-time browser OAuth login. Cursor and Codex CLI have
+   matching one-script installers — see
+   [client adapters](/docs/getting-started/client-adapters) for what each
+   client (including VS Code) supports and how to wire it.
+
+3. **Get your first briefing** — open a new session in your client. A
+   hook-capable adapter injects a briefing built from memory for the current
+   project and branch; every client can call `build_context`, `recall`, and
+   `remember` directly. Promoted standing rules are also delivered by the MCP
+   server itself. Nothing is captured from your transcripts until you opt in —
+   a fresh install reads memory but sends nothing. One first-run behaviour to
+   know: a write that names no target project is **refused, not stored
+   somewhere unexpected** — call `build_context` first (or pass a project
+   hint) so the session attaches to a project; see
+   [Scopes and isolation](/docs/concepts/scopes-and-isolation).
+
+## Pages in this section
+
+- **[Install the client](/docs/getting-started/install-client)** — the
+  no-deploy path: download the per-platform bundle, run one installer,
+  sign in to an instance someone already runs.
+- **[Deployment](/docs/getting-started/deployment)** — the end-to-end
+  production install: database, application images, edge/TLS, client
+  machines, operations, releases, and upgrades.
+- **[Claude Code](/docs/getting-started/claude-code)** — the recommended
+  plugin install, the manual alternative, per-project privacy controls, the
+  transcript watcher daemon, and the memory-first rule.
+- **[Client adapters](/docs/getting-started/client-adapters)** — how Cursor,
+  Codex CLI, and VS Code integrate, and how their capabilities differ.
+
+Once connected, continue with [how briefings work](/docs/guides/briefing) and
+the [memory model](/docs/concepts/memory-model) to understand what the agent
+is reading and writing on your behalf.

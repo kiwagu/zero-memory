@@ -1,0 +1,14 @@
+{
+  "name": "@workspace/typescript-config",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "lint": "node -e \"console.log('ok')\"",
+    "format": "bunx prettier --write .",
+    "typecheck": "node -e \"const ts=require('typescript');const files=['base.json','nextjs.json','react-library.json'];for(const f of files){const r=ts.readConfigFile(f, ts.sys.readFile);if(r.error){const h={getCurrentDirectory:ts.sys.getCurrentDirectory,getCanonicalFileName:(x)=>x,getNewLine:()=>ts.sys.newLine};console.error(ts.formatDiagnosticsWithColorAndContext([r.error],h));process.exit(1);}}console.log('ok');\""
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,22 @@
+# Zero-memory logical backup — systemd timer template (daily).
+#
+# Schedules zm-dump.service. Install steps are in that file; enable with:
+#   systemctl enable --now zm-dump.timer
+#   systemctl list-timers zm-dump.timer
+#
+# The monitoring side of this is not optional: a backup timer that stops firing
+# is silent by nature. Give the job a dead-man switch (ZM_DUMP_PING_URL) and
+# alert when the ping stops, rather than trusting anyone to read journalctl.
+
+[Unit]
+Description=Daily zero-memory logical backup
+
+[Timer]
+# Early morning UTC, away from the release-and-deploy hours; the randomized
+# delay keeps it off the top of the hour, Persistent catches up after downtime.
+OnCalendar=*-*-* 03:20:00 UTC
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

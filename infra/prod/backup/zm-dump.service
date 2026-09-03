@@ -1,0 +1,55 @@
+# Zero-memory logical backup — systemd SYSTEM unit template (oneshot).
+#
+# For a deployment whose database lives ELSEWHERE (a managed/hosted project):
+# the platform owns the physical layer, this job produces the portable artifact.
+# For a self-hosted cluster on this host use zm-snapshot.{service,timer}
+# instead — running both is redundant, not safer.
+#
+# Runs on the server host, as a user that can talk to the docker daemon (the
+# Postgres client is borrowed from an image, so the host needs none installed).
+#
+# Install (server host, as root; the checkout is where upgrade.sh keeps it):
+#   cp infra/prod/backup/zm-dump.{service,timer} /etc/systemd/system/
+#   install -d -m 0700 /etc/zero-memory
+#   $EDITOR /etc/zero-memory/backup.env   # see the variable list below
+#   chmod 0600 /etc/zero-memory/backup.env
+#   systemctl daemon-reload
+#   systemctl enable --now zm-dump.timer
+#   systemctl start zm-dump.service       # first run now, to verify
+#   journalctl -u zm-dump -n 30
+#
+# ExecStart points INTO the checkout on purpose — the same reason the deploy
+# hook is a symlink rather than a copy: the job then updates with every deploy
+# instead of drifting from the tree it came from. Adjust the path below if the
+# checkout is not at host-bootstrap.sh's default (/opt/zero-memory).
+#
+# /etc/zero-memory/backup.env:
+#   SUPABASE_DB_URL=postgresql://…        # the source; pooler URL is IPv4-safe
+#   ZM_DUMP_DIR=/var/backups/zero-memory
+#   ZM_DUMP_KEEP=14
+#   ZM_DUMP_REMOTE=…:zm/                  # optional off-site rsync target
+#   ZM_DUMP_SSH="ssh -p 23 -i /root/.ssh/…"   # optional, used by that mirror
+#     ^ QUOTE any value containing spaces. systemd reads this file literally
+#       and would be fine without them, but operators source it in a shell for
+#       a manual run — and there `KEY=ssh -p 23 …` assigns only `ssh` and then
+#       tries to RUN `-p`. The mirror would silently fall back to port 22.
+#   ZM_DUMP_PING_URL=…                    # optional dead-man ping (on success)
+#   ZM_DUMP_PING_FAIL_URL=…               # optional immediate alert on failure
+#
+# This file holds a database credential that the serving stack does NOT have —
+# the server itself never sees SUPABASE_DB_URL. Mode 0600, and it joins the
+# rotation list when that password changes.
+
+[Unit]
+Description=Zero-memory logical backup of the external database
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/zero-memory/backup.env
+ExecStart=/opt/zero-memory/infra/prod/scripts/db-dump.sh
+# The dump streams through the client image and gzip; on a small VM that is
+# the whole cost, and it must never compete with the serving containers.
+Nice=10
+IOSchedulingClass=idle

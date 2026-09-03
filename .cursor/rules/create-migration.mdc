@@ -1,0 +1,147 @@
+---
+# Specify the following for Cursor rules
+description: Use when: creating or modifying Postgres migrations in this repository.
+alwaysApply: false
+---
+
+# Database: Create migration
+
+## Pyramid Layer
+
+- Layer: L2 SQL leaf.
+
+## Use This When
+
+- Load this after a database entry rule when the task is specifically about creating a new migration file.
+
+## Stop Here If
+
+- Stop once the migration naming and placement contract is clear.
+
+## Descend To
+
+- Continue within this file for migration-file conventions.
+- Return to `/.cursor/rules/db-domain-ids-and-naming.mdc` if broader schema context is needed.
+
+You are a Postgres Expert who loves creating secure database schemas.
+
+This project uses the migrations provided by the Supabase CLI.
+
+## Target stack discipline (HARD RULE — owner directive 2026-07-17, premise updated 2026-08-04)
+
+The LIVE database is the deployed instance's hosted project. Schema reaches it
+ONLY through `infra/prod/scripts/db-provision.sh` (`supabase db push` against
+its connection string), run deliberately by the operator — never from a feature
+branch, never as a side effect of a deploy, and never through an MCP tool that
+happens to be pointed at it.
+
+The local Supabase CLI stack on ports 55321/55322 (`supabase_*_zero-memory`
+containers) is a DEVELOPMENT stack — a ready target for anyone who wants a
+local server — but it is still NOT a scratch stack: it carries the corpus the
+deployed instance was migrated from, which is the rollback point. Unpromoted
+DDL reached it twice by mistake — never again:
+
+1. **A migration on a feature branch** is applied ONLY to the isolated e2e
+   stack (`zero-memory-e2e`, ports 5533x — `tests/e2e/scripts/run-e2e.ts`
+   brings it up; `supabase db reset` there applies the whole series from
+   scratch) — validated there BEFORE the branch merges into dev.
+2. **A single migration authored directly on dev** follows the same rule:
+   e2e stack only, never a stack that holds real memories.
+3. **Immediately before promoting**: rehearse the pending series on real data
+   on the REVIEW stack (`zero-memory-review`, ports 5534x) — not on the test
+   stack, whose `db reset` would wipe the clone. One command does it:
+   `bun --cwd tests/e2e run review:stack -- --refresh` clones the live cluster
+   in and applies the pending migrations on top, so a failing accumulation is
+   the command's failure. Add any holdout/eval runs the change calls for.
+   This is ENFORCED, not remembered: the promote refuses a schema change whose
+   pending versions were not rehearsed on live's data — from live's current
+   watermark, covering every pending version, within
+   `ZM_REHEARSAL_MAX_AGE_H` (24h). Check it any time with
+   `bun scripts/rehearsal-gate.ts`. The test stack cannot satisfy it: it builds
+   the series from an empty database, so nothing there can contradict a
+   migration the way accumulated rows do.
+4. **Only on the owner's explicit command** is the accumulated series applied
+   to a stack that holds real memories — the local one via the promote flow
+   (`scripts/promote-stage.sh`, with its pre-promote `pg_dump` backup), the
+   deployed instance via `db-provision.sh`. Both are separate, deliberate
+   steps; neither happens piecemeal during development.
+
+Corollary: `make db-push` / `supabase migration up` from the repo root targets
+the local stack with its accumulated rows — during development that command is
+simply forbidden; use a stack workdir (`tests/e2e` for the test stack,
+`tests/e2e/review` for the review stack) instead. The advisor close-out below
+runs against a stack with real data and therefore happens at promote time (and
+on the review clone during pre-promote verification).
+
+## Creating a migration file
+
+Given the context of the user's message, create a database migration file inside the folder `supabase/migrations/`.
+
+The file MUST following this naming convention:
+
+The file MUST be named in the format `YYYYMMDDHHmmss_short_description.sql` with proper casing for months, minutes, and seconds in UTC time:
+
+1. `YYYY` - Four digits for the year (e.g., `2024`).
+2. `MM` - Two digits for the month (01 to 12).
+3. `DD` - Two digits for the day of the month (01 to 31).
+4. `HH` - Two digits for the hour in 24-hour format (00 to 23).
+5. `mm` - Two digits for the minute (00 to 59).
+6. `ss` - Two digits for the second (00 to 59).
+7. Add an appropriate description for the migration.
+
+For example:
+
+```
+20240906123045_create_profiles.sql
+```
+
+## SQL Guidelines
+
+Write Postgres-compatible SQL code for Supabase migration files that:
+
+- Includes a header comment with metadata about the migration, such as the purpose, affected tables/columns, and any special considerations.
+- Includes thorough comments explaining the purpose and expected behavior of each migration step.
+- Write all SQL in lowercase.
+- Add copious comments for any destructive SQL commands, including truncating, dropping, or column alterations.
+- When creating a new table, you MUST enable Row Level Security (RLS) even if the table is intended for public access.
+- When creating RLS Policies
+  - Ensure the policies cover all relevant access scenarios (e.g. select, insert, update, delete) based on the table's purpose and data sensitivity.
+  - If the table is intended for public access the policy can simply return `true`.
+  - RLS Policies should be granular: one policy for `select`, one for `insert` etc) and for each supabase role (`anon` and `authenticated`). DO NOT combine Policies even if the functionality is the same for both roles.
+  - Include comments explaining the rationale and intended behavior of each security policy
+
+The generated SQL code should be production-ready, well-documented, and aligned with Supabase's best practices.
+
+## Post-apply: run the Supabase advisors (mandatory close-out)
+
+After applying a migration (`make db-push` / a forward apply), RUN THE SUPABASE ADVISORS
+and fix any NEW warning before reporting done / committing — DDL routinely introduces them,
+and nothing else catches them (they silently reached 168 once because no step checked). This
+is the DB-level analogue of the `lint:strict` / `security-review` close-outs.
+
+- **Get them DYNAMICALLY:** the `mcp__supabase-self-hosted__get_advisors` tool — call with
+  `type: "security"` and `type: "performance"`. It runs splinter against the LIVE DB and
+  returns every lint with a `remediation` URL (the result can be large — aggregate with `jq`
+  by `.name`, read `.detail` for the exact object). Run it after each migration, compare to the
+  prior state, fix new WARN/ERROR. (No static/pre-commit check can do this — advisors read live
+  DB state, so this runs post-`db-push`.)
+- **The MCP MUST point at zero-memory's own stack.** In `.mcp.json`,
+  `supabase-self-hosted` is `http://127.0.0.1:55321/mcp` (this project's Supabase CLI stack Kong).
+  A URL carried over from another project's self-hosted stack (it was once
+  `http://localhost:8000/mcp`) makes `get_advisors` report THAT database's functions,
+  NOT zero-memory's, silently checking the wrong DB. If `get_advisors` returns anything that is not
+  a zero-memory object (`create_scope`, `remember`, `recall`, scope/memory functions), the URL is
+  wrong. Requires the CLI stack up (`bun dev` / `supabase start`); a stopped stack ⇒ MCP unreachable.
+- **Common DDL findings + fixes:** every `security definer` function MUST pin `set search_path
+  = ''` (or `= public`, matching its siblings); put INTERNAL RLS-helper definers in a
+  NON-exposed schema (`private`) so they aren't REST-callable (PostgREST only exposes `public`),
+  keeping them callable inside RLS; `revoke` from `anon` on anything the (auth-only) app doesn't
+  need; enable RLS on every new table; don't expose tables via `graphql_public` if GraphQL is
+  unused.
+- A genuinely-intended public RPC (authenticated-callable by design) is an ACCEPTED residue —
+  document it, don't break it. Drive the rest to zero.
+- **Baseline / new-warning counter:** the accepted set lives in
+  `supabase/ADVISORS.md` (cache_keys + why, with counts). After a migration, compare
+  live advisors to it: a `cache_key` already listed is known; a `cache_key` NOT listed is NEW —
+  fix it, or, if intended, add it to the baseline WITH a justification in the same change. Never
+  let the set grow silently. Current baseline: security 3 (3 WARN, all `0029` required-definer RPCs); performance is all `0005 unused_index` INFO and environmental (a stack restart zeroes index-usage stats, so the exact count fluctuates — not a fixed baseline).

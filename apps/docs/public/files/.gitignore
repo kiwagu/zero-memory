@@ -1,0 +1,5 @@
+# The published client archives are build artifacts, not sources: they are
+# ~36 MB each and change with every release. The folder is committed (so a
+# build has somewhere to serve from) and its contents are not.
+*
+!.gitignore

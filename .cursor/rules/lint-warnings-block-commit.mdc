@@ -1,0 +1,53 @@
+---
+description: "Use when: finishing or committing any code change — lint WARNINGS block the commit (the pre-commit hook runs `lint:strict` / `--max-warnings 0`). Verify with `lint:strict`, not `lint`, and leave touched packages warning-clean."
+globs: ["apps/**", "packages/**"]
+alwaysApply: true
+---
+
+# Lint warnings are a commit gate
+
+## Pyramid Layer
+
+- Layer: L1 core rule.
+
+## Use This When
+
+- Keep active for any code change — especially when verifying before reporting done
+  (sub-agents) or before a commit (coordinator).
+
+## Stop Here If
+
+- Stop after the verify-with-`lint:strict` + leave-it-clean obligations are clear; leaf rule.
+
+## Why this exists
+
+The shared ESLint config downgrades EVERYTHING to a warning (`eslint-plugin-only-warn`), so
+plain `bun run lint` ALWAYS exits 0 — warnings are invisible and silently accumulate into
+hard-to-catch bugs (e.g. the React-Compiler `set-state-in-effect` cascade). To stop the
+drift, the pre-commit hook runs `bun run lint:strict` (each package's `eslint
+--max-warnings 0`): a single warning in a touched package BLOCKS the commit.
+
+## Required behavior
+
+1. **Verify with `lint:strict`, not `lint`.** Before reporting a change done or committing,
+   run `bun run lint:strict` (or the touched package's `lint:strict`). "0 errors" is
+   meaningless here — the gate is **0 WARNINGS**.
+2. **Leave touched packages warning-clean.** Fix a new warning with the PROPER pattern — for
+   React-Compiler `set-state-in-effect`, use the react.dev "You Might Not Need an Effect"
+   patterns (key-reset / adjust-state-during-render / derive / `useSyncExternalStore`), NOT a
+   blanket effect. A genuine false positive (e.g. a real side effect that `setState`s only
+   AFTER an awaited fetch, or owns a subscription) may carry ONE
+   `// eslint-disable-next-line <rule>` with a one-line justification — the last resort, not
+   the default.
+3. **Do NOT silence the gate to dodge real warnings.** ESLint `ignores` are for
+   VENDORED/generated artifacts only (node_modules, `dist`, `.next`, `.dev-browser-*`,
+   build output). Do not add source files to the ignore, and do not turn a rule off, to hide
+   a fixable warning. (Turning off a genuinely informational, non-actionable rule — e.g.
+   `react-hooks/incompatible-library` for a compiler-incompatible 3rd-party lib — is a
+   deliberate, commented policy decision, not hiding a bug.)
+
+## Rationale
+
+Warnings that never block are warnings that never get fixed. Making `lint:strict` the
+pre-commit gate AND the verify step turns "no warning accumulation" into a property of the
+process, not of remembering — the same way the security-review close-out is wired.

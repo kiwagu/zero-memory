@@ -1,0 +1,83 @@
+---
+description: Use when: designing Supabase Realtime topic naming, choosing between broadcast and presence, or wiring client subscriptions safely.
+alwaysApply: false
+---
+
+# Supabase Realtime: Topology and Client Patterns
+
+## Pyramid Layer
+
+- Layer: L3 realtime leaf.
+
+## Use This When
+
+- Load this after the Realtime router when the task is on the client side or about topic design and subscription structure.
+
+## Stop Here If
+
+- Stop once the topic model and subscription pattern are clear.
+
+## Descend To
+
+- Return to `/.cursor/rules/use-realtime.mdc` for database, auth, or migration siblings.
+
+## Core Selection Rules
+
+- Use `broadcast` for nearly all realtime events.
+- Use `presence` sparingly for user state tracking.
+- Do not use `postgres_changes` for new work.
+- Prefer private channels and explicit cleanup.
+
+## Topic and Event Naming
+
+- Topic pattern: `scope:entity` or `scope:entity:id`
+- Event pattern: `entity_action` in snake_case
+
+Good examples:
+
+```javascript
+supabase.channel(`room:${roomId}:messages`)
+supabase.channel(`user:${userId}:notifications`)
+supabase.channel(`org:${orgId}:announcements`)
+```
+
+Avoid broad topics like `global:notifications` unless the feature is truly global.
+
+## Client Setup Pattern
+
+```javascript
+const channelRef = useRef(null)
+
+useEffect(() => {
+  if (channelRef.current?.state === 'subscribed') return
+
+  const channel = supabase.channel(`room:${roomId}:messages`, {
+    config: {
+      private: true,
+      broadcast: { self: true, ack: true },
+    },
+  })
+
+  channelRef.current = channel
+
+  await supabase.realtime.setAuth()
+
+  channel
+    .on('broadcast', { event: 'message_created' }, handleMessage)
+    .subscribe()
+
+  return () => {
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current)
+      channelRef.current = null
+    }
+  }
+}, [roomId])
+```
+
+## Framework Heuristics
+
+1. Subscribe in lifecycle-managed effects, never in render.
+2. Check existing channel state before creating another subscription.
+3. Always include cleanup.
+4. Use presence only for shared ephemeral state such as online members or cursors.

@@ -1,0 +1,136 @@
+---
+title: Content guard
+description: Deterministic server-side detection that keeps secrets and credentials out of memory before they reach storage or any external model.
+---
+
+The content guard is a deterministic filter on the server's write path that
+rejects memories containing secrets — API keys, tokens, private keys,
+connection strings with passwords. It runs before anything else touches the
+content, so a secret never reaches the database, the embedding model, or the
+translation model.
+
+## Why it exists
+
+Telling agents "never store secrets" in tool descriptions is policy, not
+enforcement — nothing at the prompt level prevents a `remember` call or a
+bulk import from writing a token verbatim. Two properties of the system make
+enforcement urgent rather than nice-to-have:
+
+- **Content leaves the server before it is stored.** Non-English content is
+  sent to an external LLM for [canonical-English translation](/docs/concepts/canonical-language),
+  and all content is sent to an embedding model. A secret caught _after_
+  those calls has already leaked. The guard therefore sits strictly before
+  both.
+- **Deterministic write paths copy text verbatim.** Bulk
+  [import](/docs/guides/import) moves files into memory without any LLM
+  judgment in between, and instruction files or auto-memory routinely contain
+  tokens, connection strings, and other credentials.
+
+## How it works
+
+The guard lives at the single choke point all writes flow through — the core
+memory service — and therefore covers every write path: `remember` (in-band
+agent writes), `ingest_conversation` (watcher capture), `import_memory` (bulk
+import), and the merged memory a reviewer writes when resolving a queued pair
+on the dashboard (the merged text is stored through the same server-side
+`remember`). The `challenge` tool runs the same detectors over the reason and
+evidence it records, because that text is persisted user-authored prose of
+exactly the same class as memory content.
+
+It checks **every text field** of an incoming record, not just the main
+content: the verbatim idiom anchor, all string leaves of the provenance
+source object, and the names of entity mentions (an unchecked entity name
+would land in the entity table and quietly bypass the guard). One hit is
+enough to reject, so the guard stops at the first field that matches.
+
+Detection is **known-format matching**, not entropy heuristics:
+
+- PEM private-key blocks
+- GitHub tokens — classic (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`) and
+  fine-grained (`github_pat_`)
+- AWS access key ids (`AKIA`, `ASIA`)
+- Slack tokens (the `xox…-` family: `xoxb-`, `xoxa-`, `xoxp-`, `xoxr-`,
+  `xoxs-`)
+- JWTs (three complete base64url segments — a truncated `eyJ…` mention does
+  not match)
+- URLs embedding credentials: any scheme carrying `user:password@`
+  (`postgres://`, `mysql://`, `redis://`, `mongodb://`, `https://`…). A URL
+  without a password does not match.
+- Anthropic (`sk-ant-`), OpenAI (`sk-`), Stripe (secret and restricted
+  `sk_live_`/`sk_test_`/`rk_live_`/`rk_test_`), and Google (`AIza`) API keys
+
+The detector names are part of the published contracts package, so a
+rejection can say _which_ format fired rather than only that something did.
+
+## What happens on a hit
+
+The write is **rejected, not redacted**. The rejection travels in the standard
+[tool-error shape](/docs/platform/contracts-and-errors) with the code
+`validation_failed` — the class that says the caller can fix this by rewriting
+its input, rather than `internal`, which would read as a server fault and
+invite a pointless retry of the same content. Its message always begins with
+the stable `secret_content_rejected:` prefix, followed by the guarded field
+that matched, the detector that fired, and a masked sample — a few leading
+characters and an ellipsis. The secret itself is never echoed back, and tests
+assert that on every guarded path. The code, the prefix and the detector names
+are the stable part: clients branch on the code and match the prefix rather
+than on the human-readable remainder of the message, which is free to be
+reworded.
+
+The agent is expected to rephrase the fact without the credential and retry.
+Rejection was chosen over silent redaction because a redacted record loses
+information without anyone noticing, and a store that quietly "fixes" secrets
+trains callers to keep sending them.
+
+The bulk paths degrade without losing work. A rejected `import_memory` fails
+that one import and releases its ledger claim, so a corrected re-run is not
+swallowed as an already-seen duplicate. Watcher ingest skips only the
+offending candidate, records the reason in the run's notes, and stores the
+rest of the batch.
+
+## What deliberately passes
+
+- **PII such as e-mail addresses and phone numbers is allowed.** These are
+  frequently legitimate memory content (contact info, git identities);
+  blocking them would break real use.
+- **Generic high-entropy strings are not flagged.** The corpus itself is full
+  of hashes and machine-generated identifiers, so an entropy detector would
+  drown the signal in false positives. Only known credential formats block a
+  write.
+
+## Scanning an existing corpus
+
+Writes are guarded going forward, but a corpus predating the guard may already
+contain secrets. A **report-only** retro-scan script (`scripts/scan-secrets.ts`)
+walks the full corpus with two detector levels: the exact write-path detectors,
+plus looser heuristics (password mentions, key-assignment patterns with
+stop-words) that are intentionally _not_ enforced on the write path because
+of their false-positive rate. It reads each record's content, its
+original-language form, and its provenance source, and labels every hit with
+the level it came from, so write-path matches — the ones today's guard would
+reject outright — stand out from the looser leads. The scan never mutates anything — the owner
+reviews the report and resolves each hit with the normal additive operations
+(`forget`, or supersede with a cleaned version). Because the store is
+[add-only](/docs/concepts/supersede-and-versioning), "removing" a secret means
+invalidating the record through version history, never editing it in place.
+
+## Design notes
+
+- **Deterministic over LLM-based.** The first version uses no LLM judge:
+  regex/format detection is cheap, predictable, and runs on every write
+  without spending anything on a model. A classifier can be layered on later if
+  the format list proves insufficient.
+- **Known residual gaps are accepted, not hidden.** They are unchanged: a
+  secret can still enter as an entity name through the `link` tool, which
+  creates entity nodes directly on the graph rather than through the guarded
+  write path, and `share` can move an old pre-guard record into a shared
+  scope. The retro-scan is the cleanup path for the second one; it reads
+  memory rows, so entity names are outside its reach too. Both are
+  low-probability, and the same format detectors can be reused there when
+  warranted.
+- **Order of operations is enforced by tests.** A unit test pins the call
+  order — guard before embedder, guard before translator, guard before the
+  row is inserted — so a refactor cannot silently reintroduce the leak
+  window. End-to-end tests reject through the content field, the verbatim
+  anchor, and `challenge` evidence, and assert in each case that the response
+  does not contain the secret.

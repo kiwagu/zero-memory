@@ -1,0 +1,71 @@
+---
+description: Use when: defining or changing contracts so data boundaries are expressed as Zod schemas first, with static types inferred from them.
+alwaysApply: true
+---
+
+# Zod schema-first contracts
+
+## Pyramid Layer
+
+- Layer: L0 contract rule.
+
+## Use This When
+
+- Keep this active whenever a task defines, changes, or consumes a contract.
+- Apply it to domain events, DTOs, filters, value objects, identifiers, route payloads, worker payloads, RPC payloads, and other boundary-facing data shapes.
+
+## Stop Here If
+
+- Stop once it is clear whether the change is a data contract, a behavioral contract, or both.
+- Descend into the detailed guide only when naming, examples, or boundary rules are needed.
+
+## Descend To
+
+- Detailed guide and examples: `/docs/schema-first-contracts.md`
+- Domain-first analysis: `/.cursor/rules/domain-context-first-analysis.mdc`
+
+## Core rule
+
+- A **data contract** must be defined schema-first with **Zod**.
+- The **static TypeScript contract** must be inferred from that schema, not manually duplicated beside it.
+- If a module exports data across a context, transport, process, or layer boundary, it should expose both:
+  - the dynamic contract: Zod schema
+  - the static contract: `z.infer<typeof ...>`
+
+## Duality requirement
+
+- Dynamic contract enables parse, safeParse, normalization, branding, and runtime validation.
+- Static contract enables inheritance, composition, and type-safe reuse across callers.
+- The two forms must describe the same shape. Do not hand-maintain parallel schema and type definitions for the same exported contract.
+
+## Important boundary
+
+- This rule is **schema-first for data contracts**, not "Zod for everything".
+- Behavioral contracts such as **ports**, **policy interfaces**, and **use-case interfaces** stay in TypeScript.
+- Their **inputs and outputs** should use schema-first data contracts where those values cross a real boundary.
+
+## Apply by default to
+
+- domain events
+- route payloads
+- server action inputs and outputs
+- worker and queue payloads
+- RPC arguments and results
+- filters and query objects
+- config and env contracts
+- identifiers and value objects
+- persisted JSON shapes and DTOs
+
+## Do not require by default for
+
+- purely local private helper types
+- every internal intermediate type inside a function
+- behavioral interfaces with no boundary data of their own
+- rich domain objects whose main purpose is behavior rather than transportable state
+
+## Anti-patterns
+
+- Writing `type X = { ... }` and `const xSchema = z.object({ ... })` separately for the same exported contract.
+- Treating a route body, event payload, or worker message as a TypeScript-only type with no runtime validation.
+- Trying to express a behavioral port entirely as a Zod object.
+- Flattening a rich domain model into a schema-only data bag when behavior is the real contract.

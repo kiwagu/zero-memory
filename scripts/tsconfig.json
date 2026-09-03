@@ -1,0 +1,21 @@
+{
+  "extends": "@workspace/typescript-config/base.json",
+  // `scripts/` is not a workspace package, so nothing checked it: the turbo
+  // `typecheck` task only visits packages, and the ROOT tsconfig exists so Bun
+  // resolves decorators for root-run entrypoints — it has no `include` and
+  // would drag the whole monorepo into one compilation. This is the project
+  // that makes the tree checkable on its own terms.
+  "compilerOptions": {
+    "noEmit": true,
+    // The same decorator settings the root config carries, for the same
+    // reason: a script may spawn or import server code that uses tsyringe.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "types": ["node"]
+  },
+  // Scripts import package SOURCE by relative path (a bare workspace specifier
+  // does not resolve from here), so those files are pulled in as dependencies
+  // and checked by their own package projects — not re-listed here.
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

@@ -1,0 +1,52 @@
+{
+  "mcpServers": {
+    "zero-memory": {
+      "type": "http",
+      "url": "${ZM_SERVER_URL:-http://localhost:8787/mcp}"
+    },
+    "zero-memory-e2e": {
+      "type": "http",
+      "url": "http://127.0.0.1:8788/mcp"
+    },
+    "supabase-self-hosted": {
+      "type": "http",
+      "url": "http://127.0.0.1:55321/mcp"
+    },
+    "supabase-e2e": {
+      "type": "http",
+      "url": "http://127.0.0.1:55331/mcp"
+    },
+    "stagehand-docs": {
+      "type": "http",
+      "url": "https://docs.stagehand.dev/mcp"
+    },
+    "deepwiki": {
+      "type": "http",
+      "url": "https://mcp.deepwiki.com/mcp"
+    },
+    "shadcn": {
+      "command": "bunx",
+      "args": ["shadcn@latest", "mcp"],
+      "env": {
+        "PATH": "${PATH}:${HOME}/.bun/bin"
+      }
+    },
+    "stagehand-local": {
+      "command": "bunx",
+      "args": ["stagehand-mcp-local"],
+      "env": {
+        "STAGEHAND_ENV": "LOCAL",
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+        "PLAYWRIGHT_BASE_URL": "http://localhost:8787",
+        "PATH": "${PATH}:${HOME}/.bun/bin"
+      }
+    },
+    "context7": {
+      "command": "bunx",
+      "args": ["-y", "@upstash/context7-mcp"],
+      "env": {
+        "PATH": "${PATH}:${HOME}/.bun/bin"
+      }
+    }
+  }
+}

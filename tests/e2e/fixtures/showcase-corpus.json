@@ -1,0 +1,118 @@
+[
+  {
+    "kind": "convention",
+    "content": "Coverage-gate checks provisional records (only `record_kind == 'provisional'`) before the main dedup. If authoritative coverage is above COVERAGE_THRESHOLD, the record is deferred."
+  },
+  {
+    "kind": "convention",
+    "content": "gen-types.sh takes DB_URL and regenerates types from the current database schema. After migration: re-run it against the e2e context (:55332) and regenerate types from there, then verify the diff — ideally, only fields of the new contract should be added (agent_name, author_kind in find_review_candidates)."
+  },
+  {
+    "kind": "convention",
+    "content": "The Tier-AGENT principle applies to the watcher: a smart model (Claude Code) — authority on extracting and writing memories; cheap (Haiku) — orchestration, verification, and audit, not a writer."
+  },
+  {
+    "kind": "convention",
+    "content": "Working agreement: the agent resolves memory conflicts in semi-automatic mode — acts without re-asking on obvious cases (duplicates, complementary keep_both, false ground-truth), escalates only on genuine contradictions. All decisions are reversible."
+  },
+  {
+    "kind": "convention",
+    "content": "After promoting the bulk resolver, new conflicts enter the review queue one by one via write-triggered scan (for near-dups within a semantic similarity window of 0.78–0.92). Subsequent workflow: visually catch examples on /review, find the mrq_… ID, pass them for analysis in a work session."
+  },
+  {
+    "kind": "convention",
+    "content": "Resolve conflict batches are chunked by verdict type (duplicate, contradiction, supersedes). Each verdict passes through bulk resolver independently. Only batches with <300 ids in owner lookup are guaranteed to pass PostgREST. Test resolution logic at scale (400+ pairs per batch) to catch URL overflow."
+  },
+  {
+    "kind": "decision",
+    "content": "Conflicts in memory should be automatically resolved by provenance without being placed in a queue for manual resolution (autoResolved=1, queued=0)."
+  },
+  {
+    "kind": "decision",
+    "content": "Provenance (the origin of a memory — the age and authority of the source) takes priority over freshness when resolving contradictions in memory. An old authoritative memory invalidates a new contradicting memory, even if the new one is fresher."
+  },
+  {
+    "kind": "decision",
+    "content": "Phase A architecture: provenance is passed as a second optional argument memory.service.remember(input, provenance?). The MCP client does not populate it; the server sets it based on the call context (author_kind type and agent_name)."
+  },
+  {
+    "kind": "decision",
+    "content": "Three-phase implementation plan: (A) provenance-rank and provisional class for watcher-records; auto-resolve conflicts. (B) Auditor-check by watcher before write (coverage-check against memories). (C) Integrate provenance into recall-ranking. Phase A is minimally invasive, uses existing fields."
+  },
+  {
+    "kind": "decision",
+    "content": "Three frameworks for resolving the watcher issue: (i) two writers + provenance-dedup — leaves duplicates; (ii) watcher-as-auditor — audits omissions, does not write itself; (iii) remove watcher entirely. Recommendation (ii): preserves value for agent-less contexts, excludes noise."
+  },
+  {
+    "kind": "decision",
+    "content": "The cheap model (Haiku) is weak as an authoritative fact writer (more noise/hallucinations), but good as an auditor/checker: its role should be in signaling agent omissions, not in creating memories."
+  },
+  {
+    "kind": "decision",
+    "content": "The watcher is conceived as insurance against an uncooperative agent: fact capture independent of in-band recording discipline. Survives only for multitenant scenarios (contexts without agent memory); for single-agent with disciplined Claude Code — redundant and generates noise/conflicts."
+  },
+  {
+    "kind": "decision",
+    "content": "Phase A (provenance-rank in deduplication) must be implemented immediately — the watcher will not be able to physically override/duplicate the chat agent's memory. This uses existing author_kind and agent_name, does not require schema migration."
+  },
+  {
+    "kind": "fact",
+    "content": "Unit tests Phase B: memory 47/47 (+2 coverage tests), extraction 26/26 (+2), lint strict green. E2E for find_authoritative_coverage: RPC returned only authoritative (sim 1.000), excluded watcher (same proximity) and distant (below 0.85). Pre-commit gates passed on all commits."
+  },
+  {
+    "kind": "fact",
+    "content": "Hygiene tests reached 8/8 including 2 new provenance cases. Memory types regenerated. Lint passed. Phase A e2e verification (provenance prioritization under conflicts) behaviorally confirmed."
+  },
+  {
+    "kind": "fact",
+    "content": "Watcher economics: Haiku pays tokens for any model, while the in-band agent (Opus) records milestones at marginal zero cost from already-executing reasoning. On overlap (one fact, two sources) — net losses: watcher token duplication plus quality degradation (Haiku paraphrases on top of ground-truth Opus)"
+  },
+  {
+    "kind": "fact",
+    "content": "Memory carries provenance (author_kind: human/agent, agent_name), but conversation_id is NOT stored on memory — critical for deduplication by conversation and for separating responsibility between agent and watcher"
+  },
+  {
+    "kind": "fact",
+    "content": "597 conflicts on the first full run — the result of accumulation by auto-ingest of conversations from many similar memories that have never been scanned by anyone. The system conflicts with itself in many ways through its own sessions."
+  },
+  {
+    "kind": "fact",
+    "content": "The primary producer of closely conflicting memories is not manual remember, but auto-ingest of conversations through watcher/stop-hook. A single dialogue generates a fan of semantically close facts about the same thing, often with reformulations and minor contradictions."
+  },
+  {
+    "kind": "gotcha",
+    "content": "SIGBUS in parallel test runs can be a flaky native onnx model load; serialize test execution (--no-parallel) to isolate real failures from nondeterministic crashes."
+  },
+  {
+    "kind": "gotcha",
+    "content": "bun --cwd with turbo script names (colon syntax like 'hygiene:scan') fails; use turbo filter syntax --filter=@workspace/<package> instead."
+  },
+  {
+    "kind": "gotcha",
+    "content": "pglite (embedded Postgres in WASM) is insufficient for e2e surface testing because it lacks the authentication and API layers (GoTrue, PostgREST, Realtime, Kong) that Supabase apps depend on. pglite can only validate raw SQL/RLS rules in unit tests with manually set JWT claims, not full integration flows."
+  },
+  {
+    "kind": "gotcha",
+    "content": "Renaming already-applied Supabase migrations desynchronizes the schema_migrations ledger and breaks `supabase migration up` on stacks that recorded the old version names. Avoid renaming applied migrations; fold changes into existing migrations via content edits instead."
+  },
+  {
+    "kind": "gotcha",
+    "content": "When recreating foreign keys in migrations via a generic loop, always explicitly specify the on_delete behavior (CASCADE/NO ACTION/etc). Postgres silently resets it to NO ACTION — do not rely on the prior constraint state."
+  },
+  {
+    "kind": "gotcha",
+    "content": "Mocks of IMemorySearchService in e2e and extraction tests must implement findAuthoritativeCoverage (returns empty array by default). Regenerating types from proto automates interface updates."
+  },
+  {
+    "kind": "reference",
+    "content": "To close the recall dedup gap, two potential approaches: (1) recall-time collapsing by similarity cluster (merge results before returning), or (2) write-triggered fast scan just after recording a new memory (instead of waiting for manual button or nightly cron)."
+  },
+  {
+    "kind": "reference",
+    "content": "Supabase Advisor should be run before any RLS column migration to detect unindexed FKs (especially the newly added ones) and uncover edge-case policy issues."
+  },
+  {
+    "kind": "reference",
+    "content": "Supabase key/JWT rotation documented with full 6-step order and consequence chain in infra/prod/RUNBOOK.md; new-key generation scripts in infra/dev/supabase/utils/"
+  }
+]

@@ -1,0 +1,54 @@
+#!/usr/bin/env sh
+set -e
+. "$(dirname -- "$0")/ensure-path.sh"
+
+# Keep packages/db/src/database.types.ts in lock-step with the schema. Type
+# drift can ONLY come from a schema change, so regenerate and stage the result
+# ONLY when this commit touches a migration — non-migration commits stay
+# DB-independent.
+#
+# Generate from the ISOLATED stack on :55332, not the shared one. A migration
+# under development has been applied there and nowhere else, so it is the only
+# database that matches the series being committed. Reading the shared stack
+# instead would describe whatever it happens to carry — including objects the
+# series is about to remove but has not yet been allowed to, which writes the
+# drift back into the types the commit is meant to correct.
+#
+# Requires that stack to be up, which it definitionally is when you have just
+# authored and applied a migration; if it is not, this fails loudly rather
+# than committing types nobody generated.
+if git diff --cached --name-only --diff-filter=ACM | grep -q '^supabase/migrations/'; then
+  echo "pre-commit: migration staged → regenerating database.types.ts"
+  bun run --cwd packages/db gen-types \
+    "${ZM_TYPES_DB_URL:-postgresql://postgres:postgres@127.0.0.1:55332/postgres}"
+  git add -- packages/db/src/database.types.ts
+fi
+
+# Fast, mandatory gates on every commit. Heavy e2e runs at
+# pre-push, not here — see .husky/pre-push.
+bun run typecheck
+# Strict: lint warnings BLOCK the commit. The `only-warn` plugin makes plain
+# `lint` always exit 0, so warnings silently accumulate; `lint:strict` runs
+# eslint with `--max-warnings 0` per package.
+bun run lint:strict
+# Env templates are read by several parsers (systemd, shells, compose, Bun)
+# that disagree on quoting and $ — the guard keeps every tracked template in
+# the one form all of them read alike.
+bun scripts/check-env-templates.ts
+bun run format
+# `turbo format` only reaches workspace packages; files OUTSIDE any package
+# (root docs, infra/**) are checked by CI's `prettier --check .` but were
+# never formatted here — a blind zone that let unformatted files commit.
+# The root run closes it; --cache keeps repeat runs fast.
+bunx prettier --write --cache --log-level warn .
+
+# Re-stage the paths already part of this commit so formatter output is included.
+_gitdir=$(git rev-parse --git-dir)
+_staged_paths="$_gitdir/pre-commit-staged-paths-$$"
+trap "rm -f \"$_staged_paths\"" EXIT HUP INT TERM
+git diff --cached --name-only --diff-filter=ACM > "$_staged_paths"
+while IFS= read -r path; do
+  [ -z "$path" ] && continue
+  git add -- "$path"
+done < "$_staged_paths"
+unset _gitdir path

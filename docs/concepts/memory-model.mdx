@@ -1,0 +1,130 @@
+---
+title: Memory model
+description: Memories, kinds, entities, links, and the MCP tools that operate on them.
+---
+
+zero-memory stores knowledge as **memories**: small, atomic facts written at
+the moment they are discovered. A memory is one self-contained statement — a
+decision with its why, a preference, a gotcha, a convention — not a transcript
+or a log dump.
+
+## Kinds
+
+Every memory has a kind that tells readers (human and LLM) how to treat it:
+
+| Kind            | What it captures                                          |
+| --------------- | --------------------------------------------------------- |
+| `fact`          | A durable statement about the world or a project          |
+| `decision`      | A choice made, together with its rationale                |
+| `preference`    | How a person or team likes things done                    |
+| `convention`    | A project agreement not enforced by tooling               |
+| `gotcha`        | A pitfall or non-obvious fix, recorded at first discovery |
+| `reference`     | A pointer to an external resource                         |
+| `episode`       | A summarized event or session                             |
+| `task`          | Work handed over to a future session (an open loop)       |
+| `open-question` | A question awaiting its answer (an open loop)             |
+
+## Entities and links
+
+Memories mention **entities** — people, projects, repos, packages, services,
+tools, libraries, concepts. Entities form a graph: memories link to the
+entities they involve, and memories link to each other with typed relations
+(`relates_to`, `supersedes`, `contradicts`, `derived_from`). Retrieval uses
+this graph to pull in context that plain text search would miss.
+
+The entities a memory is attached to are its **anchors** — the subjects it can
+be reached by. Name them on `remember` with `entities`, and they are used
+exactly as given. Name none and the server anchors the write itself, to
+entities the scope already holds whose name the text speaks: it resolves
+against the existing graph and never invents a subject. The response reports
+the key the write received in `anchors`. A `decision` that ends with no anchor
+at all comes back with `anchor_hint` instead — a subject the graph has never
+seen can only be named by the author, and a decision nobody can reach by its
+subject is findable only by phrasing it the same way again.
+
+## MCP tool surface
+
+The MCP server exposes one schema-first surface around the memory lifecycle:
+
+- **Write and ingest:** `remember`, `ingest_conversation`, and
+  `import_memory`.
+- **Retrieve and brief:** `recall`, `build_context`, `entities`, and
+  `describe_scope`.
+- **Graph, sharing, and routing:** `link`, `share`, and `move_memories`
+  (batch-move mis-routed memories into the project they belong to).
+- **Lifecycle:** `forget`, `restore_memory`, and `close_loop`.
+- **Hygiene and conflicts:** `scan_hygiene`, `challenge` (dispute one memory
+  as wrong or stale), `list_conflicts`, `get_conflict`, `resolve_conflict`,
+  and `resolve_conflicts`.
+- **Rules and quality:** `promote_rule` and `benchmark_memory`.
+- **Operations and portability:** `session_receipt`, `export_metrics`,
+  `export_memories`, and `delete_account`.
+
+Inputs and outputs come from the shared
+[contracts package](/docs/platform/contracts-and-errors), so HTTP and stdio
+transports expose the same behavior. Every tool declares its behavior
+annotations (read-only, idempotent, destructive) and returns a structured,
+schema-validated result alongside a compact text mirror. The write and read
+tools additionally report **session state** on every result —
+`session: { attached_project, thread? }` plus a plain-text line — so an
+agent always sees whether its session knows the project before the next
+write depends on it (see
+[Scopes and isolation](/docs/concepts/scopes-and-isolation)).
+
+Tools are not the whole surface. The server also exposes a read-only
+**resources** plane: `zm://memory/{id}` dereferences any memory id to its
+full untruncated row, and a standing-rules resource carries the owner's
+promoted rules without a briefing call. Read tools attach resource links to
+their hits, so a truncated recall or briefing result is never a dead end.
+For clients that support them, ready-made **prompts** trigger the common
+workflows by hand: a briefing, a session value receipt, and a conflict
+triage pass.
+
+## Write discipline
+
+The store favors many small writes over few large ones:
+
+- A write must have a resolvable target: the session's attached project is
+  the default, and a target-less write is **refused, never re-homed** — see
+  [Scopes and isolation](/docs/concepts/scopes-and-isolation).
+- One atomic fact per memory, written at the moment of discovery.
+- Updates are declared, not implied: a new version **supersedes** the old one
+  explicitly. See
+  [Supersede and versioning](/docs/concepts/supersede-and-versioning).
+- Near-duplicates in the same scope are deduplicated on write.
+
+There is a mechanical reason behind the first preference, not just taste. The
+embedding model reads a fixed-size window of each memory, so on its own a long
+memory is represented by its opening — and a handover note states the
+situation in its opening and what to do next in its closing. Longer content is
+therefore covered by **as many overlapping windows as it takes**, and search
+scores each memory by whichever of its windows is closest to the query. Where
+a fact sits inside a record stops mattering.
+
+Splitting long knowledge into linked atoms is still the better shape, for
+reasons the windows do not touch: a blob cannot be superseded in halves, it
+crowds a briefing pack, and being searchable from every angle also means
+matching queries it is only marginally about. The windows are what keep the
+long records that do get written from losing everything after their opening.
+
+Because those reasons are no longer visible in the search results, a write
+that outgrows the window comes back with `length_directive` — the size it
+reached, the windows it took, and an instruction for the next write. It is
+reported rather than enforced: nothing is refused and nothing is reshaped,
+because where to cut a record into standalone facts is a judgement about
+meaning, and the writer is the only party that has it.
+
+## Read discipline
+
+Memory is the first knowledge source, ahead of code search, docs, or the web:
+a stored decision-with-why outranks generic reasoning. Sessions open with a
+[briefing](/docs/guides/briefing) and consult `recall` before deriving
+solutions from scratch.
+
+Portable world knowledge is also age-checked on read. A `fact` or `reference`
+in the personal core scope that has not been checked against an external
+source within its freshness budget (180 days for facts, 90 for references)
+comes back from `recall` with a `stale_days` marker — a cue to re-verify
+against current docs and either confirm the fact or supersede it, not a
+verdict that it is wrong. Project-scoped memories are never marked: their
+truth lives in the project itself, not the outside world.

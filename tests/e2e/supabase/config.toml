@@ -1,0 +1,107 @@
+# Dedicated Supabase CLI stack for e2e — a fully separate project so e2e data
+# (users, memories) and container logs never bleed into the dev/stage stack.
+# Distinct project_id ⇒ own Docker network + volumes + container names
+# (supabase_db_zero-memory-e2e …); ports are shifted to 5533x to avoid binding
+# conflicts with the dev stack (5532x) and the self-hosted stack (543x).
+# Migrations are the single root set, reached via the ./migrations symlink.
+project_id = "zero-memory-e2e"
+
+[api]
+enabled = true
+port = 55331
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 55332
+shadow_port = 55330
+major_version = 17
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+[db.seed]
+enabled = false
+
+# Kept: the dashboard subscribes to it (RealtimeFeed), so switching it off
+# would exercise a degraded product rather than a lighter stack.
+[realtime]
+enabled = true
+
+# Everything below is off on purpose: this stack exists to accept the product,
+# and nothing in the suite drives these. They cost memory on a CI runner, where
+# the whole run has to fit alongside the browser and the app processes.
+
+# No test opens Studio; its pg-meta backend goes with it.
+[studio]
+enabled = false
+
+# On: the recovery spec asserts the real mail our templates produce, which is the
+# only place in the whole suite where the authentication mail path is walked.
+# Costs ~8 MiB.
+[local_smtp]
+enabled = true
+# Web UI / HTTP API of the catcher, in this stack's 5533x range. The recovery
+# spec reads captured mail through it.
+port = 55334
+
+# Nothing in the product touches object storage, so this looks like the next
+# service to drop — but it is NOT droppable: with it off, `supabase db reset`
+# fails at "Initialising schema" with "error running container: exit 1", which
+# takes the whole suite down. Measured cost of keeping it: ~140 MiB.
+[storage]
+enabled = true
+
+[auth]
+enabled = true
+# The e2e dashboard runs on :3102 (see tests/e2e/scripts/run-e2e.ts).
+# Stays a loopback address: this is the fallback GoTrue substitutes for an origin
+# it does not recognise, and it must resolve everywhere the suite runs — CI has no
+# mDNS, so a `zm.local` site_url would strand every mail link there.
+site_url = "http://127.0.0.1:3102"
+# The stand's apps listen on all interfaces, so it can also be browsed by hand as
+# `zm.local` (the dev-instance mDNS name). That origin belongs here for the same
+# reason as the others: one absent from this list is replaced by site_url SILENTLY,
+# and the mail then links back to a host the browser is not on.
+additional_redirect_urls = [
+  "http://127.0.0.1:3102/**",
+  "http://localhost:3102/**",
+  "http://zm.local:3102/**",
+]
+jwt_expiry = 28800
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = true
+
+# Same templates as every other stack — the point of asserting mail here is that
+# the recovery spec sees what a real user gets, not GoTrue's built-in default.
+# Generated: `bun run --cwd packages/email mail:export`; paths are relative to
+# tests/e2e, which is where this config.toml's project root is.
+[auth.email.template.confirmation]
+subject = "Confirm your email address"
+content_path = "../../apps/web/public/email-templates/confirmation.en.html"
+
+[auth.email.template.recovery]
+subject = "Reset your password"
+content_path = "../../apps/web/public/email-templates/recovery.en.html"
+
+[auth.email.template.email_change]
+subject = "Confirm your new email address"
+content_path = "../../apps/web/public/email-templates/email_change.en.html"
+
+[auth.email.template.invite]
+subject = "You have been invited to zero-memory"
+content_path = "../../apps/web/public/email-templates/invite.en.html"
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false

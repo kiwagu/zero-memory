@@ -1,0 +1,152 @@
+---
+title: Provenance
+description: How zero-memory ranks memories by who wrote them and shows which client each memory came from.
+---
+
+Every memory carries provenance: who authored it (`author_kind`), which agent
+or tool wrote it (`agent_name`), and how it entered the store (`source`).
+Provenance is not just metadata — it is an authority signal that feeds
+deduplication, conflict resolution, and recall ranking, and it is what the
+dashboard uses to show which client created each memory.
+
+## Why it exists
+
+Facts reach the store through parallel paths that all go through the same
+write pipeline:
+
+- **In-band** — the chat agent deliberately records a milestone with
+  `remember`. High precision: the model that wrote it had the full
+  conversation in view.
+- **Out-of-band** — the watcher re-reads the session transcript and extracts
+  facts with a lightweight model.
+- **Curated and bootstrap** — an import of already-atomic memories from
+  another tool, and the one-time harvest of a repository's own documents and
+  history. The import is curated by construction; the harvest runs the same
+  extractor as the watcher and inherits its trust level.
+
+Left unranked, these two paths capture the same event twice: the agent's
+`remember` and the watcher's extraction of the same discussion land as
+near-duplicates and surface as conflicts. The guiding invariant: a lightweight
+model is a weak author but a reliable checker. So the in-band agent writes,
+and the watcher audits coverage — writing only what in-band capture missed,
+and marking those writes as second-class.
+
+## Authority rank
+
+Authority is ranked by **role**, deliberately not by which model did the
+writing (models change; roles are stable):
+
+| Rank | Role                                                  | `agent_name`           |
+| ---- | ----------------------------------------------------- | ---------------------- |
+| 2    | Human                                                 | `zm-web`               |
+| 1    | In-band agent (direct `remember`), curated imports    | client name / `null`   |
+| 0    | Provisional: watcher extraction, repository bootstrap | `watcher`, `bootstrap` |
+
+A memory reaches rank 2 by being **typed by a person**: merging a conflicting
+pair in the review queue writes the text you compose in the form, and that row
+is recorded as human-authored. The two halves answer different questions —
+`author_kind` says who wrote it, `agent_name` says through what — so a merge
+reads `human` and `zm-web` together, and the badge shows `human · Dashboard`.
+
+Approving something the system drafted is deliberately **not** authorship. A
+reflection distillate you accept keeps rank 1: you endorsed the text, you did
+not write it, and rank 2 is reserved for words a person chose.
+
+The rank flows through three mechanisms:
+
+- **Audit-first capture.** A provisional write does not land unconditionally.
+  The write path first asks whether an **authoritative** memory already covers
+  the same fact — a similarity probe across everything the owner has, at a
+  threshold below same-scope deduplication so paraphrases are caught too. If
+  one does, the provisional write yields and the existing memory's id is
+  returned instead of a second, weaker copy. Authoritative writes skip the
+  probe entirely. As in-band capture discipline grows, the watcher
+  automatically writes less; its remaining value (capture when no cooperative
+  agent is present) is preserved.
+- **Automatic conflict resolution.** When hygiene finds an authoritative
+  memory in conflict with a provisional one, authority decides and no human is
+  queued: the provisional side is reversibly superseded whatever the judge's
+  verdict or confidence was. Two provisional memories are collapsed toward the
+  newer one on the same reasoning — low trust, low stakes, recoverable. Two
+  authoritative memories are never settled by rank alone; that pair is what
+  the judge and the review queue are for.
+- **Recall ranking.** At equal relevance, provisional memories rank below
+  authoritative ones.
+
+## Client attribution
+
+Provenance also answers a simpler question: _which tool created this memory?_
+
+- **Direct `remember`** stores the MCP client's name (from the connection
+  handshake) into `agent_name` — a memory written from one coding agent is
+  distinguishable from one written from another.
+- **Watcher ingest** keeps `agent_name = 'watcher'` — the trust level depends
+  on it — and carries the originating client as a separate dimension in
+  `source.client`. Trust and attribution never share a field.
+- **Imports** are curated, authoritative writes and carry no agent name.
+
+Raw client identifiers are normalized to stable display labels in one place,
+so every surface shows the same names.
+
+## Session marker
+
+Provenance also records _which conversation a fact was born in_. A memory
+written inside an attached conversation carries two more keys in `source`:
+
+| Key                 | Value                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------- |
+| `thread`            | The session-thread token (`thr_…`) — client-neutral, and it survives a transport reconnect. |
+| `client_session_id` | The client's own session id, opaque (for Claude Code, the transcript file's UUID).          |
+
+Both are **pointers, never content**: they say where a fact came from, and no
+part of the conversation itself is stored beside them. The transcript stays on
+your machine — the marker is what lets it be found again and re-read on
+demand, rather than being copied into the store to be searched there.
+
+The thread is the primary of the two because it is ours rather than any one
+client's: clients number their sessions differently, and a single client
+session can split across reconnects. A thread also expires (24h), so the marker
+records the conversation's identity **as of the write** — stitching a chain of
+conversations together is a separate question.
+
+Marked: direct `remember` inside an attached conversation, and watcher ingest
+(which always knows the client session id, and adds the thread when the
+conversation has a live one). Unmarked, and honestly so: imports, the
+repository bootstrap harvest, terminal quick-capture, dashboard actions, and
+everything written before the marker existed. No backfill is attempted.
+
+On a memory's page, the marker appears in the provenance panel, and a **From
+the same session** section lists the other facts that came out of that same
+conversation — a temporal neighbourhood, not a claim that they are about each
+other. Exports carry the marker in the frontmatter `source` field; re-importing
+such a file does not re-apply it, since the import is a new write with no
+conversation behind it.
+
+## Where you see it
+
+The memory card renders a provenance badge — `author_kind · client` (for
+example `agent · Claude Code`) — alongside kind, scope, and visibility badges.
+Ingested memories show both their provisional trust level and the client the
+transcript came from.
+
+![A memory card in the dashboard feed with the author_kind · client badge visible](/img/memory-card-provenance-badge.png)
+
+The activity feed attributes every tool call (recall, remember, ingest) to its
+client as well, so read-side usage is broken down by tool independently of the
+memories themselves.
+
+## Design notes
+
+- **Role over model identity.** Ranking by which model wrote a memory would
+  be brittle — models are swapped routinely. The role split
+  (human / in-band / provisional extraction) is a stable invariant.
+- **Forward-only attribution.** Memories written before client attribution
+  existed have no client to recover — their identity was lost at write time —
+  so older rows may show only `author_kind`. No backfill is attempted.
+- **Provisional is second-class by construction.** Any authoritative signal
+  about the same fact supersedes a provisional memory automatically; a human
+  never has to arbitrate that pair.
+
+See [Memory model](/docs/concepts/memory-model) for the memory fields
+provenance lives on, and [Hygiene](/docs/hygiene) for how conflicts are
+detected and resolved.

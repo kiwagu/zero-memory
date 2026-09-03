@@ -1,0 +1,33 @@
+{
+  "command": "bun run --cwd packages/email mail:export",
+  "templates": [
+    {
+      "name": "confirmation",
+      "locale": "en",
+      "subject": "Confirm your email address",
+      "file": "confirmation.en.html",
+      "urlPath": "/email-templates/confirmation.en.html"
+    },
+    {
+      "name": "recovery",
+      "locale": "en",
+      "subject": "Reset your password",
+      "file": "recovery.en.html",
+      "urlPath": "/email-templates/recovery.en.html"
+    },
+    {
+      "name": "email_change",
+      "locale": "en",
+      "subject": "Confirm your new email address",
+      "file": "email_change.en.html",
+      "urlPath": "/email-templates/email_change.en.html"
+    },
+    {
+      "name": "invite",
+      "locale": "en",
+      "subject": "You have been invited to zero-memory",
+      "file": "invite.en.html",
+      "urlPath": "/email-templates/invite.en.html"
+    }
+  ]
+}

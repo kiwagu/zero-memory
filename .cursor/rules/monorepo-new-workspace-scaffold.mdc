@@ -1,0 +1,63 @@
+---
+description: Use when: scaffolding a new apps/* or packages/* workspace member in this monorepo.
+globs: apps/**,packages/**
+alwaysApply: false
+---
+
+# New workspace member scaffold
+
+## Pyramid Layer
+
+- Layer: L1 scaffold rule.
+
+## Use This When
+
+- Start here when adding a new member under `apps/*` or `packages/*`.
+
+## Stop Here If
+
+- Stop after the scaffold checklist covers the new workspace shape.
+
+## Descend To
+
+- Shared env guidance: `/.cursor/rules/monorepo-env-minimalism.mdc`
+- Continue within this file for package-level scaffolding details.
+
+Use when adding **`apps/*`** or **`packages/*`**. Root **`package.json`** **`workspaces`** already lists **`apps/*`** and **`packages/*`** — no manual registration unless you introduce a **new top-level** directory (then extend **`workspaces`**).
+
+## `package.json`
+
+- **`name`:** follow repo convention (`@workspace/<kebab>` for shared packages; app names as existing apps).
+- **`private: true`** for internal packages.
+- **`"type": "module"`** when using ESM (most TS packages/apps here).
+- **Scripts** (align with siblings): at minimum **`lint`**, **`typecheck`**, and **`format`** where the package owns source; add **`build`** if it emits **`dist/`** or another artifact consumed elsewhere.
+- **Test scripts:** add **`test:vitest`** where the package has unit tests; wire them in root **`turbo.json`** if invoked via **`turbo run`** from the repo root.
+- **devDependencies:** **`@workspace/eslint-config`**, **`@workspace/typescript-config`**, **`eslint`**, **`typescript`** (and app-specific peers as needed).
+
+## TypeScript
+
+- **`tsconfig.json`** extending **`@workspace/typescript-config/base.json`** (libraries) — copy structure from **`packages/domain`** or **`apps/server`**.
+- If the package **emits** JS (npm-style exports), add a **`tsconfig.build.json`** (or equivalent) and wire **`"build": "tsc -p ..."`**; document **`dist/`** in **`package.json` `exports`** and **`.gitignore` / `.prettierignore`**.
+
+## ESLint
+
+- **`eslint.config.js`** re-exporting **`@workspace/eslint-config/base`**. Match **`packages/domain/eslint.config.js`** unless the app needs a different preset.
+
+## Prettier
+
+- Add **`.prettierrc`** and **`.prettierignore`** at the package root whenever **`format`** runs Prettier from that directory — **do not** rely on the monorepo root alone; local ignores must cover this tree's artifacts.
+- **Templates:** config / source-only package → **`packages/domain`**; app with a runtime entrypoint → **`apps/server`**.
+- Extend **`.prettierignore`** for outputs (**`dist/`**, **`.turbo/`**, **`coverage/`**, etc.) and keep **`node_modules/`** and lockfiles ignored.
+
+## Turbo / consumers
+
+- If **`turbo.json`** tasks need this package's outputs (e.g. **`dist/**`** for **`build`**), set **`outputs`** on the **`build`** task and use **`dependsOn: ["^build"]`** where dependents must compile first.
+- If the package is consumed by **Docker / Edge** with path constraints, document bind mounts or copied artifacts in **`infra/`**.
+
+## Final checklist
+
+1. `package.json` scripts and workspace naming match neighbors (including Turbo wiring for any `test:*` scripts).
+2. `tsconfig.json` (+ build config if emitting).
+3. `eslint.config.js` present where the package runs **`eslint .`**.
+4. `.prettierrc` + `.prettierignore` when **`format`** uses Prettier.
+5. No formatting/linting of generated dirs (ignore files + ESLint ignores if needed).

@@ -1,0 +1,37 @@
+---
+description: Use when: a change alters user-visible behaviour, a contract, a command, an env var, or a deployment step — the docs site must move in the same epic.
+alwaysApply: true
+---
+
+# Docs move with the code
+
+## Pyramid Layer
+
+- Layer: L1 core rule.
+
+## Use This When
+
+- Any change that alters what a user or client observes: tool contracts and
+  error codes, write/read defaults, CLI commands and flags, env vars, install
+  or deploy steps, dashboard screens, health endpoints, version numbers.
+
+## Stop Here If
+
+- The change is purely internal (refactor, test, infra plumbing) and no page
+  in `docs/` makes a claim it invalidates.
+
+## The rule
+
+- The documentation site (`docs/*.mdx` + `apps/docs`) states facts about the
+  code. A change that invalidates such a fact updates the page **in the same
+  epic branch**, not in a later cleanup — the same lockstep already required
+  for package READMEs.
+- Contract-shape changes and behavioural changes a client can observe also
+  land in `docs/DEPRECATIONS.md` (behavioural changes have a dedicated
+  section there).
+- Periodic full reconciliation is owned by the **docs-auditor agent** (a
+  local agent definition; ask for "audit the docs"). Invoke it after an epic
+  merges into `dev` and before cutting a release; its commits use the
+  `docs(audit):` prefix, which is the anchor the next audit resumes from.
+- Docs content is English; MCP tools are never rendered as terminal commands;
+  committed pages carry no private planning references.

@@ -1,0 +1,89 @@
+---
+title: Observability
+description: Request correlation ids, structured end-to-end logging, and the built-in metrics endpoint.
+---
+
+zero-memory emits structured JSON logs with an end-to-end correlation id on every request, and exposes a minimal Prometheus-compatible metrics endpoint — with zero observability dependencies. Every log line produced while serving a request, from the HTTP edge down to the deepest service call, carries the same `requestId`, so a single grep reconstructs the full story of any request.
+
+## Why it exists
+
+Without a correlation id, a call to an MCP tool cannot be connected to the logs of the services it fans out to — persistence, extraction, search. Retrofitting correlation later means revisiting every handler, so it is wired into the platform's foundation instead. The request id is also the join key that downstream records rely on: [usage events](/docs/platform/usage-events) and the [audit log](/docs/platform/audit-log) both reference it.
+
+## How it works
+
+### Request ids
+
+Every HTTP request to the server is assigned a request id:
+
+- The id is a branded, schema-validated identifier of the form `req_<random>.<timestamp>`, following the same entity-id convention as the platform's other identifiers.
+- An incoming `X-Request-Id` header is **parsed, not trusted**: if it passes the schema it is adopted, otherwise a fresh id is minted.
+- The response always echoes `X-Request-Id`, so clients can quote the id when reporting a problem.
+
+### Context propagation
+
+The request id travels through the call tree via `AsyncLocalStorage` — no function signatures change, no parameter threading. A single shared request context is the one source of truth for the id; the logger does not own a second copy. Instead, the logger accepts an injected context resolver, and its write path automatically stamps the current `requestId` onto every record. The logger itself stays a dependency-free leaf.
+
+The context boundary is one thin outer HTTP handler that wraps all routes: it establishes the context, measures duration, increments counters, and echoes the header. On completion, every request produces one structured log record with `method`, `path`, `status`, `duration_ms`, and `requestId`; failures log at error level with the stack.
+
+The watcher daemon uses the same mechanism with a per-cycle `runId`, so all chunks processed within one pass are linkable.
+
+### Metrics
+
+Metrics are deliberately minimal — in-process counters with no external dependencies:
+
+- `http_requests_total{status}` and `http_errors_total`, incremented at the HTTP boundary.
+- `mcp_tool_calls_total{tool}`, incremented per MCP tool invocation over HTTP through an optional hook in the MCP layer (the stdio transport does not report it).
+- `promoted_rules_lookup_failures_total`, incremented when rule lookup fails
+  open during MCP initialization. Any non-zero increase means a client
+  connected without its expected standing-rule delivery and should alert.
+- `mcp_write_refused_total{reason}`, incremented when a `remember` is refused
+  for a missing or unresolvable target. The `reason` label is one of the two
+  stable refusal reasons (`scope_target_required`,
+  `project_hint_unresolvable` — see
+  [Contracts and errors](/docs/platform/contracts-and-errors)). This is the
+  designed alerting signal for agents stuck without a project: a flat line
+  is healthy, a climbing one means sessions keep hitting the same wall
+  instead of attaching. Reported on the HTTP transport, like the tool-call
+  counter.
+
+`GET /metrics` renders the counters as `text/plain` in the Prometheus exposition format, so any standard scraper can consume them. Counters are in-process and monotonic for the process lifetime — a restart resets them to zero, so alert on rates and increases, never on absolute values.
+
+### Duration of expensive operations
+
+The known-slow paths — the extraction model call, embedding generation, and hybrid search — are wrapped in timing at exactly one place each, logging `duration_ms` alongside the request id. Latency questions ("was it the model or the database?") are answerable from logs alone.
+
+### Health endpoints and build identity
+
+The server answers `GET /healthz` (liveness) and `GET /readyz` (readiness).
+Readiness flips to `503` only when the database is unreachable — a cold
+embedder never gates it, so a scale-up does not flap. `/healthz` also states
+**which build is answering**: the running image's version
+(`v<semver>+<commit>`) and, separately, the checkout revision the compose
+files came from. A host carries those two identities independently — the
+image it runs and the checkout that configured it — and they advance
+separately, so an incident report can name both.
+
+The **dashboard** has its own `GET /healthz`, answering `503` when the
+dashboard cannot reach the MCP server. That web-to-server leg is the one
+that has failed in a real deployment while every outside check stayed green
+— monitor it as a first-class probe, not as an afterthought.
+
+### stdio safety
+
+When the MCP server runs over stdio, stdout must carry only protocol frames. Setting `LOG_STDERR=1` routes all log output to stderr; the observability layer preserves this behavior unconditionally. Tool payloads are never logged in full, so request bodies and secrets do not end up in log storage.
+
+## How to use it
+
+- **Trace a request:** take the `X-Request-Id` from a response (or from a client error report) and filter logs by that value — you get the edge record plus every nested service record for that request.
+- **Pass your own id:** send a valid `X-Request-Id` on the request to propagate a correlation id from your own system; an invalid one is silently replaced with a freshly minted id.
+- **Scrape metrics:** point Prometheus (or `curl`) at `GET /metrics` on the server. The endpoint is unauthenticated and carries no user data (counts and tool names only), but the shipped production edge configurations deliberately answer `404` for `/metrics` — scrape it from inside the deployment's network instead, or remove that block and put your own protection in front of it.
+- **Alert on rule-delivery failures:** track increases in
+  `promoted_rules_lookup_failures_total`; the request itself remains available
+  by design, so logs and this counter are the visible failure signal.
+- **Run over stdio:** set `LOG_STDERR=1` so logs never corrupt the protocol stream.
+
+## Design notes
+
+- **No OpenTelemetry — deliberately.** A full tracing SDK is the right end state for a large deployment, but at the platform's current scale its dependency weight is not justified: structured logs plus counters cover the operational need, and the correlation-id discipline means a later move to real tracing is an upgrade, not a rewrite.
+- **`AsyncLocalStorage` over parameter threading.** Passing `requestId` explicitly through every signature is precisely the invasive retrofit this design avoids; ALS attaches context to the execution flow without touching any interface.
+- **One context, not two.** Keeping the correlation id in a single shared context and injecting a resolver into the logger avoids two independently-updated sources of truth that would inevitably drift.

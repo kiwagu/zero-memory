@@ -1,0 +1,190 @@
+---
+title: Automated memory hygiene
+description: How zero-memory detects duplicates, contradictions, and stale records — and resolves them without losing knowledge.
+---
+
+A memory store that only accumulates eventually works against you: stale and
+contradictory records pile up and confuse every future session. zero-memory
+ships an automated hygiene pipeline that keeps the corpus in shape — it finds
+duplicate, superseded, and contradictory memories across scopes, resolves the
+obvious cases automatically and reversibly, and brings everything genuinely
+ambiguous to a human.
+
+## Why write-time deduplication is not enough
+
+Every `remember` call already deduplicates against near-identical records in
+the same scope. That catches the most common case, but it is deliberately
+narrow: it compares one incoming record against its closest neighbors at write
+time. It cannot see a contradiction between two records written weeks apart,
+a fact restated across scopes, or an older note that a newer record quietly
+obsoletes. Proactive, many-to-many checking is a separate job — that job is
+the hygiene pipeline.
+
+## How it works
+
+The pipeline is a two-lane design with a human in the loop:
+
+1. **Sweep.** A scan walks active memories and, for each one, finds its
+   nearest semantic neighbors — across scopes, regardless of the language the
+   fact was originally captured in.
+2. **Judge.** An LLM judge classifies each candidate pair as one of
+   `duplicate`, `supersedes` (in either direction — one side replaces the
+   other), `contradiction`, `complementary` (related facets of the same topic
+   that are both valid) or `unrelated`, with a confidence score. A
+   `complementary` verdict is what keeps two facts that merely look alike
+   from being collapsed into one — see
+   [judge precision](/docs/platform/judge-precision).
+3. **Auto lane.** High-confidence duplicates and supersessions are resolved
+   automatically: the losing record is superseded or forgotten. Every
+   automatic action is written to the audit log and is reversible — nothing
+   is deleted, and any auto-resolution can be rolled back.
+4. **Human lane.** Low-confidence verdicts and genuine contradictions go to
+   the **memory review queue**. The dashboard shows each pair side by side
+   with the judge's verdict and rationale, and offers manual actions:
+   keep both, supersede in either direction, forget either side, or merge.
+
+<Screenshot path="/review">
+
+![Dashboard review queue with a candidate pair side by side, judge verdict and rationale visible, action buttons (keep both / supersede / forget / merge)](/img/hygiene-review-queue.png)
+
+</Screenshot>
+
+Besides pair conflicts, the same queue holds **single-subject disputes** —
+one memory questioned on its own, with no counterpart: an agent's explicit
+`challenge`, a stale suspect flagged after repeated misled signals, or a
+world fact an external re-check found outdated. The dashboard's review page
+shows pair conflicts side by side; single-subject disputes are triaged
+through the conflict tools (`list_conflicts` / `resolve_conflict`) — see
+the [false-invalidation safeguards](/docs/hygiene/false-invalidation) for
+how they are raised and settled.
+
+The pipeline reuses the same primitives as the rest of the system — similarity
+search, [supersede links and version history](/docs/concepts/supersede-and-versioning),
+and the additive `forget` operation — so hygiene actions look exactly like the
+actions an agent or owner would take by hand.
+
+## Triggers
+
+Hygiene runs from three entry points:
+
+- **On write.** When enabled (`ZM_HYGIENE_ON_WRITE`), every new memory is
+  scanned against its neighbors the moment it lands, so fresh conflicts
+  surface within seconds, not on the next sweep.
+- **On demand.** The `scan_hygiene` MCP tool — or the scan button on the
+  dashboard's review page — starts a sweep over your own memories whenever
+  you want one.
+- **On a schedule.** An opt-in in-process scheduler
+  (`ZM_HYGIENE_SCAN_INTERVAL_HOURS`) runs system-wide sweeps at a fixed
+  interval.
+
+A system-wide sweep touches many people's memories, and each judgement is
+attributed to the owner of the memory under review: the judge call runs for
+that owner and lands on their [usage ledger](/docs/platform/usage-events)
+(and their own provider key, when one is configured) — corpus upkeep is work
+done for the corpus owner, not for the instance.
+
+## Sweeping the backlog
+
+All three triggers above share one blind spot: they look at what was written
+recently. A store that has been accumulating for months carries pairs no sweep
+ever considered, because both sides were already old when the pipeline first
+ran — and pairs a writer was shown at write time and simply did not act on.
+
+The **retro pass** covers that backlog. It opens the same aperture the write
+path uses, one notch wider, and walks memories oldest-first instead of by
+recency. It is an operator command rather than a trigger, because a corpus is
+walked once and deliberately:
+
+```bash
+# from apps/server
+bun run hygiene:retro -- --max 100
+bun run hygiene:retro -- --max 100 --after 2026-07-01T00:00:00Z   # resume
+```
+
+Each batch reports the cursor to resume from, so the queue receives an amount
+someone can actually work through. Two properties make it safe to point at a
+long history: it never auto-resolves — every pair it finds parks in the review
+queue, so nothing is retired without a person — and it is idempotent, since a
+pair already in the queue is left exactly as it is.
+
+`--offer` changes **who judges**. By default the pass asks the same server-side
+judge as every other trigger. With `--offer` it runs no model at all: pairs are
+generated deterministically from vector distance alone and parked with the
+verdict `unjudged`, for the session agent reading the queue to adjudicate
+through `list_conflicts` and `resolve_conflict`. Those rows carry no confidence
+and no rationale, which is the honest state — nobody has formed an opinion yet.
+It is the same division of labour the write-time candidate hint already uses:
+the server proposes, the reader decides. It also costs the instance nothing,
+which is what makes walking a large backlog practical.
+
+## The write path and authority
+
+Write-time deduplication cooperates with hygiene through an authority cascade
+built on [provenance ranks](/docs/concepts/provenance). When an incoming
+record is nearly identical to an existing one in the same scope, `remember`
+absorbs it silently only in two safe cases: the text is exactly identical, or
+the incoming record is _less_ authoritative than the one already stored. In
+every other case the record is written and the write-triggered scan (or the
+next sweep) judges the pair: different ranks resolve by authority, equal-rank duplicates resolve
+automatically, and equal-rank **contradictions go to the review queue**. This
+matters for the trickiest case — a short contradiction phrased as a
+near-paraphrase ("X is blue" vs. "X is green") scores as extremely similar
+while meaning the opposite. The cascade makes sure such a counter-fact is
+surfaced as a conflict instead of being silently swallowed.
+
+## Portability audit
+
+A fact about a public tool or technology written during project work lands in
+that project's scope by the conservative write-time default — and stays
+invisible to every other project's sessions, so the same lesson gets
+rediscovered project after project. The hygiene cycle audits live private
+project-scope memories of the world-facing kinds — `fact`, `reference`, and
+`gotcha` — and when the judge confirms one is a portable world fact free of
+project context, it files a **reviewable proposal** to move the memory into
+your personal core scope. Nothing is ever re-scoped automatically: proposals
+wait on the dashboard's portability queue with the judge's confidence and
+rationale, and only your approval applies the move — reversibly, the original
+scope stays on record. A dismissal is terminal: the same memory is never
+proposed again. Conventions and preferences are deliberately never audited —
+whether they are "portable" is yours to say, not something a judge can read
+off their content.
+
+The same judgement also runs **in the opposite direction, at write time**.
+While a project is in scope, a `remember` that asks for `scope: "core"` or
+`scope: "personal"` is a request, not a command: a deterministic kind
+prefilter admits only the world-facing kinds (`fact`, `reference`, `gotcha`
+for core; `preference` additionally for personal, granted without a judge),
+and the same portability judge must then confirm with high confidence that
+the statement holds outside the project. The gate is **fail-closed** — no
+configured model, a timeout, or a malformed verdict all deny — and a denial
+is not a refusal: the memory lands in the project and the response says so
+(`routed_to_project`), with `move_memories` as the deliberate path if you
+disagree. Audit and gate together make the portable layer a **verified**
+place: nothing drifts in by assertion alone, in either direction.
+
+## Guardrails and deeper topics
+
+Automation is only trustworthy if it cannot silently destroy knowledge. Four
+pages cover how the pipeline stays safe and scalable: the
+[content guard](/docs/hygiene/content-guard) keeps secrets out of the corpus
+before they reach storage or any external model; the
+[false-invalidation safeguards](/docs/hygiene/false-invalidation) guarantee
+that durable, authoritative knowledge is never auto-hidden and can always be
+restored; [queue throughput](/docs/hygiene/queue-throughput) explains how the
+review queue stays tractable without weakening those safeguards; and
+[decay, reflection, and reinforcement](/docs/hygiene/decay-and-reinforcement)
+describes how ranking evolves with age and usage so the corpus gets sharper
+the longer it lives.
+
+## Design notes
+
+- **Observe, then act.** The system was explicitly designed as "a surface
+  where the obvious closes itself and the debatable goes to a human", not as
+  a silent auto-deleter. The auto lane existed from day one only together
+  with its audit log and rollback.
+- **Judge false positives are contained**, not merely hoped away: the
+  confidence threshold for automatic action is conservative, and everything
+  below it lands in the queue where a wrong verdict is visible.
+- **Sweeps are incremental.** Cross-scope comparison is more expensive than
+  scoped write-time dedup, so scheduled sweeps focus on new and recently
+  touched records rather than re-comparing the full corpus each run.

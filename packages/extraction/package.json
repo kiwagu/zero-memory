@@ -1,0 +1,48 @@
+{
+  "name": "@workspace/extraction",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "scripts": {
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
+    "format": "bunx prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "test:vitest": "vitest run"
+  },
+  "dependencies": {
+    "@workspace/context": "workspace:*",
+    "@workspace/contracts": "workspace:*",
+    "@workspace/di": "workspace:*",
+    "@workspace/llm": "workspace:*",
+    "@workspace/logger": "workspace:*",
+    "@workspace/memory": "workspace:*",
+    "@workspace/policy": "workspace:*",
+    "@workspace/usage": "workspace:*",
+    "oxide.ts": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@workspace/embedding": "workspace:*",
+    "@workspace/eslint-config": "workspace:^",
+    "@workspace/typescript-config": "workspace:^",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    }
+  }
+}

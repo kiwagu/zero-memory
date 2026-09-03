@@ -1,0 +1,121 @@
+---
+description: Use when: deciding whether a change to a critical flow requires end-to-end coverage, and how much.
+alwaysApply: true
+---
+
+# E2E Requirement for Critical Flows
+
+This rule defines when end-to-end tests are mandatory, what minimum coverage
+must be preserved, and the project norm: **e2e is used everywhere — 2–3 e2e
+specs per feature** (owner's rule, 2026-07-06).
+
+## Workspace
+
+All e2e lives in the single `tests/e2e` workspace (Playwright, projects
+`api` + `web` in one config). Workflow and commands:
+`/.claude/skills/e2e-dx-workflow/SKILL.md`.
+
+`bun run test:e2e:*` runs against a dedicated, persistent Supabase CLI stack
+(`zero-memory-e2e`, ports 5533x) with its own server/web — physically
+isolated from the dev/stage stack, so e2e data and logs never leak into it.
+The stack is reused between runs (cold start paid once) and `db reset` at each
+run start keeps it clean; `bun run e2e:down` stops it.
+
+The suite NEVER runs against the review stack (`zero-memory-review`, ports
+5534x), which carries a clone of live for acceptance and the migration
+rehearsal — `db reset` would wipe it. `--target=both` runs the suite on the
+test stack while that stand is up alongside.
+
+## Scope — critical flows of zero-memory
+
+Apply this rule whenever changes touch:
+
+- **OAuth surface** — `packages/mcp-auth/**` (DCR, authorize, token, PKCE,
+  rate limit, login page)
+- **MCP tools over HTTP** — `packages/mcp/**`, `apps/server/src/**`
+  (transport, auth, remember/recall/build_context/share/forget)
+- **RLS and scopes** — `supabase/migrations/**`, `packages/persistence/**`,
+  scope routing, sharing, visibility
+- **Dashboard feed/card/auth UX** — `apps/web/**`, `packages/ui/**`
+  (login form, memory feed, fact card, filters/scopes)
+- `tests/e2e/**` itself (new specs or updates)
+
+## Mandatory minimum coverage
+
+1. OAuth: DCR → authorize → token happy path, code single-use, PKCE
+   mismatch, wrong credentials, rate limit (429 + Retry-After).
+2. MCP over HTTP: 401 without a token; tools listed and the
+   remember → recall/build_context loop works for an authenticated user.
+3. RLS: another user cannot see a personal memory via MCP **or** PostgREST.
+4. Dashboard: guest → login redirect, UI login, feed renders memories,
+   fact card opens with provenance.
+
+## Norm for new features: 2–3 e2e specs
+
+Every feature ships with 2–3 e2e specs: one happy path plus the one or two
+failure modes that would hurt users most. More than 3 usually means matrix
+testing that belongs a layer down (see the pyramid rule).
+
+## Test Pyramid Decision Rule (unit/integration vs E2E)
+
+Choose the lowest layer that can verify the behavior without losing product
+signal.
+
+Use **vitest** (`*.spec.ts` next to the code, `turbo run test:vitest`) when
+assertions are contract checks: permission/allow-deny matrices, schema
+validation, PKCE/token-flow logic, rate-limiter math — these already exist
+(e.g. `token-flow.spec.ts`, `rate-limit.spec.ts`) and must stay there.
+
+Use **E2E** (`tests/e2e/src/**/*.e2e.spec.ts`) when the live stack or a
+browser is required to validate user value:
+
+- protocol behavior of the running server (OAuth redirects, MCP transport,
+  RLS through PostgREST)
+- login/session propagation, form wiring, visible outcomes
+- selector contracts (`data-testid`) and navigation UX
+
+Do not duplicate the same matrix in both layers; keep a thin e2e slice that
+proves wiring, and push combinatorics down to vitest.
+
+## UI stability contract (`data-testid`)
+
+Deterministic selectors on key controls and outcomes, stable across
+refactors — the shadcn migration MUST preserve them (or migrate the specs in
+the same PR):
+
+- auth: `auth-login-form`, `auth-login-email`, `auth-login-password`,
+  `auth-login-submit`, `auth-login-error`
+- feed: `memory-feed`, `memory-card`
+- fact card: `memory-detail-content`, `memory-provenance`
+
+Never rewrite an existing testid without migrating its specs in the same
+change. Prefer testids over text selectors (the dashboard is i18n'd).
+
+## CI and local DX expectation
+
+Layers map to commands: units = vitest (`bun run test`); integration =
+Playwright `api` project (`bun run test:integration`, no browser); e2e =
+Playwright `web` project. `bun run test:all` runs the whole stack.
+
+- Whole stack (local pre-merge): `bun run test:all`
+- PR validation baseline: `bun run test:e2e:smoke` (integration + e2e smoke)
+- Full regression/nightly: `bun run test:e2e:full`
+
+If local/CI infrastructure is unavailable, explicitly document why the test
+was not executed and what the reviewer should run.
+
+## Reconcile e2e when you change covered behavior (every feature)
+
+A behavior change is **not done** until the e2e that asserts the OLD
+behavior is reconciled — in the SAME change:
+
+1. **FIND the covering spec(s).** Grep `tests/e2e/src` for the testids,
+   routes, tool names, or copy you are changing. If clearly-warranted
+   coverage does not exist, that absence is itself a finding.
+2. **DECIDE which side is canonical, explicitly:** a deliberate change →
+   UPDATE the spec's assertions and comments to the new canon (never
+   `.skip`, never delete coverage to make red disappear); an accidental
+   change → the red test caught a regression → fix the CODE.
+3. **RUN the reconciled spec(s) green before handing off** (against the
+   live local stack). A behavior change delivered with its covering e2e
+   red or unrun is exactly the failure mode this rule exists to stop.

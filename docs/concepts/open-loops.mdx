@@ -1,0 +1,126 @@
+---
+title: Open loops
+description: Task and open-question memories that stay in the task buffer until they are closed, with a soft briefing TTL.
+---
+
+An **open loop** is a memory of kind `task` or `open-question`: a piece of
+unfinished work or an unanswered question. Unlike ordinary memories, which
+compete for relevance in retrieval, recent open loops surface in a dedicated
+section of every briefing of their scope. One precondition: a briefing shows
+a _project's_ loops only once the session is attached to that project (a
+project hint, an inherited thread, or explicit scopes) — an unattached
+briefing narrows to the personal layer, so the hand-off lands when the
+receiving session names the same project. Closed loops disappear from
+briefings but stay in history.
+
+## Why it exists
+
+Because one server backs all your machines, projects, and agents, memory
+already works as a transport: a fact written on machine A is visible in the
+next briefing on machine B. What ordinary memories lack is the _semantics of a
+hand-off_: "surface at the recipient, persist until handled, disappear once
+done." Open loops add exactly that lifecycle — nothing else. The same
+mechanics covers two everyday cases:
+
+- **Inter-machine hand-off** — "check log X on machine Y": record it on one
+  machine, and the agent on the other machine sees it at session start.
+- **Unfinished threads** — "we never settled question Z": the question keeps
+  resurfacing until a session answers it.
+
+Open loops are a lifecycle dimension, not a topic. Kinds in zero-memory describe
+how the system should _behave_ toward a memory, and open loops behave
+differently: short-lived, priority-surfaced, and excluded from long-term
+knowledge machinery.
+
+## How it works
+
+- **Briefing placement.** `build_context` returns active loops in a dedicated
+  `open_loops` field, separate from (and in addition to) the normal top-k
+  memories, with a total count. Session hooks render them as a distinct
+  "Open loops" section. The section is capped at 10 loops, oldest first, with
+  an "N more" counter; old loops get a staleness badge by age. The section is
+  worded as recorded open work — data, not instructions.
+- **Depth follows the topic, selection does not.** All ten arrive whatever the
+  briefing is about, but the loops **nearest** the topic are inlined in full
+  while the rest carry a headline. Nearest is a rank rather than a bar, so a
+  scope holding a single open loop always gets that one in full. A loop's relevance is judged against
+  its whole text, so one whose live part sits past its opening is still
+  recognized. Nothing can be pushed out of sight by being off-topic — being
+  off-topic only makes a loop shorter on that particular briefing.
+- **Soft briefing TTL.** By default, loops older than 14 days stop appearing
+  in `open_loops` and its total. The instance knob
+  `zm.open_loop_ttl_days` changes that window. Aging out does not close or
+  invalidate the memory: it remains recallable, visible in the dashboard, and
+  closable by id.
+- **Explicit closing.** The `close_loop` tool closes a loop the moment it is
+  done or answered: the memory is invalidated (add-only — kept in history,
+  audited), and stops surfacing. When the closure itself is a fact worth
+  keeping ("done: deployed the fix, root cause was …"), `remember` with a
+  `supersedes` link to the loop closes it too, organically. The agent on the
+  receiving machine can close a loop after completing it.
+- **Automatic closure detection.** Explicit closing depends on the finishing
+  agent's discipline, so the hygiene cycle carries a safety net: it rolls up
+  evidence that a loop's work was completed, and a conservative judge (high
+  confidence gate) may close it — reversibly, with a successor link and an
+  audit trail, and with a guard against re-judging the same loop.
+- **Exclusions.** Open loops never become [rules incubator](/docs/guides/rules-incubator)
+  candidates and are kept out of long-term knowledge metrics — they are work
+  items, not durable knowledge.
+- **Pointer, not payload.** Logs and dumps do not belong in memory. A task
+  carries a path or URL to the artifact plus a distilled summary of what to
+  look at; the [content guard](/docs/hygiene/content-guard) enforces this on
+  the write path like any other memory.
+
+## How to use it
+
+A loop is created and closed through MCP tools — an agent calls them; there is
+nothing to type into a terminal. Arguments to `remember`:
+
+```json
+{
+  "content": "Check the watcher warnings in /var/log/... on the build machine — summary: repeated reconnects after resume",
+  "kind": "task"
+}
+```
+
+Outside a session there IS a command, the quick-capture CLI:
+
+```sh
+zm --task "verify the migration applied cleanly on the staging database"
+```
+
+Close it when done — arguments to `close_loop`:
+
+```json
+{ "memory_id": "mem_..." }
+```
+
+Or store the outcome with `remember` plus a `supersedes` link, which closes
+the loop as a side effect. `close_loop` refuses non-loop kinds; use `forget`
+for a wrong or outdated regular memory.
+
+In the dashboard, the memories feed filters by kind, so `task` and
+`open-question` give you a live list of open and historical loops.
+
+<Screenshot path="/memories">
+
+![Dashboard memories feed filtered to kind task/open-question, showing an active and a closed loop](/img/open-loops-feed-filter.png)
+
+</Screenshot>
+
+## Design notes
+
+- **Closing is invalidation, never deletion.** The store is add-only; a closed
+  loop remains queryable history with its audit trail. Hard deletion is
+  reserved for its own purpose and is not part of the loop lifecycle.
+- **No automatic creation.** The transcript extractor deliberately cannot
+  produce `task` or `open-question` memories — its schema is narrowed to
+  exclude them. Auto-extracted loops that nobody closes would be noise;
+  loops are created only intentionally.
+- **Addressing is conventional.** A loop targets its audience by scope plus
+  naming the machine or agent in the text; strict per-agent addressing is a
+  later concern (see [Agent principals](/docs/concepts/agent-principals)).
+
+See [Briefing](/docs/guides/briefing) for where open loops appear at session
+start, and [Session receipt](/docs/guides/session-receipt) for the
+end-of-session counter of loops created and closed.

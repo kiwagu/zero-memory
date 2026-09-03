@@ -1,0 +1,113 @@
+---
+title: Session receipt
+description: A one-line end-of-session summary of what memory captured, what fired, and what it saved.
+---
+
+The session receipt is a single line delivered when a coding session ends:
+
+```
+🧾 zero-memory session receipt: captured 4 · 3 recalled facts fired · already knew 2 facts you re-wrote · loops +1/−2 · ~1.8k tokens saved (est.)
+```
+
+It tells you, in your daily rhythm and without opening anything, whether
+memory pulled its weight this session: how many facts were captured, how many
+recalled memories were actually used, how many facts you were about to write
+again that memory already held, how many
+[open loops](/docs/concepts/open-loops) were created and closed, and an
+estimate of the context tokens the briefing saved.
+
+Each segment appears only when its counter is non-zero, so a quiet session
+gets a short line. A session that captured nothing, fired nothing, touched no
+loops, and rewrote nothing gets **no line at all** — the saved-tokens
+estimate alone (every briefed session has one) never produces a receipt.
+
+## Why it exists
+
+Without the receipt, the value of memory is only visible where you go looking
+for it — the [insights dashboard](/docs/dashboard/insights). The everyday
+feedback loop stays open: a session ends, and whether anything was captured or
+whether stored knowledge fired is invisible. The receipt closes that loop at
+the cheapest possible point — one line, once per session, only when there is
+something to say.
+
+## How it works
+
+- **Delivery.** A session-end hook prints the line on the client's
+  user-visible message channel — it is shown to _you_, not injected into the
+  model's context. A client whose session-end event is fire-and-forget has no
+  such channel, and there the line only reaches the runtime log. One receipt
+  per session: a re-fired end event (for example on resume) stays silent.
+- **Sources.** No new metrics are collected for the receipt; it is a new
+  consumer of counters the system already keeps. "Captured" accumulates
+  client-side from ingest responses during the session. The rest comes from a
+  single read-only `session_receipt` call, windowed from the session-start
+  timestamp — or, when the briefing hooks are not installed and no start was
+  stamped, from the session's first capture.
+- **Quiet degradation.** Every stage fails toward silence, never toward
+  noise or a blocked session. A session with no memory events produces no
+  line at all. If the server is unreachable at session end, the line shows
+  only the client-side captured count. If transcript ingest is switched off
+  (it is opt-in), the receipt honestly shows only the read side — recalled
+  memories that fired. Projects excluded from watching produce no receipt at
+  all: even counters would reveal that the project was observed.
+
+## The `session_receipt` tool
+
+The counters are served by a read-only MCP tool, intended for background
+clients (hooks) rather than interactive use:
+
+- **Input:** `since` — the window start (the session-start timestamp), ISO 8601.
+- **Output:** `fired` (distinct recalled memories confirmed useful in the
+  window), `loops_created`, `loops_closed`, `saved_tokens` (the briefing
+  saved-tokens estimate), `already_knew` (see below), and an echo of the
+  window start.
+
+`already_knew` is the rediscovery the store prevented: prior memories —
+written **before** the window — that a `remember` in this session surfaced as
+supersede candidates while no recall in the same session had returned them.
+In other words, facts memory already held that the session was about to write
+from scratch. It is phrased for what memory added, never as a reproach to the
+agent, and it is computed from records that already exist rather than from a
+new event type.
+
+Every aggregate is keyed on the calling user — the receipt can never carry
+someone else's numbers. The same counters are also available on demand: the
+server exposes a `receipt` prompt that asks an agent to call the tool and
+report the line mid-session.
+
+## Companion mechanics
+
+The receipt is one of three small mechanics that keep the feedback loop
+closed at different moments of the day:
+
+- **Quick capture.** `zm "the fact"` stores a memory straight from the
+  terminal, without a session (`zm` is the alias the installer creates for
+  `zero-memory-watcher capture`). `--task` records an open loop that surfaces
+  in every briefing until it is closed, `--kind` sets an explicit kind, and
+  `--scope` overrides the target scope — an exact scope path, or `core` for a
+  portable fact; the default is the project resolved from the current
+  directory. The CLI is transport only — content rides the full standard
+  write path, including the [content guard](/docs/hygiene/content-guard),
+  embedding, and canonicalization.
+- **Offline briefing cache.** After each successful briefing, the session
+  hook caches it per project. If the server is unreachable at the next
+  session start, the cached briefing is served with an explicit offline
+  header and its date — only when every call has failed, and never past its
+  time-to-live (7 days by default, tunable via `ZM_BRIEF_CACHE_TTL_DAYS`):
+  stale context is worse than none. Excluded projects are never cached.
+  Writes are not buffered offline — only reading degrades gracefully.
+
+## Design notes
+
+- **Content-free by construction.** The receipt carries counters and
+  references to your own facts only — never content from anyone else's
+  memories, in line with the platform's
+  [usage-event principles](/docs/platform/usage-events).
+- **Token savings are an estimate** and are always presented as one.
+- **One message, maximum.** Each mechanic adds at most one line to the chat
+  and says nothing when it has nothing to report — the receipt is designed to
+  be worth reading precisely because it is not always there.
+
+See [Claude Code integration](/docs/getting-started/claude-code) for wiring
+the session hooks, and [Insights](/docs/dashboard/insights) for the
+longer-horizon view the receipt is a daily echo of.

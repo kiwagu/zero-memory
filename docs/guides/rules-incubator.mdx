@@ -1,0 +1,220 @@
+---
+title: Rules incubator
+description: Promote proven memories into standing rules and deliver them through MCP, briefings, hooks, or instruction files.
+---
+
+The rules incubator watches which of your memories _actually fire_ — get
+recalled and confirmed useful across sessions — and distills the proven ones
+into standing rules. You review every candidate before promotion. Once
+promoted, zero-memory delivers the rule through its native MCP and briefing
+channels; downloadable instruction-file blocks remain available as a fallback.
+
+## Why it exists
+
+Knowledge lives in two layers with different delivery guarantees:
+
+- **Memory** is the living draft: probabilistic delivery, surfaced when
+  retrieval decides it is relevant.
+- **Rules** are the distillate: guaranteed delivery, loaded into every
+  session's context unconditionally.
+
+A fact that you are effectively re-asked for again and again has earned
+deterministic delivery. The incubator makes that promotion empirical instead
+of intuitive: the system shows you which memories crossed the threshold,
+drafts the rule text, and leaves the promotion decision to you.
+
+## How it works
+
+### Detection
+
+The detector runs with the regular hygiene cycle — the background scheduler
+tick, the `scan_hygiene` MCP tool, and the dashboard's scan button all trigger
+it. A memory becomes a candidate when all of these hold:
+
+- its kind is `convention`, `preference`, or `gotcha`;
+- it fired — was recalled and judged useful — in at least **3 distinct
+  sessions** within the detection window (30 days);
+- it is stable: not superseded or invalidated, and not recently revised.
+
+Open loops (`task`, `open-question`) are never candidates: they are work
+items, not durable knowledge. Decisions are watched but not proposed either —
+their imperative core is usually bound to the context they were taken in.
+
+### Distillation
+
+A conservative LLM judge turns the memory — with its closest graph neighbours
+as context — into an imperative rule draft and proposes the target layer:
+personal memories suggest the **General** layer, project memories suggest that
+project's layer. When in doubt, the judge recommends dismissal rather than
+flooding the queue, and a draft it is not confident about is auto-dismissed
+instead of queued — the queue stays short enough to be read.
+
+Alongside the deterministic part of the suggestion (the memory's origin scope,
+plus the global layer for personal memories — always correct by construction),
+the distiller may also rank _other_ scopes where the rule looks applicable.
+Those cross-project suggestions are validated against your actual scope list
+and explicitly marked speculative: project identity is hard to infer from
+content alone, so they are hints for you, never decisions.
+
+### Review and promotion
+
+Candidates appear on the dashboard's `/rules` screen as a review queue,
+grouped by the project a rule is addressed to (General last) and filterable by
+scope and status. Each card shows the drafted rule, the evidence (in how many
+sessions and when the memory fired, with a link to the underlying memory), the
+distiller's confidence, and three actions — **approve**, **dismiss**, or
+**snooze**.
+
+<Screenshot path="/rules">
+
+![The dashboard rule-candidates queue with one candidate card open, showing the drafted rule text, evidence counters, and approve/dismiss/snooze actions](/img/rules-incubator-queue.png)
+
+</Screenshot>
+
+Approving promotes the rule into the layer you choose on the card: General, or
+one concrete project. You can also promote one of your own memories directly
+with the `promote_rule` MCP tool or from its dashboard detail page; this skips
+candidacy, not human approval.
+
+The current layers are:
+
+- **General** — private to the owner and delivered in all of their sessions.
+- **Project** — private to the owner and delivered only when that project is
+  active.
+
+Rules are not shared team policy today. Sharing a memory does not cause its
+promoted rule to be delivered to other members.
+
+Promoted rules stay editable from the same screen: **pin** one so it is always
+delivered, **revoke** it (with a reason) to pull it back out of the always-on
+layer, or copy and download its text. A promoted rule whose source memory has
+stopped being recalled usefully is flagged as a "still relevant?" hint rather
+than removed.
+
+### Delivery
+
+Promoted rules have several delivery paths, in order of how little client
+integration they require:
+
+1. **MCP instructions.** On `initialize`, clients without a documented
+   instruction cap receive the applicable rule texts inline, pinned first. A
+   client known to cap that channel — Claude Code silently truncates server
+   instructions at 2 KB — instead receives a compact router plus an
+   announcement of how many standing rules apply and where to fetch them, and
+   never a fragment of a rule: half a sentence reads as a broken instruction.
+   Uncapped clients additionally get a project-attachment note appended to
+   the router; the capped client receives that guidance through the briefing
+   and tool descriptions instead, because whole segments are dropped in
+   priority order when the budget would overflow.
+2. **`build_context.rules[]`.** Every client can retrieve the full applicable
+   set as `{ text, pinned }` records, no hook required. The rendered tool
+   result carries a prominent `STANDING RULES` block ahead of the pack, with
+   pinned rules leading and marked.
+3. **Client hooks.** Hook-capable adapters render the same `STANDING RULES`
+   section automatically in session and task briefings — the uncapped
+   full-text channel.
+4. **The `zm://rules` resource.** A read of the current promoted set, pinned
+   first, without a briefing call — useful for reloading the rules after
+   promoting one mid-session. It is offered only where the connection can read
+   them live, so it never advertises a capability that would then fail.
+5. **Instruction files.** Copy/download and deploy-script materialization are
+   the fallback for clients that ignore MCP instructions or need a
+   Git-auditable rule file.
+
+MCP instructions are fixed for the lifetime of a connection, so a rule
+promoted mid-session does not appear in that session's system prompt —
+reconnect if that is the path you rely on. Everything else reads the current
+set on every call: a newly promoted rule reaches the very next briefing,
+including the current session's.
+
+The server never writes into `CLAUDE.md` or another client-owned instruction
+file. Use the dashboard download or the deploy script's `--rules-file` /
+`--rules-dest` options when you deliberately want materialized rules.
+
+### Delivery follows the context window
+
+Hook delivery is scoped to the **context window**, not to the session. A
+briefing writes its rules into the conversation transcript, and compaction is
+exactly what discards that transcript — so a session that was briefed hours
+ago may no longer hold a single rule.
+
+- A client event whose reason is **compaction** or a **cleared**
+  conversation opens a new window: the standing rules (and the task briefing)
+  are delivered again.
+- **Startup** and **resume** do not: the first has no previous window to lose,
+  the second replays the transcript that already carries them.
+- A client that reports no reason for its session events simply keeps the
+  previous behaviour and re-delivers on every one.
+
+The skip is keyed on **recorded delivery**, never on an attempt. A
+session-start briefing that failed — server unreachable, offline cache served
+— records nothing, so the rules still arrive from the next hook in that
+window. A standing rule silently missing its window is the one failure this
+layer must not have.
+
+### Delivery budget and pinning
+
+Each layer delivers pinned rules first, followed by the newest unpinned rules.
+At most **12 unpinned rules per layer** are delivered, and unpinned rules age
+out of delivery after **90 days**. They remain in the catalog, stay visible on
+`/rules`, and a single re-promotion restarts that clock.
+
+A pin guarantees inclusion in the delivered rule set: pinned rules are exempt
+from both the per-layer cap and the delivery TTL, and they lead the list a
+session receives. It cannot force a capped client to expose arbitrary-length
+text in its system prompt — on such a client the full pinned text still
+arrives through `build_context` and hooks rather than the instruction window.
+
+The `/rules` screen reports `Delivered N of M` for the General layer and turns
+amber whenever a promoted rule is not being delivered, alongside a count of
+pinned rules — so a budget overflow is visible rather than silent. The same
+arithmetic backs both the badge and the readers that build the delivered set,
+so the number and the delivery cannot drift apart.
+
+### Closing the loop
+
+A promoted memory is never proposed again, and a dismissal is equally
+terminal — the incubator does not re-litigate a decision you already took.
+Snoozed candidates return to the queue in place once the snooze expires (14
+days). A revoked rule stays terminal too, with the reason kept alongside it.
+Deleting a dismissed candidate is the deliberate way back: it frees the memory
+to earn candidacy again.
+
+Decisions are not deleted, they are recorded: each candidate row keeps its
+status, who resolved it, and when — that record is the trail of how a rule
+came to exist.
+
+## How to use it
+
+1. Work normally — the signal accumulates from ordinary
+   [recall usage](/docs/platform/usage-events); there is nothing to configure.
+2. Trigger a scan explicitly with the `scan_hygiene` tool or the dashboard
+   scan button, or let the background cycle run.
+3. Review the queue in the dashboard, address each rule you approve to
+   General or to one project, and pin the ones that must never be dropped.
+4. Reconnect clients that rely on MCP instructions. Hook and briefing delivery
+   updates on their next invocation.
+5. Optionally download a rule file when native delivery is unavailable or a
+   checked-in policy artifact is required.
+
+## Design notes
+
+- **A human approves every rule.** The incubator distills but never
+  auto-applies. This is both a quality gate and a structural defense against
+  memory poisoning: nothing reaches guaranteed-delivery context without an
+  explicit human decision.
+- **"Fired" means used, not shown.** Only recalls confirmed useful count
+  toward the threshold; a memory merely appearing in briefing output does
+  not. Where a precise session identity is unavailable, firings are bucketed
+  conservatively by day — undercounting is preferred to overcounting.
+- **Rules are not re-imported into memory.** The promoted rule links back to
+  its source memory; importing the rendered text again would create a feedback
+  cycle with the incubator itself.
+- **Counters come from the candidate queue itself**, not from a parallel
+  event stream — one source of truth for how many rules were born from
+  memory.
+
+See [Memory model](/docs/concepts/memory-model) for kinds and links,
+[Hygiene](/docs/hygiene) for the shared scan cycle, and
+[Recall quality](/docs/guides/recall-quality) for how usefulness verdicts are
+produced.

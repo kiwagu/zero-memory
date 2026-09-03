@@ -1,0 +1,107 @@
+---
+title: Import
+description: Seed the store from existing markdown knowledge and bootstrap it from a repository's docs and history.
+---
+
+A new memory store is empty, but your knowledge is not: it lives in per-project
+agent memory files, prose instruction files, READMEs, docs, and years of git
+history. Import brings that knowledge into zero-memory so briefings are useful
+from day one instead of after weeks of accumulation.
+
+Two paths cover two kinds of sources:
+
+- **Deterministic import** (`zero-memory-watcher import`) — existing markdown
+  memory files, copied as-is. No LLM involved, nothing spent on extraction.
+- **LLM bootstrap** (`zero-memory-watcher bootstrap`) — README/docs pages and
+  the git history, distilled by the extraction pipeline.
+
+Both run on the client machine over the watcher's authenticated transport, and
+both are idempotent: re-running them only processes what changed.
+
+## Deterministic import
+
+File-based agent memory (for example Claude Code's auto-memory directory and
+the prose sections of `CLAUDE.md` files) already consists of atomic, curated
+facts, so it maps almost one-to-one onto memories via the `import_memory` MCP
+tool:
+
+- **Kind** comes from each file's frontmatter type: user notes become
+  preferences, feedback becomes conventions, project notes become decisions
+  (when a rationale marker is present) or facts, references stay references.
+  Prose instruction-file sections become conventions.
+- **Scope** is routed automatically: user-global files land in your personal
+  scope; project files land in the project scope, resolved from a project
+  hint (the repository root) and auto-created if needed. A project item whose
+  hint resolves badly degrades to your personal scope rather than being
+  dropped — but a project-targeted import with **no** hint at all is a
+  validation failure, not a degrade. (Note the difference from `remember`,
+  which refuses rather than degrades — the import path predates that
+  contract and keeps its softer behavior for hinted items.) See
+  [Scopes and isolation](/docs/concepts/scopes-and-isolation).
+- **Provenance** is set by the server, never taken from client input: each
+  imported memory records an import source with the file path and content
+  hash. Because these files are human-curated, imported memories are treated
+  as authoritative — a later automatic paraphrase of the same fact defers to
+  them. See [Provenance](/docs/concepts/provenance).
+- **Idempotency** is ledger-based: the content hash of each file is recorded
+  on first import, so a re-run skips everything unchanged, and server-side
+  semantic dedup collapses paraphrases of facts you already stored.
+
+Already-distilled rule files are deliberately not imported: rules are a
+downstream layer, and importing them would create duplicates flowing against
+the [rules incubator](/docs/guides/rules-incubator). Source discovery is
+adapter-based, so support for further tools' memory formats plugs in without
+server changes.
+
+Flags: `--dry-run` (preview without writing), `--project <hint>`,
+`--server <url>`, `--no-scan`, plus `--home`/`--cwd` overrides for discovery
+roots.
+
+## Bootstrap from a repository
+
+Bootstrap feeds repository knowledge through the same LLM extraction pipeline
+that processes session transcripts, with source-aware policies:
+
+- **Docs** (root `README*.md` and `docs/**/*.md`) are read for standing
+  knowledge — decisions, constraints, conventions — not API reference or
+  boilerplate.
+- **History** (`git log`, newest first, default depth 300, batched) is read
+  for the arc of decisions, not individual commits.
+
+Every chunk passes the extraction confidence gate and the per-chunk memory
+cap. Extracted memories carry provisional bootstrap provenance — the
+same trust level as watcher-captured memories, so your own writes and
+confirmations override them naturally.
+
+Usage:
+
+```sh
+zero-memory-watcher bootstrap [repo-dir] \
+  [--dry-run] [--exclude <globs>] [--docs-only | --history-only] \
+  [--depth <n>] [--project <hint>] [--server <url>]
+```
+
+- `--dry-run` is an honest preview: it asks the server's ingest ledger which
+  chunks are genuinely new versus already processed, without claiming
+  anything or spending tokens. If the server is unreachable, the preview
+  degrades to a local listing with `unknown` verdicts and reports a cost
+  range instead of failing.
+- `--exclude` drops sources by comma-separated globs (matched against the
+  full path and the basename) before any server call, and prints how many
+  were excluded so a trimmed list is visible as trimmed.
+- A circuit breaker stops the run after three consecutive errors, since every
+  chunk costs an extraction call.
+- `help` and `version` work offline, before login or deployment.
+
+## After importing
+
+Deterministic import copies file content verbatim — which makes it the most
+likely path to carry a stray secret into memory. The write-path
+[content guard](/docs/hygiene/content-guard) addresses this class of risk;
+running a hygiene scan (`scan_hygiene`) after a large import is recommended so
+duplicates and conflicts surface early.
+
+Import is one-directional by design: files flow into memory, not back. The
+reverse direction — memory as reviewable markdown — is
+[Export](/docs/guides/export), and the two formats round-trip: an exported
+tree can be re-imported idempotently.

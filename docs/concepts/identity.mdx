@@ -1,0 +1,174 @@
+---
+title: Identity
+description: Prefixed, self-describing domain identifiers, branded id contracts, the system-of-record rule that decides which ids are ours to shape, and how a project is identified.
+---
+
+Every identifier that zero-memory itself creates is a **prefixed entity id**:
+a text value like `mem_a1b2c3d4e5f6g7h8.0123456789`, made of a short kind
+prefix, a random part, and an embedded timestamp (Crockford base32). You can
+read an id and know what it names and roughly when it was created —
+`mem_…` is a memory, `ent_…` an entity, `usr_…` a user.
+
+## Why prefixed ids
+
+Opaque UUIDs answer none of the questions an id gets asked in practice: What
+table does this belong to? Was it pasted into the wrong field? How old is the
+row? Prefixed ids make every log line, API payload, and support conversation
+self-describing, and the embedded timestamp gives natural creation ordering
+for free. Just as importantly, the prefix gives the type system something to
+hold on to (see branded contracts below).
+
+## How it works
+
+### Generated in the database, mirrored in TypeScript
+
+Domain primary keys are text columns whose default calls a Postgres function,
+`entity_id_generate('<prefix>')`, so the invariant lives in one place and
+plain SQL inserts get correct ids. The TypeScript package generates the same
+format byte-for-byte for ids minted in application code, and a sync test
+guards that the SQL and TypeScript implementations never drift. Companion SQL
+predicates (`is_entity_id`, `is_entity_id_with_prefix`) back column `CHECK`
+constraints.
+
+### One prefix registry
+
+All prefixes live in a single registry with CI-checked uniqueness — no two id
+kinds can share a prefix. The core ones:
+
+| Prefix | Names                                                        |
+| ------ | ------------------------------------------------------------ |
+| `mem_` | a memory                                                     |
+| `ent_` | an entity in the knowledge graph                             |
+| `edg_` | an edge between entities                                     |
+| `usr_` | a user (domain identity, see below)                          |
+| `ses_` | an MCP session                                               |
+| `thr_` | a session thread — durable project identity per conversation |
+| `oac_` | an OAuth client registered with the built-in OAuth server    |
+| `req_` | a request/correlation id across HTTP and MCP                 |
+| `pbn_` | a project binding (see below)                                |
+
+Operational append-only tables — usage events, the audit log, the review
+queue, the owner-reviewed candidate queues (rules, reflections, portability),
+and benchmark runs — carry their own prefixes on the same scheme.
+
+Uniqueness alone is not enough: a guard that only reads the registry cannot
+see a prefix that was never declared there. So a second check reads the
+**schema** and requires every prefix the migrations actually mint to be
+present in the registry. The reverse direction is deliberately allowed — some
+ids (request and session correlation ids) are minted in application code and
+have no table to be found in.
+
+### Branded contracts: parse, don't trust
+
+In the Zod contracts, every id type is **branded**: `MemoryId`, `EntityId`,
+and `UserId` are distinct types, not interchangeable strings. A raw string
+does not typecheck into an id slot, so the compiler itself forces every id
+arriving from outside — MCP tool input, HTTP request — to be parsed through
+its schema at the boundary. Casting is reserved for trusted construction
+(the id generators).
+
+### A codec, not a one-way transform
+
+The id schema is a **codec**: a two-sided pipe with a permissive input shape
+(trimmed, mixed case accepted) and a canonical output shape (lowercase). It
+parses in one direction — validate, normalize, brand — and can describe both
+sides. That matters beyond tidiness: the MCP tools publish a JSON Schema for
+their results, and a schema built from a one-way transform cannot be
+serialized at all. Because the codec keeps both shapes, every result that
+embeds an id — a recall hit, a briefing memory, a dispute — advertises the
+exact canonical id format a client should expect back.
+
+## The system-of-record rule
+
+Not every id in the schema is ours to shape. The dividing line is ownership:
+
+> An identifier gets an entity id **if and only if** this application is its
+> system of record — the id is born in this code or schema. An id emitted by
+> an external system keeps that system's native format; we only reference it.
+
+The operational test is one question: _is this id minted here?_
+
+- **Ours** — memories, entities, edges, users (`usr_`), project bindings
+  (`pbn_`), MCP session ids (`ses_`), session threads (`thr_`), OAuth client
+  ids (`oac_` — the OAuth specs leave `client_id` opaque, so its shape is the
+  server's choice), request ids (`req_`).
+- **Not ours** — the auth provider's user id (a UUID minted by the identity
+  service) and the conversation id supplied by the connecting client. These
+  are not "exceptions to the rule"; they are simply other systems' ids, stored
+  as received.
+
+The two session-shaped ids illustrate why the distinction matters. `ses_` is
+ours and dies with the transport connection. The conversation id is not ours
+— yet it is the unique key of a durable server-side row (the session thread,
+`thr_`), which is exactly what lets project identity survive a reconnect
+that destroys the `ses_`: an id we do not own anchors state that outlives an
+id we do. The `thr_` row id doubles as the thread token the client hook
+delivers and the agent echoes; it selects state, it does not grant access —
+lookups are always filtered by the authenticated caller.
+
+## The user mirror
+
+The external auth user id cannot be reshaped, so the domain gets its own user
+identity as a 1:1 mirror: a `profiles` table maps each auth user (UUID) to a
+`usr_` entity id, created automatically on registration and kept in lockstep.
+
+Two principles govern the seam:
+
+- **`profiles` is the only touchpoint.** Only `profiles` references the auth
+  provider's user table; the rest of the domain references `profiles`.
+  Changing the auth provider means rewriting one adapter, not the domain.
+- **The domain speaks `usr_` everywhere, including in policies.** Owner,
+  invalidated-by, shared-by, scope membership — all of them are `usr_` values
+  referencing `profiles`, and the access-control predicates compare the same
+  way. The translation from the authenticated session to `usr_` happens once
+  per statement, in a small stable helper that resolves the caller's row in
+  `profiles`; the query planner hoists it, so the seam costs a lookup per
+  statement rather than a join per row.
+
+## Project identity
+
+A project is the other thing the system has to recognize reliably, and its
+identity is not minted at all — it is **derived from what the client already
+has**. A repo root path or a git remote URL is normalized into a lookup key
+(a remote in any of its usual spellings collapses to `host/org/repo`; a path
+collapses to its cleaned absolute form), and a **project binding** maps that
+key to the scope memories from the project belong in.
+
+Three properties make the mapping trustworthy:
+
+- **Deterministic.** One binding exists per project identity, and every way of
+  naming a project — a transcript's working directory, a `project_hint`, a
+  briefing's resolved scope, a session thread's stored scope — runs through
+  the same resolution, so a project does not mean one thing to one client and
+  something else to another.
+- **Shared where sharing is expected.** A binding is visible to its creator
+  and to anyone who can see the scope it names, so teammates on a shared
+  project scope resolve the repo to that same scope instead of each creating
+  their own.
+- **Naming is not granting.** A binding only names a scope. Whether the caller
+  may read or write there is still decided by row-level security on the
+  memories themselves — see
+  [Scopes and isolation](/docs/concepts/scopes-and-isolation).
+
+On first sight of a project the scope is derived from the repository name
+under the caller's own namespace, created, and bound; every later session
+reuses the binding.
+
+## Design notes
+
+- Keeping ids as branded UUIDs forever was considered and rejected as an end
+  state: it delivers "parse, don't trust" but leaves ids unreadable and
+  timestamp-free. It did serve as a useful intermediate — brand the contracts
+  first, switch the underlying format second, and consumers of the branded
+  types never notice.
+- The seam is kept to one hop on purpose. Policies could compare the
+  authentication provider's own user id and skip the lookup entirely, but then
+  every domain table would have to carry that id alongside `usr_`, and the
+  identity of a row would depend on which column you happened to read.
+  Resolving once per statement buys one consistent domain identity everywhere.
+- Project bindings are recorded, never rewritten through the application:
+  there is no update or delete path for them, because routing that changes
+  under a session would silently split one project's memories across two
+  scopes. Correcting a binding is an operational action, and misplaced
+  memories are moved explicitly instead — see
+  [Scopes and isolation](/docs/concepts/scopes-and-isolation).

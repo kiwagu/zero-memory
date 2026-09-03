@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a capability or a change in behaviour
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the solution — the constraints here
+        (scope isolation, forward-only migrations, schema-first contracts)
+        often make a different shape of fix the right one.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Optional. A sketch is enough; it does not need to be a design.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried or considered instead
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to implement this

@@ -1,0 +1,44 @@
+# VCS & local-only workspace
+.git
+refs
+
+# Dependencies (reinstalled inside the image)
+node_modules
+**/node_modules
+.bun
+
+# Build outputs & caches
+.next
+**/.next
+.turbo
+**/.turbo
+dist
+**/dist
+out
+build
+coverage
+*.log
+
+# Env & secrets — never bake into images
+.env
+.env.*
+**/.env
+**/.env.*
+!infra/prod/.env.example
+
+# Assistant / editor config
+.claude
+.cursor
+.vscode
+.idea
+
+# Not needed in any image
+# (`docs/` is NOT here: the documentation image serves that tree, and the
+# other images simply never copy it.)
+infra
+scripts
+supabase
+Makefile
+README.md
+**/README.md
+.DS_Store

@@ -1,0 +1,190 @@
+---
+title: Contracts and errors
+description: Schema-first contracts with a semver contract version, a fixed error taxonomy, and a written deprecation policy.
+---
+
+Every tool input and output in zero-memory is defined by a zod schema in a
+single contracts package — one source of truth shared by the MCP server, the
+HTTP layer, and the dashboard. On top of that sit two commitments to external
+clients: a **semver contract version**, and a **fixed error taxonomy** every
+error passes through.
+
+## Why it exists
+
+zero-memory is open source and self-hosted: once installations exist in the
+wild, a breaking change to a tool schema or an error shape breaks other
+people's setups, not just one deployment. And errors that arrive as free
+text are dead ends for both audiences — an LLM client cannot branch on prose,
+and a human cannot build UX on it. Freezing the contract's shape and the
+error vocabulary before clients depend on them is what makes the surface
+safe to evolve.
+
+## How it works
+
+### One package, one source of schemas
+
+All tool contracts live in the contracts package (`packages/contracts`) as
+zod schemas — tool inputs, memory shapes, graph shapes. Servers validate
+against these schemas; nothing defines a request or response shape anywhere
+else. English is the canonical language for everything the contract emits —
+see [Canonical language](/docs/concepts/canonical-language).
+
+### Contract version
+
+The package exports a single semver constant, `CONTRACT_VERSION`, with fixed
+semantics:
+
+| Bump      | Meaning                                        |
+| --------- | ---------------------------------------------- |
+| **major** | Breaking change to a tool's schema or response |
+| **minor** | New optional field or new tool                 |
+| **patch** | Descriptions and documentation only            |
+
+The version is surfaced to MCP clients in the `initialize` response under the
+protocol extension slot:
+
+```json
+{
+  "capabilities": {
+    "experimental": {
+      "zero-memory/contract": { "version": "2.1.0" }
+    }
+  }
+}
+```
+
+This keeps the server-info object protocol-valid while letting a client detect
+at connect time which contract it is talking to.
+
+### Structured results, annotations, and budgets
+
+The MCP surface itself carries the contract, not just the schemas behind it:
+
+- **Structured tool results.** Every success payload travels twice, as the
+  protocol recommends: in `structuredContent`, validated against the tool's
+  declared output schema, and as a compact JSON text block mirroring it for
+  clients that only read text. Read and write results add a third,
+  human-readable footer block; on `remember`, `recall`, and `build_context`
+  it carries the session-state line (attached project, thread), and read
+  results append the standing reminder to store durable facts.
+- **Session attachment on results.** `remember`, `recall`, and
+  `build_context` results carry an optional
+  `session: { attached_project, thread? }` field — the 2.1.0 minor. The
+  `thread` value is a durable token the agent echoes back on later calls so
+  the project survives a transport reconnect; it is a state selector, not a
+  credential (see
+  [Scopes and isolation](/docs/concepts/scopes-and-isolation)).
+- **Resource links.** Read results append `resource_link` blocks: every
+  surfaced memory is dereferenceable at `zm://memory/{id}` for its full,
+  untruncated row, and the caller's standing rules are served at `zm://rules`.
+  Which rows a URI resolves to is decided by the caller's authenticated
+  context, never by the URI itself — a pasted URI can leak nothing but an
+  opaque id.
+- **Tool annotations.** Every tool declares MCP `ToolAnnotations` — read-only,
+  destructive, idempotent, and open-world hints — verified against its actual
+  handler by an automated completeness check, so a client's permission layer
+  can classify a call before approving it. `openWorldHint` is `false` across
+  the board: every tool talks to the memory store alone.
+- **Capped descriptions.** Some clients silently truncate long tool
+  descriptions, so every registered description must fit a 2 KB
+  client-visible budget — enforced by an automated check, not by review.
+- **Capped instructions.** The connect-time instructions channel has the
+  same problem, so the server composes it under a hard budget for clients
+  known to cap it: when the router text plus the owner-rules announcement
+  would not fit, whole segments are dropped in priority order (owner rules
+  before the router's tail) rather than truncated mid-sentence, and the
+  result records what was dropped. Uncapped clients get the full text,
+  including the project-attachment note.
+
+### Error taxonomy
+
+Every tool error is one of seven codes:
+
+| Code                | Meaning                                                    | HTTP status |
+| ------------------- | ---------------------------------------------------------- | ----------- |
+| `validation_failed` | Input broke the schema or an argument rule                 | 400         |
+| `unauthorized`      | No valid authentication                                    | 401         |
+| `forbidden`         | Authenticated, but not allowed (e.g. another user's scope) | 403         |
+| `not_found`         | The referenced id does not exist                           | 404         |
+| `conflict`          | The operation conflicts with current state                 | 409         |
+| `rate_limited`      | A rate limit or a metered budget is used up; retry later   | 429         |
+| `internal`          | Unexpected server error                                    | 500         |
+
+Tool-plane errors and non-OAuth HTTP routes share one body shape, defined —
+like everything else — as a zod schema in the contracts package:
+
+```json
+{
+  "error": {
+    "code": "forbidden",
+    "message": "You do not have access to this scope"
+  }
+}
+```
+
+`details` is optional structured context — never a stack trace. Tools
+construct errors through `toolError(code, message, details?)`; on the MCP
+tool plane a failure comes back as a tool result flagged `isError`, with this
+JSON body as its first text block — the same slot clients already parse for
+success payloads. The HTTP layer maps the same codes to the statuses above.
+
+**The class is decided where the failure happens, not guessed at the
+boundary.** Services answer with a failure that carries its own code, and the
+layer that reports it passes that code through; only a genuinely unclassified
+failure becomes `internal`. That is what makes code-based branching reliable:
+a rejection the caller could fix — a secret in the content, a memory that is
+not an open loop, an id that does not exist — never arrives labelled as a
+server fault it can do nothing about.
+
+Two protocol-owned surfaces deliberately keep their own envelopes:
+
+- MCP transport failures are JSON-RPC errors.
+- OAuth endpoints use the RFC 6749 flat `error` / `error_description` body;
+  their rate-limit response also keeps `Retry-After`.
+
+Clients should not try to parse those protocol envelopes as
+`ToolErrorSchema`.
+
+### Deprecation policy
+
+Deprecations are declared, not discovered. The public
+[deprecations ledger](/docs/DEPRECATIONS) records what is deprecated, since
+which contract version, what replaces it, and when it will be removed —
+**never earlier than the next major version** — plus every breaking change a
+client must act on. Evolution is additive by preference: new optional fields
+and new tools (minor bumps) over breaking changes.
+
+## How to use it
+
+- **MCP clients**: read
+  `capabilities.experimental["zero-memory/contract"].version` from
+  `initialize` and branch on structured error codes, never message text —
+  messages are for humans and may be reworded in any release. The advice
+  holds on every surface: a write rejected for something the caller can fix
+  (a secret in the content, a memory that is not an open loop, a missing id)
+  arrives as `validation_failed`, `conflict` or `not_found` — not as
+  `internal`, which is reserved for failures no caller can act on.
+  One deliberate refinement: a handful of `validation_failed` messages start
+  with a **stable, documented prefix** that IS part of the contract —
+  `scope_target_required:` and `project_hint_unresolvable:` for refused
+  writes, `secret_content_rejected:` from the content guard. Match on the
+  prefix, never on the human-readable remainder.
+- **HTTP clients**: rely on the status-code mapping above; the response body
+  always carries the same `error` object, so one parser covers every failure.
+- **On `rate_limited`**: retry later; the OAuth endpoints' rate-limit
+  response sets `Retry-After` — honor it when present.
+- **Before upgrading a server**: check the
+  [deprecations ledger](/docs/DEPRECATIONS) and the contract version delta —
+  a minor bump is safe to take blindly; a major bump means reading the table
+  first.
+
+## Design notes
+
+- **Semver over URL versioning.** MCP clients are configured with a single
+  endpoint URL; versioning the path (`/v1/...`) would force every client to
+  reconfigure on each major. A semver constant plus additive evolution keeps
+  the URL stable and makes version drift observable instead of breaking.
+- **A closed error vocabulary.** Seven codes are few enough for an LLM
+  client to reason about reliably and for a dashboard to give each a distinct
+  treatment. `details` carries structured specifics without ever making the
+  code set open-ended.

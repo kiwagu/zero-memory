@@ -1,0 +1,44 @@
+---
+description: Use when: implementation complexity grows and the code needs stable structure, clear responsibilities, and maintainable extension points.
+alwaysApply: true
+---
+
+# Standard design patterns for maintainable code
+
+## Pyramid Layer
+
+- Layer: L0 cross-cutting design rule.
+
+## Use This When
+
+- Apply this on any non-trivial implementation or refactor where branching, responsibilities, or extension points are growing.
+- Especially relevant for workers, integration boundaries, orchestration code, adapters, admin flows, and reusable UI/domain modules.
+
+## Core Rule
+
+- Prefer standard, recognizable design patterns over ad hoc branching once complexity grows.
+- Favor patterns that reduce conditional sprawl and isolate change: `strategy + registry`, `adapter`, `factory`, `template method`, `policy object`, `builder`, or well-scoped composition.
+- Name abstractions by responsibility, not by vague framework terms (`channel handler`, `share policy`, `transport adapter`, not `manager2` or `processorX`).
+
+## Required behavior
+
+- Keep orchestration code thin. Channel-specific, provider-specific, or mode-specific behavior should live behind a stable interface.
+- Add abstractions only when they simplify the codebase. Do not introduce ceremonial layers with no concrete benefit.
+- Prefer extending a registry or adding a new strategy over editing a long chain of `if` / `switch` branches in core flows.
+- Keep pattern boundaries testable: validate the seam where the orchestrator selects a strategy, adapter, or policy.
+- Reuse established patterns already present in the repository before inventing new internal frameworks. Reuse-first is a pre-step for ALL artifacts (not just patterns) — see `/.cursor/rules/reuse-first-discovery.mdc`.
+
+## Anti-patterns
+
+- Growing a central coordinator by appending more channel/type/provider `if` branches.
+- Mixing transport details, payload normalization, and business decisions in one function.
+- Creating custom pseudo-patterns when a common, named pattern already fits.
+- Hiding simple logic behind unnecessary indirection when one small helper would do.
+
+## Feature-component reuse (render layer)
+
+Recognizable design patterns apply to FEATURE components, not just primitives: one
+parameterizable renderer, every cross-cutting concern a prop/slot, each variant a config.
+When a task adds a "new view", the pattern is "add a config + inject the new provider,"
+NEVER "add a parallel renderer." Re-deriving an existing list/tree/card/cell renderer is
+the anti-pattern this rule forbids.

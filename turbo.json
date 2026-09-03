@@ -1,0 +1,132 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "cacheMaxAge": "14d",
+  "cacheMaxSize": "10GB",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**", "!.next/dev/**"]
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "lint:strict": {
+      "dependsOn": ["^lint:strict"]
+    },
+    "format": {
+      "dependsOn": ["^format"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "test:vitest": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:e2e": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:e2e:smoke": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:e2e:full": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    },
+    "start": {
+      "dependsOn": ["build", "^build"],
+      "cache": false,
+      "persistent": true
+    }
+  },
+  "globalEnv": [
+    "CI",
+    "NODE_ENV",
+    "ZM_BUILD_VERSION",
+    "ZM_TERMS_URL",
+    "ZM_PRIVACY_URL",
+    "ZM_TERMS_VERSION",
+    "ZM_BUILD_COMMIT",
+    "ZM_CHECKOUT_SHA",
+    "E2E_SERVER_URL",
+    "E2E_WEB_URL",
+    "E2E_USER_A_EMAIL",
+    "E2E_USER_B_EMAIL",
+    "E2E_PASSWORD",
+    "E2E_RATELIMIT_MAX",
+    "E2E_MAIL_CATCHER_URL",
+    "LOG_LEVEL",
+    "LOG_STDERR",
+    "ZM_LOG_FILE",
+    "ZM_LOG_MAX_LINES",
+    "ZM_INGEST_CONFIG",
+    "ZM_CONFIG",
+    "ZM_HEALTH_TTL_MS",
+    "ZM_UPDATE_CHECK_TTL_MS",
+    "ZM_BRIEF_CACHE_TTL_DAYS",
+    "ZM_BRIEF_HOOK_BUDGET_CHARS",
+    "ZM_ACK_WORDS",
+    "CLAUDE_PLUGIN_ROOT",
+    "PORT",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "SUPABASE_URL",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "ANTHROPIC_API_KEY",
+    "XDG_STATE_HOME",
+    "XDG_CONFIG_HOME",
+    "ZM_EMAIL",
+    "ZM_PASSWORD",
+    "ZM_MODEL_CACHE_DIR",
+    "ZM_PUBLIC_URL",
+    "ZM_SERVER_URL",
+    "ZM_EXTRACTOR",
+    "ZM_EXTRACTOR_MODEL",
+    "ZM_HYGIENE_MODEL",
+    "ZM_ROI_MODEL",
+    "ZM_HYGIENE_ON_WRITE",
+    "ZM_JUDGE_MODEL",
+    "ZM_HYGIENE_SCAN_INTERVAL_HOURS",
+    "ZM_TRANSLATION_SCAN_INTERVAL_HOURS",
+    "ZM_USAGE_UPKEEP_INTERVAL_HOURS",
+    "ZM_SCOPE_DESCRIBE_MODEL",
+    "ZM_TRANSLATOR_MODEL",
+    "ZM_INGEST_BUFFER_TOKENS",
+    "ZM_INGEST_MAX_MEMORIES",
+    "ZM_INGEST_AUTOSHARE",
+    "ZM_INGEST_GATE",
+    "ZM_INGEST_EXTRACT",
+    "ZM_CLIENT_VERSION",
+    "ZM_MAX_SESSIONS",
+    "ZM_RATELIMIT_MAX",
+    "ZM_RATELIMIT_WINDOW_S",
+    "ZM_SERVER_URL",
+    "ZM_WATCH_CHUNK_CHARS",
+    "ZM_WATCH_CHUNK_OVERLAP_CHARS",
+    "ZM_TRUST_PROXY",
+    "ZM_SNAPSHOT_DIR",
+    "ZM_SNAPSHOT_REUSE_MIN",
+    "NEXT_DIST_DIR",
+    "ZM_DEV_INDICATORS",
+    "ZM_DOCS_UPLOAD_TOKEN",
+    "ZM_CLIENT_BUNDLE_URL",
+    "ZM_CLIENT_BUNDLE_VERSION",
+    "ZM_HOSTED_MCP_URL",
+    "ZM_HOSTED_WEB_URL",
+    "ZM_SOURCE_DB"
+  ]
+}

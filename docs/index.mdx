@@ -1,0 +1,52 @@
+---
+title: Overview
+description: Shared LLM memory across chats, projects, and people, exposed via MCP.
+---
+
+zero-memory is a shared, persistent memory for LLM coding agents. It is exposed
+through the Model Context Protocol (MCP), so any MCP-compatible tool — Claude
+Code, Cursor, Codex CLI, VS Code, and others — reads and writes the same memory
+instead of rebuilding context from scratch in every session.
+
+## Why
+
+Every new chat session starts from zero. Most existing memory layers are
+single-user or hide team sharing behind a hosted cloud. zero-memory targets the
+open niche: **self-hosted, open-source, multi-user team memory with access
+control enforced in the database**.
+
+## Key ideas
+
+- **Two-tier memory** — private fragments visible only to their author, plus
+  selectively shared fragments with provenance (who, when, from which
+  conversation). Sharing is always an explicit action.
+- **Explicit scope membership** — private personal memory plus
+  owner-namespaced, shareable project and team scopes. A matching project name
+  never grants access, the session's project is the write default, and a
+  write with no resolvable target is refused rather than mis-filed. See
+  [Scopes and isolation](/docs/concepts/scopes-and-isolation).
+- **Several write paths** — deliberate agent writes, terminal quick capture,
+  deterministic import, repository bootstrap, and opt-in transcript ingest.
+  Transcript extraction is disabled by default.
+- **MCP-first** — memory, briefing, hygiene, rules, import/export, and metrics
+  tools work in any MCP-compatible client. See the
+  [memory model](/docs/concepts/memory-model).
+- **Network-served standing rules** — promoted rules use native MCP
+  instructions where the client can carry them and `build_context` everywhere;
+  hooks add automatic delivery timing and offline resilience.
+- **Postgres (Supabase) backend** — hybrid pgvector + full-text retrieval, an
+  entity graph as edge tables, Row Level Security for scoping, and Realtime
+  for live team updates.
+
+## How the docs are organized
+
+- [Getting Started](/docs/getting-started) — connect a client to a running
+  instance, or deploy your own stack.
+- [Concepts](/docs/concepts) — the memory model and the design decisions behind
+  it.
+- [Guides](/docs/guides) — day-to-day workflows: briefings, import/export,
+  session receipts.
+- [Dashboard](/docs/dashboard) — the web UI for browsing and curating memory.
+- [Memory Hygiene](/docs/hygiene) — how the store stays clean over time.
+- [Platform](/docs/platform) — architecture, observability, testing, and
+  internals.

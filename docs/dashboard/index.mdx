@@ -1,0 +1,188 @@
+---
+title: Dashboard
+description: The web UI for browsing, searching, and curating shared memory.
+---
+
+The dashboard is the web UI for browsing and managing shared memory. It runs
+alongside the memory server (in a development checkout, `bun dev` from the repo
+root starts everything and serves the dashboard on port 3100) and signs you in
+with a Supabase account — register a new one or use a provisioned account on
+the login page.
+
+Every screen shares the same chrome: the **zero-memory** wordmark and a left
+nav on the left, and the signed-in account — shown by its **display name**
+when one is set in settings, otherwise by the address's local part, with the
+full address one hover away — a theme switcher (light, dark, system), and a
+**Sign out** button in the top-right. Everything you see is
+filtered by row-level security — you only ever see your own private memory plus
+whatever is shared into scopes you belong to. See
+[Scopes and isolation](/docs/concepts/scopes-and-isolation) for how that
+model works.
+
+<Screenshot path="/memories">
+
+![The Memories landing screen with the left nav, filter bar, and a populated memory feed](/img/dashboard-overview.png)
+
+</Screenshot>
+
+## The screens
+
+- **Insights** (`/`) — what memory is doing for you: value, quality, health,
+  and how the corpus ages. See [Insights](/docs/dashboard/insights).
+- **Memories** (`/memories`) — the memory feed with filters and
+  [advanced search](/docs/dashboard/search); described below.
+- **Entities** (`/entities`) — the knowledge graph's nodes; described below.
+- **Scopes** (`/scopes`) — team sharing and scope management; described below.
+- **Review** (`/review`) — pairs of conflicting memories (duplicate,
+  supersede, contradiction) that [automated hygiene](/docs/hygiene) could not
+  resolve on its own, presented side by side with the judge's verdict and
+  rationale for your decision.
+- **Rules** (`/rules`) — standing-rule candidates from the
+  [rules incubator](/docs/guides/rules-incubator): review drafted rules,
+  promote or dismiss them, pin the ones that must always be delivered, and see
+  the "Delivered N of M" delivery budget per layer.
+- **Reflections** (`/reflections`) — clusters of related episodes distilled
+  into one consolidated fact, awaiting your approval. See
+  [Decay, reflection, and reinforcement](/docs/hygiene/decay-and-reinforcement).
+- **Portability** (`/portability`) — project-scope memories the judge deems
+  portable world knowledge, proposed for a move into your core scope; nothing
+  moves without your decision.
+- **Activity** (`/activity`) — the memory activity log: every recall run
+  against your memory in the last 30 days, with hit / empty / error outcomes.
+  See [Insights](/docs/dashboard/insights) for how it relates to the metrics.
+- **Settings** (`/settings`) — your profile (the read-only sign-in address
+  and an editable **display name** the dashboard shows in place of it —
+  saving takes effect immediately, clearing it restores the fallback),
+  [export](/docs/guides/export) and [import](/docs/guides/import) of your
+  memory, your own model-provider key, and account deletion. Account
+  deletion still demands the exact address, not the display name.
+
+Activity and Settings sit at the bottom of the sidebar; the rest are the
+primary navigation.
+
+## Memories
+
+The `/memories` screen lists every memory visible to you, newest first, in
+pages. The root `/` is the [Insights](/docs/dashboard/insights) dashboard.
+
+- **Search content or `mem_` id…** — free-text filter over the memory text;
+  pasting a memory id (or any copied fragment of one) finds it by prefix
+  instead.
+- **All kinds** — narrow to one kind (fact, preference, decision, convention,
+  gotcha, reference, episode, task, open-question).
+- **All visibility** — show only private or only sharable memories.
+- **All projects** — narrow to one project scope, offered by name (or its
+  alias).
+- **Lifecycle status** — the default, **Active (no history)**, hides
+  superseded historical versions but keeps memories retired without a
+  successor, dimmed and badged, so a disappearance stays observable.
+  **Live only** drops those too — for the loop kinds (task, open-question)
+  that reads as "only what is still open". Other values show superseded
+  versions only, lone invalidations only, or everything.
+- **Filter / Refresh** — applies the current search box and dropdowns, and
+  doubles as a feed refresh when nothing changed.
+
+Every value in these dropdowns carries a count of how many memories it would
+yield under the other filters; a value that would yield none is greyed out
+rather than removed, and the value currently applied always stays selectable.
+The filters follow the selection: opening a card and coming back restores the
+same filtered view, and page links preserve it too.
+
+Each memory renders as a card with its text, a kind badge, a sharing badge
+(private, sharable, or shared — "shared" only when the scope actually has
+members beyond the owner), its scope — rendered in the collapsed badge form,
+with the per-owner id segment folded to `…` (`proj.….api`) since it is
+identical on every scope you own; the full path lives on the scopes page and
+behind a hover — who authored it (a human or an agent,
+with the writing client where known), and when. A memory that is part of a
+supersession chain carries a history badge; a retired memory renders dimmed
+with an invalidated badge; a memory captured in another language reveals its
+original text below the canonical English. A fresh account
+shows _"No memories visible for these filters."_ until memory is written — by
+an agent through MCP, by the background watcher, or shared to you by a
+teammate. Selecting a card opens its detail view with full
+[provenance](/docs/concepts/provenance), lifecycle (the validity window and
+version history), linked entities, and links, plus every owner action in one
+row: share into a scope, forget, promote to rule, and move to a project.
+Path-valued provenance fields show the file's basename with the full path
+behind a hover — the directories above a file describe the machine that
+ingested it, which is exactly what a shared screen should not display. On a
+shared memory, a **See who can access this** dialog lists the scope's members
+and their roles.
+
+A memory in the wrong scope is moved from its own card — **Move to a project**
+on the memory page. There is no bulk repair surface: a write the server cannot
+place is refused rather than stored somewhere else, so memories no longer
+accumulate in the wrong scope for a batch tool to sweep up later.
+
+The same screen also hosts [advanced search](/docs/dashboard/search) — a
+ranked, relevance-scored search that uses the exact same retrieval machinery
+agents use.
+
+## Entities
+
+<Screenshot path="/entities">
+
+![Entities screen](/img/entities.png)
+
+</Screenshot>
+
+The knowledge graph's nodes. Entities (people, projects, repos, packages,
+services, tools, libraries, concepts) are extracted from memories and linked to
+each other by typed edges.
+
+- **Search entities…** + **Search** — find an entity by name.
+
+Each entity shows its name, type, and scope; expanding one reveals its edges
+(both directions) and the memories that mention it. Like memories, entities are
+scope-filtered, so a new account shows _"No entities visible."_ until memory
+containing entities is captured.
+
+## Scopes
+
+<Screenshot path="/scopes">
+
+![Scopes screen](/img/scopes.png)
+
+</Screenshot>
+
+Where team sharing is managed. A scope is a named container that memory can be
+shared into; membership in a scope is what lets you see its shared memory.
+
+- **New scope** — create a shared scope under the `project.*`, `proj.*`, or
+  `team.*` root; shareable scopes are namespaced per creator, so the path lives
+  inside your own owner subtree and the creator automatically becomes the
+  scope's first **admin**.
+- Below the form, each scope you belong to is a card: a memory count, its
+  members and their roles (reader, writer, admin), and — where set — a display
+  alias and description. The card title links to the memory feed filtered to
+  that scope, and any scope can be exported as a Markdown `.zip`.
+- Admins get more: add members by email and assign roles, revoke a member's
+  access, edit the alias and description (or have them generated), rename the
+  scope's last label, merge the whole scope — memories, entities, members —
+  into another scope they administer, or delete it outright.
+
+A new account may already have a project scope created automatically on its
+first project-routed write. Until another member is invited, that scope is
+shareable but visible only to its creator.
+
+## Insights
+
+Beyond browsing, the dashboard measures what memory is doing for you: tokens
+saved, recall quality, and memory health, aggregated over a chosen time window.
+See [Insights](/docs/dashboard/insights).
+
+## Where memory comes from
+
+The dashboard is for reading and curating; memory is written elsewhere and
+shows up here:
+
+- **Agents via MCP** — any MCP client (Claude Code, Cursor, …) connected to
+  the server writes memory with the `remember` tool and reads it with `recall`
+  / `build_context`. See the [memory model](/docs/concepts/memory-model).
+- **The watcher and hooks** — opt-in transcript transport feeds usefulness
+  metrics and can run model extraction when `ZM_INGEST_EXTRACT=on`. Extraction
+  is off by default; the normal high-precision write path is the in-session
+  agent calling `remember` proactively.
+- **Teammates** — memory shared into a scope you belong to appears in your
+  feed, live, as it is written.

@@ -1,0 +1,4 @@
+/* Theme + Tailwind + shadcn from @workspace/ui; class scan for this app only (paths relative to this file). */
+@import '@workspace/ui/globals.css';
+
+@source "../**/*.{ts,tsx}";

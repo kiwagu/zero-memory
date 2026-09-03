@@ -1,0 +1,38 @@
+---
+description: Use when: creating or updating Postgres Row Level Security policies.
+alwaysApply: false
+---
+
+# Database: Create RLS policies
+
+## Pyramid Layer
+
+- Layer: L2 SQL router.
+
+## Use This When
+
+- Load this after a database entry rule when the task is specifically about row-level security policies.
+- Use this file to choose the narrowest RLS leaf before loading examples.
+
+## Stop Here If
+
+- Stop here once the task is clearly about authoring syntax, auth helper usage, or performance tuning.
+
+## Descend To
+
+- Authoring basics and operation-specific policy shape: `/.cursor/rules/rls-policy-authoring-basics.mdc`
+- Auth helper functions, JWT claims, and MFA checks: `/.cursor/rules/rls-helper-functions-and-jwt.mdc`
+- Performance and execution-plan guidance: `/.cursor/rules/rls-performance-patterns.mdc`
+- Return to `/.cursor/rules/db-domain-ids-and-naming.mdc` if the task broadens into schema design.
+
+## Default Posture — Fail-Closed (always)
+
+Before writing any policy: the default access posture is **fail-closed**. A row is invisible unless a predicate **deliberately** admits it; new user content defaults to **private (owner-only)**; sharing is an **additive, OR'd widening**, never the baseline. The forgotten case must fail **closed** (un-shared, recoverable), never **open** (leaked, irrecoverable). The fence is the **RLS predicate** — never an app `where` filter or a `status` flag (`poc-no-fallbacks`). Detail: `rls-policy-authoring-basics.mdc` → "Default Posture".
+
+RLS policy work splits into three narrow concerns:
+
+1. Authoring syntax and operation-specific policy shape.
+2. Auth helper functions, JWT claims, and MFA-based checks.
+3. Performance tuning and execution-plan safety.
+
+Load only the matching leaf above.

@@ -1,0 +1,49 @@
+---
+description: Use when: making POC or MVP decisions so legacy fallbacks and premature versioning do not creep in.
+alwaysApply: true
+---
+
+# No fallbacks during refactors (POC / pre-production)
+
+## Pyramid Layer
+
+- Layer: L1 core rule.
+
+## Use This When
+
+- Keep this rule active whenever a task replaces an existing mechanism, API, env name, or flow.
+
+## Stop Here If
+
+- Stop here after the no-fallback policy is clear; this is a leaf rule.
+
+## Descend To
+
+- No sibling descent required. Apply the rule directly to touched code and docs.
+
+This repository is **not in production** yet. Treat the codebase as **POC / MVP**: optimize for **one clear implementation**, not compatibility shims.
+
+## Required behavior
+
+- When replacing a mechanism (transport, API shape, env flags, feature path), **remove the old variant completely** from code, compose, env templates, and docs touched by the change.
+- **Do not** add or keep:
+  - `MODE=a|b`, `USE_LEGACY`, `FEATURE_FLAG` toggles, or “try new then fall back to old” branches **for the sake of backward compatibility** within this repo.
+  - Commented-out blocks of the previous implementation “just in case”.
+- **Do** state explicitly (PR description, migration note in a short comment near the new entry point, or changelog-style note in the touched doc) that the **previous approach is removed** and is **not compatible** with the new one—so operators know to adopt the new flow end-to-end.
+
+## Versioning (v1, v2, …) — allowed, with a lifecycle boundary
+
+- **Design for evolution:** use normal **major-style versioning** in contracts where it fits—e.g. REST path prefixes (`/api/v1/...`), event `schema_version`, JetStream subject prefixes, OpenAPI tags—so the architecture **anticipates** future breaking changes without ad-hoc flags.
+- **Pre-production rule:** until the project has **shipped first production** (real external consumers depending on stability), maintain **one active major** for each public surface. Do **not** run **v1 and v2 in parallel** as a long-lived compatibility layer (dual handlers, “try v2 then v1”, serving two REST trees for the same product flow).
+- **After first production:** introducing **v2** alongside **v1** may be justified with an explicit, time-boxed migration plan for real clients. Until then, replacing behavior means **retire v1, ship the new contract as the only line** (still using versioned naming where useful for the *next* break).
+
+This is not a fallback: it is **forward-looking naming** before production, and **controlled multi-version support** only once production obligations exist.
+
+## Rationale
+
+Fallbacks duplicate logic, hide failures, and slow down iteration. Until there is a real production cutover requirement, **breaking cleanly** is preferable to maintaining two paths.
+
+## Exceptions (rare)
+
+- **External systems** you cannot change (e.g. a third-party API that is temporarily unavailable): operational retries or circuit breakers are not the same as “old vs new code path” fallbacks and are out of scope for this rule.
+- If product later requires a **supported** transition period, that should be an **explicit, time-boxed** decision (documented decision record), not an open-ended dual path.
