@@ -375,11 +375,66 @@ function assertReviewComposeIsolation(
   );
 }
 
+/**
+ * curl exit codes that mean the TRANSPORT was not ready yet, as opposed to the
+ * server answering with something we dislike. Retrying these is safe; retrying
+ * an HTTP status would hide a real failure.
+ */
+const TRANSIENT_CURL_EXITS = new Set([
+  7, // could not connect
+  35, // TLS handshake failed — the certificate for this name is not issued yet
+  52, // empty reply
+  56, // receive failure
+]);
+
+/** Sleep without going async: this whole script is deliberately synchronous. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * The edge reports healthy as soon as it is listening, but Caddy's internal CA
+ * mints each hostname's certificate on that name's FIRST contact — so a request
+ * can arrive in the window between "container healthy" and "this name has a
+ * certificate" and come back as a TLS alert instead of a response. Hosts that
+ * are probed several times warm themselves on the earlier request; a host
+ * probed exactly once has no such luck, which is why the rehearsal failed on
+ * `supabase.localhost` alone, 151 ms after the edge went healthy.
+ *
+ * Retrying the transport closes that window precisely. A blanket sleep before
+ * verification would not: it would have to be long enough for the worst case
+ * and would then cost every run that time, while still being a guess.
+ */
 function curl(args: string[], allowHttpError = false): string {
-  return run('curl', ['--silent', '--show-error', '--insecure', ...args], {
-    capture: true,
-    allowFailure: allowHttpError,
+  const full = ['--silent', '--show-error', '--insecure', ...args];
+  const attempts = 10;
+  let result = spawnSync('curl', full, {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+  for (
+    let attempt = 2;
+    attempt <= attempts && TRANSIENT_CURL_EXITS.has(result.status ?? -1);
+    attempt += 1
+  ) {
+    sleepSync(300);
+    result = spawnSync('curl', full, {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  }
+
+  if (result.status !== 0 && !allowHttpError) {
+    const detail = (result.stderr || result.stdout || '').trim();
+    throw new Error(
+      `curl ${full.join(' ')} failed (exit ${result.status})` +
+        (detail ? `: ${detail}` : '')
+    );
+  }
+  return result.stdout ?? '';
 }
 
 function readJson(url: string): Record<string, unknown> {
