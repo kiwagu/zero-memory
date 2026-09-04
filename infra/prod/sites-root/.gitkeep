@@ -1,0 +1,4 @@
+# Document roots for the site files in ../sites, mounted read-only at
+# /srv/sites. A page at <this dir>/apex/index.html is addressed from a site
+# file as `root * /srv/sites/apex`. Empty by default; override with
+# ZM_SITES_ROOT.

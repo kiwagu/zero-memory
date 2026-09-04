@@ -1,0 +1,4 @@
+# Caddy site files an operator adds to this edge (*.caddy), imported by
+# caddy/Caddyfile.template. Empty by default and mounted read-only; override
+# the location with ZM_SITES_DIR. Serve documents from the directory mounted
+# at /srv/sites (ZM_SITES_ROOT).

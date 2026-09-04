@@ -79,6 +79,20 @@
 	reverse_proxy zm-docs:3200
 }
 
+# ── Operator-supplied sites ─────────────────────────────────────────────────
+# Anything an operator serves from this edge that is NOT part of the product:
+# a marketing page on the apex, a status page, a redirect for a second domain.
+# Drop a `*.caddy` file into the mounted directory (ZM_SITES_DIR, empty by
+# default) and it is served alongside the three sites above.
+#
+# This is an import rather than another {$ZM_..._HOST} block on purpose: an
+# unset hostname placeholder does not degrade to "no site", it makes the whole
+# Caddyfile invalid ("server block without any key"), so every additional
+# hostname declared here would become MANDATORY for everyone. An empty import
+# glob is merely a warning, which is the honest default for an instance that
+# serves nothing extra.
+import /etc/caddy/sites/*.caddy
+
 # ── Supabase API gateway (optional) ─────────────────────────────────────────
 # The dashboard runs in the browser, so Kong must be reachable from users'
 # machines (NEXT_PUBLIC_SUPABASE_URL at web build time = this external URL).

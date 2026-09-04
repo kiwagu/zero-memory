@@ -42,6 +42,15 @@ install_hook() {
 #      moving is what makes the mirror clone advance, locally and with no
 #      network, so the clone is the authority for what may later be published.
 #      Publishing stays a separate, deliberate command.
+#
+# The mirror location is read from LOCAL GIT CONFIG (`zeroMemory.mirrorDir`),
+# not from a path baked into this file. It differs per clone and most clones
+# have none, so it is configuration, not source:
+#
+#   git config zeroMemory.mirrorDir /path/to/mirror-clone
+#
+# Unset — the overwhelmingly common case — means the hook does step 1 and
+# stops.
 install_hook post-merge "$(cat <<'HOOK'
 #!/bin/sh
 # zero-memory managed hook
@@ -53,9 +62,7 @@ printf '{"detected_at":"%s","source":"git merge (native post-merge hook)"}\n' \
 # Mirror materialization, only on main, only when the clone is configured.
 [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ] || exit 0
 root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-env_file="$root/refs/zero-memory-infra/deploy/instance.env"
-[ -f "$env_file" ] || exit 0
-mirror_dir=$(sed -n 's/^MIRROR_DIR=//p' "$env_file" | tail -1)
+mirror_dir=$(git config --get zeroMemory.mirrorDir 2>/dev/null) || exit 0
 [ -n "$mirror_dir" ] && [ -d "$mirror_dir/.git" ] || exit 0
 # Never fail a merge because publishing plumbing had a bad day.
 "$root/scripts/mirror-snapshot.sh" "$mirror_dir" || \

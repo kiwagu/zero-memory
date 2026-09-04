@@ -39,6 +39,15 @@ services:
       # and the dashboard asks for no consent, which is correct for an
       # instance with no published documents.
       - ${ZM_LEGAL_DIR:-./legal}:/srv/legal:ro
+      # Operator-supplied Caddy site files (*.caddy), read-only, imported by
+      # the template. Empty by default: an instance that serves nothing beyond
+      # the product's own three hostnames mounts an empty directory and Caddy
+      # simply warns that the glob matched nothing.
+      - ${ZM_SITES_DIR:-./sites}:/etc/caddy/sites:ro
+      # Document roots those site files serve from, read-only. One mount for
+      # any number of sites: a file at <dir>/apex/index.html is addressed as
+      # `root * /srv/sites/apex`.
+      - ${ZM_SITES_ROOT:-./sites-root}:/srv/sites:ro
       # Certificates + ACME account (must survive recreation to respect
       # Let's Encrypt rate limits) and autosaved config.
       - caddy_data:/data
