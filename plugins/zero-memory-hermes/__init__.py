@@ -48,6 +48,72 @@ logger = logging.getLogger(__name__)
 _PLUGIN_DIR = Path(__file__).parent
 
 
+def _session_cwd_of(session_id: str) -> str:
+    """The terminal tool's per-session cwd record, or "" when it has none.
+
+    Two keys are tried, because the terminal tool files its record under the
+    GATEWAY session key, not the agent's session id — measured 2026-09-12, and
+    the reason a naive ``get_session_cwd(session_id)`` came back empty on a live
+    desktop session. ``HERMES_SESSION_KEY`` is a ContextVar, so it resolves
+    inside a hook running on the session's own task and is simply absent in a
+    detached process; both cases are handled by falling through.
+
+    Imported lazily and defensively: this is host INTERNALS, not a published
+    plugin API (``PluginContext`` exposes no cwd — verified against its public
+    surface), so it may move between Hermes releases. A missing symbol must cost
+    one leg of the fallback chain, never the briefing.
+    """
+    try:
+        from tools.terminal_tool import get_session_cwd  # noqa: PLC0415
+    except Exception:
+        return ""
+
+    keys = []
+    try:
+        from gateway.session_context import get_session_env  # noqa: PLC0415
+
+        gateway_key = get_session_env("HERMES_SESSION_KEY", "")
+        if gateway_key:
+            keys.append(gateway_key)
+    except Exception:
+        pass
+    if session_id:
+        keys.append(session_id)
+
+    for key in keys:
+        try:
+            recorded = get_session_cwd(key)
+        except Exception:
+            continue
+        # `.strip()` matters: a whitespace-only record is not an answer, and
+        # returning it would shadow the next leg with a path that resolves to
+        # nothing. Caught by `test_blank_records_are_declined`.
+        if isinstance(recorded, str) and recorded.strip():
+            return recorded.strip()
+    return ""
+
+
+
+def _terminal_cwd() -> str:
+    """Where this profile's commands actually run (``TERMINAL_CWD``).
+
+    Read through the terminal tool's own config reader rather than the raw env
+    var, so a value set in profile ``config.yaml`` and one exported into the
+    environment resolve identically — one source of truth, as the host sees it.
+    """
+    try:
+        from tools.terminal_tool import _get_env_config  # noqa: PLC0415
+    except Exception:
+        return ""
+    value = str((_get_env_config() or {}).get("cwd") or "")
+    # "." is the shipped default and means "wherever the host started", i.e.
+    # exactly the useless answer this chain exists to avoid.
+    if not value or value == ".":
+        return ""
+    return value
+
+
+
 def _hook_payload(
     session_id: str,
     cwd: str,
@@ -93,11 +159,36 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
 
     mirror = mirror_mod.TranscriptMirror(enabled=capture)
 
-    def _cwd() -> str:
-        try:
-            return str(Path.cwd())
-        except Exception:
-            return ""
+    def _cwd(session_id: str = "") -> str:
+        """The directory the SESSION works in, not the one the host was started in.
+
+        Order matters, and every leg was measured on a live desktop session
+        (2026-09-12) before being written down:
+
+        1. ``get_session_cwd(session_id)`` — the per-session record the terminal
+           tool keeps. Authoritative when the session has established a cwd,
+           empty otherwise (in-memory, per agent process).
+        2. the terminal backend's configured cwd (``TERMINAL_CWD``, resolved
+           through the tool's own config reader so profile config and env stay
+           one source) — where this profile's commands actually run.
+        3. ``Path.cwd()`` — the host process directory. LAST, because on the
+           desktop app it is the launcher's directory (measured: ``/home/kiwagu``
+           while the session worked in ``~/repos/1/proflow``), which made every
+           briefing name the wrong memory project. That silent mis-scoping is
+           the whole reason this helper is not a one-liner.
+        """
+        for leg in (
+            lambda: _session_cwd_of(session_id),
+            _terminal_cwd,
+            lambda: str(Path.cwd()),
+        ):
+            try:
+                value = leg()
+            except Exception:
+                continue
+            if value:
+                return value
+        return ""
 
     def _transcript_path(session_id: str) -> str:
         """The mirror path, or "" when capture is off.
@@ -109,7 +200,7 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
 
     # ── read: brief the agent when a session opens ────────────────────────
     def on_session_start(session_id: str = "", **_: object) -> None:
-        cwd = _cwd()
+        cwd = _cwd(session_id)
         mirror.open_session(session_id, cwd)
         # Fired for its side effect only: Hermes ignores this hook's return
         # value, so the briefing text itself is delivered by pre_llm_call
@@ -138,7 +229,7 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
         implementation of that logic across all four clients is the whole
         reason the binary exists.
         """
-        cwd = _cwd()
+        cwd = _cwd(session_id)
         mode = ["brief", "session-start"] if is_first_turn else ["brief", "task"]
         event = "SessionStart" if is_first_turn else "UserPromptSubmit"
         payload = _hook_payload(
@@ -173,7 +264,7 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
     ) -> None:
         if not mirror.enabled:
             return
-        cwd = _cwd()
+        cwd = _cwd(session_id)
         mirror.open_session(session_id, cwd)
         mirror.record_message(session_id, "user", user_message)
         mirror.record_message(session_id, "assistant", assistant_response)
@@ -230,7 +321,7 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
             watcher_mod.run_hook(
                 binary,
                 ["receipt"],
-                _hook_payload(session_id, _cwd(), "SessionEnd"),
+                _hook_payload(session_id, _cwd(session_id), "SessionEnd"),
                 timeout,
             )
         )
@@ -258,7 +349,7 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
                 watcher_mod.run_hook(
                     binary,
                     ["status"],
-                    _hook_payload(session, _cwd(), "UserPromptSubmit"),
+                    _hook_payload(session, _cwd(session), "UserPromptSubmit"),
                     timeout,
                 )
             )
@@ -268,7 +359,7 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
                 watcher_mod.run_hook(
                     binary,
                     ["receipt"],
-                    _hook_payload(session, _cwd(), "SessionEnd"),
+                    _hook_payload(session, _cwd(session), "SessionEnd"),
                     timeout,
                 )
             )
