@@ -1,0 +1,45 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -c '(.tool_input.command // \"\") as $c | if ($c | test(\"(^| )(grep|egrep|fgrep|rg|git|cat|less|head|tail) \")) then empty elif ($c | test(\"db[[:space:]]+reset\")) and ($c | test(\"tests/e2e/review\")) then {hookSpecificOutput:{hookEventName:\"PreToolUse\",permissionDecision:\"deny\",permissionDecisionReason:\"That resets the review stand, which carries a clone of the live cluster plus the pending migrations — the acceptance stand and the migration rehearsal both live there, and a reset destroys both. Refresh it deliberately instead: cd tests/e2e && bun run review:stack -- --refresh\"}} else empty end'"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); f=$(printf '%s' \"$input\" | jq -r '.tool_input.file_path // \"\"'); c=$(printf '%s' \"$input\" | jq -r '.tool_input.content // \"\"'); case \"$f\" in */apps/*/components/*.tsx|*/apps/*/app/*.tsx) if printf '%s' \"$c\" | grep -qE '<(button|input|select|textarea)[ />]'; then printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"@workspace/ui + ZM-first: recall() the placement convention BEFORE building. Generic/visible primitives (buttons, inputs, progress bars, dropzones) MUST live in packages/ui; apps hold only thin wrappers injecting infra via callbacks. This file has a raw <button>/<input> - confirm it belongs in packages/ui, not apps.\"}}'; fi ;; esac; exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /home/kiwagu/repos/zero-memory && bun scripts/hooks/post-merge-status-reminder.ts 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /home/kiwagu/repos/zero-memory && bun scripts/hooks/merge-sync-pending-check.ts 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}

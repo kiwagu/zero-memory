@@ -1,0 +1,14 @@
+[mcp_servers.deepwiki]
+url = "https://mcp.deepwiki.com/mcp"
+
+[mcp_servers.stagehand-docs]
+url = "https://docs.stagehand.dev/mcp"
+
+[mcp_servers.supabase-e2e]
+url = "http://127.0.0.1:55331/mcp"
+
+[mcp_servers.supabase-self-hosted]
+url = "http://127.0.0.1:55321/mcp"
+
+[mcp_servers.zero-memory-e2e]
+url = "http://127.0.0.1:8788/mcp"
