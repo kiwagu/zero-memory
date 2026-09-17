@@ -61,7 +61,8 @@ Two ways to produce a frame:
   ratio, and save into `public/img/`. Never shoot a personal working corpus:
   memory content, scope slugs and provenance carry private detail, and these
   images are committed. The showcase account exists so a shot can be real
-  without being private — see `tests/e2e/scripts/curate-showcase.ts`.
+  without being private — it is seeded from
+  `tests/e2e/fixtures/showcase-corpus.json`.
 - **Automatically** — `cd tests/e2e && bun run e2e:screenshots` recaptures the
   frames tagged `@docs-shot` in
   `tests/e2e/src/web/docs-screenshots.e2e.spec.ts`. Ordinary suite runs never

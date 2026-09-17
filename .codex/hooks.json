@@ -20,26 +20,7 @@
         ]
       }
     ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd /home/kiwagu/repos/zero-memory && bun scripts/hooks/post-merge-status-reminder.ts 2>/dev/null || true"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd /home/kiwagu/repos/zero-memory && bun scripts/hooks/merge-sync-pending-check.ts 2>/dev/null || true"
-          }
-        ]
-      }
-    ]
+    "PostToolUse": [],
+    "SessionStart": []
   }
 }

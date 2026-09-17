@@ -3,26 +3,26 @@ title: Claude Code
 description: Connect Claude Code to zero-memory so every session starts briefed from persistent memory and durable facts are captured automatically.
 ---
 
-There are two ways to connect Claude Code to a zero-memory server:
-
-- **Install the plugin** (recommended) — one command wires the briefing
-  hooks, transcript capture, the MCP tools, and the memory-first rule. It
-  installs fully offline from a local folder; no central store.
-- **Wire it by hand** — register the MCP server yourself and, optionally,
-  wire the hooks manually. The manual hooks are the plugin's equivalent —
-  use one or the other, never both.
+There are two ways to connect Claude Code to a zero-memory server. Installing
+the plugin is the recommended one: a single command wires the briefing hooks,
+transcript capture, the MCP tools, and the memory-first rule. It installs
+fully offline from a local folder; no central store. The alternative is to
+wire it by hand, registering the MCP server yourself and, optionally, wiring
+the hooks manually. The manual hooks are the plugin's equivalent, so use one
+or the other, never both.
 
 ## Prerequisites
 
-- The server is running and reachable at its MCP URL — e.g.
-  `https://memory.example.com/mcp`, or `http://<host>:8787/mcp` on a local
-  network. Verify from the client: `curl <base-url>/healthz`. There is no
-  default address: the installer asks for this URL, checks it, and stores it in
-  `~/.config/zero-memory/config.json`, which the MCP registration, the hooks and
-  the ingest daemon all read.
-- Authentication is **OAuth** — a one-time browser login stores a token that
-  the hooks and the MCP client reuse and refresh. No Supabase URL, email, or
-  password is needed on the client.
+The server must be running and reachable at its MCP URL, for example
+`https://memory.example.com/mcp`, or `http://<host>:8787/mcp` on a local
+network. Verify from the client: `curl <base-url>/healthz`. There is no
+default address: the installer asks for this URL, checks it, and stores it in
+`~/.config/zero-memory/config.json`, which the MCP registration, the hooks and
+the ingest daemon all read.
+
+Authentication is **OAuth**. A one-time browser login stores a token that the
+hooks and the MCP client reuse and refresh. No Supabase URL, email, or
+password is needed on the client.
 
 ## Install the plugin (recommended)
 
@@ -48,7 +48,7 @@ stores a memory from any terminal through the full standard write path, and
 in every briefing until closed.
 
 The MCP server itself is registered at **user scope**, not bundled in the
-plugin — a plugin-bundled server gets namespaced tool names instead of the
+plugin: a plugin-bundled server gets namespaced tool names instead of the
 plain `mcp__zero-memory__*` prefix.
 
 > **`zero-memory` is registered in two places on purpose — do not "clean up"
@@ -57,10 +57,10 @@ plain `mcp__zero-memory__*` prefix.
 > deploy script additionally registers it at **user scope**, which is what
 > makes memory available in a contributor's _other_ projects on the same
 > machine. The two entries collapse to a single mount because the name
-> matches — nothing is doubled in the tool list. User scope shadows the
+> matches, so nothing is doubled in the tool list. User scope shadows the
 > project entry (`claude mcp get zero-memory` reports the scope in effect),
 > so on a machine that has run a deploy script, editing `.mcp.json` has no
-> local effect — change both, or expect the local one to keep answering.
+> local effect. Change both, or expect the local one to keep answering.
 
 ### One command
 
@@ -70,7 +70,7 @@ bash scripts/plugin-bundle/deploy-zm-claude.sh
 
 On a dev machine it builds the binary from source; on a guest machine it
 installs the binary shipped next to it in a handoff folder. Then authorize
-once — the only step that cannot be scripted:
+once. This is the only step that cannot be scripted:
 
 ```sh
 zero-memory-watcher login
@@ -78,9 +78,9 @@ zero-memory-watcher login
 
 To deploy on a machine with no repo and no network, bring the per-platform
 bundle (`zm-bundle-<version>-<platform>.zip`, built with
-`scripts/plugin-bundle/build-zm-bundle.sh` — see
+`scripts/plugin-bundle/build-zm-bundle.sh`; see
 [Install the client](/docs/getting-started/install-client)) and run the
-deploy script inside it — same result, fully offline. The bundle carries a
+deploy script inside it. Same result, fully offline. The bundle carries a
 manifest naming its platform, and the installer refuses an archive built for
 a different one; a hand-assembled folder without that manifest still
 installs, but only with a warning. The manual equivalent:
@@ -102,7 +102,7 @@ scripted run.
 By default the plugin captures **nothing**: it reads memory and injects the
 memory-first mandate, but transcript `ingest` is opt-in
 (`deploy-zm-claude.sh --with-ingest`). Even then, ingest stays off until you
-set a consent config at `~/.config/zero-memory/ingest.json` — exactly one of
+set a consent config at `~/.config/zero-memory/ingest.json`, exactly one of
 `allowlist` / `denylist`, each a list of path globs (`"*"` = all):
 
 ```jsonc
@@ -112,7 +112,7 @@ set a consent config at `~/.config/zero-memory/ingest.json` — exactly one of
 ```
 
 A `.zero-memory-ignore` file in a project (or any ancestor) always wins and
-also stops the briefing hooks — nothing leaves the machine for that project.
+also stops the briefing hooks: nothing leaves the machine for that project.
 The `recall` / `remember` MCP tools work under any setting: the agent sends
 only what it consciously queries or stores, never the whole transcript.
 
@@ -132,20 +132,20 @@ shows up as memory that works in chat while briefings come from somewhere else.
 A stdio entrypoint (`apps/server/src/mcp-stdio.ts`) exists for local
 single-user setups, signing in with `ZM_EMAIL`/`ZM_PASSWORD`.
 
-**Hooks without the plugin** — the hook set is declared once, inside the
+**Hooks without the plugin.** The hook set is declared once, inside the
 binary: `zero-memory-watcher hooks --profile full` prints it as JSON (session
 and task briefings, health trailer, receipt, transcript capture, and the four
 recall-reminder wirings), and `scripts/wire-hooks.sh` applies it idempotently
 to the **global** `~/.claude/settings.json` (memory-first is host-global, so
-it belongs at user scope). The full profile carries no `guide` hook — on a
+it belongs at user scope). The full profile carries no `guide` hook; on a
 plugin-less machine the mandate goes into `~/.claude/CLAUDE.md` as an
 always-on rule instead. Wiring by hand, never use the bare binary name: hook
 subprocesses often run with a stripped PATH, and a bare name registers, fires,
-and fails silently — use an absolute or `~`-relative path. All commands exit
+and fails silently. Use an absolute or `~`-relative path. All commands exit
 silently on a server failure, so a down server never blocks a session. Verify
 the wiring with `zero-memory-watcher hooks --check`: it reports hooks that
 are missing, hooks wired twice (every copy fires), and a plugin installed
-alongside the full settings profile — in which case both channels fire and
+alongside the full settings profile. In that last case both channels fire and
 every briefing arrives twice, so keep one channel only.
 
 ## Transcript watcher daemon (optional)
@@ -159,11 +159,11 @@ zero-memory-watcher login
 zero-memory-watcher watch
 ```
 
-Chunks are content-hashed, so the daemon and the `Stop` hook can coexist —
+Chunks are content-hashed, so the daemon and the `Stop` hook can coexist:
 re-sends are server-side no-ops. Run it under a systemd user unit
 (`infra/prod/watcher.service`). Build the binary with
 `bash scripts/build-watcher.sh` (cross-compile via a bun target triple,
-e.g. `TARGET=bun-linux-arm64` — note this spelling differs from the bundle's
+e.g. `TARGET=bun-linux-arm64`; note this spelling differs from the bundle's
 platform names like `linux-aarch64`).
 
 ## The memory-first rule
@@ -172,7 +172,7 @@ Making memory the first place the agent looks is a rule, not code, and the
 delivery layers differ in force: the plugin skill (softest), server-sent
 instructions on MCP connect (baseline), the hook-delivered mandate
 (`guide` + `nudge`, machine-independent), and an always-on rule appended to
-the user-global `~/.claude/CLAUDE.md` (strongest) — installed with
+the user-global `~/.claude/CLAUDE.md` (strongest), installed with
 `deploy-zm-claude.sh --with-rule`, off by default because patching a
 machine's global config is invasive. The rule is self-guarding: it applies
 only when the session exposes the `mcp__zero-memory__*` tools.

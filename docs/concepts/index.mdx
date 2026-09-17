@@ -6,24 +6,26 @@ description: The memory model and the design decisions behind zero-memory.
 This section explains how zero-memory represents knowledge and why it is built
 the way it is.
 
-- [Memory model](/docs/concepts/memory-model) — memories, kinds, entities,
-  links, and the MCP tools that operate on them.
-- [Canonical language](/docs/concepts/canonical-language) — why stored
-  content is canonical English, and how other languages are handled on write,
-  read, and in the dashboard.
-- [Scopes and isolation](/docs/concepts/scopes-and-isolation) — personal,
-  project, and team scopes, explicit membership, project-isolated reads, how
-  a session attaches to its project (and why an unattached write is
-  refused), and the verified portable layer.
-- [Agent principals](/docs/concepts/agent-principals) — how non-human writers
-  are identified and what that identity enables across memories, activity,
-  and metrics.
-- [Identity](/docs/concepts/identity) — prefixed domain identifiers, branded
-  id contracts, the system-of-record rule, and how a project is identified.
-- [Provenance](/docs/concepts/provenance) — who wrote a memory, how that
-  ranks it, and which client it came from.
-- [Supersede and versioning](/docs/concepts/supersede-and-versioning) — how
-  facts are updated without creating duplicates, and how version history
-  forms behind a current fact.
-- [Open loops](/docs/concepts/open-loops) — tasks and open questions that
-  persist in briefings until closed.
+Start with the [memory model](/docs/concepts/memory-model): memories, kinds,
+entities, links, and the MCP tools that operate on them. Stored content is
+always canonical English.
+[Canonical language](/docs/concepts/canonical-language) covers why, and how
+other languages are handled on write, read, and in the dashboard.
+
+Access is the next layer.
+[Scopes and isolation](/docs/concepts/scopes-and-isolation) describes personal,
+project, and team scopes, explicit membership, project-isolated reads, how a
+session attaches to its project (and why an unattached write is refused), and
+the verified portable layer. Writers have identities of their own.
+[Agent principals](/docs/concepts/agent-principals) explains how non-human
+writers are identified and what that identity enables across memories,
+activity, and metrics, while [Identity](/docs/concepts/identity) covers
+prefixed domain identifiers, branded id contracts, the system-of-record rule,
+and how a project is identified.
+
+The rest is lifecycle. [Provenance](/docs/concepts/provenance) records who
+wrote a memory, how that ranks it, and which client it came from.
+[Supersede and versioning](/docs/concepts/supersede-and-versioning) shows how
+facts are updated without creating duplicates, and how version history forms
+behind a current fact. [Open loops](/docs/concepts/open-loops) are tasks and
+open questions that persist in briefings until closed.

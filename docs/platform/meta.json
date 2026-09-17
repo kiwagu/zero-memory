@@ -2,6 +2,7 @@
   "title": "Platform",
   "pages": [
     "index",
+    "retrieval",
     "ui-stack",
     "e2e-testing",
     "observability",

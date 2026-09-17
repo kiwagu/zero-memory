@@ -132,7 +132,7 @@ describe('ScopeDescribeService', () => {
       makeMeta()
     );
 
-    const result = await service.describe({ scope: 'ulearn' });
+    const result = await service.describe({ scope: 'acme' });
 
     expect(result.isErr()).toBe(true);
   });

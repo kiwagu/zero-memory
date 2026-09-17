@@ -4,16 +4,12 @@
  * UI. Not part of any gate — the `@docs-shot` tag keeps these out of the smoke
  * run; capture them on demand with `bun run e2e:screenshots`.
  *
- * THIS SPEC ONLY PHOTOGRAPHS. The scene is prepared by `bun run demo:seed`,
- * which fills the showcase account with real, curated content (see
- * `scripts/curate-showcase.ts`). Seeding here as well would photograph
- * `E2E fixture: …` rows — a picture of the test harness rather than of the
- * product. Run the seed first; every test below fails with that instruction if
- * the account is missing.
+ * Prepare the scene with `bun run demo:seed` first: this spec only photographs.
+ * Seeding here would photograph `E2E fixture: …` rows instead of the product.
  *
- * Element shots are used where a doc page points at one panel, viewport shots
- * where it describes a whole screen. Nothing is captured `fullPage`: a tall
- * strip of a scrolled page is unreadable at documentation width.
+ * Element shots where a doc page points at one panel, viewport shots where it
+ * describes a whole screen. Never `fullPage` — a tall strip of a scrolled page
+ * is unreadable at documentation width.
  */
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -37,33 +33,60 @@ const imageDir = join(
 const shotPath = (name: string): string => join(imageDir, `${name}.png`);
 
 /**
- * Brings the shot's SUBJECT into frame before the shutter.
- *
- * Several screens open on something other than what the doc page is about — the
- * settings page starts at the profile panel, the insights page at its hero
- * chart, the search screen at its form. Capturing the raw viewport then shows
- * everything except the point. `scrollIntoViewIfNeeded` moves nothing when the
- * subject is already visible, so this is safe to apply everywhere.
+ * Brings the shot's subject into frame: several screens open on something other
+ * than what the doc page is about. `scrollIntoViewIfNeeded` moves nothing when
+ * the subject is already visible, so this is safe everywhere.
  */
 const frameOn = async (subject: Locator, page: Page): Promise<void> => {
   await subject.scrollIntoViewIfNeeded();
   await page.waitForTimeout(SETTLE_MS);
 };
 
+/**
+ * Waits for React to hydrate, not merely for the server's HTML to be on screen.
+ *
+ * Playwright injects `caret-color: transparent` to hide the text caret; landing
+ * before hydration, that attribute becomes a genuine hydration mismatch and the
+ * `next dev` overlay badges the shot. Shoot after hydration instead.
+ *
+ * The signal is `next-themes` writing `style="color-scheme: …"` on <html>,
+ * which the server-rendered markup never carries. A heading is NOT a signal: it
+ * ships in the SSR HTML, so waiting on one can fire mid-hydration.
+ */
+const waitForHydration = async (page: Page): Promise<void> => {
+  await page.waitForFunction(() =>
+    document.documentElement.getAttribute('style')?.includes('color-scheme')
+  );
+};
+
+/**
+ * Drops the `next dev` devtools overlay from the frame. This hides TOOLING, not
+ * an app defect: the badge is lit by this suite's own aborted requests.
+ *
+ * The config switch is not the answer, measured rather than assumed — the
+ * stands already run `ZM_DEV_INDICATORS=off`, and Next 16's `devIndicators`
+ * governs the BUILD indicator; the error badge is not reachable through it.
+ */
+const hideDevOverlay = async (page: Page): Promise<void> => {
+  await page.evaluate(() => {
+    document
+      .querySelectorAll('nextjs-portal')
+      .forEach((portal) => portal.remove());
+  });
+};
+
 /** Writes one screen-level PNG, creating the docs image directory on first use. */
 const captureScreen = async (page: Page, name: string): Promise<void> => {
   await mkdir(imageDir, { recursive: true });
+  await waitForHydration(page);
+  await hideDevOverlay(page);
   await page.screenshot({ path: shotPath(name) });
 };
 
 /**
- * Breathing room around a panel crop, in CSS pixels.
- *
- * An element screenshot stops exactly at the element's box, which slices off
- * the very thing that makes a tile look like a tile: its border and the shadow
- * just outside it. Capturing a slightly larger region keeps the card intact.
- * Kept small on purpose — a wide margin starts pulling in the neighbours a
- * crop exists to exclude.
+ * Breathing room around a panel crop, in CSS pixels. An element screenshot
+ * stops at the element's box, slicing off its border and shadow. Kept small: a
+ * wide margin pulls in the neighbours the crop exists to exclude.
  */
 const PANEL_PADDING = 10;
 
@@ -74,16 +97,18 @@ const capturePanel = async (
   page: Page
 ): Promise<void> => {
   await mkdir(imageDir, { recursive: true });
-  // The clip is expressed in VIEWPORT coordinates, so a panel further down a
-  // long page must be scrolled into view first — otherwise the requested
-  // region falls outside the image and the capture fails.
+  // A panel crop is a screenshot too: same hydration and overlay gates.
+  await waitForHydration(page);
+  await hideDevOverlay(page);
+  // The clip is in VIEWPORT coordinates, so a panel further down the page must
+  // be scrolled into view or the region falls outside the image.
   await frameOn(target, page);
   const box = await target.boundingBox();
   if (!box) {
     throw new Error(`panel "${name}" has no box to capture`);
   }
-  // Clamped at the page origin: a panel flush against the top or left edge
-  // would otherwise ask for a negative offset, which Playwright rejects.
+  // Clamped at the origin: a panel flush against an edge would otherwise ask
+  // for a negative offset, which Playwright rejects.
   const x = Math.max(0, box.x - PANEL_PADDING);
   const y = Math.max(0, box.y - PANEL_PADDING);
   await page.screenshot({
@@ -116,6 +141,12 @@ const signIn = async (page: Page): Promise<void> => {
     page.getByTestId('insights-page'),
     'showcase account missing — run `bun run demo:seed` first'
   ).toBeVisible();
+  // Let the landing page go quiet before the caller navigates on. Leaving with
+  // a request in flight aborts it, and the dev server throws annotating the
+  // resulting DOMException — an uncaught exception that lights the overlay's
+  // error badge for the rest of the browser session. Hydration alone is not
+  // enough: it completes while the dashboard's data requests still stream.
+  await page.waitForLoadState('networkidle');
 };
 
 test.use({
@@ -158,8 +189,8 @@ test.describe('documentation screenshots', () => {
   }) => {
     await signIn(page);
     // Filtered rather than taken off page one: the showcase corpus is longer
-    // than a page, and the one memory with an original-language form would
-    // otherwise depend on where the feed's ordering happened to put it.
+    // than a page, so the one memory with an original-language form would
+    // otherwise depend on the feed's ordering.
     await page.goto('/memories?q=canonical+English');
 
     const card = page
@@ -259,10 +290,9 @@ test.describe('documentation screenshots', () => {
     const inventory = page.getByTestId('insights-inventory');
     await expect(inventory).toBeVisible();
 
-    // Deliberately the viewport, not the whole scrollable page: a 2400px-tall
-    // strip is unreadable once scaled into a documentation column. But the
-    // viewport's TOP is the hero chart, which says little on its own — so the
-    // shot is framed on the tiles the page is actually about.
+    // Deliberately the viewport, not the whole scrollable page: a 2400px strip
+    // is unreadable in a documentation column. The viewport's top is the hero
+    // chart, so the shot is framed on the tiles the page is about.
     await inventory.evaluate((node) =>
       node.scrollIntoView({ block: 'start', behavior: 'instant' })
     );
@@ -347,19 +377,5 @@ test.describe('documentation screenshots', () => {
       page.getByRole('heading', { name: 'Scopes', level: 1 })
     ).toBeVisible();
     await captureScreen(page, 'scopes');
-  });
-
-  test.describe('dark theme', () => {
-    // The theme is `next-themes` in system mode, so the emulated colour scheme
-    // is what flips the dashboard — no toggle to drive.
-    test.use({ colorScheme: 'dark' });
-
-    test('@docs-shot memory feed in dark theme', async ({ page }) => {
-      await signIn(page);
-      await page.goto('/memories');
-
-      await expect(page.getByTestId('memory-card').first()).toBeVisible();
-      await captureScreen(page, 'dashboard-dark-theme');
-    });
   });
 });

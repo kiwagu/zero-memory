@@ -62,7 +62,7 @@ const CLEAN_SAMPLES: string[] = [
   'the stack listens on postgres://db.internal:5432/zm',
   'docs live at https://user@example.com/path',
   // PII stays allowed in v1 (git config, team contacts).
-  'reach the owner at kiwagu@example.com',
+  'reach the owner at owner@example.com',
   'password rotation policy is quarterly',
 ];
 

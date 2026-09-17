@@ -172,10 +172,10 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
            through the tool's own config reader so profile config and env stay
            one source) — where this profile's commands actually run.
         3. ``Path.cwd()`` — the host process directory. LAST, because on the
-           desktop app it is the launcher's directory (measured: ``/home/kiwagu``
-           while the session worked in ``~/repos/1/proflow``), which made every
-           briefing name the wrong memory project. That silent mis-scoping is
-           the whole reason this helper is not a one-liner.
+           desktop app it is the launcher's directory (measured: the user's
+           home, while the session worked in a project checkout), which made
+           every briefing name the wrong memory project. That silent
+           mis-scoping is the whole reason this helper is not a one-liner.
         """
         for leg in (
             lambda: _session_cwd_of(session_id),

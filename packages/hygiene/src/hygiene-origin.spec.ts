@@ -38,10 +38,7 @@ describe('crossProjectPair', () => {
     ).toBe(false);
     // Same owner, different slugs: provably different projects.
     expect(
-      crossProjectPair(
-        perOwner(OWNER, 'ulearn'),
-        perOwner(OWNER, 'zero_memory')
-      )
+      crossProjectPair(perOwner(OWNER, 'acme'), perOwner(OWNER, 'zero_memory'))
     ).toBe(true);
     // Same slug under DIFFERENT owner segments: the owner is a namespace, so
     // two customers' same-named projects never pair.
@@ -72,7 +69,7 @@ describe('crossProjectPair', () => {
   });
 
   it('a bare-slug scope (no proj. root) stays unknown and never blocks', () => {
-    const bare: OriginSide = { scope: 'ulearn', source: null };
+    const bare: OriginSide = { scope: 'acme', source: null };
     expect(crossProjectPair(bare, proj('zero_memory'))).toBe(false);
     expect(crossProjectPair(bare, bare)).toBe(false);
   });

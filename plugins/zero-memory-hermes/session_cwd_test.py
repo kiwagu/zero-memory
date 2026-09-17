@@ -6,9 +6,9 @@ framework installed:
 `python3 plugins/zero-memory-hermes/session_cwd_test.py`.
 
 They exist because of a defect measured 2026-09-12 on a live Hermes desktop
-session: `_cwd()` returned `Path.cwd()` — the LAUNCHER's directory
-(`/home/kiwagu`) — while the session worked in `~/repos/1/proflow`. Every
-briefing therefore named the wrong memory project, silently, for the whole life
+session: `_cwd()` returned `Path.cwd()` — the LAUNCHER's directory, the user's
+home — while the session worked in a project checkout. Every briefing
+therefore named the wrong memory project, silently, for the whole life
 of the session. The host modules are stubbed rather than imported: what must
 hold on any Hermes release is the ORDER of the chain and its behaviour when a
 leg is missing, not the internals themselves.
@@ -95,11 +95,11 @@ def _cwd_chain(namespace):
 def test_session_record_wins_over_everything() -> None:
     """A recorded session cwd is the most specific answer there is."""
     ns = _load_helpers(
-        session_cwd={"gw-key": "/home/u/repos/1/proflow"},
+        session_cwd={"gw-key": "/home/u/repos/app"},
         gateway_key="gw-key",
         terminal_cwd="/home/u/repos",
     )
-    assert _cwd_chain(ns)("sess-1") == "/home/u/repos/1/proflow"
+    assert _cwd_chain(ns)("sess-1") == "/home/u/repos/app"
 
 
 def test_gateway_key_is_tried_before_the_agent_session_id() -> None:

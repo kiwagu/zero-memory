@@ -5,23 +5,29 @@ description: Architecture, observability, testing, and internals.
 
 How the zero-memory platform is built and operated.
 
-- [UI stack](/docs/platform/ui-stack) — the component system behind the
-  dashboard.
-- [End-to-end testing](/docs/platform/e2e-testing) — the e2e harness and the
-  testing contract.
-- [Observability](/docs/platform/observability) — logging, request tracing,
-  and diagnostics.
-- [Usage events](/docs/platform/usage-events) — the append-only record of
-  metered work.
-- [Audit log](/docs/platform/audit-log) — who did what, recorded in the
-  database.
-- [Contracts and errors](/docs/platform/contracts-and-errors) — schema-first
-  contracts, versioning, and the error taxonomy.
-- [Deprecations](/docs/DEPRECATIONS) — the ledger of deprecated surfaces and
-  breaking changes in the client contract.
-- [Value metering](/docs/platform/value-metering) — instrumentation that
-  measures what memory contributes.
-- [Judge precision](/docs/platform/judge-precision) — how automated judgments
-  are kept trustworthy.
-- [ROI benchmark](/docs/platform/roi-benchmark) — counterfactual measurement
-  of memory's impact.
+[Retrieval](/docs/platform/retrieval) is the hybrid RAG pipeline behind every
+recall: two search legs, rank fusion, chunk-level embeddings, and the signals
+that reorder the result. The dashboard is composed from one component system,
+described in [UI stack](/docs/platform/ui-stack). The e2e harness that
+exercises it, and the testing contract that goes with it, are in
+[End-to-end testing](/docs/platform/e2e-testing).
+
+A running instance reports on itself in three places.
+[Observability](/docs/platform/observability) covers logging, request
+tracing, and diagnostics. [Usage events](/docs/platform/usage-events) is the
+append-only record of metered work, and the
+[audit log](/docs/platform/audit-log) records who did what, in the database.
+
+What external clients depend on is written down twice.
+[Contracts and errors](/docs/platform/contracts-and-errors) describes the
+schema-first contracts, the versioning, and the error taxonomy;
+[Deprecations](/docs/DEPRECATIONS) is the ledger of deprecated surfaces and
+breaking changes in the client contract.
+
+The last three pages are about whether memory is actually helping.
+[Value metering](/docs/platform/value-metering) is the instrumentation that
+measures what memory contributes,
+[judge precision](/docs/platform/judge-precision) is how automated judgments
+are kept trustworthy, and the
+[memory benchmark](/docs/platform/roi-benchmark) measures what you would lose
+without it.

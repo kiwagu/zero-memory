@@ -1,0 +1,115 @@
+---
+title: Retrieval
+description: The hybrid RAG pipeline behind recall — two search legs, rank fusion, chunk-level embeddings, and ranking signals.
+---
+
+Every `recall` and `build_context` call runs the same retrieval pipeline: a
+hybrid RAG layer over atomic memories rather than document chunks. Two search
+legs run in parallel, their rankings are fused, and the fused order is then
+weighted by signals the store keeps about each memory. All of it executes
+inside Postgres, so ordering and limiting happen at the source and row-level
+security scopes the results to the caller before anything leaves the
+database.
+
+## Two legs, one fused ranking
+
+The semantic leg is pgvector cosine similarity over 1024-dimension
+embeddings. The lexical leg is Postgres full-text search over a generated
+`tsvector` column. Each leg independently returns its top candidates, capped
+at `k * pool_multiplier` rows (4× the requested result count by default).
+
+The two rankings are combined by reciprocal rank fusion. Each leg contributes
+`leg_weight / (rrf_k + rank)`, with `rrf_k` at 60 — the classic flattener,
+where a lower value sharpens the head of the ranking. Both legs carry equal
+weight by default.
+
+Fusion is what makes an exact identifier findable. A memory id or an error
+code pasted into a query often has weak semantic similarity to anything, but
+the lexical leg ranks it first, and fusion carries that rank into the final
+order. Conversely a question phrased in words the corpus never used still
+finds its answer through the vector leg.
+
+These parameters live in a single-row `public.fusion_config` table, readable
+by users and writable only by the service role. An empty table degrades to
+the same defaults, so search never breaks on a missing row. Values are
+accepted through the retrieval-eval harness rather than set ad hoc, because
+the knobs interact: lowering `rrf_k` while raising `pool_multiplier` changes
+both the shape of the head and how many candidates reach fusion.
+
+## Why a memory is more than one vector
+
+The embedding model reads a fixed window and its tokenizer truncates to that
+window silently — no flag, no warning, no error. For English technical prose
+the cliff sits near 2300 characters, and everything past it is simply absent
+from the stored vector.
+
+This was measured rather than assumed. Appending 459 characters of unrelated
+text to a 2400-character body left the stored vector bit-for-bit identical
+(cosine 1.000000). A probe cut from a long memory's own tail found its parent
+as the top hit 10% of the time, against 88–100% for memories whose tail still
+fits inside the window.
+
+A long memory is therefore not unfindable — only its _opening_ is findable,
+and whatever a writer puts after the cliff is reachable by exact wording and
+nothing else. That hurts most for the records built to hand work over: their
+opening states the situation and their closing states what to do next, so
+truncation eats the actionable half first.
+
+Coverage is a function of length. A memory gets as many overflow embedding
+windows as its content needs, each one an additional vector pointing at the
+same record. During search a memory's windows collapse to its closest one, so
+a long memory competes once rather than flooding the results with its own
+fragments.
+
+## What comes back
+
+A hit is not the whole record. The excerpt is cut from the window that
+actually matched, so a long memory returns the region that scored rather than
+its first paragraph. What this guarantees is the region, not the sentence:
+the excerpt starts where the matching window starts, and the exact phrase
+that scored can lie further inside it. A hit shorter than the excerpt cap is
+delivered whole.
+
+## Ranking signals on top of relevance
+
+Fused relevance is the substrate, not the final order. Two deterministic
+multipliers are applied inside the same query:
+
+Recency decay, with a per-kind half-life. An `episode` fades over weeks while
+a `decision` barely moves over years, because the useful lifetime of a fact
+depends on what kind of fact it is. See
+[decay and reinforcement](/docs/hygiene/decay-and-reinforcement).
+
+Usage reinforcement, precomputed from recall-quality signals. Memories that
+have been recalled and confirmed useful carry a multiplier that lifts them in
+later searches. See [recall quality](/docs/guides/recall-quality) for how
+usefulness is established.
+
+Invalidated memories are excluded from search entirely. The blended value
+rides in the `score` column, which callers treat as an opaque ordering
+scalar.
+
+## Language
+
+Content is canonicalized into one internal language on write, and queries are
+steered the same way, so the embedding model runs against a single language
+instead of a multilingual mix. That is what allows a memory written in one
+language to be retrieved by a query in another — the vector leg matches
+across languages because both sides were canonicalized first. The full-text
+leg cannot do this: it matches strings, so a non-English query reaches only
+the semantic half. See
+[canonical language](/docs/concepts/canonical-language).
+
+The embedding model is `e5-large-v2`, which expects asymmetric prefixes —
+`query:` for search queries and `passage:` for stored content. The service
+applies them, along with mean pooling and L2 normalization, so callers never
+deal with the convention.
+
+## Where retrieval surfaces
+
+The same pipeline backs three entry points. `recall` is the agent-facing
+search tool. `build_context` uses it to assemble a session briefing, where
+the pack is additionally budgeted and de-noised — see
+[briefings](/docs/guides/briefing). The dashboard's
+[advanced search](/docs/dashboard/search) exposes it directly, including the
+per-leg chips that show which leg matched and how strongly.

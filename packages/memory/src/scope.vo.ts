@@ -11,7 +11,7 @@ const CORE_LABEL = 'core';
 
 /**
  * Roots a caller-supplied scope may live under. A bare ltree label (agents
- * write `scope: "ulearn"`, or placeholder literals like `user` / `project`)
+ * write `scope: "acme"`, or placeholder literals like `user` / `project`)
  * passes the pattern but lands OUTSIDE every read set — the memory becomes
  * invisible to normal recall — so creation requires a rooted path of at
  * least two labels.
@@ -60,7 +60,7 @@ export class Scope extends ValueObject<string> {
   /**
    * Reconstitutes a scope from a STORED row (memories, project bindings).
    * Lenient on purpose: rows written before creation was hardened may carry a
-   * legacy unrooted path (e.g. a bare `ulearn`), and a read must never fail
+   * legacy unrooted path (e.g. a bare `acme`), and a read must never fail
    * on data that is already in the store — only the ltree pattern is checked.
    * New scopes always go through the strict {@link create}.
    */

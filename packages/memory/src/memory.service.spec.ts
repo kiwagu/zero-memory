@@ -2046,11 +2046,11 @@ describe('MemoryService.remember — the portable-layer gate', () => {
     const result = await service.remember({
       content: 'put this loop in the other project',
       kind: 'task',
-      scope: 'proj.ulearn',
+      scope: 'proj.acme',
     });
 
     expect(result.isOk()).toBe(true);
-    expect(result.unwrap().scope).toContain('ulearn');
+    expect(result.unwrap().scope).toContain('acme');
     expect(portabilityJudge.judgePortability).not.toHaveBeenCalled();
   });
 });
@@ -2108,7 +2108,7 @@ describe('MemoryService — the session thread', () => {
   });
 
   it('lets the hook win when its project differs from the echoed thread', async () => {
-    const threads = threadOn('proj.ulearn');
+    const threads = threadOn('proj.acme');
     const { service } = makeService({ threads });
 
     // cwd moved, so the work moved: the assertion rewrites the row rather
@@ -2185,7 +2185,7 @@ describe('MemoryService — the session thread', () => {
 
   it('keeps the thread out of the way of an explicitly named scope', async () => {
     const { service, threads } = makeService({
-      threads: threadOn('proj.ulearn'),
+      threads: threadOn('proj.acme'),
     });
 
     // Addressing another scope by name is the owner's instruction: it must

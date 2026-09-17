@@ -7,28 +7,25 @@ The [false-invalidation safeguards](/docs/hygiene/false-invalidation)
 deliberately trade throughput for safety: any pair whose loser is durable,
 authoritative knowledge goes to the review queue instead of being resolved
 automatically. That means the queue grows _by design_. zero-memory restores
-throughput with three mechanisms that reduce inflow and cheapen triage —
+throughput with three mechanisms that reduce inflow and cheapen triage,
 without weakening the safeguards.
 
-## Why it exists
+## What actually fills the queue
 
 Analysis of real queues shows that most pending pairs are not hard
-judgment calls at all. The dominant classes are:
-
-- **Checkpoint chains** — "planned → implemented → merged → deployed"
-  status updates about the same piece of work (roughly half of a typical
-  queue);
-- **Refinement chains** — "symptom → root cause → verified final fix" for
-  the same problem (roughly a quarter);
-- **Cross-scope restatements** of one rule, and **complementary
-  general-vs-specific** pairs (most of the rest).
+judgment calls at all. The dominant classes are checkpoint chains —
+"planned → implemented → merged → deployed" status updates about the same
+piece of work, roughly half of a typical queue — and refinement chains,
+"symptom → root cause → verified final fix" for the same problem, roughly
+another quarter. Cross-scope restatements of one rule and complementary
+general-vs-specific pairs make up most of the rest.
 
 The striking property of the first two classes: the _same agent_ that writes
 the update usually knows, at write time, that it is an update — "MERGED",
 "FIXED", "DONE" with a reference to the previous state. The queue is mostly
 paying later for information the writer had earlier. Meanwhile, resolving
 what does land in the queue requires context the pair-wise LLM judge does
-not have — which is exactly what a chat agent with full session context does
+not have, which is exactly what a chat agent with full session context does
 have.
 
 ## Mechanism 1: declared supersede on write
@@ -36,13 +33,13 @@ have.
 The `remember` tool accepts a `supersedes` link, and its guidance instructs
 agents explicitly: **when writing a status update to something previously
 recorded, first `recall` the earlier record, then pass its id in
-`supersedes`.** The old checkpoint is superseded at the source — reversibly,
-through the normal [version history](/docs/concepts/supersede-and-versioning)
-— and the pair never enters the queue at all. A declared supersede also
+`supersedes`.** The old checkpoint is superseded at the source, reversibly,
+through the normal [version history](/docs/concepts/supersede-and-versioning),
+and the pair never enters the queue at all. A declared supersede also
 closes the matching [open loop](/docs/concepts/open-loops) when the update
 completes a tracked task.
 
-This is the highest-leverage mechanism: the checkpoint and refinement
+This is the highest-leverage mechanism. The checkpoint and refinement
 classes, the large majority of queue inflow, are exactly the writes where
 the author already knows the answer.
 
@@ -68,7 +65,7 @@ retire?}]` — omitting both means keep both, `retire: true` reversibly
   batch.
 
 The queue also carries single-subject disputes (a challenged memory, a stale
-suspect); winner policies skip those — there is nothing to pick between —
+suspect). Winner policies skip those, since there is nothing to pick between,
 so a bulk policy can never retire a memory on its own.
 
 A full queue triage is therefore one MCP call instead of one call per pair.
@@ -98,22 +95,23 @@ plain facts, episodes, and references were not). The skip also stops the
 scheduler from burning judge tokens re-classifying the same neighbors every
 night.
 
-## Design notes
+## Evidence behind these choices
 
-- **Deterministic logic stays outside the judge.** Encoding triage
-  meta-rules as prose in the judge's prompt was measured and rejected: it
-  degrades the judge's precision on the verdicts it already handles well.
-  Everything that can be decided deterministically is decided before the
-  LLM; the judge remains a pair classifier.
-- **Work-item anchors are precise; topic anchors are dangerous.** A
-  deterministic checkpoint-chain detector was evaluated against ground-truth
-  pairs: matching on shared work-item anchors (branch name, commit hash) is
-  extremely precise but fires too rarely to matter, while loosening to
-  topic-level anchors (a document or ticket number shared by many distinct
-  facts) collapses precision and starts hitting exactly the complementary
-  keep-both pairs the safeguards protect. The detector was therefore not
-  shipped as an auto-action — declared supersedes already remove that class
-  at the source.
-- **Adoption is observable.** The share of writes carrying a declared
-  supersede is visible in [usage events](/docs/platform/usage-events), so
-  drift back toward queue-heavy behavior shows up in the data.
+Deterministic logic stays outside the judge. Encoding triage meta-rules as
+prose in the judge's prompt was measured and rejected: it degrades the
+judge's precision on the verdicts it already handles well. Everything that
+can be decided deterministically is decided before the LLM; the judge remains
+a pair classifier.
+
+Work-item anchors are precise; topic anchors are dangerous. A deterministic
+checkpoint-chain detector was evaluated against ground-truth pairs. Matching
+on shared work-item anchors (branch name, commit hash) is extremely precise
+but fires too rarely to matter, while loosening to topic-level anchors (a
+document or ticket number shared by many distinct facts) collapses precision
+and starts hitting exactly the complementary keep-both pairs the safeguards
+protect. The detector was therefore not shipped as an auto-action, since
+declared supersedes already remove that class at the source.
+
+Adoption is observable. The share of writes carrying a declared supersede is
+visible in [usage events](/docs/platform/usage-events), so drift back toward
+queue-heavy behavior shows up in the data.

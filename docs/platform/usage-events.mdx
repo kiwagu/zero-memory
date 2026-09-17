@@ -3,21 +3,20 @@ title: Usage events
 description: The append-only record of metered work, kept for operational accounting and product insight.
 ---
 
-zero-memory records every unit of metered work — an LLM extraction, an
-embedding batch, an MCP tool call — as a row in an append-only table,
-`public.usage_events`. The table is the deployment's own operational
-accounting ledger: it stays inside your database, and it never contains
-memory content.
+zero-memory records every unit of metered work as a row in an append-only
+table, `public.usage_events`: an LLM extraction, an embedding batch, an MCP
+tool call. The table is the deployment's own operational accounting ledger. It
+stays inside your database, and it never contains memory content.
 
-## Why it exists
+## Why the ledger starts on day one
 
 Usage history is unrecoverable: if events are not written from day one, the
 data simply never existed. A single append-only table, captured from the
-start, serves two needs at once — operational accounting (how much work ran,
-for whom, in what units) and product insight (which tools and paths are
-actually used) — without shipping anything to an external analytics service.
+start, covers two needs at once. Operational accounting asks how much work
+ran, for whom, in what units; product insight asks which tools and paths are
+actually used. Neither one ships anything to an external analytics service.
 
-## How it works
+## Rows, types, and attribution
 
 ### The table
 
@@ -35,7 +34,7 @@ Each event is one row:
 | `request_id`  | Correlation id shared with logs and the audit log                                                                      |
 
 The table is append-only and indexed by time and by `(user_id, occurred_at)`.
-Row-level security is enabled with **no policies** — a deliberate deny-all:
+Row-level security is enabled with **no policies**, a deliberate deny-all:
 only the server's service role can access the table directly. End users never
 query raw rows; owner-scoped dashboard/activity RPCs expose only the caller's
 derived view.
@@ -58,61 +57,60 @@ adding instrumentation.
 ### Recording is fire-and-forget
 
 Writes go through a small domain port (`UsageRecorder`) whose calls are never
-awaited on the critical path. If the ledger write fails, the failure is
-logged and the primary operation — the recall, the remember, the ingest —
-completes normally. Accounting must never break the product.
+awaited on the critical path. If the ledger write fails, the failure is logged
+and the primary operation completes normally, whether that is the recall, the
+remember or the ingest. Accounting must never break the product.
 
 ### Attribution
 
 `user_id` comes from the authenticated request context. Background work (for
 example, watcher passes) runs outside any request but always knows whose
-corpus it touched, so it passes the subject explicitly — otherwise the ledger
+corpus it touched, so it passes the subject explicitly. Otherwise the ledger
 and any check against it would describe different things. `agent_name` is set
 when the actor is an [agent principal](/docs/concepts/agent-principals), and
 `request_id` ties the event to the same request in the logs — see
 [Observability](/docs/platform/observability).
 
-## How to use it
+## Questions the ledger answers
 
-Query the table directly with operator (service-role) access:
+Query the table directly with operator (service-role) access. Grouping by
+`event_type` and `unit` over a time window gives volume by type: extraction
+token spend, embedding volume, and tool-call counts. The
+`(user_id, occurred_at)` index makes per-user accounting cheap. Filtering by
+`request_id` traces one request, showing every unit of work it produced
+alongside its log lines and [audit entries](/docs/platform/audit-log).
 
-- **Volume by type** — group by `event_type` and `unit` over a time window to
-  see extraction token spend, embedding volume, and tool-call counts.
-- **Per-user accounting** — the `(user_id, occurred_at)` index makes
-  per-person rollups cheap.
-- **Tracing one request** — filter by `request_id` to see every unit of work
-  a single request produced, alongside its log lines and
-  [audit entries](/docs/platform/audit-log).
-- **Scope-usage audit** — group read-tool rows by `read_mode`, or unnest the
-  per-scope return counts, to answer "are sessions reading pinned to their
-  project, or degrading to everything visible?" The fields are recorded at
-  the source, so the audit is a `GROUP BY` instead of a fragile
-  reconstruction.
+The scope-usage audit has the same shape. Group read-tool rows by `read_mode`,
+or unnest the per-scope return counts, to answer "are sessions reading pinned
+to their project, or degrading to everything visible?" The fields are recorded
+at the source, so the audit is a `GROUP BY` instead of a fragile
+reconstruction.
 
-One thing deliberately **not** in this ledger: refused writes. A refused
-`remember` emits no usage event — it is counted by the
+One thing is deliberately **not** in this ledger: refused writes. A refused
+`remember` emits no usage event. It is counted by the
 `mcp_write_refused_total` Prometheus counter, labelled by refusal reason
 (see [Observability](/docs/platform/observability)).
 
-Higher-level questions — what the memory actually contributed, not just what
-it cost — are covered by [Value metering](/docs/platform/value-metering),
+Higher-level questions, about what the memory actually contributed rather than
+what it cost, are covered by [Value metering](/docs/platform/value-metering),
 which builds on this ledger's `recall_used` signal.
 
-## Design notes
+## What the ledger refuses
 
-- **Own table over external analytics.** A hosted analytics service would
-  mean a premature dependency and data leaving the deployment. One
-  append-only table covers both accounting and funnel analysis, and keeps a
-  self-hosted installation fully self-contained.
-- **Memory content never enters the ledger.** Metadata is normally restricted
-  to counters and identifiers — token counts, model ids, tool names, and
-  returned memory ids. The deliberate exception is the user's own `recall`
-  query, truncated to 200 characters so the activity feed can explain an empty
-  search. It is stored exactly as it was sent, which is also exactly what was
-  searched — nothing rewrites a query, so one string covers both.
-  Treat usage retention as operational metadata retention, not as a
-  content-free guarantee.
-- **Deny-all RLS as a pattern.** Enabling row-level security while creating
-  no policies is the standard pattern here for operational tables: nothing
-  short of the service role can touch them, and the posture is explicit in
-  the schema rather than implied by omission.
+The ledger is an own table rather than external analytics. A hosted analytics
+service would mean a premature dependency and data leaving the deployment. One
+append-only table covers both accounting and funnel analysis, and keeps a
+self-hosted installation self-contained.
+
+Memory content never enters the ledger. Metadata is normally restricted to
+counters and identifiers: token counts, model ids, tool names, and returned
+memory ids. The deliberate exception is the user's own `recall` query,
+truncated to 200 characters so the activity feed can explain an empty search.
+It is stored exactly as it was sent, which is also exactly what was searched,
+since nothing rewrites a query. Treat usage retention as operational metadata
+retention, not as a content-free guarantee.
+
+Deny-all RLS is a pattern here. Enabling row-level security while creating no
+policies is the standard shape for operational tables: nothing short of the
+service role can touch them, and the posture is explicit in the schema rather
+than implied by omission.

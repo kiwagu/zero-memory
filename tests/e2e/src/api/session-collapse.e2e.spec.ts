@@ -189,7 +189,7 @@ test.describe('Same-session refinement collapse over MCP', () => {
       const write = await mcp.callTool('remember', {
         content: 'e2e bare-scope marker: this write must not land anywhere',
         kind: 'fact',
-        scope: 'ulearn',
+        scope: 'acme',
       });
       expect(write.isError ?? false).toBe(true);
       expect(contentText(write)).toContain('rooted ltree path');

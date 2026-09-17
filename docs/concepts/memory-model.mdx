@@ -4,8 +4,8 @@ description: Memories, kinds, entities, links, and the MCP tools that operate on
 ---
 
 zero-memory stores knowledge as **memories**: small, atomic facts written at
-the moment they are discovered. A memory is one self-contained statement — a
-decision with its why, a preference, a gotcha, a convention — not a transcript
+the moment they are discovered. A memory is one self-contained statement, a
+decision with its why, a preference, a gotcha, a convention. Not a transcript
 or a log dump.
 
 ## Kinds
@@ -32,13 +32,13 @@ entities they involve, and memories link to each other with typed relations
 (`relates_to`, `supersedes`, `contradicts`, `derived_from`). Retrieval uses
 this graph to pull in context that plain text search would miss.
 
-The entities a memory is attached to are its **anchors** — the subjects it can
+The entities a memory is attached to are its **anchors**, the subjects it can
 be reached by. Name them on `remember` with `entities`, and they are used
 exactly as given. Name none and the server anchors the write itself, to
 entities the scope already holds whose name the text speaks: it resolves
 against the existing graph and never invents a subject. The response reports
 the key the write received in `anchors`. A `decision` that ends with no anchor
-at all comes back with `anchor_hint` instead — a subject the graph has never
+at all comes back with `anchor_hint` instead. A subject the graph has never
 seen can only be named by the author, and a decision nobody can reach by its
 subject is findable only by phrasing it the same way again.
 
@@ -46,18 +46,18 @@ subject is findable only by phrasing it the same way again.
 
 The MCP server exposes one schema-first surface around the memory lifecycle:
 
-- **Write and ingest:** `remember`, `ingest_conversation`, and
+- Write and ingest: `remember`, `ingest_conversation`, and
   `import_memory`.
-- **Retrieve and brief:** `recall`, `build_context`, `entities`, and
+- Retrieve and brief: `recall`, `build_context`, `entities`, and
   `describe_scope`.
-- **Graph, sharing, and routing:** `link`, `share`, and `move_memories`
+- Graph, sharing, and routing: `link`, `share`, and `move_memories`
   (batch-move mis-routed memories into the project they belong to).
-- **Lifecycle:** `forget`, `restore_memory`, and `close_loop`.
-- **Hygiene and conflicts:** `scan_hygiene`, `challenge` (dispute one memory
+- Lifecycle: `forget`, `restore_memory`, and `close_loop`.
+- Hygiene and conflicts: `scan_hygiene`, `challenge` (dispute one memory
   as wrong or stale), `list_conflicts`, `get_conflict`, `resolve_conflict`,
   and `resolve_conflicts`.
-- **Rules and quality:** `promote_rule` and `benchmark_memory`.
-- **Operations and portability:** `session_receipt`, `export_metrics`,
+- Rules and quality: `promote_rule` and `benchmark_memory`.
+- Operations and portability: `session_receipt`, `export_metrics`,
   `export_memories`, and `delete_account`.
 
 Inputs and outputs come from the shared
@@ -65,8 +65,8 @@ Inputs and outputs come from the shared
 transports expose the same behavior. Every tool declares its behavior
 annotations (read-only, idempotent, destructive) and returns a structured,
 schema-validated result alongside a compact text mirror. The write and read
-tools additionally report **session state** on every result —
-`session: { attached_project, thread? }` plus a plain-text line — so an
+tools additionally report **session state** on every result:
+`session: { attached_project, thread? }` plus a plain-text line. An
 agent always sees whether its session knows the project before the next
 write depends on it (see
 [Scopes and isolation](/docs/concepts/scopes-and-isolation)).
@@ -82,20 +82,18 @@ triage pass.
 
 ## Write discipline
 
-The store favors many small writes over few large ones:
-
-- A write must have a resolvable target: the session's attached project is
-  the default, and a target-less write is **refused, never re-homed** — see
-  [Scopes and isolation](/docs/concepts/scopes-and-isolation).
-- One atomic fact per memory, written at the moment of discovery.
-- Updates are declared, not implied: a new version **supersedes** the old one
-  explicitly. See
-  [Supersede and versioning](/docs/concepts/supersede-and-versioning).
-- Near-duplicates in the same scope are deduplicated on write.
+The store favors many small writes over few large ones. A write must have a
+resolvable target: the session's attached project is the default, and a
+target-less write is **refused, never re-homed** (see
+[Scopes and isolation](/docs/concepts/scopes-and-isolation)). Each memory
+carries one atomic fact, written at the moment of discovery. Updates are
+declared, not implied, so a new version **supersedes** the old one explicitly;
+see [Supersede and versioning](/docs/concepts/supersede-and-versioning).
+Near-duplicates in the same scope are deduplicated on write.
 
 There is a mechanical reason behind the first preference, not just taste. The
 embedding model reads a fixed-size window of each memory, so on its own a long
-memory is represented by its opening — and a handover note states the
+memory is represented by its opening, and a handover note states the
 situation in its opening and what to do next in its closing. Longer content is
 therefore covered by **as many overlapping windows as it takes**, and search
 scores each memory by whichever of its windows is closest to the query. Where
@@ -124,7 +122,7 @@ solutions from scratch.
 Portable world knowledge is also age-checked on read. A `fact` or `reference`
 in the personal core scope that has not been checked against an external
 source within its freshness budget (180 days for facts, 90 for references)
-comes back from `recall` with a `stale_days` marker — a cue to re-verify
-against current docs and either confirm the fact or supersede it, not a
-verdict that it is wrong. Project-scoped memories are never marked: their
-truth lives in the project itself, not the outside world.
+comes back from `recall` with a `stale_days` marker. That is a cue to
+re-verify against current docs and either confirm the fact or supersede it,
+not a verdict that it is wrong. Project-scoped memories are never marked:
+their truth lives in the project itself, not the outside world.

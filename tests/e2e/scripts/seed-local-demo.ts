@@ -33,10 +33,8 @@ const DEMO_NAME = 'Zero Memory Demo';
 const workdir = resolve(fileURLToPath(import.meta.url), '../..');
 
 /**
- * The showcase corpus: real memories this project accumulated, curated for
- * publication by `bun scripts/curate-showcase.ts` (which strips private paths,
- * planning markers, other projects and identifiers). Committed and reviewable,
- * because these end up in screenshots.
+ * The showcase corpus: curated memories, reviewed and committed because they
+ * end up in screenshots.
  *
  * Falls back to the handful of hand-written lines below when the curated file
  * is absent, so a fresh checkout still gets a usable demo.

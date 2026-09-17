@@ -52,21 +52,6 @@ platform means adding one row there and building on it — no other file changes
   source machine's `start` calls it, the Claude installer's `--with-ingest`
   reuses it, and `build-zm-bundle.sh` stages it into the bundle. Check what is
   actually wired with `zero-memory-watcher hooks --check`.
-- `mirror-snapshot.sh <mirror-dir>` — materialize this repo's `main` tree as a
-  history-free snapshot commit INSIDE the local mirror clone, over git's local
-  transport. No network, idempotent (an unchanged tree is a no-op), and it cuts
-  `v<version>` when the clone carries no tag for the snapshotted tree's version
-  — releasing is a version bump. This repository is deliberately NOT connected
-  to the mirror host: exactly one checkout holds that remote, and it carries
-  nothing but published snapshots.
-- `mirror-publish.sh <mirror-dir>` — the only step that talks to the mirror
-  host, run inside the clone: pushes the branch plus any version tags the
-  remote lacks. `--dry-run` shows what would travel.
-- `install-git-hooks.sh` — install this repo's local git hooks idempotently.
-  `.git/hooks` is untracked, so a hand-written hook is invisible elsewhere and
-  fails silently; the set is declared here instead. `post-merge` flags the
-  merge for its durable-status sync and, on `main`, materializes the mirror
-  snapshot — main moving is the signal the release contour is built on.
 - `promote-stage.sh` — promote the stage worktree (the stable serving copy) to
   the current `dev` tip. Manual, deliberate step, on the owner's explicit
   command only — this is the ONLY path that applies migrations to the live DB.

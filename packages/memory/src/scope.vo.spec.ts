@@ -33,18 +33,18 @@ describe('Scope', () => {
   });
 
   it('rejects bare and unrooted labels with a hint', () => {
-    // Bare slugs ('ulearn') and placeholder literals ('user', 'project')
+    // Bare slugs ('acme') and placeholder literals ('user', 'project')
     // pass the ltree pattern but land outside every read set.
-    for (const path of ['ulearn', 'user', 'proj', 'project', 'a.b.c.d']) {
+    for (const path of ['acme', 'user', 'proj', 'project', 'a.b.c.d']) {
       const result = Scope.create(path);
       expect(result.isErr(), path).toBe(true);
     }
-    expect(Scope.create('ulearn').unwrapErr()).toContain('rooted ltree path');
+    expect(Scope.create('acme').unwrapErr()).toContain('rooted ltree path');
   });
 
   it('reconstitutes legacy stored scopes leniently', () => {
     // Rows written before creation was hardened must keep reading.
-    expect(Scope.fromStored('ulearn').isOk()).toBe(true);
+    expect(Scope.fromStored('acme').isOk()).toBe(true);
     expect(Scope.fromStored('proj.zero_memory').isOk()).toBe(true);
     expect(Scope.fromStored('Not Ltree!').isErr()).toBe(true);
   });
