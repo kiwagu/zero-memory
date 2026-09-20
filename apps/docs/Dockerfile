@@ -21,6 +21,7 @@ COPY apps/server/package.json apps/server/
 COPY apps/watcher/package.json apps/watcher/
 COPY apps/web/package.json apps/web/
 COPY packages/audit/package.json packages/audit/
+COPY packages/board/package.json packages/board/
 COPY packages/client-adapter-claude/package.json packages/client-adapter-claude/
 COPY packages/client-adapter-codex/package.json packages/client-adapter-codex/
 COPY packages/client-adapter-cursor/package.json packages/client-adapter-cursor/

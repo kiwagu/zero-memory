@@ -50,7 +50,7 @@
     },
     "apps/server": {
       "name": "server",
-      "version": "0.16.0",
+      "version": "0.19.0",
       "bin": {
         "zero-memory-mcp": "./src/mcp-stdio.ts",
       },
@@ -91,7 +91,7 @@
     },
     "apps/watcher": {
       "name": "watcher",
-      "version": "0.28.1",
+      "version": "0.28.2",
       "bin": {
         "zero-memory-watcher": "./src/index.ts",
       },
@@ -119,7 +119,7 @@
     },
     "apps/web": {
       "name": "web",
-      "version": "0.16.0",
+      "version": "0.19.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "catalog:",
         "@supabase/ssr": "catalog:",
@@ -154,6 +154,23 @@
       "dependencies": {
         "@workspace/di": "workspace:*",
         "@workspace/logger": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "@workspace/eslint-config": "workspace:^",
+        "@workspace/typescript-config": "workspace:^",
+        "eslint": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/board": {
+      "name": "@workspace/board",
+      "version": "0.1.0",
+      "dependencies": {
+        "@workspace/contracts": "workspace:*",
+        "oxide.ts": "catalog:",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@types/node": "catalog:",
@@ -1501,6 +1518,8 @@
     "@workflow/serde": ["@workflow/serde@4.1.0", "", {}, "sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ=="],
 
     "@workspace/audit": ["@workspace/audit@workspace:packages/audit"],
+
+    "@workspace/board": ["@workspace/board@workspace:packages/board"],
 
     "@workspace/client-adapter-claude": ["@workspace/client-adapter-claude@workspace:packages/client-adapter-claude"],
 

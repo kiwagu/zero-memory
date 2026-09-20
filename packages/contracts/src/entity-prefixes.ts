@@ -85,6 +85,11 @@ export const ENTITY_PREFIXES = {
   // session-cap eviction used to reset the project silently), and its id IS
   // the token the client hook asserts and the agent echoes back.
   session_thread: 'thr',
+  // project board: a card is the container of one piece of work (the document
+  // that says what is being done), and a card event is one row of its
+  // append-only stream — a move with its reason, an attachment, or a note.
+  card: 'crd',
+  card_event: 'cev',
 } as const;
 
 export type EntityKind = keyof typeof ENTITY_PREFIXES;
