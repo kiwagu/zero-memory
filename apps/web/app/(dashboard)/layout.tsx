@@ -26,6 +26,7 @@ export default async function DashboardLayout({
   const nav: DashboardNavItem[] = [
     { href: '/', label: t('nav.insights'), icon: 'insights' },
     { href: '/memories', label: t('nav.memories'), icon: 'memories' },
+    { href: '/board', label: t('nav.board'), icon: 'board' },
     { href: '/entities', label: t('nav.entities'), icon: 'entities' },
     { href: '/scopes', label: t('nav.scopes'), icon: 'scopes' },
     { href: '/review', label: t('nav.review'), icon: 'review' },

@@ -710,6 +710,17 @@ begin
                    from public.card_events e
                   where e.card_id = c.id
                   order by e.seq desc
+                  limit 1),
+               -- WHY the card sits in this column, which is a different
+               -- question from what happened to it last: an attachment or a
+               -- note carries no reason, and a board whose tiles showed the
+               -- latest touch would hide the justification behind it.
+               'state_reason', (
+                 select e.reason
+                   from public.card_events e
+                  where e.card_id = c.id
+                    and e.type in ('moved', 'archived')
+                  order by e.seq desc
                   limit 1)
              ) as row,
              c.updated_at
