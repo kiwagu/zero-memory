@@ -16,8 +16,16 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export default async function DashboardLayout({
   children,
+  modal,
 }: Readonly<{
   children: React.ReactNode;
+  /**
+   * Parallel slot for a route shown OVER the page beneath it — a card opened
+   * from the board. It renders alongside `children` rather than replacing
+   * them, which is what keeps the board visible behind the dialog while the
+   * address bar names the card.
+   */
+  modal: React.ReactNode;
 }>) {
   const supabase = await createServerSupabaseClient();
   const account = await currentAccount(supabase);
@@ -67,6 +75,7 @@ export default async function DashboardLayout({
           }}
         />
         <main className="min-w-0 flex-1 p-6">{children}</main>
+        {modal}
       </SidebarInset>
     </SidebarProvider>
   );

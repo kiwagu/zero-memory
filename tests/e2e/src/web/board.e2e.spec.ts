@@ -92,8 +92,13 @@ test.describe('Project board in the dashboard', () => {
     await expect(tile).toContainText(REASON);
     await expect(tile).toContainText(`#${cardNumber}`);
 
-    // The card: its work, its attachments, its history.
+    // Opening a card is a DIALOG over the board — and the address bar still
+    // names the card, so the step is navigable, shareable and reloadable.
     await tile.click();
+    await expect(page.getByTestId('card-modal')).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
+    // The board is still there underneath, not replaced.
+    await expect(page.getByTestId('board')).toBeVisible();
     await expect(page.getByTestId('card-detail')).toBeVisible();
     await expect(page.getByTestId('card-title')).toContainText(
       'Migrate the ingest worker'
@@ -119,5 +124,20 @@ test.describe('Project board in the dashboard', () => {
     await expect(detail.locator('select')).toHaveCount(0);
     await expect(detail.locator('form')).toHaveCount(0);
     await expect(detail.locator('[draggable="true"]')).toHaveCount(0);
+
+    // Dismissing goes back to the board rather than pushing it again.
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('card-modal')).toBeHidden();
+    await expect(page).toHaveURL(/\/board$/);
+
+    // The same address opened DIRECTLY is a page of its own, not a dialog:
+    // a reload or a pasted link must land on the card, not on nothing.
+    await page.goto(`/board/${cardId}`);
+    await expect(page.getByTestId('card-detail')).toBeVisible();
+    await expect(page.getByTestId('card-title')).toContainText(
+      'Migrate the ingest worker'
+    );
+    await expect(page.getByTestId('card-modal')).toHaveCount(0);
+    await expect(page.getByTestId('board')).toHaveCount(0);
   });
 });
