@@ -110,6 +110,199 @@ export type Database = {
           },
         ];
       };
+      card_events: {
+        Row: {
+          actor_id: string;
+          agent_label: string | null;
+          card_id: string;
+          created_at: string;
+          from_state: string | null;
+          id: string;
+          idempotency_key: string | null;
+          note_text: string | null;
+          reason: string | null;
+          ref_kind: string | null;
+          ref_target: string | null;
+          relation: string | null;
+          reply_to: string | null;
+          revision: number | null;
+          scope: unknown;
+          seq: number;
+          thread: string | null;
+          to_state: string | null;
+          type: string;
+        };
+        Insert: {
+          actor_id?: string;
+          agent_label?: string | null;
+          card_id: string;
+          created_at?: string;
+          from_state?: string | null;
+          id?: string;
+          idempotency_key?: string | null;
+          note_text?: string | null;
+          reason?: string | null;
+          ref_kind?: string | null;
+          ref_target?: string | null;
+          relation?: string | null;
+          reply_to?: string | null;
+          revision?: number | null;
+          scope: unknown;
+          seq: number;
+          thread?: string | null;
+          to_state?: string | null;
+          type: string;
+        };
+        Update: {
+          actor_id?: string;
+          agent_label?: string | null;
+          card_id?: string;
+          created_at?: string;
+          from_state?: string | null;
+          id?: string;
+          idempotency_key?: string | null;
+          note_text?: string | null;
+          reason?: string | null;
+          ref_kind?: string | null;
+          ref_target?: string | null;
+          relation?: string | null;
+          reply_to?: string | null;
+          revision?: number | null;
+          scope?: unknown;
+          seq?: number;
+          thread?: string | null;
+          to_state?: string | null;
+          type?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'card_events_actor_id_fkey';
+            columns: ['actor_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_events_card_id_fkey';
+            columns: ['card_id'];
+            isOneToOne: false;
+            referencedRelation: 'cards';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_events_reply_to_fkey';
+            columns: ['reply_to'];
+            isOneToOne: false;
+            referencedRelation: 'card_events';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      card_refs: {
+        Row: {
+          attached_at: string;
+          attached_by: string;
+          card_id: string;
+          kind: string;
+          scope: unknown;
+          target: string;
+        };
+        Insert: {
+          attached_at?: string;
+          attached_by?: string;
+          card_id: string;
+          kind: string;
+          scope: unknown;
+          target: string;
+        };
+        Update: {
+          attached_at?: string;
+          attached_by?: string;
+          card_id?: string;
+          kind?: string;
+          scope?: unknown;
+          target?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'card_refs_attached_by_fkey';
+            columns: ['attached_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_refs_card_id_fkey';
+            columns: ['card_id'];
+            isOneToOne: false;
+            referencedRelation: 'cards';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      cards: {
+        Row: {
+          archived_at: string | null;
+          body: string;
+          created_at: string;
+          created_by: string;
+          id: string;
+          idempotency_key: string | null;
+          number: number;
+          origin_loop_id: string | null;
+          revision: number;
+          scope: unknown;
+          state: string;
+          title: string;
+          updated_at: string;
+        };
+        Insert: {
+          archived_at?: string | null;
+          body?: string;
+          created_at?: string;
+          created_by?: string;
+          id?: string;
+          idempotency_key?: string | null;
+          number: number;
+          origin_loop_id?: string | null;
+          revision?: number;
+          scope: unknown;
+          state?: string;
+          title: string;
+          updated_at?: string;
+        };
+        Update: {
+          archived_at?: string | null;
+          body?: string;
+          created_at?: string;
+          created_by?: string;
+          id?: string;
+          idempotency_key?: string | null;
+          number?: number;
+          origin_loop_id?: string | null;
+          revision?: number;
+          scope?: unknown;
+          state?: string;
+          title?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'cards_created_by_fkey';
+            columns: ['created_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'cards_origin_loop_id_fkey';
+            columns: ['origin_loop_id'];
+            isOneToOne: false;
+            referencedRelation: 'memories';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       edges: {
         Row: {
           created_at: string;
@@ -1557,6 +1750,16 @@ export type Database = {
         Args: { p_role: string; p_scope: unknown; p_user: string };
         Returns: undefined;
       };
+      board_list: {
+        Args: {
+          p_include_archived?: boolean;
+          p_limit?: number;
+          p_query?: string;
+          p_scope?: string;
+          p_state?: string;
+        };
+        Returns: Json;
+      };
       build_context: {
         Args: {
           briefing?: boolean;
@@ -1569,6 +1772,103 @@ export type Database = {
         Returns: Json;
       };
       can_write_scope: { Args: { p_scope: unknown }; Returns: boolean };
+      card_archive: {
+        Args: {
+          p_agent_label?: string;
+          p_card_id: string;
+          p_reason: string;
+          p_thread?: string;
+        };
+        Returns: Json;
+      };
+      card_attach: {
+        Args: {
+          p_agent_label?: string;
+          p_card_id: string;
+          p_idempotency_key?: string;
+          p_kind: string;
+          p_target: string;
+          p_thread?: string;
+        };
+        Returns: Json;
+      };
+      card_create: {
+        Args: {
+          p_agent_label?: string;
+          p_body?: string;
+          p_idempotency_key?: string;
+          p_origin_loop_id?: string;
+          p_scope: string;
+          p_state?: string;
+          p_thread?: string;
+          p_title: string;
+        };
+        Returns: Json;
+      };
+      card_detach: {
+        Args: {
+          p_agent_label?: string;
+          p_card_id: string;
+          p_kind: string;
+          p_target: string;
+          p_thread?: string;
+        };
+        Returns: Json;
+      };
+      card_edit: {
+        Args: {
+          p_agent_label?: string;
+          p_body?: string;
+          p_card_id: string;
+          p_expected_revision?: number;
+          p_thread?: string;
+          p_title?: string;
+        };
+        Returns: Json;
+      };
+      card_get: {
+        Args: { p_after_seq?: number; p_card_id: string; p_limit?: number };
+        Returns: Json;
+      };
+      card_move: {
+        Args: {
+          p_agent_label?: string;
+          p_card_id: string;
+          p_idempotency_key?: string;
+          p_reason: string;
+          p_thread?: string;
+          p_to_state: string;
+        };
+        Returns: Json;
+      };
+      card_note: {
+        Args: {
+          p_agent_label?: string;
+          p_card_id: string;
+          p_idempotency_key?: string;
+          p_relation?: string;
+          p_reply_to?: string;
+          p_text: string;
+          p_thread?: string;
+        };
+        Returns: Json;
+      };
+      card_promote_loop: {
+        Args: {
+          p_agent_label?: string;
+          p_body?: string;
+          p_idempotency_key?: string;
+          p_loop_id: string;
+          p_state?: string;
+          p_thread?: string;
+          p_title: string;
+        };
+        Returns: Json;
+      };
+      card_resolve: {
+        Args: { p_number: number; p_scope: string };
+        Returns: Json;
+      };
       create_scope: { Args: { p_scope: unknown }; Returns: undefined };
       dashboard_activity: {
         Args: {
