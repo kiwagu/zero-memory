@@ -43,3 +43,18 @@ export function scopeSlug(scope: unknown): string {
     .filter((label) => label !== '' && !label.startsWith('usr_'));
   return labels.at(-1) ?? scopeDisplay(scope);
 }
+
+/**
+ * How a scope is written in a DROPDOWN, on every screen that offers one.
+ *
+ * One rule, so the same project reads the same way in the memory feed, the
+ * rules groups and the board picker: the alias its owner gave it, and failing
+ * that the slug that distinguishes it. The full path belongs in a `title`,
+ * never in the visible label — truncated, a path says nothing.
+ */
+export function scopeOptionLabel(
+  scope: unknown,
+  alias?: string | null
+): string {
+  return alias && alias.trim() !== '' ? alias : scopeSlug(scope);
+}

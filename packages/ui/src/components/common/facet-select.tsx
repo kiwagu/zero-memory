@@ -66,11 +66,10 @@ function FacetSelect({
   onChange: (value: string) => void;
   /**
    * How wide the trigger is allowed to be:
-   *   compact — a fixed band (a row of several facets stays aligned);
-   *   content — as wide as its own label, so the value is not eaten;
-   *   grow    — fills the row it shares.
+   *   compact — a fixed band, so a row of several facets stays aligned;
+   *   content — as wide as its own label, so the value is not eaten.
    */
-  width?: 'compact' | 'content' | 'grow';
+  width?: 'compact' | 'content';
   testId?: string;
 }) {
   // Base UI's Select.Value renders the raw value unless the Root gets an
@@ -101,7 +100,6 @@ function FacetSelect({
         size="sm"
         className={cn(
           '[&>span]:truncate',
-          width === 'grow' && 'w-full min-w-48 flex-1',
           width === 'content' && 'w-auto max-w-[28rem]',
           width === 'compact' && 'max-w-56 min-w-32'
         )}

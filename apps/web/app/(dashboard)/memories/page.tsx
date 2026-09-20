@@ -33,7 +33,7 @@ import {
   type FeedStatus,
   type MemoryRow,
 } from '@/lib/memory';
-import { scopeDisplay } from '@workspace/ui/lib/scope-format';
+import { scopeOptionLabel } from '@workspace/ui/lib/scope-format';
 
 import { loadScopeMemberCounts } from '@/lib/scope-members';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
@@ -106,7 +106,7 @@ export default async function FeedPage({
     .filter((row) => !row.scope.startsWith('user.'))
     .map((row) => ({
       value: row.scope,
-      label: row.alias ?? scopeDisplay(row.scope),
+      label: scopeOptionLabel(row.scope, row.alias),
     }));
   const scope = scopeOptions.some((option) => option.value === params.scope)
     ? (params.scope as string)

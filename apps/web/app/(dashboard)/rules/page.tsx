@@ -10,7 +10,10 @@ import type {
   RuleScopeSuggestion,
   RuleTargetLayerKind,
 } from '@workspace/ui/components/rules/rule-candidate-queue';
-import { isPersonalScope, scopeDisplay } from '@workspace/ui/lib/scope-format';
+import {
+  isPersonalScope,
+  scopeOptionLabel,
+} from '@workspace/ui/lib/scope-format';
 
 import { RuleCandidateList } from '@/components/rule-candidate.client';
 import { RulesFilter } from '@/components/rules-filter';
@@ -345,7 +348,7 @@ export default async function RulesPage({
   const groupLabel = (scope: string | null): string =>
     scope === null
       ? t('rules.groupGeneral')
-      : (aliasByScope.get(scope) ?? scopeDisplay(scope));
+      : scopeOptionLabel(scope, aliasByScope.get(scope));
   const groups = [...groupMap.entries()]
     .map(([scope, items]) => ({ scope, label: groupLabel(scope), items }))
     .sort((a, b) => {
@@ -466,7 +469,7 @@ export default async function RulesPage({
             : []),
           ...availableScopes.map((scope) => ({
             value: scope,
-            label: aliasByScope.get(scope) ?? scopeDisplay(scope),
+            label: scopeOptionLabel(scope, aliasByScope.get(scope)),
           })),
         ]}
         statuses={[

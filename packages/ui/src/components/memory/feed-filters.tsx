@@ -89,9 +89,11 @@ function FeedFilters({
       }}
       className="w-full space-y-2"
     >
-      {/* Row 1: the two wide fields (content search + project scope) stretch to
-          fill the width, with the apply/refresh action pinned at the end; the
-          compact facet selects drop to row 2 so nothing wraps mid-row. */}
+      {/* Row 1: the search field stretches to fill what the scope picker does
+          not take, with the apply/refresh action pinned at the end; the
+          compact facet selects drop to row 2 so nothing wraps mid-row. The
+          scope picker is sized like every other scope picker in the app —
+          as wide as the board or project it names. */}
       <div className="flex w-full flex-wrap items-center gap-2">
         <Input
           type="search"
@@ -110,7 +112,7 @@ function FeedFilters({
         />
         {scopes.length > 0 ? (
           <FacetSelect
-            width="grow"
+            width="content"
             value={values.scope}
             placeholder={labels.allScopes}
             placeholderCount={placeholderCounts?.scope}

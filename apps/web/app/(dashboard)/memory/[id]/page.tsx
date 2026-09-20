@@ -12,7 +12,7 @@ import { OriginalDisclosure } from '@workspace/ui/components/memory/original-dis
 import { MemoryActions } from '@/components/memory-actions';
 import { MoveMemory } from '@/components/move-memory';
 import { PromoteToRule } from '@/components/promote-to-rule';
-import { scopeDisplay } from '@workspace/ui/lib/scope-format';
+import { scopeOptionLabel } from '@workspace/ui/lib/scope-format';
 import { SharedWith } from '@/components/shared-with';
 import { getRequestMessages } from '@/lib/i18n';
 import {
@@ -118,7 +118,7 @@ export default async function MemoryDetailPage({
     ),
   ]
     .sort()
-    .map((value) => ({ value, label: scopeDisplay(value) }));
+    .map((value) => ({ value, label: scopeOptionLabel(value) }));
 
   // The session marker: the conversation this memory was born in, when it has
   // one. A write outside any conversation (import, repo bootstrap, terminal

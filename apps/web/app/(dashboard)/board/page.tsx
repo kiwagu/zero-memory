@@ -19,7 +19,7 @@ import {
   resolveBoardScope,
   type BoardCard,
 } from '@/lib/board';
-import { scopeSlug } from '@workspace/ui/lib/scope-format';
+import { scopeOptionLabel } from '@workspace/ui/lib/scope-format';
 
 import { getRequestMessages } from '@/lib/i18n';
 import { formatTimestamp, scopeLabel } from '@/lib/memory';
@@ -46,6 +46,22 @@ export default async function BoardPage({
   const { data: scopeRows } = await supabase.rpc('board_scopes');
   const boards = boardScopesSchema.safeParse(scopeRows).data ?? [];
   const { selected, value } = resolveBoardScope(scope, boards);
+
+  // A board wears the name its owner gave the scope, exactly as the memory
+  // feed and the rules groups do — one rule, so the same project reads the
+  // same way wherever it is offered.
+  const { data: aliasRows } = boards.length
+    ? await supabase
+        .from('scopes')
+        .select('scope, alias')
+        .in(
+          'scope',
+          boards.map((board) => board.scope)
+        )
+    : { data: [] };
+  const aliasByScope = new Map(
+    (aliasRows ?? []).map((row) => [String(row.scope), row.alias])
+  );
 
   const { data, error } = await supabase.rpc('board_list', {
     p_scope: selected ?? undefined,
@@ -109,7 +125,12 @@ export default async function BoardPage({
               // The default row names the board it resolves to, so "opened on
               // the latest activity" is visible rather than merely true.
               value === '' && selected
-                ? t('board.scope.latestNamed', { scope: scopeSlug(selected) })
+                ? t('board.scope.latestNamed', {
+                    scope: scopeOptionLabel(
+                      selected,
+                      aliasByScope.get(selected)
+                    ),
+                  })
                 : t('board.scope.latest')
             }
             value={value}
@@ -117,7 +138,10 @@ export default async function BoardPage({
               { value: ALL_BOARDS, label: t('board.scope.all') },
               ...boards.map((board) => ({
                 value: board.scope,
-                label: scopeSlug(board.scope),
+                label: scopeOptionLabel(
+                  board.scope,
+                  aliasByScope.get(board.scope)
+                ),
                 count: board.cards,
               })),
               // A board named in the address but holding nothing is still the
@@ -125,7 +149,7 @@ export default async function BoardPage({
               ...(value !== '' &&
               value !== ALL_BOARDS &&
               !boards.some((board) => board.scope === value)
-                ? [{ value, label: scopeSlug(value), count: 0 }]
+                ? [{ value, label: scopeOptionLabel(value), count: 0 }]
                 : []),
             ]}
           />
