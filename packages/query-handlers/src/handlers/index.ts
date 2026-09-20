@@ -1,3 +1,4 @@
+import { BoardQueryHandler } from './board.query-handler.js';
 import { BuildContextQueryHandler } from './build-context.query-handler.js';
 import { ExportMetricsQueryHandler } from './export-metrics.query-handler.js';
 import { GetMemoryQueryHandler } from './get-memory.query-handler.js';
@@ -6,6 +7,7 @@ import { RecallQueryHandler } from './recall.query-handler.js';
 import { SessionReceiptQueryHandler } from './session-receipt.query-handler.js';
 
 export const queryHandlers = [
+  BoardQueryHandler,
   BuildContextQueryHandler,
   ExportMetricsQueryHandler,
   GetMemoryQueryHandler,
@@ -14,6 +16,7 @@ export const queryHandlers = [
   SessionReceiptQueryHandler,
 ];
 
+export * from './board.query-handler.js';
 export * from './build-context.query-handler.js';
 export * from './export-metrics.query-handler.js';
 export * from './get-memory.query-handler.js';

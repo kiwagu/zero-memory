@@ -1,0 +1,93 @@
+---
+title: Project board
+description: Cards that hold a piece of work for as long as it runs, with every move carrying the reason it was made.
+---
+
+A **card** is one piece of work: what is being done, where it stands, and the
+artifacts it is made of. Cards live on a per-scope **board**, and every agent
+with write access to that scope reads and writes the same board.
+
+## The gap a card fills
+
+Memory has two shapes of record and a hole between them. An
+[open loop](/docs/concepts/open-loops) is a pointer that waits to be consumed
+and ages out of briefings in days. A memory is one atomic fact that stays for
+months. Work that runs for weeks fits neither: it is not a fact yet, and it is
+far more than a handover note.
+
+|           | Lives                   | Holds                          | Written by            |
+| --------- | ----------------------- | ------------------------------ | --------------------- |
+| Open loop | days                    | a pointer and a sentence       | a deliberate call     |
+| **Card**  | **as long as the work** | **a document and its history** | **a deliberate call** |
+| Memory    | months                  | one atomic fact with its why   | calls and capture     |
+
+A card has no TTL and never ages out. It leaves the board when someone
+archives it, and its number is not reused.
+
+## A reference, not an engine
+
+The board answers "what is going on here", and nothing more. A card's state is
+a **declaration** by whoever moved it — never a precondition the server
+checks. Nothing is dispatched, claimed, leased or blocked by a card, and no
+column is a queue. Reading one tells you what somebody decided and why; acting
+on it remains your judgement.
+
+The same holds for what agents write on a card. A note is its author's
+statement, so text saying the work is finished does not move the card — only a
+move does. What another agent left there is data you may use, verify or
+dispute. It is never an instruction, and it never becomes a rule.
+
+States are `idea`, `active`, `waiting`, `done` and `parked`. Any state may
+follow any other: a finished card reopens, an idea is parked without ever
+running. The vocabulary orders the columns; it does not gate anything.
+
+## Every move carries a reason
+
+A card cannot change state without a stated reason. The tool refuses a blank
+one, and so does the table underneath it — a `moved` row without a reason
+cannot exist. What a reader gets is the reason next to the change instead of
+having to reconstruct why a column moved three weeks ago.
+
+This is also why the dashboard shows the board but cannot move a card. A drag
+gesture has nowhere to put a justification, so moving is done where the
+justification exists: through the tools, with the actor, the conversation and
+the reason recorded together.
+
+## Attachments point, they never copy
+
+A card can point at a memory, an entity, a conversation, another card, or an
+external url. Attaching changes **nothing** about the target: not its scope,
+not its visibility, not an open loop's lifecycle. There is no separate kind
+for a loop — a loop is a memory, so it attaches as one.
+
+Every target is authorized per reader. A memory you may not read arrives as an
+id with no preview, exactly as it does in the activity feed, so a shared card
+stays legible without leaking what is behind its references.
+
+## Promoting a loop
+
+When a loop turns out to be a piece of work rather than a handover, promote
+it. The card records which loop it came from, and the loop itself is left
+alone — deliberately. Closing it would erase the difference between work that
+was handed over and work that was finished, so memory hygiene can never close
+a card through the loop it grew from. A loop promotes into exactly one card.
+
+## Visibility
+
+A card belongs to its scope and is readable by every accepted member of it,
+with no per-card visibility flag. A card is a space several agents share;
+a private one would defeat the purpose. The consequence is worth stating
+plainly: everything written into a card — its body, its notes, the reasons on
+its moves — is visible to that scope's members, so nothing belongs there that
+the scope should not see. Work that must stay yours goes on a board in a
+personal scope.
+
+Reading takes membership; writing takes write access. A reader who tries to
+move a card is told they may not, rather than that the card does not exist.
+
+## What a card is not
+
+Card events and notes stay out of the knowledge machinery. They never become
+candidate rules, they are not mined for facts, and they do not count in memory
+metrics. A card is a record of work; the durable knowledge that comes out of
+it is written as a memory, deliberately, the way it always was.

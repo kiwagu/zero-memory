@@ -33,3 +33,15 @@ export const parseCardRef = (value: unknown): Result<CardRef, string> => {
   }
   return Ok(parsed.data);
 };
+
+/**
+ * Flatten a reference for storage: the store keeps a kind and an opaque
+ * target rather than one column per kind, because the targets are
+ * polymorphic and one of them (a url) is not ours at all.
+ */
+export const flattenCardRef = (
+  ref: CardRef
+): { kind: CardRef['kind']; target: string } => ({
+  kind: ref.kind,
+  target: ref.kind === 'url' ? ref.url : ref.id,
+});

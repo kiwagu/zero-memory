@@ -207,68 +207,244 @@ export const cardSchema = z.object({
 });
 export type Card = z.infer<typeof cardSchema>;
 
-/** Fields every event in the stream carries, whatever its type. */
-const cardEventBase = {
+/**
+ * One event of a card's append-only stream, as a reader receives it.
+ *
+ * Flat, with a column per fact and nulls where a type does not use one —
+ * because that is what the store holds and returns. The per-type shape (a
+ * `moved` row always has a reason, a `noted` row always has text) is a check
+ * constraint on the table rather than a second model here: one enforcing
+ * copy, in the place a direct database call also has to pass.
+ */
+export const cardEventSchema = z.object({
   id: cardEventIdSchema,
-  card_id: cardIdSchema,
-  /** Position in the card's own stream: the order events were written. */
   seq: z.number().int().positive(),
+  type: cardEventTypeSchema,
   actor_id: userIdSchema,
-  agent_label: cardAgentLabelSchema.nullable(),
-  /** The conversation the event was written in, when one was asserted. */
-  thread: cardThreadIdSchema.nullable(),
+  agent_label: z.string().nullable(),
+  thread: z.string().nullable(),
+  from_state: cardStateSchema.nullable(),
+  to_state: cardStateSchema.nullable(),
+  reason: z.string().nullable(),
+  revision: z.number().int().nullable(),
+  text: z.string().nullable(),
+  reply_to: z.string().nullable(),
+  relation: cardNoteRelationSchema.nullable(),
+  ref_kind: z.enum(CARD_REF_KINDS).nullable(),
+  ref_target: z.string().nullable(),
   created_at: z.string(),
-};
+});
+export type CardEvent = z.infer<typeof cardEventSchema>;
 
 /**
- * One event of a card's append-only stream.
+ * An attachment as a reader receives it.
  *
- * A discriminated union rather than a wide row of nullables, because the
- * shapes genuinely differ: a `moved` event without a reason must be
- * unrepresentable, and a `noted` event has no state at all.
+ * `preview` is present only when the reader may read the target: the store
+ * resolves it under that reader's own fences, so a memory in a scope they do
+ * not belong to arrives as an id with `available: false`. The card stays
+ * legible without leaking a line of what is behind the reference.
  */
-export const cardEventSchema = z.discriminatedUnion('type', [
-  z.object({
-    ...cardEventBase,
-    type: z.literal('created'),
-    to_state: cardStateSchema,
-    origin_loop_id: memoryIdSchema.nullable(),
-  }),
-  z.object({
-    ...cardEventBase,
-    type: z.literal('edited'),
-    revision: z.number().int().positive(),
-  }),
-  z.object({
-    ...cardEventBase,
-    type: z.literal('moved'),
-    from_state: cardStateSchema,
-    to_state: cardStateSchema,
-    reason: cardReasonSchema,
-  }),
-  z.object({
-    ...cardEventBase,
-    type: z.literal('archived'),
-    reason: cardReasonSchema,
-  }),
-  z.object({
-    ...cardEventBase,
-    type: z.literal('attached'),
-    ref: cardRefSchema,
-  }),
-  z.object({
-    ...cardEventBase,
-    type: z.literal('detached'),
-    ref: cardRefSchema,
-  }),
-  z.object({
-    ...cardEventBase,
-    type: z.literal('noted'),
-    text: cardNoteTextSchema,
-    /** The event this note answers — always another note. */
-    reply_to: cardEventIdSchema.nullable(),
-    /** How it stands to that note; meaningless without `reply_to`. */
-    relation: cardNoteRelationSchema.nullable(),
-  }),
-]);
-export type CardEvent = z.infer<typeof cardEventSchema>;
+export const cardRefViewSchema = z.object({
+  kind: z.enum(CARD_REF_KINDS),
+  target: z.string(),
+  attached_at: z.string(),
+  available: z.boolean(),
+  preview: z.string().nullable(),
+});
+export type CardRefView = z.infer<typeof cardRefViewSchema>;
+
+/** One row of the board listing. */
+export const boardCardSchema = z.object({
+  id: cardIdSchema,
+  scope: memoryScopeSchema,
+  number: z.number().int().positive(),
+  title: z.string(),
+  state: cardStateSchema,
+  updated_at: z.string(),
+  archived_at: z.string().nullable(),
+  /** How many artifacts the card points at. */
+  refs: z.number().int().nonnegative(),
+  /** What last happened to it, so a board reads as activity, not as a list. */
+  last_event: z
+    .object({
+      type: cardEventTypeSchema,
+      reason: z.string().nullable(),
+      created_at: z.string(),
+    })
+    .nullable(),
+});
+export type BoardCard = z.infer<typeof boardCardSchema>;
+
+/** Who is writing, and in which conversation. Every write tool takes these. */
+const authorshipFields = {
+  thread: z
+    .string()
+    .optional()
+    .describe(
+      'The conversation this is written in. Binding a card to a thread is ' +
+        'what makes its feed fill itself: memories born in that conversation ' +
+        'surface on the card without being attached one by one.'
+    ),
+  agent_label: cardAgentLabelSchema
+    .optional()
+    .describe(
+      'The name you go by on this board. Metadata for whoever reads it — ' +
+        'your rights come from your credentials, never from this.'
+    ),
+  idempotency_key: cardIdempotencyKeySchema
+    .optional()
+    .describe(
+      'Repeat it to make a retry after a timeout land once. The same key ' +
+        'returns the first result instead of writing a second row.'
+    ),
+};
+
+/** `board` — the read side. */
+export const boardInputSchema = z.object({
+  action: z
+    .enum(['list', 'get', 'resolve'])
+    .default('list')
+    .describe(
+      'list: the cards of a scope. get: one card with its attachments and a ' +
+        'page of its history. resolve: turn a project-local number into a card.'
+    ),
+  scope: z
+    .string()
+    .optional()
+    .describe('Which project board. Required for list and resolve.'),
+  state: cardStateSchema.optional().describe('Show only this column.'),
+  query: z
+    .string()
+    .optional()
+    .describe(
+      'Match card titles. Returns every candidate — it never picks one for you.'
+    ),
+  include_archived: z.boolean().optional(),
+  card_id: cardIdSchema.optional().describe('Required for get.'),
+  number: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe('The project-local number for resolve, e.g. 42 for `#42`.'),
+  after_seq: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe('Read only what happened after this position in the history.'),
+  limit: z.number().int().positive().max(200).optional(),
+});
+export type BoardInput = z.infer<typeof boardInputSchema>;
+
+export const boardOutputSchema = z.object({
+  cards: z.array(boardCardSchema).default([]),
+  /** Live count per state, so a summary needs no second call. */
+  totals: z.record(z.string(), z.number()).default({}),
+  card: cardSchema.nullable().default(null),
+  refs: z.array(cardRefViewSchema).default([]),
+  events: z.array(cardEventSchema).default([]),
+  has_more: z.boolean().default(false),
+  next_after_seq: z.number().default(0),
+});
+export type BoardOutput = z.infer<typeof boardOutputSchema>;
+
+/** `card` — opening and steering one piece of work. */
+export const cardInputSchema = z.object({
+  action: z
+    .enum(['create', 'promote_loop', 'edit', 'move', 'archive'])
+    .describe(
+      'create: open a card. promote_loop: turn an open loop into one, ' +
+        'recording where it came from and leaving the loop itself alone. ' +
+        'edit: rewrite its text. move: declare where the work stands, with ' +
+        'the reason why. archive: take it off the board for good.'
+    ),
+  card_id: cardIdSchema
+    .optional()
+    .describe('Required for edit, move and archive.'),
+  scope: z.string().optional().describe('Which project board. For create.'),
+  loop_id: memoryIdSchema
+    .optional()
+    .describe('The task or open-question memory to promote.'),
+  title: cardTitleSchema.optional(),
+  body: cardBodySchema
+    .optional()
+    .describe(
+      'The document: the goal, its boundaries, what "done" means. Markdown.'
+    ),
+  state: cardStateSchema
+    .optional()
+    .describe('Where a new card starts. Defaults to idea.'),
+  to: cardStateSchema.optional().describe('Where the card is moving.'),
+  reason: cardReasonSchema
+    .optional()
+    .describe(
+      'Why the state changed — required for move and archive. This is what ' +
+        'the next reader has instead of guessing; there is no way to move a ' +
+        'card without it.'
+    ),
+  expected_revision: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      'Refuse the edit unless the card is still at this revision, so two ' +
+        'writers cannot overwrite each other silently.'
+    ),
+  ...authorshipFields,
+});
+export type CardInput = z.infer<typeof cardInputSchema>;
+
+export const cardOutputSchema = z.object({
+  card: cardSchema,
+  /** False when the call was a no-op (nothing to change, already attached). */
+  changed: z.boolean().default(true),
+  /** True when an idempotency key replayed an earlier call's result. */
+  replayed: z.boolean().default(false),
+});
+export type CardOutput = z.infer<typeof cardOutputSchema>;
+
+/** `card_log` — the card's stream: notes and attachments. */
+export const cardLogInputSchema = z.object({
+  action: z
+    .enum(['note', 'attach', 'detach'])
+    .describe(
+      'note: add a statement of your own. attach / detach: point the card at ' +
+        'an artifact, or stop pointing at it.'
+    ),
+  card_id: cardIdSchema,
+  text: cardNoteTextSchema
+    .optional()
+    .describe(
+      'What you want on the record. A note is your statement, not a verdict: ' +
+        'writing that the work is done does not move the card — a move does.'
+    ),
+  reply_to: cardEventIdSchema
+    .optional()
+    .describe('The note you are answering.'),
+  relation: cardNoteRelationSchema
+    .optional()
+    .describe('How your note stands to the one it answers.'),
+  ref_kind: z
+    .enum(CARD_REF_KINDS)
+    .optional()
+    .describe(
+      'What kind of artifact. An open loop is a memory, so attach it as one.'
+    ),
+  ref_target: z
+    .string()
+    .max(CARD_LIMITS.url)
+    .optional()
+    .describe('Its id, or the url for an external one.'),
+  ...authorshipFields,
+});
+export type CardLogInput = z.infer<typeof cardLogInputSchema>;
+
+export const cardLogOutputSchema = z.object({
+  /** The note's id, so a later note can answer it. Null for attachments. */
+  event_id: z.string().nullable().default(null),
+  changed: z.boolean().default(true),
+  replayed: z.boolean().default(false),
+});
+export type CardLogOutput = z.infer<typeof cardLogOutputSchema>;

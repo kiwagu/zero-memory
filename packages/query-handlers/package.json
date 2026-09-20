@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@workspace/board": "workspace:*",
     "@workspace/context": "workspace:*",
     "@workspace/contracts": "workspace:*",
     "@workspace/cqrs": "workspace:*",

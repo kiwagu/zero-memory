@@ -272,6 +272,36 @@ test.describe('account lifecycle: hard_delete_user', () => {
       user_id: userId,
       role: 'admin',
     });
+    // A board card with one event and one attachment: three mapped tables
+    // whose rows are owned by whoever WROTE them, so erasure has to sweep
+    // them by actor rather than through the card's author alone.
+    const { data: card } = await db
+      .from('cards')
+      .insert({
+        scope: sharedScope,
+        number: 1,
+        title: 'e2e erasure fixture card',
+        state: 'active',
+        created_by: userId,
+      })
+      .select('id')
+      .single();
+    const cardId = (card as { id: string }).id;
+    await insertOrThrow(db, 'card_events', {
+      card_id: cardId,
+      scope: sharedScope,
+      seq: 1,
+      type: 'created',
+      to_state: 'active',
+      actor_id: userId,
+    });
+    await insertOrThrow(db, 'card_refs', {
+      card_id: cardId,
+      scope: sharedScope,
+      kind: 'memory',
+      target: m1,
+      attached_by: userId,
+    });
     await insertOrThrow(db, 'usage_daily', {
       day: '2026-07-20',
       user_id: userId,

@@ -1,4 +1,5 @@
 export * from './audit/audit-recorder.js';
+export * from './board/card.repository.js';
 export * from './ingest/ingest-log.repository.js';
 export * from './memory/account-eraser.js';
 export * from './memory/entity.repository.js';

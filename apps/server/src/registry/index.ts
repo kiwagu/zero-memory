@@ -3,6 +3,7 @@ import {
   recordAudit,
   type IAuditRecorder,
 } from '@workspace/audit';
+import { CARD_REPOSITORY } from '@workspace/board';
 import { registerCommands } from '@workspace/command-handlers';
 import { getCurrentUserEntityId, registerContext } from '@workspace/context';
 import { EventBus } from '@workspace/cqrs';
@@ -63,6 +64,7 @@ import {
   SupabaseEntityRepository,
   SupabaseGraphService,
   SupabaseIngestLogRepository,
+  SupabaseCardRepository,
   SupabaseMemoryExportReader,
   SupabaseMemoryRepository,
   SupabaseMemorySearchService,
@@ -90,6 +92,7 @@ export const register = (c = container): void => {
   registerContext(c);
   c.registerSingleton(EMBEDDING_SERVICE, E5SmallEmbeddingService);
   c.registerSingleton(MEMORY_REPOSITORY, SupabaseMemoryRepository);
+  c.registerSingleton(CARD_REPOSITORY, SupabaseCardRepository);
   c.registerSingleton(MEMORY_EXPORT_READER, SupabaseMemoryExportReader);
   c.registerSingleton(ACCOUNT_ERASER, SupabaseAccountEraser);
   c.registerSingleton(MEMORY_SEARCH_SERVICE, SupabaseMemorySearchService);

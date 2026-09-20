@@ -9,6 +9,7 @@
     "identity",
     "provenance",
     "supersede-and-versioning",
-    "open-loops"
+    "open-loops",
+    "project-board"
   ]
 }

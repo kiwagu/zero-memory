@@ -1,3 +1,5 @@
+import { CardCommandHandler } from './card.command-handler.js';
+import { CardLogCommandHandler } from './card-log.command-handler.js';
 import { CloseLoopCommandHandler } from './close-loop.command-handler.js';
 import { DescribeScopeCommandHandler } from './describe-scope.command-handler.js';
 import { HardDeleteAccountCommandHandler } from './delete-account.command-handler.js';
@@ -11,6 +13,8 @@ import { MoveMemoriesCommandHandler } from './move-memories.command-handler.js';
 import { ShareMemoryCommandHandler } from './share-memory.command-handler.js';
 
 export const commandHandlers = [
+  CardCommandHandler,
+  CardLogCommandHandler,
   CloseLoopCommandHandler,
   DescribeScopeCommandHandler,
   HardDeleteAccountCommandHandler,
@@ -24,6 +28,8 @@ export const commandHandlers = [
   ShareMemoryCommandHandler,
 ];
 
+export * from './card.command-handler.js';
+export * from './card-log.command-handler.js';
 export * from './close-loop.command-handler.js';
 export * from './describe-scope.command-handler.js';
 export * from './delete-account.command-handler.js';

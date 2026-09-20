@@ -1,7 +1,12 @@
 import { newCardId, newMemoryId } from '@workspace/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { cardRefKey, parseCardRef, sameCardRef } from './card-ref.vo.js';
+import {
+  cardRefKey,
+  flattenCardRef,
+  parseCardRef,
+  sameCardRef,
+} from './card-ref.vo.js';
 
 describe('cardRefKey', () => {
   it('identifies a reference by its kind and target', () => {
@@ -49,5 +54,19 @@ describe('parseCardRef', () => {
       true
     );
     expect(parseCardRef({ kind: 'url', url: 'not a url' }).isErr()).toBe(true);
+  });
+});
+
+describe('flattenCardRef', () => {
+  it('stores a kind and one opaque target, whatever the kind', () => {
+    const id = newMemoryId();
+
+    expect(flattenCardRef({ kind: 'memory', id })).toEqual({
+      kind: 'memory',
+      target: id,
+    });
+    expect(
+      flattenCardRef({ kind: 'url', url: 'https://example.invalid/a' })
+    ).toEqual({ kind: 'url', target: 'https://example.invalid/a' });
   });
 });
