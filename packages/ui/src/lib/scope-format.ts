@@ -24,3 +24,22 @@ export function scopeDisplay(scope: unknown): string {
     .map((label) => (label.startsWith('usr_') ? '…' : label))
     .join('.');
 }
+
+/**
+ * The name that tells one scope from another: its last meaningful label.
+ *
+ * A full path is unreadable in a chip and useless when truncated — `proj.….zero_`
+ * names nothing. What distinguishes two scopes is their slug (`zero_memory`,
+ * `acme`), so that is what a picker or a heading shows, with the full path
+ * kept in a `title` for whoever needs it.
+ *
+ * Per-owner id segments are skipped, since they are identical across one
+ * user's scopes; a path made only of them falls through to its own display
+ * form rather than rendering empty.
+ */
+export function scopeSlug(scope: unknown): string {
+  const labels = String(scope)
+    .split('.')
+    .filter((label) => label !== '' && !label.startsWith('usr_'));
+  return labels.at(-1) ?? scopeDisplay(scope);
+}

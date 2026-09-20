@@ -48,6 +48,46 @@ export const boardCardSchema = z.object({
 });
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
+/** One board the caller can see: its scope, its size and when it last moved. */
+export const boardScopeSchema = z.object({
+  scope: z.string(),
+  cards: z.number(),
+  last_activity_at: z.string(),
+});
+export type BoardScope = z.infer<typeof boardScopeSchema>;
+
+export const boardScopesSchema = z.array(boardScopeSchema);
+
+/**
+ * Which board to show, given what the address says and what exists.
+ *
+ * No parameter means "the one that moved last" — a reader who arrives with no
+ * opinion gets the work in motion rather than the alphabetical first. The
+ * sentinel `all` is the deliberate choice to see every board at once, and it
+ * IS in the URL because it is not the default.
+ *
+ * A parameter naming a board with nothing on it is HONOURED, not corrected.
+ * An empty board is a true answer — the work there is done or has not started
+ * — and quietly showing a different board instead would tell the reader the
+ * address they are looking at holds something it does not.
+ */
+export const ALL_BOARDS = 'all';
+
+export function resolveBoardScope(
+  requested: string | undefined,
+  boards: BoardScope[]
+): { selected: string | null; value: string } {
+  if (requested === ALL_BOARDS) {
+    return { selected: null, value: ALL_BOARDS };
+  }
+  if (requested) {
+    return { selected: requested, value: requested };
+  }
+  // The placeholder row: the default, and therefore absent from the URL.
+  // With no boards at all there is nothing to select and nothing to show.
+  return { selected: boards[0]?.scope ?? null, value: '' };
+}
+
 export const boardListSchema = z.object({
   cards: z.array(boardCardSchema).default([]),
   totals: z.record(z.string(), z.number()).default({}),

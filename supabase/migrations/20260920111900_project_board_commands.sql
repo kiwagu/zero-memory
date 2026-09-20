@@ -755,6 +755,51 @@ comment on function public.board_list(
   'The board of a scope: cards with their last event, plus live totals per '
   'state. A title query returns candidates — it never picks one silently.';
 
+-- Which boards exist, and which one was touched last.
+--
+-- The dashboard opens on the board with the most recent activity, because a
+-- reader arriving with no opinion wants the work that is moving, not the
+-- alphabetical first. Activity means the CARD'S STREAM, not the card row: a
+-- note or an attachment is activity and neither bumps the card.
+create or replace function public.board_scopes()
+returns jsonb
+language sql
+stable
+set search_path = ''
+as $$
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'scope', scope,
+        'cards', cards,
+        'last_activity_at', last_activity_at
+      )
+      order by last_activity_at desc
+    ),
+    '[]'::jsonb
+  )
+  from (
+    select
+      c.scope::text as scope,
+      count(*)::int as cards,
+      max(greatest(c.updated_at, coalesce(last_event.at, c.updated_at)))
+        as last_activity_at
+    from public.cards c
+      left join lateral (
+        select max(e.created_at) as at
+          from public.card_events e
+         where e.card_id = c.id
+      ) last_event on true
+    where c.archived_at is null
+    group by c.scope
+  ) boards;
+$$;
+
+comment on function public.board_scopes() is
+  'Boards the caller can see, newest activity first, with how many live cards '
+  'each holds. Feeds the board picker and decides which board opens by '
+  'default.';
+
 -- Resolve a project-local address (`#42`) inside one scope.
 create or replace function public.card_resolve(
   p_scope text,
@@ -806,6 +851,7 @@ revoke all on function public.card_get(text, bigint, integer) from public, anon;
 revoke all on function public.board_list(
   text, text, text, boolean, integer) from public, anon;
 revoke all on function public.card_resolve(text, integer) from public, anon;
+revoke all on function public.board_scopes() from public, anon;
 revoke all on function private.card_json(public.cards) from public, anon;
 
 grant execute on function public.card_create(
@@ -830,5 +876,6 @@ grant execute on function public.board_list(
   text, text, text, boolean, integer) to authenticated, service_role;
 grant execute on function public.card_resolve(text, integer)
   to authenticated, service_role;
+grant execute on function public.board_scopes() to authenticated, service_role;
 grant execute on function private.card_json(public.cards)
   to authenticated, service_role;

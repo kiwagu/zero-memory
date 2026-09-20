@@ -6,15 +6,21 @@ import {
   type BoardColumn,
 } from '@workspace/ui/components/board/board-columns';
 
+import { BoardFilter } from '@/components/board-filter.client';
 import { BoardLive } from '@/components/board-live.client';
 import {
+  ALL_BOARDS,
   CARD_STATES,
   boardListSchema,
+  boardScopesSchema,
   cardEventLabel,
   cardStateLabel,
   cardStateVariant,
+  resolveBoardScope,
   type BoardCard,
 } from '@/lib/board';
+import { scopeSlug } from '@workspace/ui/lib/scope-format';
+
 import { getRequestMessages } from '@/lib/i18n';
 import { formatTimestamp, scopeLabel } from '@/lib/memory';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
@@ -34,8 +40,15 @@ export default async function BoardPage({
   const { t } = await getRequestMessages();
 
   const supabase = await createServerSupabaseClient();
+
+  // Which boards exist at all, newest activity first. The answer decides both
+  // the picker's options and, with no choice in the address, which board opens.
+  const { data: scopeRows } = await supabase.rpc('board_scopes');
+  const boards = boardScopesSchema.safeParse(scopeRows).data ?? [];
+  const { selected, value } = resolveBoardScope(scope, boards);
+
   const { data, error } = await supabase.rpc('board_list', {
-    p_scope: scope && scope.trim() !== '' ? scope : undefined,
+    p_scope: selected ?? undefined,
     p_limit: BOARD_LIMIT,
   });
 
@@ -83,7 +96,40 @@ export default async function BoardPage({
   return (
     <div className="flex flex-col gap-6 p-4" data-testid="board">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">{t('board.title')}</h1>
+        {/* The picker rides on the title's line, right-aligned: it is a label
+            for what is on screen rather than a form, so it costs a row of its
+            own for nothing. Always present — hiding it with one board, or
+            with an empty one, would leave the reader unable to see which
+            board they are looking at. An empty board filters to empty. */}
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-2xl font-semibold">{t('board.title')}</h1>
+          <BoardFilter
+            testId="board-scope-filter"
+            placeholder={
+              // The default row names the board it resolves to, so "opened on
+              // the latest activity" is visible rather than merely true.
+              value === '' && selected
+                ? t('board.scope.latestNamed', { scope: scopeSlug(selected) })
+                : t('board.scope.latest')
+            }
+            value={value}
+            options={[
+              { value: ALL_BOARDS, label: t('board.scope.all') },
+              ...boards.map((board) => ({
+                value: board.scope,
+                label: scopeSlug(board.scope),
+                count: board.cards,
+              })),
+              // A board named in the address but holding nothing is still the
+              // board on screen, so the control says so instead of going blank.
+              ...(value !== '' &&
+              value !== ALL_BOARDS &&
+              !boards.some((board) => board.scope === value)
+                ? [{ value, label: scopeSlug(value), count: 0 }]
+                : []),
+            ]}
+          />
+        </div>
         <p className="text-muted-foreground text-sm">
           {t('board.description')}
         </p>

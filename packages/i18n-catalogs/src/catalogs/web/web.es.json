@@ -532,5 +532,8 @@
   "board.relation.disputes": "discute",
   "board.relation.corrects": "corrige",
   "board.refHidden": "no visible para ti",
-  "board.noHistory": "Todavía no ha pasado nada."
+  "board.noHistory": "Todavía no ha pasado nada.",
+  "board.scope.latest": "Actividad más reciente",
+  "board.scope.all": "Todos los tableros",
+  "board.scope.latestNamed": "Actividad más reciente: {scope}"
 }

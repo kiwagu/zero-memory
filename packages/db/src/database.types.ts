@@ -1760,6 +1760,7 @@ export type Database = {
         };
         Returns: Json;
       };
+      board_scopes: { Args: never; Returns: Json };
       build_context: {
         Args: {
           briefing?: boolean;
