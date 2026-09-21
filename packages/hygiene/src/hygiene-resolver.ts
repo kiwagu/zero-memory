@@ -1,6 +1,8 @@
 import {
+  isOpenLoopKind,
   secretContentRejectedMessage,
   type ErrorCode,
+  type MemoryKind,
 } from '@workspace/contracts';
 import { createLogger } from '@workspace/logger';
 import { guardMemoryWrite } from '@workspace/memory';
@@ -9,6 +11,8 @@ import {
   readAllPages,
   type Client,
 } from '@workspace/persistence';
+
+import { LoopClosureDetector } from './loop-closure-detector.js';
 
 /**
  * Outcome of a single owner-scoped resolution. A refusal carries the taxonomy
@@ -349,7 +353,7 @@ export class HygieneResolver {
   ): Promise<ResolverOutcome> {
     const { data: memory, error: lookupError } = await this.client
       .from('memories')
-      .select('id, owner_id, invalidated_at, superseded_by')
+      .select('id, owner_id, kind, invalidated_at, superseded_by')
       .eq('id', memoryId)
       .maybeSingle();
     if (lookupError) {
@@ -391,6 +395,15 @@ export class HygieneResolver {
       .delete()
       .eq('dst', memoryId)
       .eq('type', 'supersedes');
+
+    // Reopening a loop is a person saying "not done": the closure judge must
+    // not close it again on the evidence they have just overruled.
+    if (isOpenLoopKind(memory.kind as MemoryKind)) {
+      await new LoopClosureDetector(this.client).holdReopened(
+        memoryId,
+        ownerId
+      );
+    }
 
     await this.#audit('AgentRestoreMemory', {
       memory: memoryId,

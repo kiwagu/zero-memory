@@ -5,11 +5,13 @@
  * history (ADD-only). The content guard applies to loop kinds like any write.
  */
 import { expect, test } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
 
 import { backdateMemory } from '../helpers/decay.js';
+import { e2eEnv } from '../helpers/env.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
-import { passwordGrantToken } from '../helpers/users.js';
+import { passwordGrantToken, provisionE2EUser } from '../helpers/users.js';
 
 interface BriefingPack {
   memories: Array<{ id: string }>;
@@ -191,6 +193,106 @@ test.describe('Open loops over MCP', () => {
       expect(closed.isError ?? false).toBe(false);
     } finally {
       await mcp.close();
+    }
+  });
+
+  test('a loop a person reopens is not closed again on the evidence they overruled', async () => {
+    // A dedicated user: the closure rollup reads every newer memory of the
+    // owner, and the seed users' corpora grow under concurrent specs.
+    const user = await provisionE2EUser('reopened-loop@zm.e2e');
+    const token = await passwordGrantToken(user);
+    const agent = await McpTestClient.connect(token);
+    // Completion evidence comes from other conversations, so no same-session
+    // rule folds it into the loop or into each other.
+    const reporter = await McpTestClient.connect(token);
+    const later = await McpTestClient.connect(token);
+    const admin = createClient(
+      e2eEnv.supabaseUrl,
+      e2eEnv.supabaseServiceRoleKey,
+      { auth: { persistSession: false } }
+    );
+    const stamp = Date.now();
+    const remember = async (
+      client: McpTestClient,
+      content: string,
+      kind: string
+    ) => {
+      const stored = await client.callTool('remember', {
+        content,
+        kind,
+        scope: 'personal',
+      });
+      expect(stored.isError ?? false).toBe(false);
+      return firstJson<{ memory_id: string }>(stored).memory_id;
+    };
+    // What the judge would be shown next: the newest evidence the rollup
+    // pairs with the loop, at the detector's own similarity floor.
+    const newestEvidence = async (loopId: string) => {
+      const { data: owner } = await admin
+        .from('memories')
+        .select('owner_id')
+        .eq('id', loopId)
+        .single();
+      const { data, error } = await admin.rpc('find_loop_closure_evidence', {
+        p_owner: owner?.owner_id,
+      });
+      expect(error).toBeNull();
+      return (
+        data as Array<{ loop_id: string; newest_evidence_id: string }>
+      ).find((row) => row.loop_id === loopId)?.newest_evidence_id;
+    };
+    const guard = async (loopId: string) => {
+      const { data } = await admin
+        .from('loop_closure_checks')
+        .select('last_evidence_id')
+        .eq('loop_id', loopId)
+        .maybeSingle();
+      return data?.last_evidence_id ?? null;
+    };
+
+    try {
+      const loop = await remember(
+        agent,
+        `e2e reopen marker ${stamp}: migrate the invoice archive to cold storage — copy, verify and delete the hot copies`,
+        'task'
+      );
+      const done = await remember(
+        reporter,
+        `e2e reopen marker ${stamp}: the invoice archive migration to cold storage is finished`,
+        'fact'
+      );
+      expect(await newestEvidence(loop)).toBe(done);
+
+      // The loop is closed. The closure judge's own close deletes its guard
+      // too, so either way the loop has none when it comes back.
+      const closed = await agent.callTool('close_loop', { memory_id: loop });
+      expect(closed.isError ?? false).toBe(false);
+      expect(await guard(loop)).toBeNull();
+
+      // The owner says it is not done and reopens it.
+      const restored = await agent.callTool('restore_memory', {
+        memory_id: loop,
+      });
+      expect(restored.isError ?? false).toBe(false);
+
+      // THE CLAIM: the reopened loop is held against the evidence it already
+      // has. A guard equal to the newest evidence is exactly what makes the
+      // next detector run skip the loop instead of judging it again.
+      expect(await guard(loop)).toBe(done);
+      expect(await newestEvidence(loop)).toBe(done);
+
+      // Newer evidence is what earns the loop another judgement.
+      const followUp = await remember(
+        later,
+        `e2e reopen marker ${stamp}: the hot copies of the invoice archive are deleted, cold storage verified`,
+        'fact'
+      );
+      expect(await newestEvidence(loop)).toBe(followUp);
+      expect(await guard(loop)).toBe(done);
+    } finally {
+      await agent.close();
+      await reporter.close();
+      await later.close();
     }
   });
 
