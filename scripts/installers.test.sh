@@ -117,12 +117,12 @@ run() {
   check "helper: a paired block is removed, the rest kept" test "$(cat "$HOME/c")" = "$(printf 'keep1\nkeep2')"
 
   printf 'keep1\nBEGIN\nmine\nmine too\n' > "$HOME/d"; cp "$HOME/d" "$T/d.orig"
-  zm_strip_block "$HOME/d" BEGIN END > "$T/d.out"
+  zm_strip_block "$HOME/d" BEGIN END > "$T/d.out" 2>&1
   check "helper: a lone BEGIN leaves the file untouched" cmp -s "$HOME/d" "$T/d.orig"
   check "helper: ...and says so" grep -q 'do not pair up' "$T/d.out"
 
   printf 'keep1\nEND\nkeep2\n' > "$HOME/e"; cp "$HOME/e" "$T/e.orig"
-  zm_strip_block "$HOME/e" BEGIN END >/dev/null
+  zm_strip_block "$HOME/e" BEGIN END >/dev/null 2>&1
   check "helper: a stray END leaves the file untouched" cmp -s "$HOME/e" "$T/e.orig"
 
   printf 'v1\n' > "$HOME/g"; snap="$(zm_snapshot_file "$HOME/g")"
@@ -131,6 +131,33 @@ run() {
   snap="$(zm_snapshot_file "$HOME/g")"; printf 'v2\n' > "$HOME/g"
   zm_keep_snapshot "$HOME/g" "$snap" >/dev/null
   check "helper: an edit that changed the file keeps the snapshot" grep -qx v1 "$ZM_BACKUP_DIR/home/g"
+
+  printf 'old\n' > "$HOME/h"; new="$(mktemp)"; printf 'new\n' > "$new"
+  safe_backup_dir="$ZM_BACKUP_DIR"; ZM_BACKUP_DIR="/proc/zero-memory-denied"
+  if zm_write_file "$HOME/h" "$new" >/dev/null 2>&1; then backup_rc=0; else backup_rc=$?; fi
+  check "helper: a failed backup refuses the write" test "$backup_rc$ZM_FILE_CHANGED$(cat "$HOME/h")" = "10old"
+  check "helper: a refused write keeps the proposed content" grep -qx new "$new"
+  rm -f "$new"
+
+  if zm_remove_file "$HOME/h" >/dev/null 2>&1; then remove_rc=0; else remove_rc=$?; fi
+  check "helper: a failed backup refuses the removal" test "$remove_rc$ZM_FILE_CHANGED$(cat "$HOME/h")" = "10old"
+
+  ZM_BACKUP_DIR="$safe_backup_dir"; new="$(mktemp)"; printf 'new\n' > "$new"
+  if zm_write_file /proc/self/status "$new" >/dev/null 2>&1; then write_rc=0; else write_rc=$?; fi
+  check "helper: a failed target write is reported and keeps its input" test "$write_rc$ZM_FILE_CHANGED$(test -f "$new"; echo $?)" = "100"
+  rm -f "$new"
+
+  mktemp() { return 1; }
+  if failed_snap="$(zm_snapshot_file "$HOME/h" 2>/dev/null)"; then snapshot_create_rc=0; else snapshot_create_rc=$?; fi
+  unset -f mktemp
+  check "helper: a failed snapshot creation is reported" test "$snapshot_create_rc$failed_snap" = 1
+
+  printf 'old\n' > "$HOME/i"; snap="$(zm_snapshot_file "$HOME/i")"; printf 'new\n' > "$HOME/i"
+  ZM_BACKUP_DIR="/proc/zero-memory-denied"
+  if zm_keep_snapshot "$HOME/i" "$snap" >/dev/null 2>&1; then snapshot_rc=0; else snapshot_rc=$?; fi
+  check "helper: a failed snapshot backup restores the user's file" test "$snapshot_rc$ZM_FILE_CHANGED$(cat "$HOME/i")" = "10old"
+  rm -f "$snap"
+  ZM_BACKUP_DIR="$safe_backup_dir"
   echo "$PASS $FAIL" > "$T/helper.counts"
 )
 read -r helper_pass helper_fail < "$T/helper.counts"
