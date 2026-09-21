@@ -17,6 +17,7 @@ export {
   splitOpenLoops,
   type OpenLoopsSplit,
 } from './open-loops.logic.js';
+export { renderBoardSummary } from './work-section.logic.js';
 export {
   DEFAULT_ANCHOR_BUDGET_CHARS,
   renderCompactionAnchor,

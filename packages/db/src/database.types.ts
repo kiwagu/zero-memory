@@ -1761,6 +1761,10 @@ export type Database = {
         Returns: Json;
       };
       board_scopes: { Args: never; Returns: Json };
+      briefing_work: {
+        Args: { p_scope: string; p_thread?: string };
+        Returns: Json;
+      };
       build_context: {
         Args: {
           briefing?: boolean;

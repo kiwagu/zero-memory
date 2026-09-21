@@ -74,7 +74,17 @@ describe('mergeOpenLoops', () => {
   });
 
   it('handles the no-splits case', () => {
-    expect(mergeOpenLoops([])).toEqual({ loops: [], total: 0 });
+    expect(mergeOpenLoops([])).toEqual({ loops: [], total: 0, work: null });
+  });
+
+  it('drains the board summary so the JSON pack does not repeat it', () => {
+    const work = { bound_card: null, active: 1, waiting: 0, lead: [] };
+    const split = splitOpenLoops({ ...payload([loop(1)]), work });
+    expect(split.work).toEqual(work);
+    expect(split.payload).not.toHaveProperty('work');
+    expect(mergeOpenLoops([splitOpenLoops(payload([])), split]).work).toEqual(
+      work
+    );
   });
 });
 

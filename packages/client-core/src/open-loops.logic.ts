@@ -1,5 +1,6 @@
 import {
   buildContextOutputSchema,
+  type BriefingWork,
   type ContextMemory,
 } from '@workspace/contracts';
 
@@ -20,17 +21,20 @@ export interface OpenLoopsSplit {
   payload: unknown;
   loops: ContextMemory[];
   total: number;
+  /** The board's work in progress, when the server sent a summary. */
+  work: BriefingWork | null;
 }
 
 /** Splits open loops out of an UNPARSED briefing payload — never throws. */
 export const splitOpenLoops = (payload: unknown): OpenLoopsSplit => {
   const parsed = buildContextOutputSchema.safeParse(payload);
-  if (!parsed.success) return { payload, loops: [], total: 0 };
-  const { open_loops, open_loops_total, ...rest } = parsed.data;
+  if (!parsed.success) return { payload, loops: [], total: 0, work: null };
+  const { open_loops, open_loops_total, work, ...rest } = parsed.data;
   return {
     payload: { ...rest, open_loops: [], open_loops_total: 0 },
     loops: open_loops,
     total: open_loops_total,
+    work: work ?? null,
   };
 };
 
@@ -43,7 +47,7 @@ export const splitOpenLoops = (payload: unknown): OpenLoopsSplit => {
  */
 export const mergeOpenLoops = (
   splits: readonly OpenLoopsSplit[]
-): { loops: ContextMemory[]; total: number } => {
+): { loops: ContextMemory[]; total: number; work: BriefingWork | null } => {
   const byId = new Map<string, ContextMemory>();
   for (const split of splits) {
     for (const loop of split.loops) {
@@ -54,7 +58,10 @@ export const mergeOpenLoops = (
     b.created_at.localeCompare(a.created_at)
   );
   const total = Math.max(0, ...splits.map((split) => split.total));
-  return { loops, total: Math.max(total, loops.length) };
+  // Every briefing of one session pins the same project, so the first
+  // summary is the summary.
+  const work = splits.find((split) => split.work)?.work ?? null;
+  return { loops, total: Math.max(total, loops.length), work };
 };
 
 /** Whole days a loop has been open (unparsable dates render as 0). */
