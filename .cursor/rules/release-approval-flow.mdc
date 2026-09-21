@@ -16,7 +16,7 @@ promoting stage, restarting services, or touching the live database.
 
 ## The Rule
 
-1. **One epic — one branch — one merge.** All work of an epic, including
+1. **One epic — one branch — one landing.** All work of an epic, including
    every review fix that surfaces while it awaits approval, lands as
    commits on the SAME feature branch. Never spawn micro fix-branches for
    review feedback; they bloat history and dilute the epic.
@@ -64,42 +64,52 @@ promoting stage, restarting services, or touching the live database.
 
    a. **Cut the branch from `main`.** It is stable by definition.
 
-   b. **On the feature branch — the ordinary gates:** `check` (format,
-      lint, typecheck, env templates), units, the feature's own e2e specs
-      and `test:e2e:smoke`. Fast feedback on the change itself. The full
-      suite here would only re-test `main`, which the last release already
-      proved.
+   b. **On the feature branch — the gates, on a COMMITTED tip:** `check`
+      (format, lint, typecheck, env templates), units, and the FULL e2e.
+      A run against an uncommitted working tree proves a tree no commit
+      points at; name the HEAD a run was made on, or it is not evidence.
 
-   c. **Merge into `dev` — and run the FULL e2e there. This step is
-      mandatory.** `dev` is the compatibility contour: it is the only place
-      where this feature meets the others still in flight, so it is the
-      only place that combination has ever existed. Conflicts are resolved
-      here too, on `dev`, not later.
+   c. **Merge into `dev` — only while OTHER work is in flight.** `dev` is
+      the compatibility contour: it exists to be the one place where this
+      feature meets the others, so it is the only place that combination
+      has ever existed. With two or more features in flight, merge into
+      `dev` and run the FULL e2e there on the committed merge; conflicts
+      are resolved on `dev`, not later. With a single feature in flight
+      there is nothing to integrate against — the branch run in (b) IS the
+      integration run, and `dev` is not used.
 
-   d. **Merge the SAME feature branch into `main`. No test run is owed
-      here.** `main` gains nothing that was not already exercised: the
-      branch was tested on its own, and its combination with everything
-      in flight was tested on `dev`. THIS HOLDS ONLY BECAUSE NOTHING
-      REACHES `main` WITHOUT PASSING `dev` — that condition is what makes
-      the step safe, so never let a branch skip (c) to save time.
+   d. **Squash the feature branch onto `main` — never a merge commit
+      there.** One commit per epic, subject in the usual one-line form, and
+      the branch it came from recorded as a trailer in a SECOND `-m`, so
+      the subject stays one line:
+
+      ```
+      git merge --squash <branch>
+      git commit -m "<type(scope): subject>" \
+                 -m "Squashed-from: <branch> (<short-sha>)"
+      ```
+
+      The feature branch SURVIVES its landing: it is the only remaining
+      carrier of how the work got there, step by step. Deleting a landed
+      branch is the owner's decision, never routine cleanup. No test run is
+      owed at this step — `main` gains exactly the tree that (b), and (c)
+      where it applied, already proved.
 
    e. **Release** — `run.sh sync` re-runs check, units and the full e2e
       before it cuts the tag, so the published tree is proved once more at
       the moment of publication.
 
-   `dev` and `main` therefore carry DIFFERENT merge commits for the same
-   work and drift apart permanently. That is the model working, not a
-   defect: do not try to make one an ancestor of the other, and do not
-   "repair" the divergence.
+   When `dev` is in use it carries merge commits while `main` carries one
+   squash per epic, so the two drift apart permanently. That is the model
+   working, not a defect: do not try to make one an ancestor of the
+   other, and do not "repair" the divergence.
 
-   Every merge records a merge commit, so a branch stays one object in
-   history and `git revert -m 1` can take a whole epic back out. You do not
-   pass a flag for this — `merge.ff=false` is set in the repository config
-   by `scripts/setup-git-merge-policy.sh`, which `prepare`/`postinstall`
-   run. A policy that depends on remembering a flag at the moment of
-   typing is not a policy; fast-forward is git's silent default and it is
-   most likely exactly where it hurts most — a branch cut from an unmoved
-   `main`.
+   On `main` an epic is ONE commit, so `git revert <squash>` takes it back
+   out whole, and `git log --grep='Squashed-from: <branch>'` finds where a
+   branch landed. `merge.ff=false`, set in the repository config by
+   `scripts/setup-git-merge-policy.sh` (run by `prepare`/`postinstall`),
+   still guards the `dev` merges against git's silent fast-forward; a
+   squash is not affected by it.
 
    Applying a schema change to a serving deployment and any data one-shots
    there are the owner's manual steps — hand over exact commands, and
