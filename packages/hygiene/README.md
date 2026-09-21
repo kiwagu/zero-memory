@@ -23,6 +23,11 @@ unrelated` with a confidence.
    - **Tier-HUMAN** (contradictions, low-confidence pairs): a row in
      `public.memory_review_queue` (deny-all) plus a `contradicts` link, for a
      person to resolve.
+   - An auto-resolution whose loser is a loop promoted to a card
+     (`cards.origin_loop_id`) is downgraded to Tier-HUMAN
+     (`protectPromotedLoop`): the card now carries that work, so retiring the
+     loop is a call for a person to make. The loop-closure judge skips such
+     loops entirely, in its SQL candidate query.
 
 Tuning lives in one place: `DEFAULT_HYGIENE_CONFIG` (`hygiene-verdict.ts`).
 

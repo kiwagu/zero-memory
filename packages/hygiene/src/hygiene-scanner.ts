@@ -9,7 +9,9 @@ import {
 
 import {
   decideAction,
+  protectPromotedLoop,
   queueInstead,
+  retiredBy,
   sameSessionCollapseAction,
   type HygieneAction,
 } from './hygiene-decision.js';
@@ -850,6 +852,25 @@ export class HygieneScanner {
   }
 
   /**
+   * The promoted loops among what `action` would retire: the loser, when a
+   * card was promoted from it. Asked only for an auto-resolution, and only
+   * about its one loser, so a scan pays nothing for pairs that retire nothing.
+   */
+  async #promotedLoops(action: HygieneAction): Promise<Set<string>> {
+    const loser = retiredBy(action);
+    if (loser === null) return new Set();
+    const { data, error } = await this.client
+      .from('cards')
+      .select('origin_loop_id')
+      .eq('origin_loop_id', loser)
+      .limit(1);
+    if (error) {
+      throw new Error(`promoted-loop lookup failed: ${error.message}`);
+    }
+    return new Set((data ?? []).map((row) => row.origin_loop_id as string));
+  }
+
+  /**
    * Applies one verdict. Returns the retired memory id on an auto-resolution,
    * the literal `'queued'` when parked for a human, or null when nothing to do.
    */
@@ -885,7 +906,9 @@ export class HygieneScanner {
         autoInvalidateConfidence: this.config.autoInvalidateConfidence,
       }
     );
-    const action = queueOnly ? queueInstead(decided) : decided;
+    const action = queueOnly
+      ? queueInstead(decided)
+      : protectPromotedLoop(decided, await this.#promotedLoops(decided));
     const audit = {
       confidence: verdict.confidence,
       rationale: verdict.rationale,
