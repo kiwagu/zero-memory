@@ -243,4 +243,67 @@ test.describe('Project board in the dashboard', () => {
       'nothing_here'
     );
   });
+
+  test('a card shows what its bound conversation remembered', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    // A fresh project per run, so the marker is born in THIS conversation
+    // rather than merged into a row from an earlier run.
+    const hint = `/tmp/zm-e2e-board-web-feed-${Date.now()}`;
+
+    let cardId: string;
+    try {
+      const pack = firstJson<{ session?: { thread?: string } }>(
+        await mcp.callTool('build_context', {
+          topic: 'card feed in the dashboard',
+          briefing: true,
+          project_hint: hint,
+        })
+      );
+      const thread = pack.session?.thread;
+      expect(thread).toBeTruthy();
+
+      const stored = await mcp.callTool('remember', {
+        content:
+          'board-web feed marker: the report build now waits for the backup ' +
+          'to finish',
+        kind: 'decision',
+        project_hint: hint,
+      });
+      expect(stored.isError ?? false).toBe(false);
+      const { scope } = firstJson<{ scope: string }>(stored);
+
+      const created = await mcp.callTool('card', {
+        action: 'create',
+        scope,
+        title: 'Order the nightly jobs',
+      });
+      expect(created.isError ?? false).toBe(false);
+      cardId = firstJson<CardResult>(created).card.id;
+
+      const bound = await mcp.callTool('card_log', {
+        action: 'attach',
+        card_id: cardId,
+        ref_kind: 'thread',
+        ref_target: thread,
+      });
+      expect(bound.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+
+    // Never attached, yet on the card: it was born in the bound conversation.
+    const feed = page.getByTestId('card-feed');
+    await expect(feed).toContainText('report build now waits');
+    await expect(page.getByTestId('card-refs')).not.toContainText(
+      'report build now waits'
+    );
+  });
 });

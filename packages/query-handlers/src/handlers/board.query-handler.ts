@@ -30,6 +30,7 @@ export class BoardQueryHandler implements IQueryHandler<
           cardId: query.card_id ?? required('card_id', 'read a card'),
           afterSeq: query.after_seq,
           limit: query.limit,
+          feedBefore: query.feed_before,
         });
         if (read.isErr()) {
           const cardFailure = read.unwrapErr();
@@ -44,6 +45,9 @@ export class BoardQueryHandler implements IQueryHandler<
           events: view.events,
           has_more: view.has_more,
           next_after_seq: view.next_after_seq,
+          feed: view.feed,
+          feed_has_more: view.feed_has_more,
+          feed_next_before: view.feed_next_before,
         });
       }
       case 'resolve': {

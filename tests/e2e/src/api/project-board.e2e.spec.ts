@@ -9,7 +9,9 @@
  * close it, and a stranger sees nothing at all.
  */
 import { expect, test } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
 
+import { e2eEnv } from '../helpers/env.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
@@ -51,6 +53,14 @@ interface BoardResult {
   }>;
   has_more: boolean;
   next_after_seq: number;
+  feed: Array<{
+    memory_id: string;
+    kind: string;
+    preview: string;
+    thread: string;
+  }>;
+  feed_has_more: boolean;
+  feed_next_before: string | null;
 }
 
 const PROJECT_HINT = '/tmp/zm-e2e-board-project';
@@ -335,6 +345,184 @@ test.describe('Project board over MCP', () => {
     } finally {
       await owner.close();
       await stranger.close();
+    }
+  });
+
+  test('a conversation bound to a card fills its feed, and nothing else does', async () => {
+    const seed = await readSeedState();
+    const agent = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    const elsewhere = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    // A fresh project per run: a memory repeated across runs would be merged
+    // into the earlier run's row — born in an earlier conversation.
+    const hint = `/tmp/zm-e2e-board-feed-${Date.now()}`;
+    const feedOf = async (
+      cardId: string,
+      extra: Record<string, unknown> = {}
+    ): Promise<BoardResult> => {
+      const read = await agent.callTool('board', {
+        action: 'get',
+        card_id: cardId,
+        ...extra,
+      });
+      expect(read.isError ?? false).toBe(false);
+      return firstJson<BoardResult>(read);
+    };
+    const ids = (view: BoardResult): string[] =>
+      view.feed.map((item) => item.memory_id);
+    const remember = async (
+      client: McpTestClient,
+      args: Record<string, unknown>
+    ): Promise<{ memory_id: string; scope: string }> => {
+      const stored = await client.callTool('remember', args);
+      expect(stored.isError ?? false).toBe(false);
+      return firstJson<{ memory_id: string; scope: string }>(stored);
+    };
+
+    try {
+      // Reading first opens the conversation this agent's writes are born in.
+      const pack = firstJson<{ session?: { thread?: string } }>(
+        await agent.callTool('build_context', {
+          topic: 'derived card feed',
+          briefing: true,
+          project_hint: hint,
+        })
+      );
+      const thread = pack.session?.thread;
+      expect(thread).toMatch(/^thr_/u);
+
+      // Written BEFORE the conversation is bound: the feed is derived from
+      // where a memory was born, not from when the binding happened.
+      const early = await remember(agent, {
+        content:
+          'e2e feed marker: the nightly export runs after the vacuum, never ' +
+          'before it',
+        kind: 'fact',
+        project_hint: hint,
+      });
+
+      const created = await agent.callTool('card', {
+        action: 'create',
+        scope: early.scope,
+        title: 'Keep the nightly jobs from colliding',
+      });
+      expect(created.isError ?? false).toBe(false);
+      const card = firstJson<CardResult>(created).card;
+
+      // Nothing is bound yet, so nothing belongs to the card.
+      expect((await feedOf(card.id)).feed).toHaveLength(0);
+
+      const bound = await agent.callTool('card_log', {
+        action: 'attach',
+        card_id: card.id,
+        ref_kind: 'thread',
+        ref_target: thread,
+      });
+      expect(bound.isError ?? false).toBe(false);
+
+      const late = await remember(agent, {
+        content:
+          'e2e feed marker: the backup window moved to four in the morning ' +
+          'so it no longer overlaps the report build',
+        kind: 'decision',
+        project_hint: hint,
+      });
+      // Same conversation, another scope: a personal note is not the card's.
+      const personal = await remember(agent, {
+        content: 'e2e feed marker: I prefer reading job logs oldest line first',
+        kind: 'preference',
+        scope: 'personal',
+      });
+      // Same project, another conversation: not bound, so not the card's.
+      const other = firstJson<{ session?: { thread?: string } }>(
+        await elsewhere.callTool('build_context', {
+          topic: 'unrelated work',
+          briefing: true,
+          project_hint: hint,
+        })
+      );
+      expect(other.session?.thread).not.toBe(thread);
+      const unrelated = await remember(elsewhere, {
+        content:
+          'e2e feed marker: the staging certificate renews on the first of ' +
+          'the month',
+        kind: 'fact',
+        project_hint: hint,
+      });
+
+      // THE CLAIM: both memories of the bound conversation arrive, newest
+      // first, with no attach call for either — and nothing else does.
+      const filled = await feedOf(card.id);
+      expect(ids(filled)).toEqual([late.memory_id, early.memory_id]);
+      expect(filled.feed.every((item) => item.thread === thread)).toBe(true);
+      expect(ids(filled)).not.toContain(personal.memory_id);
+      expect(ids(filled)).not.toContain(unrelated.memory_id);
+      expect(filled.feed[0]?.preview).toContain('backup window');
+
+      // The feed pages on its own cursor, newest to oldest.
+      const first = await feedOf(card.id, { limit: 1 });
+      expect(ids(first)).toEqual([late.memory_id]);
+      expect(first.feed_has_more).toBe(true);
+      expect(first.feed_next_before).toBe(late.memory_id);
+      const second = await feedOf(card.id, {
+        limit: 1,
+        feed_before: first.feed_next_before,
+      });
+      expect(ids(second)).toEqual([early.memory_id]);
+      expect(second.feed_has_more).toBe(false);
+
+      // Reading the feed is not a recall: nothing was reinforced by it.
+      const admin = createClient(
+        e2eEnv.supabaseUrl,
+        e2eEnv.supabaseServiceRoleKey,
+        { auth: { persistSession: false, autoRefreshToken: false } }
+      );
+      const { count } = await admin
+        .from('usage_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_type', 'recall_used')
+        .in('metadata->>mem_id', [early.memory_id, late.memory_id]);
+      expect(count ?? 0).toBe(0);
+
+      // A memory attached on purpose is listed once — as an attachment.
+      const pinned = await agent.callTool('card_log', {
+        action: 'attach',
+        card_id: card.id,
+        ref_kind: 'memory',
+        ref_target: late.memory_id,
+      });
+      expect(pinned.isError ?? false).toBe(false);
+      const withPin = await feedOf(card.id);
+      expect(ids(withPin)).toEqual([early.memory_id]);
+      expect(withPin.refs.map((ref) => ref.target)).toContain(late.memory_id);
+
+      // A retired memory leaves the feed on its own, and comes back with it.
+      const forgotten = await agent.callTool('forget', {
+        memory_id: early.memory_id,
+      });
+      expect(forgotten.isError ?? false).toBe(false);
+      expect((await feedOf(card.id)).feed).toHaveLength(0);
+      const restored = await agent.callTool('restore_memory', {
+        memory_id: early.memory_id,
+      });
+      expect(restored.isError ?? false).toBe(false);
+      expect(ids(await feedOf(card.id))).toEqual([early.memory_id]);
+
+      // Unbinding the conversation is the whole undo: nothing was copied.
+      const unbound = await agent.callTool('card_log', {
+        action: 'detach',
+        card_id: card.id,
+        ref_kind: 'thread',
+        ref_target: thread,
+      });
+      expect(unbound.isError ?? false).toBe(false);
+      expect((await feedOf(card.id)).feed).toHaveLength(0);
+    } finally {
+      await agent.close();
+      await elsewhere.close();
     }
   });
 });

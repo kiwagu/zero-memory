@@ -1827,6 +1827,10 @@ export type Database = {
         };
         Returns: Json;
       };
+      card_feed: {
+        Args: { p_before?: string; p_card_id: string; p_limit?: number };
+        Returns: Json;
+      };
       card_get: {
         Args: { p_after_seq?: number; p_card_id: string; p_limit?: number };
         Returns: Json;

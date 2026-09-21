@@ -64,6 +64,8 @@ export interface ReadCardParams {
   cardId: string;
   afterSeq?: number;
   limit?: number;
+  /** Continue the feed past this memory (the previous page's cursor). */
+  feedBefore?: string;
 }
 
 export interface ListBoardParams {
@@ -110,12 +112,28 @@ export interface CardEventView {
   created_at: string;
 }
 
+/**
+ * One memory of a card's feed: born in a conversation bound to the card, in
+ * its scope, still live. Derived when read — the card stores none of it.
+ */
+export interface CardFeedItemView {
+  memory_id: string;
+  kind: string;
+  preview: string;
+  thread: string;
+  created_at: string;
+}
+
 export interface CardReadView {
   card: Card;
   refs: CardRefView[];
   events: CardEventView[];
   has_more: boolean;
   next_after_seq: number;
+  /** Newest first; empty when no conversation is bound. */
+  feed: CardFeedItemView[];
+  feed_has_more: boolean;
+  feed_next_before: string | null;
 }
 
 export interface BoardCardView {

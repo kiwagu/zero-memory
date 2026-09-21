@@ -2,7 +2,11 @@ import { z } from 'zod';
 
 import { entityIdSchemas } from './entity-prefixes.js';
 import { entityIdSchema } from './graph.schema.js';
-import { memoryIdSchema, memoryScopeSchema } from './memory.schema.js';
+import {
+  memoryIdSchema,
+  memoryKindSchema,
+  memoryScopeSchema,
+} from './memory.schema.js';
 import { userIdSchema } from './user.schema.js';
 
 /**
@@ -253,6 +257,21 @@ export const cardRefViewSchema = z.object({
 });
 export type CardRefView = z.infer<typeof cardRefViewSchema>;
 
+/**
+ * One memory in a card's feed: born in a conversation bound to the card, in
+ * the card's own scope, still live. The feed is derived when it is read, so
+ * this is a view of the memory — never a copy of it.
+ */
+export const cardFeedItemSchema = z.object({
+  memory_id: memoryIdSchema,
+  kind: memoryKindSchema,
+  preview: z.string(),
+  /** The bound conversation it was born in. */
+  thread: z.string(),
+  created_at: z.string(),
+});
+export type CardFeedItem = z.infer<typeof cardFeedItemSchema>;
+
 /** One row of the board listing. */
 export const boardCardSchema = z.object({
   id: cardIdSchema,
@@ -281,9 +300,10 @@ const authorshipFields = {
     .string()
     .optional()
     .describe(
-      'The conversation this is written in. Binding a card to a thread is ' +
-        'what makes its feed fill itself: memories born in that conversation ' +
-        'surface on the card without being attached one by one.'
+      'The conversation this is written in, recorded with the entry so a ' +
+        'reader can see where it came from. It does not bind the ' +
+        'conversation to the card: for that, attach it with `card_log` ' +
+        '(`ref_kind: thread`).'
     ),
   agent_label: cardAgentLabelSchema
     .optional()
@@ -305,8 +325,10 @@ export const boardInputSchema = z.object({
     .enum(['list', 'get', 'resolve'])
     .default('list')
     .describe(
-      'list: the cards of a scope. get: one card with its attachments and a ' +
-        'page of its history. resolve: turn a project-local number into a card.'
+      'list: the cards of a scope. get: one card with its attachments, a ' +
+        'page of its history and a page of its feed — the memories born in ' +
+        'the conversations bound to it. resolve: turn a project-local number ' +
+        'into a card.'
     ),
   scope: z
     .string()
@@ -333,6 +355,12 @@ export const boardInputSchema = z.object({
     .nonnegative()
     .optional()
     .describe('Read only what happened after this position in the history.'),
+  feed_before: memoryIdSchema
+    .optional()
+    .describe(
+      'For get: continue the feed past this memory — the `feed_next_before` ' +
+        'a previous page returned.'
+    ),
   limit: z.number().int().positive().max(200).optional(),
 });
 export type BoardInput = z.infer<typeof boardInputSchema>;
@@ -346,6 +374,14 @@ export const boardOutputSchema = z.object({
   events: z.array(cardEventSchema).default([]),
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
+  /**
+   * For get: the memories born in the conversations bound to the card,
+   * newest first. Nothing about them is stored on the card — they belong to
+   * it because of where they were written.
+   */
+  feed: z.array(cardFeedItemSchema).default([]),
+  feed_has_more: z.boolean().default(false),
+  feed_next_before: z.string().nullable().default(null),
 });
 export type BoardOutput = z.infer<typeof boardOutputSchema>;
 
@@ -430,7 +466,9 @@ export const cardLogInputSchema = z.object({
     .enum(CARD_REF_KINDS)
     .optional()
     .describe(
-      'What kind of artifact. An open loop is a memory, so attach it as one.'
+      'What kind of artifact. An open loop is a memory, so attach it as one. ' +
+        'Attaching a `thread` binds that conversation: what it remembers in ' +
+        "the card's scope then appears in the card's feed on its own."
     ),
   ref_target: z
     .string()
