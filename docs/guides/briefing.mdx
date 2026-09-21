@@ -143,6 +143,16 @@ The pack has several legs:
 - Open loops: active tasks and open questions of the briefed scopes,
   oldest first, limited by the 14-day soft briefing TTL. A loop that ages out
   remains open and recallable.
+- Work, project briefings that name a `max_tokens` budget only: the
+  [project board](/docs/concepts/project-board)'s work in progress — the card
+  bound to this conversation, with its state and the reason for it and how
+  much is attached, the active and waiting counts, and the first three other
+  cards. It takes the place of one row of the memories leg rather than adding
+  to the pack. It rides budgeted briefings only because that is where giving
+  up the row was measured harmless: on a copy of a real corpus, one of six
+  rows cost no expected hit, while the twelfth row of an unbudgeted call
+  carried two. A loop attached to one of the named cards leaves the open-loops
+  leg; its card points at it.
 
 Every section inlines content only up to its own cap and marks the row as
 `truncated` past it; the full text stays one id away through `recall` or the
@@ -177,11 +187,11 @@ briefing looks delivered while its most valuable payload goes unread.
 
 So the hook briefing is composed against a character budget below that
 threshold, and the budget is split before anything renders: the project line
-first, then a floor held for the open loops whenever there are any, then the
-standing rules up to their ceiling, then the memory pack in what remains —
-whole memories while they fit, one-line stubs naming the rest. The loops
-render against what the rules actually used, so a short rules block leaves
-them more than their floor. Whatever is shortened says so and names where the
+first, then a floor held for the work in progress — the board's lines and the
+open loops — whenever there is any, then the standing rules up to their
+ceiling, then the memory pack in what remains — whole memories while they
+fit, one-line stubs naming the rest. The work renders against what the rules
+actually used, so a short rules block leaves it more than its floor. Whatever is shortened says so and names where the
 full text is; nothing high in that order is pushed out by something lower.
 
 ## Noise control

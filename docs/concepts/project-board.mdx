@@ -170,6 +170,18 @@ project-local number such as `#42` into its card.
 `idempotency_key`: a retry with the same key after a timeout returns the first
 result instead of writing a second row.
 
+## The board at the start of a session
+
+A session that opens on a project hears about its board before anything else
+it reads. A budgeted briefing — what the client hooks request — carries a few
+lines of it: the card this conversation is bound to, with its state and the
+reason it is there, how many cards are active and waiting, and the first three
+of them. The lines name the work; `board` reads it. They take the place of one
+row of memories the briefing would otherwise carry, so the briefing does not
+grow, and a loop attached to one of the named cards is left out of the loop
+list, since the card already points at it. A `build_context` call that names
+no budget carries no summary and briefs exactly as it did before.
+
 ## The board in the dashboard
 
 The dashboard shows the board as one row of columns, which scrolls sideways
