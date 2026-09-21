@@ -34,9 +34,12 @@ knowledge machinery.
 
 `build_context` returns active loops in a dedicated `open_loops` field,
 separate from (and in addition to) the normal top-k memories, with a total
-count. Session hooks render them as a distinct "Open loops" section. The
-section is capped at 10 loops, oldest first, with an "N more" counter; old
-loops get a staleness badge by age. The section is worded as recorded open
+count. Session hooks render them as a distinct "Open loops" section, newest
+first, with an "N more" counter; old loops get a staleness badge by age. The
+server caps the list at 10 loops. In the hook briefing the section holds its
+own share of the channel budget, so a long block of standing rules cannot
+crowd it out, and a loop too long to fit whole arrives as a one-line stub with
+its id instead of ending the section. The section is worded as recorded open
 work — data, not instructions.
 
 Depth follows the topic, selection does not. All ten arrive whatever the

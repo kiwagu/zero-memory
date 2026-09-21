@@ -42,6 +42,46 @@ export const DEFAULT_HOOK_BUDGET_CHARS = 9_000;
 /** How much of a memory a stub shows before the id. */
 const STUB_CONTENT_CHARS = 100;
 
+/**
+ * Share of the channel held for the open loops whenever there are any. They
+ * are the one part of a briefing the agent cannot learn another way — the
+ * rules also live in the repository's instruction files, the pack is one
+ * build_context away — so they get a FLOOR rather than whatever the rules
+ * happen to leave.
+ */
+export const LOOPS_BUDGET_SHARE = 0.25;
+
+/** What the composer's blank lines between sections cost, generously. */
+const SECTION_SEPARATORS_CHARS = 16;
+
+export interface SectionBudgets {
+  /** The standing rules' ceiling; pinned rules may still exceed it. */
+  readonly rules: number;
+}
+
+/**
+ * Splits the channel BEFORE the sections are rendered: the project line is
+ * spent first, the open loops are held a floor, and the rules get the rest as
+ * their ceiling. Without this split the rules took what they wanted and the
+ * loops rendered into the remainder — on this project, nothing — and then
+ * the rules did not fit either, so the briefing lost both. The loops render
+ * afterwards against what the rules ACTUALLY used, so a short rules block
+ * leaves them more than the floor.
+ */
+export const planSectionBudgets = (
+  budgetChars: number,
+  projectLineChars: number,
+  hasLoops: boolean
+): SectionBudgets => ({
+  rules: Math.max(
+    0,
+    budgetChars -
+      projectLineChars -
+      (hasLoops ? Math.floor(budgetChars * LOOPS_BUDGET_SHARE) : 0) -
+      SECTION_SEPARATORS_CHARS
+  ),
+});
+
 /** Resolves the budget knob, falling back to the measured default. */
 export const resolveHookBudgetChars = (raw: string | undefined): number => {
   const parsed = Number(raw);

@@ -10,6 +10,7 @@ import {
   mergeOpenLoops,
   mergeStandingRules,
   parseBriefingPack,
+  planSectionBudgets,
   renderOfflineBriefing,
   renderOpenLoopsSection,
   renderStandingRulesSection,
@@ -72,12 +73,8 @@ export type BriefMode = 'session-start' | 'task';
  * second lookup. */
 const TRUNK_BRANCHES = new Set(['main', 'dev', 'stage', 'master']);
 
-/**
- * What the project line costs, reserved before the loops are rendered. The
- * line is built later (it needs the server's resolved scope), but it outranks
- * everything, so its room is set aside rather than discovered afterwards.
- */
-const PROJECT_LINE_RESERVE = 900;
+/** The composer's blank lines around the rules and loops, generously. */
+const SECTION_GAPS_CHARS = 8;
 
 /**
  * Why a live briefing could not be served, per classified server state — the
@@ -147,23 +144,22 @@ const renderThreadLine = (scope: string, thread: string | null): string =>
  * MCP connection is separate from this hook's, and over HTTP the server
  * cannot learn the project from client roots — the agent passing the hint on
  * its first call is what attaches ITS session to the project.
+ *
+ * Kept short on purpose. It used to run to ~825 characters — 86% of this
+ * project's whole briefing once the rules had been squeezed out — while the
+ * per-message banner repeats the same instruction on every turn anyway.
  */
 const renderProjectLine = (scope: string, hint: string): string =>
-  `PROJECT: ${scope} — this session's memory project. The server does NOT ` +
-  `know it for your connection yet: pass project_hint: ${JSON.stringify(hint)} ` +
-  'on your first zero-memory call (build_context/recall/remember) so reads ' +
-  'and scope-less writes land in this project. Until you do, a write that ' +
-  'names no target is REFUSED rather than stored somewhere else — the server ' +
-  'will not guess your project. If the user names a DIFFERENT project in ' +
-  'chat, pass that name as project_hint immediately. ' +
+  `PROJECT: ${scope} — this session's memory project. Pass project_hint: ` +
+  `${JSON.stringify(hint)} on your first zero-memory call so reads and ` +
+  'scope-less writes land here; until you do, a write naming no target is ' +
+  'REFUSED, never guessed. A different project the user names in chat is ' +
+  'passed as project_hint instead. ' +
   // The project is the default and stays it. core/personal used to be
   // advertised here as equal choices, which is how project facts quietly
   // left their project; they are now requests that the server verifies.
-  "This project is the DEFAULT for everything you store. scope: 'core' or " +
-  "'personal' asks to leave it — worth doing only when the fact plainly " +
-  'holds outside this project, or is about the owner rather than the work. ' +
-  'The server checks that claim and stores the memory here when it does not ' +
-  'hold.';
+  "This project is the DEFAULT for what you store: scope 'core' or " +
+  "'personal' is a request to leave it, and the server checks that claim.";
 
 /**
  * The one line this hook exists to deliver now that it no longer guesses a
@@ -375,19 +371,7 @@ const runSessionStart = async (
     };
   });
   const rules = mergeStandingRules(splits.map((section) => section.rulesSplit));
-  const rulesSection = renderStandingRulesSection(rules);
   const merged = mergeOpenLoops(splits.map((section) => section.split));
-  // The loops are rendered against what the higher-priority sections leave,
-  // so a long loop list is TRIMMED (with the rest counted) instead of being
-  // dropped whole by the composer below — losing every handover to make room
-  // is the one degradation this section must not have.
-  const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
-  const loopSection = renderOpenLoopsSection(
-    merged.loops,
-    merged.total,
-    new Date(),
-    Math.max(0, budget - (rulesSection?.length ?? 0) - PROJECT_LINE_RESERVE)
-  );
 
   // The server-resolved project pin leads the briefing and is persisted per
   // repo root: later sessions (and the offline path) open with the trusted
@@ -416,6 +400,33 @@ const runSessionStart = async (
   const projectLine = resolvedScope
     ? renderProjectLine(resolvedScope, projectHint)
     : null;
+
+  // THE SPLIT, decided before anything renders. The rules used to take what
+  // they wanted and the loops got the remainder — on this project, nothing —
+  // after which the rules did not fit either and the briefing lost both. Now
+  // the loops are held a floor and the rules get a ceiling: pinned rules in
+  // full, the others in full while they fit and by headline after. The loops
+  // then render against what the rules actually used, TRIMMED with the rest
+  // counted rather than dropped whole by the composer below.
+  const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
+  const plan = planSectionBudgets(
+    budget,
+    projectLine?.length ?? 0,
+    merged.loops.length > 0
+  );
+  const rulesSection = renderStandingRulesSection(rules, plan.rules);
+  const loopSection = renderOpenLoopsSection(
+    merged.loops,
+    merged.total,
+    new Date(),
+    Math.max(
+      0,
+      budget -
+        (projectLine?.length ?? 0) -
+        (rulesSection?.length ?? 0) -
+        SECTION_GAPS_CHARS
+    )
+  );
 
   // THE CHANNEL BUDGET. Past a client-side threshold the whole payload is
   // spilled to a file and replaced by a preview, so an over-long briefing is
@@ -633,21 +644,32 @@ const runTask = async (
   // the rules layer must not have. After a compaction the window is new and
   // the record is cleared, so they are delivered again.
   const rulesSplit = splitStandingRules(filtered);
+  const split = splitOpenLoops(rulesSplit.payload);
+
+  // Same channel budget as the session-start briefing, and for the same
+  // reason: this hook fires on a user message, where an over-long payload is
+  // spilled to a file and the turn proceeds on a preview. And the same split:
+  // the loops are held a floor, the rules get a ceiling.
+  const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
+  const leadChars = (banner?.length ?? 0) + TASK_LOOKUP_INSTRUCTION.length;
+  const plan = planSectionBudgets(budget, leadChars, split.loops.length > 0);
   const rulesSection = rulesNeedDelivery({
     epoch: session?.epoch ?? 0,
     ...(session?.rules_epoch !== undefined && {
       rulesEpoch: session.rules_epoch,
     }),
   })
-    ? renderStandingRulesSection(rulesSplit.rules)
+    ? renderStandingRulesSection(rulesSplit.rules, plan.rules)
     : null;
-  const split = splitOpenLoops(rulesSplit.payload);
-  const loopSection = renderOpenLoopsSection(split.loops, split.total);
-
-  // Same channel budget as the session-start briefing, and for the same
-  // reason: this hook fires on a user message, where an over-long payload is
-  // spilled to a file and the turn proceeds on a preview.
-  const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
+  const loopSection = renderOpenLoopsSection(
+    split.loops,
+    split.total,
+    new Date(),
+    Math.max(
+      0,
+      budget - leadChars - (rulesSection?.length ?? 0) - SECTION_GAPS_CHARS
+    )
+  );
   const trimmed = renderPackWithinBudget(
     projectTopic,
     split.payload,

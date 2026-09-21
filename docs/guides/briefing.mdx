@@ -110,7 +110,10 @@ The pack has several legs:
   briefed project. `rules[]` carries `{ text, pinned }` objects, pinned first.
   Pinned rules are exempt from the 12-rule unpinned cap and the 90-day
   delivery TTL. Hook-capable clients render them above the JSON pack as an
-  imperative **STANDING RULES** section.
+  imperative **STANDING RULES** section. Within the hook's channel budget
+  that section has its own ceiling: pinned rules always arrive in full, the
+  others in full while they fit and by their headline after, with a line
+  saying where their full text is.
 
 - Memories: top-ranked hits for the topic, scope-isolated by default.
   A briefing with **no resolvable project** narrows to the personal root and
@@ -171,6 +174,15 @@ mechanisms exist because a pack is delivered through channels that impose their
 own limits: past a client's threshold an oversized result is spilled to a file
 and replaced by a short preview, which is the worst outcome available. The
 briefing looks delivered while its most valuable payload goes unread.
+
+So the hook briefing is composed against a character budget below that
+threshold, and the budget is split before anything renders: the project line
+first, then a floor held for the open loops whenever there are any, then the
+standing rules up to their ceiling, then the memory pack in what remains —
+whole memories while they fit, one-line stubs naming the rest. The loops
+render against what the rules actually used, so a short rules block leaves
+them more than their floor. Whatever is shortened says so and names where the
+full text is; nothing high in that order is pushed out by something lower.
 
 ## Noise control
 

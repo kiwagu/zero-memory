@@ -1,11 +1,14 @@
 export {
   composeWithinBudget,
   DEFAULT_HOOK_BUDGET_CHARS,
+  LOOPS_BUDGET_SHARE,
+  planSectionBudgets,
   renderMemoryStub,
   resolveHookBudgetChars,
   renderPackWithinBudget,
   type BudgetedSection,
   type ComposedBriefing,
+  type SectionBudgets,
   type TrimmedPack,
 } from './brief-budget.logic.js';
 export {
@@ -22,6 +25,7 @@ export {
 export {
   mergeStandingRules,
   renderStandingRulesSection,
+  ruleHeadline,
   splitStandingRules,
   type StandingRulesSplit,
 } from './standing-rules.logic.js';

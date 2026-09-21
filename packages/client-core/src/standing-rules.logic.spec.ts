@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   mergeStandingRules,
   renderStandingRulesSection,
+  ruleHeadline,
   splitStandingRules,
 } from './standing-rules.logic.js';
 
@@ -95,9 +96,73 @@ describe('renderStandingRulesSection', () => {
     expect(withoutPin).not.toContain('guaranteed reach every');
   });
 
-  it('carries a rule of any length in full — this channel has no cap', () => {
+  it('carries a rule of any length in full when no ceiling is given', () => {
     const long = 'x'.repeat(5000);
     const section = renderStandingRulesSection([{ text: long, pinned: true }]);
     expect(section).toContain(long);
+  });
+
+  const body = (headline: string): string =>
+    `${headline}. ${'The reasoning behind it runs on at length. '.repeat(30)}`;
+
+  it('keeps pinned rules whole even past the ceiling, and headlines the rest', () => {
+    const pinned = body('PINNED RULE: never touch production');
+    const ordinary = body('ORDINARY RULE ABOUT BRANCHES');
+    const section = renderStandingRulesSection(
+      [
+        { text: pinned, pinned: true },
+        { text: ordinary, pinned: false },
+      ],
+      800
+    )!;
+    // The guarantee the owner pinned it for outranks the ceiling.
+    expect(section).toContain(pinned);
+    expect(section).not.toContain(ordinary);
+    expect(section).toContain('2. ORDINARY RULE ABOUT BRANCHES [headline]');
+    expect(section).toContain(
+      '(1 rule(s) above are shown by headline only — call build_context'
+    );
+  });
+
+  it('carries the others in full while they fit and adds no footer when all do', () => {
+    const section = renderStandingRulesSection(
+      [
+        { text: 'short rule one', pinned: false },
+        { text: 'short rule two', pinned: false },
+      ],
+      2000
+    )!;
+    expect(section).toContain('1. short rule one');
+    expect(section).toContain('2. short rule two');
+    expect(section).not.toContain('[headline]');
+    expect(section).not.toContain('headline only');
+  });
+});
+
+describe('ruleHeadline', () => {
+  it('ends at the first sentence break after the opening', () => {
+    expect(
+      ruleHeadline(
+        'NO PRIVATE REFERENCES IN COMMITTED ARTIFACTS (every project) — the ' +
+          'rest explains why.'
+      )
+    ).toBe('NO PRIVATE REFERENCES IN COMMITTED ARTIFACTS (every project)');
+    expect(ruleHeadline('Production systems are READ-ONLY. Always.')).toBe(
+      'Production systems are READ-ONLY'
+    );
+  });
+
+  it('does not break inside an open parenthesis', () => {
+    expect(
+      ruleHeadline(
+        'NORTH STAR (keep it in view — not only when asked): the rest follows.'
+      )
+    ).toBe('NORTH STAR (keep it in view — not only when asked)');
+  });
+
+  it('caps an opening that never breaks', () => {
+    const headline = ruleHeadline('word '.repeat(100));
+    expect(headline.length).toBeLessThanOrEqual(161);
+    expect(headline.endsWith('…')).toBe(true);
   });
 });

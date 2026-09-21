@@ -4,10 +4,14 @@ import { describe, expect, it } from 'vitest';
 import {
   composeWithinBudget,
   DEFAULT_HOOK_BUDGET_CHARS,
+  LOOPS_BUDGET_SHARE,
+  planSectionBudgets,
   renderMemoryStub,
   resolveHookBudgetChars,
   renderPackWithinBudget,
 } from './brief-budget.logic.js';
+import { renderOpenLoopsSection } from './open-loops.logic.js';
+import { renderStandingRulesSection } from './standing-rules.logic.js';
 
 // Built THROUGH the contract: a hand-rolled literal would let an id or kind
 // that the real pack can never contain into the fixtures, and the first draft
@@ -185,5 +189,78 @@ describe('composeWithinBudget', () => {
 
     expect(composed.omitted).toEqual([]);
     expect(composed.text).toBe('PROJECT: proj.x');
+  });
+});
+
+describe('planSectionBudgets', () => {
+  it('holds the loops a floor and gives the rules the rest as a ceiling', () => {
+    const plan = planSectionBudgets(9000, 400, true);
+    const floor = Math.floor(9000 * LOOPS_BUDGET_SHARE);
+    expect(plan.rules).toBeLessThanOrEqual(9000 - 400 - floor);
+    expect(plan.rules).toBeGreaterThan(9000 - 400 - floor - 50);
+  });
+
+  it('holds nothing back when there are no loops to deliver', () => {
+    expect(planSectionBudgets(9000, 400, false).rules).toBeGreaterThan(
+      planSectionBudgets(9000, 400, true).rules
+    );
+  });
+
+  it('never plans a negative ceiling', () => {
+    expect(planSectionBudgets(100, 400, true).rules).toBe(0);
+  });
+});
+
+describe('the briefing split, end to end', () => {
+  // The measured defect: 8,455 characters of rules, a 9,000 budget, and a
+  // project line — the loops got nothing, then the rules did not fit either.
+  const rule = (headline: string, pinned: boolean) => ({
+    text: `${headline}. ${'Why it holds, at length. '.repeat(55)}`,
+    pinned,
+  });
+  const rules = [
+    rule('PINNED ONE', true),
+    rule('PINNED TWO', true),
+    rule('ORDINARY THREE', false),
+    rule('ORDINARY FOUR', false),
+    rule('ORDINARY FIVE', false),
+    rule('ORDINARY SIX', false),
+  ];
+  const loops = [1, 2, 3].map((n) =>
+    contextMemorySchema.parse({
+      id: `mem_${String(n).padStart(16, '0')}.0000000000`,
+      content: `handover ${n}: finish the migration and verify it`,
+      kind: 'task',
+      scope: 'proj.alpha',
+      created_at: `2026-09-0${n}T00:00:00Z`,
+    })
+  );
+  const projectLine = `PROJECT: proj.alpha — ${'x'.repeat(400)}`;
+
+  it('delivers the pinned rules whole and the loops, and drops neither', () => {
+    const budget = 9000;
+    const plan = planSectionBudgets(budget, projectLine.length, true);
+    const rulesSection = renderStandingRulesSection(rules, plan.rules)!;
+    const loopSection = renderOpenLoopsSection(
+      loops,
+      loops.length,
+      new Date('2026-09-10T00:00:00Z'),
+      budget - projectLine.length - rulesSection.length - 8
+    );
+    const composed = composeWithinBudget(
+      [
+        { name: 'the project line', text: projectLine },
+        { name: 'the standing rules', text: rulesSection },
+        { name: 'the open loops', text: loopSection },
+      ],
+      budget
+    );
+
+    expect(composed.omitted).toEqual([]);
+    expect(composed.text.length).toBeLessThanOrEqual(budget);
+    expect(composed.text).toContain(rules[0]!.text);
+    expect(composed.text).toContain(rules[1]!.text);
+    expect(composed.text).toContain('[headline]');
+    expect(composed.text).toContain('handover 3');
   });
 });
