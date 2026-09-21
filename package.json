@@ -19,6 +19,7 @@
     "db:sync": "bun run db:migrate:e2e && bun run db:types",
     "db:types": "bun run --cwd packages/db gen-types",
     "test": "CI=1 turbo run test:vitest",
+    "test:installers": "bash scripts/installers.test.sh",
     "test:integration": "CI=1 turbo run test:integration",
     "test:e2e": "CI=1 turbo run test:e2e",
     "test:e2e:smoke": "CI=1 turbo run test:e2e:smoke",

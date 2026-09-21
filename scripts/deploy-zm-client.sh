@@ -41,6 +41,9 @@ warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*"; }
 . "$SCRIPT_DIR/zm-server-url.sh"
 zm_resolve_server_url || exit 1
 BASE_URL="$ZM_BASE_URL"
+# The rules for touching the user's own files (back up first, write in place).
+# shellcheck source=scripts/zm-user-files.sh
+. "$SCRIPT_DIR/zm-user-files.sh"
 
 # --- 1. register the MCP server (user scope) --------------------------------
 if ! command -v claude >/dev/null 2>&1; then
@@ -51,12 +54,20 @@ fi
 # Everything below points at ONE address: the editor's registration, the config
 # the hooks read, and the OAuth line printed at the end.
 zm_store_server_url
-say "Registering MCP server 'zero-memory' -> $ZM_SERVER_URL (user scope)"
-# drop any stale entry first so a re-run picks up a changed URL
-claude mcp remove zero-memory --scope user >/dev/null 2>&1 \
-  || claude mcp remove zero-memory >/dev/null 2>&1 || true
-claude mcp add --scope user --transport http zero-memory "$ZM_SERVER_URL"
-claude mcp get zero-memory || true
+# A registration that already points at this server is left alone: removing it
+# can drop the user's OAuth login for nothing. Only a changed URL is re-pointed.
+current_mcp="$(claude mcp get zero-memory 2>/dev/null || true)"
+if printf '%s\n' "$current_mcp" | grep -q 'Scope: User config' \
+  && printf '%s\n' "$current_mcp" | grep -qxF "  URL: $ZM_SERVER_URL"; then
+  say "MCP server 'zero-memory' already registered (user scope) -> $ZM_SERVER_URL — left untouched"
+else
+  say "Registering MCP server 'zero-memory' -> $ZM_SERVER_URL (user scope)"
+  # drop any stale entry first so a re-run picks up a changed URL
+  claude mcp remove zero-memory --scope user >/dev/null 2>&1 \
+    || claude mcp remove zero-memory >/dev/null 2>&1 || true
+  claude mcp add --scope user --transport http zero-memory "$ZM_SERVER_URL"
+  claude mcp get zero-memory || true
+fi
 
 # --- 2. add the ZM rule/instructions to the global CLAUDE.md ----------------
 mkdir -p "$(dirname "$CLAUDE_MD")"
@@ -65,6 +76,7 @@ if grep -qF "$MARKER" "$CLAUDE_MD"; then
   say "CLAUDE.md already contains the ZM section — leaving it untouched"
 else
   say "Appending ZM section to $CLAUDE_MD"
+  zm_backup_file "$CLAUDE_MD"
   grep -q '^# ' "$CLAUDE_MD" || printf '# Global instructions (all projects on this host)\n' >> "$CLAUDE_MD"
   cat >> "$CLAUDE_MD" <<'ZMSECTION'
 

@@ -80,6 +80,27 @@ keeps your editor and your briefings from ending up on different servers.
 `zero-memory-watcher login <url>` does the same thing later if you move to
 another instance.
 
+The installers write into files that are yours: the client's settings, its MCP
+registry, its instruction file. They handle these files the same way:
+
+- **Only when something changes.** A re-run with nothing to change leaves every
+  file byte-identical. That includes an MCP registration that already points at
+  the right server, so your client's login survives.
+- **Backed up first.** Before a change, the file's previous content is copied to
+  `~/.local/state/zero-memory/backups/<time of the run>/`, at the file's own
+  path under your home directory. If that copy cannot be written, the change
+  is not made: the file keeps its content and the installer stops.
+- **Written in place.** A file you keep as a symlink stays one.
+- **Your own text stays yours.** Your instruction files (`CLAUDE.md`, Codex's
+  `AGENTS.md`) are only ever appended to, never cut, and only when you ask for
+  it. A block the installer manages is replaced only when both of its markers
+  are still there. Otherwise the file is left alone and the installer says so.
+
+Hermes' `config.yaml` is edited through Hermes' own `hermes plugins enable` and
+`hermes config set`, so it is written the way Hermes writes it. Hermes rewrites
+the whole file when it saves, so comments you added yourself survive only in
+the backup.
+
 Reload the client fully afterwards (Claude Code: **Developer: Reload Window**)
 and open a new session: hooks are loaded at startup.
 

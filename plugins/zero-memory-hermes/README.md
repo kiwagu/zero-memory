@@ -95,8 +95,13 @@ bash scripts/plugin-bundle/deploy-zm-hermes.sh
 ```
 
 It installs the watcher binary, copies this plugin into the active Hermes
-profile, enables it, and registers the MCP server. Finish with a one-time
-`zero-memory-watcher login <url>` if the machine is not authorized yet.
+profile, enables it, and registers the MCP server. The profile's `config.yaml`
+is edited only through Hermes' own commands (`hermes plugins enable`,
+`hermes config set`), so the `hermes` CLI must be on `PATH`. Each command writes
+only when its value is missing or different. When the file does change, its
+previous content is backed up under `~/.local/state/zero-memory/backups/`.
+Finish with a one-time `zero-memory-watcher login <url>` if the machine is not
+authorized yet.
 
 ## The `HOME` gotcha this plugin fixes
 
