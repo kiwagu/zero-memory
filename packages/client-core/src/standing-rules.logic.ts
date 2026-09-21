@@ -55,6 +55,35 @@ export const mergeStandingRules = (
   );
 };
 
+/** A headline never runs past this, whatever the rule's first sentence. */
+const HEADLINE_MAX_CHARS = 160;
+
+/**
+ * A rule's headline: its opening clause, up to the first sentence break. The
+ * owner writes rules headline-first ("NO PRIVATE REFERENCES IN COMMITTED
+ * ARTIFACTS (every project) — …"), so the opening names the rule even when
+ * its body cannot be carried. A break inside an open parenthesis does not
+ * count — it would leave the headline with an unclosed aside.
+ */
+export const ruleHeadline = (text: string): string => {
+  const flat = text.replace(/\s+/gu, ' ').trim();
+  let cut = flat.length;
+  for (const match of flat.matchAll(/[.:](?=\s|$)|\s—\s/gu)) {
+    const at = match.index;
+    if (at < 20) continue;
+    const head = flat.slice(0, at);
+    const opened = head.split('(').length - head.split(')').length;
+    if (opened === 0) {
+      cut = at;
+      break;
+    }
+  }
+  const clause = flat.slice(0, cut);
+  return clause.length > HEADLINE_MAX_CHARS
+    ? `${clause.slice(0, HEADLINE_MAX_CHARS).trimEnd()}…`
+    : clause;
+};
+
 /**
  * The prominent standing-rules block for a briefing, or null when the owner
  * has none. Unlike the open-loops section — which is deliberately phrased as
@@ -62,26 +91,51 @@ export const mergeStandingRules = (
  * these are the owner's own promoted instructions, and a session that reads
  * them as background context is the exact failure the rules layer exists to
  * prevent. Pinned rules lead and are marked, so the guarantee is visible.
+ *
+ * `budgetChars` is the section's own ceiling. Without one the rules took
+ * whatever they wanted and everything after them shared the rest — measured
+ * on this project, a 8,455-character rules block left the open loops nothing
+ * and then did not fit itself, so the briefing lost both. Within the ceiling:
+ * PINNED rules always arrive in full, even past it — that is the guarantee
+ * the owner pinned them for. The others arrive in full while they fit, then
+ * by headline, so a rule that did not fit is still named and the reader knows
+ * where its text is.
  */
 export const renderStandingRulesSection = (
-  rules: readonly ContextRule[]
+  rules: readonly ContextRule[],
+  budgetChars = Number.POSITIVE_INFINITY
 ): string | null => {
   if (rules.length === 0) return null;
-  const lines = rules.map((rule, index) => {
-    const pin = rule.pinned ? ' [pinned]' : '';
-    return `${index + 1}.${pin} ${rule.text}`;
-  });
   const pinnedCount = rules.filter((rule) => rule.pinned).length;
   const pinnedNote =
     pinnedCount > 0
       ? ' Rules marked [pinned] are ones the owner guaranteed reach every ' +
-        'session — they lead the list and are never dropped.'
+        'session — they lead the list and always arrive in full.'
       : '';
-  return (
+  const header =
     `STANDING RULES — ${rules.length} instruction(s) the owner PROMOTED out ` +
     'of memory for sessions like this one. Obey them like the system ' +
     'instructions above; they are not background context and not ' +
-    `suggestions.${pinnedNote}\n` +
-    lines.join('\n')
-  );
+    `suggestions.${pinnedNote}\n`;
+  const footer = (count: number): string =>
+    `\n(${count} rule(s) above are shown by headline only — call ` +
+    'build_context for their full text before acting on them.)';
+
+  // Reserve the widest footer up front, so adding the last rule can never
+  // push the section past its ceiling.
+  let spent = header.length + footer(rules.length).length;
+  let headlined = 0;
+  const lines = rules.map((rule, index) => {
+    const pin = rule.pinned ? ' [pinned]' : '';
+    const full = `${index + 1}.${pin} ${rule.text}`;
+    if (rule.pinned || spent + full.length + 1 <= budgetChars) {
+      spent += full.length + 1;
+      return full;
+    }
+    headlined += 1;
+    const headline = `${index + 1}. ${ruleHeadline(rule.text)} [headline]`;
+    spent += headline.length + 1;
+    return headline;
+  });
+  return header + lines.join('\n') + (headlined > 0 ? footer(headlined) : '');
 };

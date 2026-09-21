@@ -37,8 +37,9 @@ export const splitOpenLoops = (payload: unknown): OpenLoopsSplit => {
 /**
  * Merges the loops of several splits (e.g. the project and branch briefings,
  * which brief the same scopes and so carry the same loops): union by id,
- * oldest first. The total is the max, not the sum — each briefing already
- * reported the whole scope-wide count.
+ * NEWEST first — the loops most likely still in flight are the ones a
+ * trimmed section must keep. The total is the max, not the sum — each
+ * briefing already reported the whole scope-wide count.
  */
 export const mergeOpenLoops = (
   splits: readonly OpenLoopsSplit[]
@@ -50,7 +51,7 @@ export const mergeOpenLoops = (
     }
   }
   const loops = [...byId.values()].sort((a, b) =>
-    a.created_at.localeCompare(b.created_at)
+    b.created_at.localeCompare(a.created_at)
   );
   const total = Math.max(0, ...splits.map((split) => split.total));
   return { loops, total: Math.max(total, loops.length) };
@@ -63,16 +64,21 @@ const ageDays = (createdAt: string, now: Date): number => {
   return Math.max(0, Math.floor((now.getTime() - created) / 86_400_000));
 };
 
+/** How much of a loop a one-line stub shows before its id. */
+const LOOP_STUB_CHARS = 140;
+
 /**
  * The prominent "Open loops" text block for a briefing, or null when there
- * is nothing to show. Oldest first with a staleness badge, capped upstream
- * (the server caps the list and reports the scope-wide total).
+ * is nothing to show. In the order given (newest first after merging), with
+ * a staleness badge, capped upstream (the server caps the list and reports
+ * the scope-wide total).
  *
- * `budgetChars` bounds the rendered block: loops beyond what fits are counted
- * into the "+N more" tail rather than pushing the section over a delivery
- * channel's limit. Trimming keeps the leading (oldest) loops for the same
- * reason the list is ordered that way — stale work is the kind that gets
- * forgotten — and an omitted loop is still counted, never silently gone.
+ * `budgetChars` bounds the rendered block. The list is limited by COUNT, not
+ * by cutting a handover mid-sentence: a loop arrives whole while it fits, and
+ * one too long to fit arrives as a one-line stub — kind, age, opening, id —
+ * instead of ending the section. A single long handover used to consume the
+ * whole allowance and leave the section empty. Loops beyond what fits are
+ * counted into the "+N more" tail, never silently gone.
  */
 export const renderOpenLoopsSection = (
   loops: readonly ContextMemory[],
@@ -82,21 +88,24 @@ export const renderOpenLoopsSection = (
 ): string | null => {
   if (loops.length === 0) return null;
   const header =
-    `Open loops recorded in persistent memory (${total} active, oldest ` +
+    `Open loops recorded in persistent memory (${total} active, newest ` +
     'first; a loop stays listed until closed with close_loop or superseded ' +
     'by a remember):\n';
-  const rendered = loops.map((loop) => {
-    const age = ageDays(loop.created_at, now);
-    const staleness = age > 0 ? `, open ${age}d` : '';
-    return `- [${loop.kind}${staleness}] ${loop.content} (id: ${loop.id})`;
-  });
+  // The tail is not free either: leave room for the widest "+N more" it could
+  // grow into, so adding the last line can never overflow.
+  const tail = `\n(+${total} more active open loops)`.length;
 
   const lines: string[] = [];
   let spent = header.length;
-  for (const line of rendered) {
-    // The tail is not free either: leave room for the widest "+N more" it
-    // could grow into, so adding the last line can never overflow.
-    const tail = `\n(+${total} more active open loops)`.length;
+  for (const loop of loops) {
+    const age = ageDays(loop.created_at, now);
+    const badge = `[${loop.kind}${age > 0 ? `, open ${age}d` : ''}]`;
+    const full = `- ${badge} ${loop.content} (id: ${loop.id})`;
+    const flat = loop.content.replace(/\s+/gu, ' ').trim();
+    const stub =
+      `- ${badge} ${flat.slice(0, LOOP_STUB_CHARS).trimEnd()}` +
+      `${flat.length > LOOP_STUB_CHARS ? '…' : ''} (id: ${loop.id})`;
+    const line = spent + full.length + 1 + tail <= budgetChars ? full : stub;
     if (spent + line.length + 1 + tail > budgetChars) break;
     lines.push(line);
     spent += line.length + 1;
