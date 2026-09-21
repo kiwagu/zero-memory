@@ -58,19 +58,20 @@ the attached project. See
 
 ## Capability matrix
 
-| Touchpoint           | Claude Code                              | Cursor                               | Codex CLI                                  | Hermes                                             | VS Code / Copilot      |
-| -------------------- | ---------------------------------------- | ------------------------------------ | ------------------------------------------ | -------------------------------------------------- | ---------------------- |
-| MCP registration     | user scope, `mcp__zero-memory__*` prefix | `~/.cursor/mcp.json`, raw tool names | `codex mcp add`, user scope                | `mcp_servers.zero-memory` in `config.yaml`         | `.vscode/mcp.json`     |
-| Always-on rule       | `CLAUDE.md` (opt-in) + skill             | always-apply rule in the plugin      | memory-first skill in the plugin           | memory-first skill in the plugin                   | instructions files     |
-| Session briefing     | hook                                     | hook                                 | hook                                       | hook (`pre_llm_call`, first turn)                  | pull only              |
-| Task briefing        | hook                                     | not injected (no channel)            | hook                                       | hook (`pre_llm_call`)                              | no stable event        |
-| Transcript capture   | Stop hook (opt-in)                       | stop hook + transcript path (opt-in) | Stop hook + session rollout files (opt-in) | `post_llm_call` + a plugin-written mirror (opt-in) | manual export + import |
-| Compaction capture   | `PreCompact` hook                        | `preCompact` hook                    | `PreCompact` hook                          | not needed — captured every turn                   | —                      |
-| Compaction anchor    | yes — output reaches the summary         | — (observational hook)               | — (output not read as context)             | — (no plugin-facing compaction event)              | —                      |
-| Session receipt      | hook (SessionEnd)                        | — (stop is fire-and-forget)          | —                                          | hook (`on_session_end`, logged)                    | —                      |
-| Recall-usage scoring | ids from the transcript                  | — (results not recorded)             | ids from the rollout tool stream           | ids from `post_tool_call` results                  | —                      |
+| Touchpoint                | Claude Code                              | Cursor                               | Codex CLI                                  | Hermes                                             | VS Code / Copilot      |
+| ------------------------- | ---------------------------------------- | ------------------------------------ | ------------------------------------------ | -------------------------------------------------- | ---------------------- |
+| MCP registration          | user scope, `mcp__zero-memory__*` prefix | `~/.cursor/mcp.json`, raw tool names | `codex mcp add`, user scope                | `mcp_servers.zero-memory` in `config.yaml`         | `.vscode/mcp.json`     |
+| Always-on rule            | `CLAUDE.md` (opt-in) + skill             | always-apply rule in the plugin      | memory-first skill in the plugin           | memory-first skill in the plugin                   | instructions files     |
+| Session briefing          | hook                                     | hook                                 | hook                                       | hook (`pre_llm_call`, first turn)                  | pull only              |
+| Task briefing             | hook                                     | not injected (no channel)            | hook                                       | hook (`pre_llm_call`)                              | no stable event        |
+| Transcript capture        | Stop hook (opt-in)                       | stop hook + transcript path (opt-in) | Stop hook + session rollout files (opt-in) | `post_llm_call` + a plugin-written mirror (opt-in) | manual export + import |
+| Compaction capture        | `PreCompact` hook                        | `preCompact` hook                    | `PreCompact` hook                          | not needed — captured every turn                   | —                      |
+| Compaction anchor         | yes — output reaches the summary         | — (observational hook)               | — (output not read as context)             | — (no plugin-facing compaction event)              | —                      |
+| Briefing after compaction | `SessionStart` re-fires (`compact`)      | not measured yet                     | `PostCompact` re-arms the next prompt      | `pre_llm_call`, once the briefing left the window  | —                      |
+| Session receipt           | hook (SessionEnd)                        | — (stop is fire-and-forget)          | —                                          | hook (`on_session_end`, logged)                    | —                      |
+| Recall-usage scoring      | ids from the transcript                  | — (results not recorded)             | ids from the rollout tool stream           | ids from `post_tool_call` results                  | —                      |
 
-The two compaction rows are one boundary and two different questions. The
+The first two compaction rows are one boundary and two different questions. The
 three hook-driven editors announce a compaction before it happens, so each can
 have the epoch that is about to be condensed captured while it is still whole.
 Hermes reaches the same result by a different route: it captures every
@@ -83,6 +84,19 @@ structured output and lists context injection for other events only; Hermes
 exposes no compaction event to a general plugin at all. Where the anchor
 cannot land it is not attempted, so no client pays a round trip to write into
 nothing.
+
+The third row is about what comes after. A compaction discards everything the
+hooks injected, so the new context window is owed its briefing again. Each
+client reports the boundary its own way, and the watcher re-arms the same
+deliveries for all of them:
+
+- **Claude Code** re-fires its session-start hook with `compact` as the
+  reason.
+- **Codex** has a post-compaction hook, which opens a new window for the next
+  prompt's briefing.
+- **Hermes** has no event. Its plugin notices on the next turn that the session
+  briefing is no longer in the context it replays (see below).
+- **Cursor** has not been observed through a compaction yet.
 
 The recall-usage row is the recall-usefulness judge's input: when a captured
 transcript records which memory ids `recall` / `build_context` actually
@@ -155,6 +169,22 @@ its own append-only JSONL file under
 which the shared ingest path then consumes like any other transcript. Capture
 stays opt-in: with `capture: false` (the default) the mirror is never created
 and the session is read-only.
+
+A Hermes session can outlive many context windows, and Hermes gives a general
+plugin no compaction event, so the plugin recognizes a rebuilt window itself.
+It relies on how Hermes treats injected context:
+
+- Hermes keeps what `pre_llm_call` injected on the user message it rode in on.
+- It sends those bytes again on every later turn, including after a resume.
+- A compaction summarizes those messages away.
+
+The plugin therefore starts each session briefing with the line
+`[zero-memory session briefing]`. Before every turn it looks for that line
+among the injections still in the history. When the line is gone, the turn
+gets the session briefing again, reported to the watcher as a compaction.
+The rules and the next task briefing then re-arm as they do on Claude Code.
+Counting compaction summaries would not work, because Hermes keeps a single
+summary and rewrites it: the count stops moving after the first compaction.
 
 Two gotchas of the environment are handled rather than documented as caveats.
 Hermes runs its agent with `HOME` pointed at a per-profile sandbox, which would
