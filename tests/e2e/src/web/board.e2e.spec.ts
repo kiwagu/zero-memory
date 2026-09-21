@@ -94,6 +94,22 @@ test.describe('Project board in the dashboard', () => {
     await expect(tile).toContainText(REASON);
     await expect(tile).toContainText(`#${cardNumber}`);
 
+    // Narrower than its five columns, the board scrolls inside its own row.
+    // The page itself never widens, so the header and the picker stay whole.
+    await page.setViewportSize({ width: 1100, height: 800 });
+    const row = page.getByTestId('board-columns');
+    await expect
+      .poll(() => row.evaluate((node) => node.scrollWidth > node.clientWidth))
+      .toBe(true);
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth
+      )
+    ).toBe(true);
+    await page.setViewportSize({ width: 1280, height: 720 });
+
     // Opening a card is a DIALOG over the board — and the address bar still
     // names the card, so the step is navigable, shareable and reloadable.
     await tile.click();

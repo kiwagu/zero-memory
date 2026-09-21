@@ -6,6 +6,7 @@
  *   - a spread of memories across kinds (populates the feed / a memory to open)
  *   - one pending memory-hygiene conflict (populates /review)
  *   - the queues, metrics and graph the documentation screenshots show
+ *   - a project board with a card in every column
  *
  * The content is REAL prose about this product — not lorem filler and not the
  * maintainer's working corpus, which carries private paths and project names
@@ -133,6 +134,98 @@ const GRAPH_MEMORIES: Array<{
 const CONFLICT = [
   'Rate limiting uses a fixed-window limiter: 30 requests per 60 seconds per IP.',
   'Rate limiting uses a token-bucket limiter: 100 requests per minute per IP.',
+];
+
+/**
+ * The project board on /board: one card per column. A card opens in `idea`
+ * and reaches its column by moves, because a tile shows the reason of the
+ * move that put it there — a card created straight into a column has none.
+ */
+const BOARD: Array<{
+  title: string;
+  body: string;
+  moves: Array<{ to: string; reason: string }>;
+  note?: string;
+  /** Points the card at the project's first memory. */
+  attachAnchor?: boolean;
+}> = [
+  {
+    title: 'Weekly decision digest per project',
+    body:
+      'Goal: one short summary a week of the decisions recorded in a project.\n\n' +
+      'Boundaries: reads existing memories only; no new capture path.\n\n' +
+      'Done when: a project owner can opt in and receives one digest a week.',
+    moves: [],
+  },
+  {
+    title: 'Translate imported memories into the canonical language',
+    body:
+      'Goal: an import written in any language is found by an English query.\n\n' +
+      'Boundaries: reuse the translator of the write path; each memory keeps ' +
+      'its original phrasing beside the canonical text.\n\n' +
+      'Done when: a non-English export, once imported, answers an English recall.',
+    moves: [
+      {
+        to: 'active',
+        reason:
+          'Imports skip translation today, so a non-English export never ' +
+          'matches an English query.',
+      },
+    ],
+    note: 'The translator already records the source language; import only needs to call it.',
+    attachAnchor: true,
+  },
+  {
+    title: 'Swap the embedding model without a re-index outage',
+    body:
+      'Goal: move to a stronger embedding model while recall keeps answering.\n\n' +
+      'Boundaries: old and new vectors live side by side until the switch.\n\n' +
+      'Done when: every memory has a new vector and recall reads only those.',
+    moves: [
+      {
+        to: 'active',
+        reason:
+          'Long memories are the weakest case in the latest recall benchmark.',
+      },
+      {
+        to: 'waiting',
+        reason:
+          'Waiting for the new model to publish its vector size; the ' +
+          'migration plan depends on it.',
+      },
+    ],
+  },
+  {
+    title: 'Paginate the memory feed',
+    body:
+      'Goal: the feed stays fast however large the corpus grows.\n\n' +
+      'Done when: a visit loads one page, and paging is stable while new ' +
+      'memories arrive.',
+    moves: [
+      {
+        to: 'active',
+        reason: 'The feed loaded the whole corpus on every visit.',
+      },
+      {
+        to: 'done',
+        reason:
+          'Shipped: keyset pages on (created_at, id), stable under ' +
+          'concurrent writes.',
+      },
+    ],
+  },
+  {
+    title: 'Browser extension that captures decisions from web chats',
+    body: 'Goal: decisions made in a browser chat reach memory without copy and paste.',
+    moves: [
+      {
+        to: 'parked',
+        reason:
+          'Transcript capture already covers the supported clients; revisit ' +
+          'if a browser-only client matters.',
+      },
+    ],
+  },
 ];
 
 /** Reads the running e2e stack's URL + service-role key from the CLI. */
@@ -364,19 +457,75 @@ const mcp = await McpTestClient.connect(token);
  */
 const write = async (
   args: Record<string, unknown>
-): Promise<{ memory_id: string }> => {
+): Promise<{ memory_id: string; scope: string }> => {
   const result = await mcp.callTool('remember', args);
   if (result.isError) {
     throw new Error(`seed write failed: ${result.content[0]?.text ?? ''}`);
   }
-  return firstJson<{ memory_id: string }>(result);
+  return firstJson<{ memory_id: string; scope: string }>(result);
+};
+
+/** Calls a board tool and fails loudly, for the same reason `write` does. */
+const boardCall = async <T>(
+  tool: 'board' | 'card' | 'card_log',
+  args: Record<string, unknown>
+): Promise<T> => {
+  const result = await mcp.callTool(tool, args);
+  if (result.isError) {
+    throw new Error(`seed ${tool} failed: ${result.content[0]?.text ?? ''}`);
+  }
+  return firstJson<T>(result);
 };
 
 try {
   // Project-scoped, so the scopes screen shows a real project beside the
   // personal one and feed cards carry a project badge.
+  const projectWrites = [];
   for (const memory of GRAPH_MEMORIES) {
-    await write({ ...memory, project_hint: 'zero-memory' });
+    projectWrites.push(await write({ ...memory, project_hint: 'zero-memory' }));
+  }
+  const [anchor] = projectWrites;
+  if (!anchor) {
+    throw new Error('seed wrote no project memory to put a board in');
+  }
+
+  // The project's board: a card in every column, each moved with the reason
+  // its tile shows. Matched by title, so a re-run adds nothing.
+  const { cards: existing } = await boardCall<{
+    cards: Array<{ title: string }>;
+  }>('board', { action: 'list', scope: anchor.scope, limit: 200 });
+  const onBoard = new Set(existing.map((card) => card.title));
+  for (const spec of BOARD) {
+    if (onBoard.has(spec.title)) continue;
+    const { card } = await boardCall<{ card: { id: string } }>('card', {
+      action: 'create',
+      scope: anchor.scope,
+      title: spec.title,
+      body: spec.body,
+    });
+    if (spec.attachAnchor) {
+      await boardCall('card_log', {
+        action: 'attach',
+        card_id: card.id,
+        ref_kind: 'memory',
+        ref_target: anchor.memory_id,
+      });
+    }
+    if (spec.note) {
+      await boardCall('card_log', {
+        action: 'note',
+        card_id: card.id,
+        text: spec.note,
+      });
+    }
+    for (const move of spec.moves) {
+      await boardCall('card', {
+        action: 'move',
+        card_id: card.id,
+        to: move.to,
+        reason: move.reason,
+      });
+    }
   }
   await write({
     content:
@@ -419,5 +568,6 @@ process.stdout.write(
   `\n✓ Local demo ready.\n  URL:   ${WEB_URL}\n  Login: ${DEMO_EMAIL} / ${DEMO_PASSWORD}\n` +
     `  Name:  ${DEMO_NAME}\n` +
     `  Feed:  ${MEMORIES.length} memories + graph, loops and a version chain\n` +
-    `  Queues: review · rules · reflections · insights · ROI\n\n`
+    `  Queues: review · rules · reflections · insights · ROI\n` +
+    `  Board: ${BOARD.length} cards, one per column\n\n`
 );

@@ -60,7 +60,10 @@ export default async function DashboardLayout({
         items={nav}
         footerItems={footerNav}
       />
-      <SidebarInset>
+      {/* min-w-0: the inset is a flex item beside the sidebar, and without it
+          a page wider than the window (the board's scrolling row) would widen
+          the whole inset instead of scrolling inside its own container. */}
+      <SidebarInset className="min-w-0">
         <DashboardTopbar
           displayName={account.displayName}
           email={account.email}

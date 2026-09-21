@@ -59,58 +59,64 @@ function BoardColumns({
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-      {columns.map((column) => (
-        <section
-          key={column.key}
-          className="flex flex-col gap-3"
-          data-testid={`board-column-${column.key}`}
-        >
-          <div className="flex items-center justify-between">
-            <Badge variant={column.variant ?? 'secondary'}>
-              {column.label}
-            </Badge>
-            <span className="text-muted-foreground text-xs tabular-nums">
-              {column.cards.length}
-            </span>
-          </div>
+    // One row of columns at every width. Where the window is narrower than the
+    // board, the row scrolls sideways instead of wrapping: stacked into blocks,
+    // a board loses what it shows at a glance — where each card stands next to
+    // the others. The inset keeps focus rings clear of the scroll clip.
+    <div className="-m-1 overflow-x-auto p-1 pb-3" data-testid="board-columns">
+      <div className="flex gap-4">
+        {columns.map((column) => (
+          <section
+            key={column.key}
+            className="flex min-w-64 flex-1 basis-0 flex-col gap-3"
+            data-testid={`board-column-${column.key}`}
+          >
+            <div className="flex items-center justify-between">
+              <Badge variant={column.variant ?? 'secondary'}>
+                {column.label}
+              </Badge>
+              <span className="text-muted-foreground text-xs tabular-nums">
+                {column.cards.length}
+              </span>
+            </div>
 
-          {column.cards.map((card) => (
-            <LinkComponent
-              key={card.id}
-              href={card.href}
-              data-testid="board-card"
-              className="focus-visible:ring-ring rounded-lg focus-visible:ring-2 focus-visible:outline-none"
-            >
-              <Card className="hover:border-ring transition-colors">
-                <CardContent className="flex flex-col gap-2 p-3">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-muted-foreground text-xs tabular-nums">
-                      {card.numberLabel}
-                    </span>
-                    <span className="text-sm leading-snug font-medium">
-                      {card.title}
-                    </span>
-                  </div>
-
-                  <BadgeList badges={card.badges} />
-
-                  {card.lastEventLabel ? (
-                    <div className="text-muted-foreground flex flex-col gap-0.5 text-xs">
-                      <span>{card.lastEventLabel}</span>
-                      {card.reason ? (
-                        <span className="text-foreground/80 italic">
-                          {card.reason}
-                        </span>
-                      ) : null}
+            {column.cards.map((card) => (
+              <LinkComponent
+                key={card.id}
+                href={card.href}
+                data-testid="board-card"
+                className="focus-visible:ring-ring rounded-lg focus-visible:ring-2 focus-visible:outline-none"
+              >
+                <Card className="hover:border-ring transition-colors">
+                  <CardContent className="flex flex-col gap-2 p-3">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-muted-foreground text-xs tabular-nums">
+                        {card.numberLabel}
+                      </span>
+                      <span className="text-sm leading-snug font-medium">
+                        {card.title}
+                      </span>
                     </div>
-                  ) : null}
-                </CardContent>
-              </Card>
-            </LinkComponent>
-          ))}
-        </section>
-      ))}
+
+                    <BadgeList badges={card.badges} />
+
+                    {card.lastEventLabel ? (
+                      <div className="text-muted-foreground flex flex-col gap-0.5 text-xs">
+                        <span>{card.lastEventLabel}</span>
+                        {card.reason ? (
+                          <span className="text-foreground/80 italic">
+                            {card.reason}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              </LinkComponent>
+            ))}
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
