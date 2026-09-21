@@ -8,7 +8,9 @@
 #   1. BACK UP before changing, and only when the content actually changes. The
 #      copy lands in $ZM_BACKUP_DIR — one directory per installer run, under
 #      ~/.local/state/zero-memory/backups/ — at the file's own path, so undoing
-#      a bad edit is a single `cp`.
+#      a bad edit is a single `cp`. A change whose backup cannot be made is not
+#      made: the file keeps its content and the call fails, whatever the
+#      caller's `set -e` does.
 #   2. WRITE IN PLACE. Replacing the file with a temp one (`mv tmp file`) turns
 #      a symlink — a config kept in a dotfiles repository — into a plain file
 #      and resets its mode. Writing through the existing path keeps both.

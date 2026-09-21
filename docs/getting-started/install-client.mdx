@@ -88,7 +88,8 @@ registry, its instruction file. They handle these files the same way:
   the right server, so your client's login survives.
 - **Backed up first.** Before a change, the file's previous content is copied to
   `~/.local/state/zero-memory/backups/<time of the run>/`, at the file's own
-  path under your home directory.
+  path under your home directory. If that copy cannot be written, the change
+  is not made: the file keeps its content and the installer stops.
 - **Written in place.** A file you keep as a symlink stays one.
 - **Your own text stays yours.** Your instruction files (`CLAUDE.md`, Codex's
   `AGENTS.md`) are only ever appended to, never cut, and only when you ask for
