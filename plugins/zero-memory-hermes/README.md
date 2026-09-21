@@ -18,20 +18,39 @@ plugin is the amplifier that makes memory _automatic_ rather than remembered.
 
 ## What it adds
 
-| Hook               | Effect                                                                                                                                                                                                                       |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `on_session_start` | Opens the session mirror and warms the watcher's offline briefing cache.                                                                                                                                                     |
-| `pre_llm_call`     | The only hook that can inject: the **session briefing** on the first turn (project, standing rules, open loops), the **task briefing** on later substantive prompts, plus the health warning when the server is unreachable. |
-| `post_llm_call`    | Mirrors the completed turn and ships the delta to `ingest_conversation` (opt-in).                                                                                                                                            |
-| `post_tool_call`   | Mirrors `recall` / `build_context` **results** — the input the recall-usefulness judge scores against. Write tools are never recorded.                                                                                       |
-| `on_session_end`   | Logs the session value receipt.                                                                                                                                                                                              |
+| Hook               | Effect                                                                                                                                                                                                                                                                           |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `on_session_start` | Opens the session mirror and warms the watcher's offline briefing cache.                                                                                                                                                                                                         |
+| `pre_llm_call`     | The only hook that can inject: the **session briefing** on the first turn (project, standing rules, open loops) and again on any turn after a compaction removed it, the **task briefing** on later substantive prompts, plus the health warning when the server is unreachable. |
+| `post_llm_call`    | Mirrors the completed turn and ships the delta to `ingest_conversation` (opt-in).                                                                                                                                                                                                |
+| `post_tool_call`   | Mirrors `recall` / `build_context` **results** — the input the recall-usefulness judge scores against. Write tools are never recorded.                                                                                                                                           |
+| `on_session_end`   | Logs the session value receipt.                                                                                                                                                                                                                                                  |
 
 There is deliberately **no compaction hook**. Hermes exposes none to a general
 plugin (`on_pre_compress` belongs to the memory-provider surface, a different
-extension point) — and this adapter does not need one: `post_llm_call` ingests
-every completed turn, so the epoch a compaction condenses has already been
-shipped. The _anchor_ half (writing into the summary itself) is genuinely
-unavailable here and is declared missing rather than emulated.
+extension point), and this adapter covers both halves of that boundary
+without one:
+
+- **Capture.** `post_llm_call` ingests every completed turn, so the epoch a
+  compaction condenses has already been shipped.
+- **The briefing.** Hermes keeps what `pre_llm_call` injected on the user
+  message it rode in on (the `api_content` sidecar) and sends it again on every
+  later turn, including after a resume. A compaction summarizes those messages
+  away. The plugin starts each session briefing with the line
+  `[zero-memory session briefing]`, and before every turn looks for it in the
+  history it is handed. When the line is gone, the turn gets the session
+  briefing again, reported to the watcher as `source: compact`. The watcher
+  then re-arms the rules and the task briefing exactly as it does after a
+  Claude Code compaction. An empty answer leaves no mark, so the next turn
+  asks again. When the server is down the watcher answers with a warning
+  instead. That warning is marked like a briefing, and the task briefing is
+  then the second chance for the rules, as on every other client.
+
+  Counting compaction summaries would not work: Hermes keeps one summary and
+  rewrites it, so the count stops moving after the first compaction.
+
+The _anchor_ half (writing into the summary itself) is genuinely unavailable
+here and is declared missing rather than emulated.
 
 `/zm status` reports which server this machine talks to, `/zm receipt` prints
 the session receipt, `/zm capture` shows whether capture is on and where the

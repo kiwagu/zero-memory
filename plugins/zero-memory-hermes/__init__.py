@@ -3,8 +3,9 @@
 The fourth client adapter of zero-memory, alongside Claude Code, Codex and
 Cursor. It gives a Hermes session the same memory loop the others get:
 
-* **read** — the project briefing when a session opens, the task briefing on
-  the first substantive prompt, a health warning when the server is
+* **read** — the project briefing when a session opens and again whenever a
+  compaction takes it out of the context window, the task briefing on the
+  first substantive prompt, a health warning when the server is
   unreachable, and a recall-first nudge when the agent reaches for code search
   before memory;
 * **write** — opt-in capture of the conversation, so durable facts are stored
@@ -114,6 +115,56 @@ def _terminal_cwd() -> str:
 
 
 
+# The first line of every session briefing this plugin injects. It is what the
+# next turn looks for to tell whether the briefing is still in view.
+SESSION_BRIEFING_MARK = "[zero-memory session briefing]"
+
+
+def _briefing_in_view(conversation_history: object) -> bool:
+    """Whether a session briefing is still in the context the model is sent.
+
+    Hermes keeps what ``pre_llm_call`` injects on the user row it rode in on —
+    the ``api_content`` sidecar, never ``content`` — and replays those bytes on
+    every later turn, a resumed session included. A compaction summarizes rows
+    away and drops the sidecar of the row it merges into, so the briefing
+    leaves exactly when the window is rebuilt. Asking "is it still there"
+    instead of counting summaries matters: the compressor keeps ONE summary and
+    updates it in place, so a count stops moving after the first compaction.
+
+    Only ``api_content`` is read. The summarizer writes into ``content``, and a
+    summary that happens to quote the mark must not pass for the briefing.
+    """
+    if not isinstance(conversation_history, (list, tuple)):
+        return False
+    for message in conversation_history:
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        injected = message.get("api_content")
+        if isinstance(injected, str) and SESSION_BRIEFING_MARK in injected:
+            return True
+    return False
+
+
+def _briefing_leg(
+    is_first_turn: bool, conversation_history: object
+) -> tuple[list[str], str, str]:
+    """The watcher leg for this turn: ``(subcommand, hook event, source)``.
+
+    The session briefing opens the first turn and REOPENS any turn whose
+    window no longer carries it; every other turn gets the task briefing. A
+    lost briefing reaches the watcher as ``source: compact`` — the reason
+    Claude Code gives when its session-start event re-fires after a compaction
+    — so the watcher opens a new context epoch and re-arms the rules and the
+    task briefing exactly as it does there. What to repeat stays the watcher's
+    decision; this plugin only reports that the window was rebuilt.
+    """
+    if is_first_turn:
+        return ["brief", "session-start"], "SessionStart", "startup"
+    if not _briefing_in_view(conversation_history):
+        return ["brief", "session-start"], "SessionStart", "compact"
+    return ["brief", "task"], "UserPromptSubmit", ""
+
+
 def _hook_payload(
     session_id: str,
     cwd: str,
@@ -218,31 +269,37 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
         session_id: str = "",
         user_message: str = "",
         is_first_turn: bool = False,
+        conversation_history: object = None,
         **_: object,
     ) -> dict[str, str] | None:
         """The only hook whose return value reaches the model.
 
         Two legs, in the order the other clients use them: the session briefing
-        on the first turn (project, rules, open loops), the task briefing on
-        every substantive prompt after it. Dedup and "is this prompt
-        substantive" are the WATCHER's decisions, not this plugin's — one
-        implementation of that logic across all four clients is the whole
-        reason the binary exists.
+        on the first turn (project, rules, open loops) and on any turn whose
+        window a compaction rebuilt, the task briefing on every substantive
+        prompt otherwise. Dedup and "is this prompt substantive" are the
+        WATCHER's decisions, not this plugin's — one implementation of that
+        logic across all four clients is the whole reason the binary exists.
         """
         cwd = _cwd(session_id)
-        mode = ["brief", "session-start"] if is_first_turn else ["brief", "task"]
-        event = "SessionStart" if is_first_turn else "UserPromptSubmit"
+        mode, event, source = _briefing_leg(is_first_turn, conversation_history)
         payload = _hook_payload(
             session_id,
             cwd,
             event,
             prompt=user_message,
             transcript_path=_transcript_path(session_id),
-            source="startup" if is_first_turn else "",
+            source=source,
         )
-        sections = [watcher_mod.extract_context(
+        briefing = watcher_mod.extract_context(
             watcher_mod.run_hook(binary, mode, payload, timeout)
-        )]
+        )
+        # An empty answer leaves no mark, so the next turn asks again. A
+        # server-down warning is marked like a briefing: the task briefing is
+        # then the second chance for the rules, as it is on every client.
+        if briefing and event == "SessionStart":
+            briefing = f"{SESSION_BRIEFING_MARK}\n{briefing}"
+        sections = [briefing]
         # The health warning rides along on the prompt event, as on Codex and
         # Cursor: an unreachable server is worth one line in the turn that
         # would otherwise silently get no memory.
@@ -300,18 +357,21 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
             return
         mirror.record_recall(task_id, tool_name, result)
 
-    # ── the compaction boundary: nothing to do, and that is the point ─────
-    # The other three adapters flush at a pre-compaction hook, because they
-    # capture at END OF SESSION and would otherwise lose the epoch a
-    # compaction condenses away. Hermes exposes no such hook to a general
-    # plugin (`VALID_HOOKS` in hermes_cli/plugins.py carries no compaction
-    # event; the compression callback belongs to the memory-provider surface,
-    # a different extension point), and here it is not needed: `post_llm_call`
-    # above ingests EVERY completed turn, so by the time a compaction happens
-    # the epoch has already been shipped. What the others recover at a
-    # boundary, this adapter never lets go of.
+    # ── the compaction boundary: no hook, and none needed ─────────────────
+    # Hermes exposes no compaction event to a general plugin (`VALID_HOOKS` in
+    # hermes_cli/plugins.py carries none; the compression callback belongs to
+    # the memory-provider surface, a different extension point). Each half of
+    # what the other adapters do at that boundary is covered without one:
     #
-    # The anchor half — writing INTO the summary the compressor produces — is
+    # * capture — the others flush at a pre-compaction hook because they
+    #   capture at END OF SESSION. `post_llm_call` above ingests EVERY
+    #   completed turn, so the epoch a compaction condenses is already shipped.
+    # * the briefing — the others learn of the new window from the client.
+    #   Here `pre_llm_call` sees it directly: turn-start compaction runs before
+    #   that hook, and a window that no longer carries the session briefing
+    #   gets it again (`_briefing_leg`).
+    #
+    # The anchor — writing INTO the summary the compressor produces — is
     # genuinely unavailable, and is declared missing (`canAnchorCompaction:
     # false` on the watcher's hermes client) rather than emulated.
 
