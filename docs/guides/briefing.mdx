@@ -48,6 +48,19 @@ The two kinds deduplicate on the client: the session hook records which memory
 ids it injected, and the task hook filters those out of its own pack, so the
 same memory never arrives twice.
 
+A **context window** ends at a compaction, which condenses the conversation and
+discards everything the hooks injected into it. What a window carried is then
+owed again, and which parts come back depends on the client:
+
+- **Standing rules and the task briefing** re-arm on every client that reports
+  the boundary.
+- **The session briefing** also comes back on Claude Code, which re-fires its
+  session-start hook, and on Hermes, whose plugin sees that its session
+  briefing has left the replayed context.
+
+See [Client adapters](/docs/getting-started/client-adapters) for how each
+client reports the boundary.
+
 Stored content is canonical English, so an English topic retrieves best. The
 server never translates a topic to get there: what a caller sends is what is
 searched. Writing the topic in English is the caller's job, and the tool
