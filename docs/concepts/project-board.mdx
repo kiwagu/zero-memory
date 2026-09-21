@@ -90,7 +90,24 @@ When a loop turns out to be a piece of work rather than a handover, promote
 it. The card records which loop it came from, and the loop itself is left
 alone — deliberately. Closing it would erase the difference between work that
 was handed over and work that was finished, so memory hygiene can never close
-a card through the loop it grew from. A loop promotes into exactly one card.
+a card through the loop it grew from.
+
+From the moment of promotion the card is where that work's state lives, and
+nothing that happens to the loop reaches it:
+
+- Closing, forgetting, restoring or superseding the loop leaves the card's
+  state, revision and history exactly as they were.
+- The hygiene judge that closes finished loops skips a promoted one: the work
+  was handed over, not finished.
+- A duplicate or superseded verdict that would retire a promoted loop is not
+  applied automatically; it waits in the review queue for a person.
+- A briefing that names the card shows the loop through it, the same way as a
+  loop attached to the card. Where the card is not named, the loop still
+  arrives on its own.
+
+A loop promotes into exactly one card. Asking again, or two agents asking at
+the same moment, gets a refusal that names the card that already carries the
+work.
 
 ## Visibility
 
