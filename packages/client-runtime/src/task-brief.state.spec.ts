@@ -97,8 +97,9 @@ describe('brief state file', () => {
     expect(entry?.task_briefed).toBe(true);
   });
 
-  it('opens a new epoch on compaction and re-arms both per-window deliveries', () => {
+  it('opens a new epoch on compaction and re-arms every per-window delivery', () => {
     stampSessionStart(path, 'sess-1', 100, 'startup');
+    recordSessionBriefing(path, 'sess-1', ['mem_a', 'mem_b'], 105);
     markRulesDelivered(path, 'sess-1', 110);
     markTaskBriefed(path, 'sess-1', 120);
 
@@ -111,9 +112,22 @@ describe('brief state file', () => {
     expect(entry?.epoch).toBe(1);
     expect(entry?.rules_epoch).toBeUndefined();
     expect(entry?.task_briefed).toBe(false);
-    // The session's identity survives: its start stamp and injected ids are
-    // the receipt's window, not the context window.
+    // ...and so is what the old window was given: filtering those ids would
+    // keep the next task briefing from bringing them back. This is the path
+    // a client that re-arms only at the boundary (Codex) depends on.
+    expect(entry?.injected_ids).toEqual([]);
+    // The session's start stamp is the receipt's window, not the context
+    // window, and survives.
     expect(entry?.started_at).toBe(100);
+  });
+
+  it('keeps the injected ids across a resume, where the transcript is replayed', () => {
+    stampSessionStart(path, 'sess-1', 100, 'startup');
+    recordSessionBriefing(path, 'sess-1', ['mem_a'], 105);
+
+    stampSessionStart(path, 'sess-1', 200, 'resume');
+
+    expect(loadBriefState(path)['sess-1']?.injected_ids).toEqual(['mem_a']);
   });
 
   it('a cleared conversation is a boundary too', () => {

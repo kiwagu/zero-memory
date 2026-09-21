@@ -14,7 +14,13 @@ import { startsNewEpoch } from '@workspace/client-core';
  */
 
 export interface SessionBriefState {
-  /** `mem_` ids the session-start briefing injected (dedup source). */
+  /**
+   * `mem_` ids a briefing injected into the CURRENT context window — what the
+   * task briefing leaves out so nothing arrives twice. Cleared at a boundary
+   * with everything else the window carried: after a compaction those
+   * memories are no longer in view, so filtering them would withhold exactly
+   * what the new window lacks.
+   */
   injected_ids: string[];
   /** Set once the first substantive prompt has been briefed. */
   task_briefed: boolean;
@@ -199,11 +205,13 @@ export const stampSessionStart = (
   // A boundary event (compaction, a cleared conversation) means the window
   // this session was briefed into is gone: the epoch advances and everything
   // scoped to a window re-arms — the task briefing included, since after a
-  // compaction the task context is as absent as the rules are.
+  // compaction the task context is as absent as the rules are, and the dedup
+  // list with it, or the next task briefing would filter out the very
+  // memories and loops the new window no longer has.
   const boundary = startsNewEpoch(source);
   const epoch = (existing?.epoch ?? 0) + (boundary ? 1 : 0);
   state[sessionId] = {
-    injected_ids: existing?.injected_ids ?? [],
+    injected_ids: boundary ? [] : (existing?.injected_ids ?? []),
     task_briefed: boundary ? false : (existing?.task_briefed ?? false),
     epoch,
     // The thread is deliberately NOT re-armed by a boundary: compaction and
