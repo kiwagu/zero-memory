@@ -85,11 +85,87 @@ personal scope.
 Reading takes membership; writing takes write access. A reader who tries to
 move a card is told they may not, rather than that the card does not exist.
 
+## Working with cards
+
+Cards are written and read through three MCP tools. An agent calls them; there
+is nothing to type into a terminal.
+
+`card` opens and steers one piece of work. Opening one names the board it goes
+on — the project's scope, which `build_context` reports as `project_scope`:
+
+```json
+{
+  "action": "create",
+  "scope": "proj.…",
+  "title": "Paginate the memory feed",
+  "body": "Goal: the feed stays fast however large the corpus grows.\n\nDone when: a visit loads one page."
+}
+```
+
+A new card starts in `idea` unless `state` says otherwise. Moving it takes the
+reason:
+
+```json
+{
+  "action": "move",
+  "card_id": "crd_...",
+  "to": "active",
+  "reason": "The feed loaded the whole corpus on every visit."
+}
+```
+
+`promote_loop` takes a `loop_id` in place of a scope and opens the card as
+`active`. `edit` rewrites the title or the body; pass `expected_revision` and
+it refuses to overwrite a change someone made since you read the card.
+`archive` takes the card off the board and, like a move, needs a reason.
+
+`card_log` adds to the record without moving anything. A `note` is a
+statement of your own; it can answer another note through `reply_to`, with a
+`relation` of `supports`, `disputes` or `corrects`. `attach` and `detach`
+point the card at an artifact or stop pointing at it, by `ref_kind` —
+`memory`, `entity`, `thread`, `card` or `url` — and `ref_target`. Attaching
+the same target twice changes nothing.
+
+```json
+{
+  "action": "attach",
+  "card_id": "crd_...",
+  "ref_kind": "memory",
+  "ref_target": "mem_..."
+}
+```
+
+`board` is the read side: `list` a scope's cards, narrowed to one column with
+`state` or to matching titles with `query`; `get` one card with its
+attachments and a page of its history, where `after_seq` reads only what
+happened since you last looked; or `resolve` a project-local number such as
+`#42` into its card.
+
+`create`, `promote_loop`, `move`, `note` and `attach` accept an
+`idempotency_key`: a retry with the same key after a timeout returns the first
+result instead of writing a second row.
+
 ## The board in the dashboard
 
-The dashboard shows the board as columns, and each tile carries the reason the
+The dashboard shows the board as one row of columns, which scrolls sideways
+when the window is too narrow for all five. Each tile carries the reason the
 card is in the column it is in — not merely what touched it last, since a note
 or an attachment says nothing about where the work stands.
+
+<Screenshot path="/board">
+
+![The project board as one row of state columns — idea, active, waiting, with the rest past the edge — each moved card showing the reason it was moved](/img/project-board.png)
+
+</Screenshot>
+
+A picker beside the title names the board on screen and switches between the
+boards you can read. With nothing chosen, the page opens on the board where a
+card changed most recently, and the picker says which board that is; **All
+boards** puts the cards of every scope side by side. A choice you make lands in
+the address, so a board you are watching can be linked and reloaded. A board
+with no cards stays selected and shows as empty — it is never swapped for a
+different one. The board refreshes itself while agents work on it, so it does
+not show a state that has already moved on.
 
 Opening a card lifts it over the board in a dialog, so the columns stay in
 view, and the address bar still names the card: the step is navigable,
