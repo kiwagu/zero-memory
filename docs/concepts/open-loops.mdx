@@ -69,7 +69,10 @@ Explicit closing depends on the finishing agent's discipline, so the hygiene
 cycle carries a safety net. It rolls up evidence that a loop's work was
 completed, and a conservative judge (high confidence gate) may close it:
 reversibly, with a successor link and an audit trail, and with a guard against
-re-judging the same loop. A loop promoted to a
+re-judging the same loop. Reopening a loop with `restore_memory` holds it open
+against the evidence that exists at that moment: the judge takes it up again
+only once newer evidence arrives, so a person's "not done" is never overruled
+by the very evidence it answered. A loop promoted to a
 [card](/docs/concepts/project-board) is never judged: its work was handed
 over, and the card now carries it.
 
