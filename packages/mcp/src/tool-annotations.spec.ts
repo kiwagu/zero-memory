@@ -28,6 +28,7 @@ const READ_TOOLS = [
   'session_receipt',
   'export_metrics',
   'export_memories',
+  'board',
 ] as const;
 
 /** Tools that invalidate or erase user-visible data — review-worthy. */

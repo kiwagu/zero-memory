@@ -3,15 +3,11 @@
 import * as React from 'react';
 
 import { Button } from '@workspace/ui/components/button';
-import { Input } from '@workspace/ui/components/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@workspace/ui/components/select';
-import { cn } from '@workspace/ui/lib/utils';
+  FacetSelect,
+  type FacetOption,
+} from '@workspace/ui/components/common/facet-select';
+import { Input } from '@workspace/ui/components/input';
 import {
   Tooltip,
   TooltipContent,
@@ -24,14 +20,8 @@ import {
  * injected `onApply` callback (an empty string value clears that filter).
  */
 
-interface FeedFilterOption {
-  value: string;
-  label: string;
-  /** How many memories this value yields under the other filters, when known. */
-  count?: number;
-  /** Yields nothing: shown with its zero and greyed out, never removed. */
-  disabled?: boolean;
-}
+/** The feed's own name for the shared facet option shape. */
+type FeedFilterOption = FacetOption;
 
 interface FeedFiltersLabels {
   searchPlaceholder: string;
@@ -69,100 +59,6 @@ interface FeedFiltersProps {
   onApply: (updates: Record<string, string>) => void;
 }
 
-const CLEAR_VALUE = '__all__';
-
-/** The option's count, right-aligned and muted; absent when it is unknown. */
-function FacetCount({ count }: { count?: number }) {
-  if (count === undefined) {
-    return null;
-  }
-  return (
-    <span className="ml-auto pl-3 text-xs tabular-nums text-muted-foreground">
-      {count}
-    </span>
-  );
-}
-
-function FacetSelect({
-  value,
-  placeholder,
-  placeholderCount,
-  options,
-  onChange,
-  grow = false,
-  testId,
-}: {
-  value: string;
-  placeholder: string;
-  /** Count behind the placeholder row (the "any value" / default reading). */
-  placeholderCount?: number;
-  options: FeedFilterOption[];
-  onChange: (value: string) => void;
-  /** Fill the available row width instead of staying compact (the scope
-   * filter on the first row); the value stays truncated. */
-  grow?: boolean;
-  testId?: string;
-}) {
-  // Base UI's Select.Value renders the raw value unless the Root gets an
-  // items map (value → label) to resolve the display text from.
-  const items = React.useMemo(
-    () => ({
-      [CLEAR_VALUE]: placeholder,
-      ...Object.fromEntries(
-        options.map((option) => [option.value, option.label])
-      ),
-    }),
-    [options, placeholder]
-  );
-
-  return (
-    <Select
-      value={value || CLEAR_VALUE}
-      items={items}
-      onValueChange={(next) =>
-        onChange(next === CLEAR_VALUE ? '' : String(next))
-      }
-    >
-      {/* The trigger stays compact (truncated); the OPEN list sizes to its
-          widest item (the popup default pins width to the trigger via
-          --anchor-width, so w-max overrides it), capped at 28rem with the
-          full value in the title tooltip past that. */}
-      <SelectTrigger
-        size="sm"
-        className={cn(
-          '[&>span]:truncate',
-          grow ? 'w-full min-w-48 flex-1' : 'min-w-32 max-w-56'
-        )}
-        data-testid={testId}
-      >
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent className="w-max min-w-(--anchor-width) max-w-[28rem]">
-        <SelectItem value={CLEAR_VALUE}>
-          <span className="block truncate">{placeholder}</span>
-          <FacetCount count={placeholderCount} />
-        </SelectItem>
-        {options.map((option) => (
-          <SelectItem
-            key={option.value}
-            value={option.value}
-            // An empty value stays in the list, dimmed: removing it would
-            // reshuffle the list on every choice and could drop the value the
-            // URL currently applies. The applied one is never disabled.
-            disabled={option.disabled}
-            data-testid={option.disabled ? 'facet-option-empty' : undefined}
-          >
-            <span className="block max-w-[26rem] truncate" title={option.value}>
-              {option.label}
-            </span>
-            <FacetCount count={option.count} />
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 function FeedFilters({
   labels,
   kinds,
@@ -193,9 +89,11 @@ function FeedFilters({
       }}
       className="w-full space-y-2"
     >
-      {/* Row 1: the two wide fields (content search + project scope) stretch to
-          fill the width, with the apply/refresh action pinned at the end; the
-          compact facet selects drop to row 2 so nothing wraps mid-row. */}
+      {/* Row 1: the search field stretches to fill what the scope picker does
+          not take, with the apply/refresh action pinned at the end; the
+          compact facet selects drop to row 2 so nothing wraps mid-row. The
+          scope picker is sized like every other scope picker in the app —
+          as wide as the board or project it names. */}
       <div className="flex w-full flex-wrap items-center gap-2">
         <Input
           type="search"
@@ -214,7 +112,7 @@ function FeedFilters({
         />
         {scopes.length > 0 ? (
           <FacetSelect
-            grow
+            width="content"
             value={values.scope}
             placeholder={labels.allScopes}
             placeholderCount={placeholderCounts?.scope}

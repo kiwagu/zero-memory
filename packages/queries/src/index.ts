@@ -1,3 +1,4 @@
+export * from './board.query.js';
 export * from './build-context.query.js';
 export * from './export-metrics.query.js';
 export * from './get-memory.query.js';

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   Activity,
   BookMarked,
+  Columns3,
   Combine,
   Layers,
   Plane,
@@ -19,6 +20,7 @@ import { AppSidebar } from '@workspace/ui/components/dashboard/app-sidebar';
 
 const NAV_ICONS = {
   memories: <ScrollText />,
+  board: <Columns3 />,
   entities: <Waypoints />,
   scopes: <Layers />,
   review: <Scale />,

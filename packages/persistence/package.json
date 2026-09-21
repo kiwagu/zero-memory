@@ -15,6 +15,7 @@
   "dependencies": {
     "@supabase/supabase-js": "catalog:",
     "@workspace/audit": "workspace:*",
+    "@workspace/board": "workspace:*",
     "@workspace/context": "workspace:*",
     "@workspace/contracts": "workspace:*",
     "@workspace/db": "workspace:*",

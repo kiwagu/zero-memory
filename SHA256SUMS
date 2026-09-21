@@ -1,3 +1,3 @@
-# zero-memory-watcher — version 0.28.2 (binary = plugin manifest) — built from git e6fe6d6-dirty (main)  commit=e6fe6d6fe5708a4563d5eebab2ef147e5e7e57ba-dirty
+# zero-memory-watcher — version 0.28.3 (binary = plugin manifest) — built from git 02e0bb5-dirty (feature/project-board)  commit=02e0bb55e04e00356e91cdc45dbd3689ee8f36bc-dirty
 # build-env: bun=1.3.14  target=linux-x64  arch=x86_64  os=Ubuntu 26.04.1 LTS
-847d7fc387093061f5a5dc77d841c0a29162fb16dfcf43c34f96e183a2284b62  zero-memory-watcher
+f4168bd90a3edf23e23d2e3b35f55175bfad1c5833594e0d5db6ac1ab540608e  zero-memory-watcher
