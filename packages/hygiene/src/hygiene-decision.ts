@@ -98,6 +98,29 @@ export function sameSessionCollapseAction(
     : { winner: candidate.id, loser: subject.id };
 }
 
+/** The memory an auto-resolution would retire, or null when it retires none. */
+export const retiredBy = (action: HygieneAction): string | null =>
+  action.kind === 'forget' || action.kind === 'supersede' ? action.loser : null;
+
+/**
+ * Parks an auto-resolution that would retire a loop promoted to a card.
+ *
+ * Once a loop is promoted, its card is where that work's state lives. Retiring
+ * the loop behind the owner's back changes nothing on the card, but it does
+ * change what the loop says: a duplicate or superseded verdict on handed-over
+ * work is a call for a person to make, not a cleanup to apply. So the pair
+ * waits in the queue like any other conflict a human settles.
+ */
+export function protectPromotedLoop(
+  action: HygieneAction,
+  promotedLoopIds: ReadonlySet<string>
+): HygieneAction {
+  const loser = retiredBy(action);
+  return loser !== null && promotedLoopIds.has(loser)
+    ? queueInstead(action)
+    : action;
+}
+
 /**
  * Downgrades an auto-resolution to a queue row, leaving `skip` and `queue`
  * untouched. The sweep over history uses it: same judge, same decision rules,

@@ -662,4 +662,205 @@ test.describe('Project board over MCP', () => {
       await agent.close();
     }
   });
+  test('a promoted loop is the card’s to settle: nothing over the loop moves the card', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const agent = await McpTestClient.connect(token);
+    // A second conversation writes the completion-sounding evidence, so no
+    // same-session rule can fold it into the loops.
+    const other = await McpTestClient.connect(token);
+    const admin = createClient(
+      e2eEnv.supabaseUrl,
+      e2eEnv.supabaseServiceRoleKey,
+      { auth: { persistSession: false } }
+    );
+    const stamp = Date.now();
+    const hint = `/tmp/zm-e2e-board-handover-${stamp}`;
+
+    interface Pack {
+      open_loops: Array<{ id: string }>;
+      work?: { bound_card: { number: number } | null };
+      session?: { thread?: string };
+    }
+    const brief = async (): Promise<Pack> => {
+      const result = await agent.callTool('build_context', {
+        topic: 'export migration',
+        briefing: true,
+        max_tokens: 1200,
+        project_hint: hint,
+      });
+      expect(result.isError ?? false).toBe(false);
+      return firstJson<Pack>(result);
+    };
+    const remember = async (
+      client: McpTestClient,
+      args: Record<string, unknown>
+    ) => {
+      const stored = await client.callTool('remember', {
+        project_hint: hint,
+        ...args,
+      });
+      expect(stored.isError ?? false).toBe(false);
+      return firstJson<{ memory_id: string; scope: string }>(stored);
+    };
+    const snapshot = async (cardId: string) => {
+      const got = firstJson<BoardResult>(
+        await agent.callTool('board', { action: 'get', card_id: cardId })
+      );
+      return {
+        state: got.card?.state,
+        revision: got.card?.revision,
+        archived: got.card?.archived_at,
+        events: got.events.length,
+      };
+    };
+
+    try {
+      const thread = (await brief()).session?.thread;
+      expect(thread).toMatch(/^thr_/u);
+
+      const loop = await remember(agent, {
+        content: `e2e handover marker ${stamp}: move the billing export to parquet — schema, backfill and cutover still open`,
+        kind: 'task',
+      });
+      // The unpromoted twin comes from the other conversation and is about
+      // different work: two near-identical loops in ONE session would be read
+      // as a refinement, and the newer would retire the older.
+      const control = await remember(other, {
+        content: `e2e handover marker ${stamp}: rotate the TLS certificates on the edge proxies — inventory, renewal and rollout still open`,
+        kind: 'task',
+      });
+
+      const promoted = await agent.callTool('card', {
+        action: 'promote_loop',
+        loop_id: loop.memory_id,
+        title: 'Move the billing export to parquet',
+      });
+      expect(promoted.isError ?? false).toBe(false);
+      const card = firstJson<CardResult>(promoted).card;
+
+      // A second promotion is refused AND names the card that already carries
+      // the work, so the caller can go to it instead of guessing.
+      const twice = await agent.callTool('card', {
+        action: 'promote_loop',
+        loop_id: loop.memory_id,
+        title: 'The same work again',
+      });
+      expect(twice.isError ?? false).toBe(true);
+      expect(contentText(twice)).toContain(`#${card.number}`);
+
+      // 1. THE LOOP-CLOSURE JUDGE NEVER SEES A PROMOTED LOOP. Evidence that
+      // reads like completion arrives later, from another conversation; the
+      // unpromoted twin is still offered to the judge, the promoted one is not.
+      await remember(other, {
+        content: `e2e handover marker ${stamp}: the parquet export and the certificate rotation are both finished`,
+        kind: 'fact',
+      });
+      const { data: candidates, error } = await admin.rpc(
+        'find_loop_closure_evidence',
+        { p_min_similarity: 0.2 }
+      );
+      expect(error).toBeNull();
+      const judged = (candidates as Array<{ loop_id: string }>).map(
+        (row) => row.loop_id
+      );
+      expect(judged).toContain(control.memory_id);
+      expect(judged).not.toContain(loop.memory_id);
+
+      // 2. A NAMED CARD BRINGS ITS ORIGIN LOOP: bound to this conversation,
+      // the card carries the loop, and the briefing does not list it again.
+      // The unpromoted loop still arrives on its own.
+      const bound = await agent.callTool('card_log', {
+        action: 'attach',
+        card_id: card.id,
+        ref_kind: 'thread',
+        ref_target: thread,
+      });
+      expect(bound.isError ?? false).toBe(false);
+      const pack = await brief();
+      expect(pack.work?.bound_card?.number).toBe(card.number);
+      const listed = pack.open_loops.map((l) => l.id);
+      expect(listed).not.toContain(loop.memory_id);
+      expect(listed).toContain(control.memory_id);
+
+      // 3. EVERY PATH OVER THE ORIGIN LOOP LEAVES THE CARD WHERE IT WAS.
+      const before = await snapshot(card.id);
+      const forgotten = await agent.callTool('forget', {
+        memory_id: loop.memory_id,
+      });
+      expect(forgotten.isError ?? false).toBe(false);
+      expect(await snapshot(card.id)).toEqual(before);
+
+      const restored = await agent.callTool('restore_memory', {
+        memory_id: loop.memory_id,
+      });
+      expect(restored.isError ?? false).toBe(false);
+      expect(await snapshot(card.id)).toEqual(before);
+
+      await remember(agent, {
+        content: `e2e handover marker ${stamp}: move the billing export to parquet — cutover rescheduled`,
+        kind: 'task',
+        links: [{ type: 'supersedes', dst: loop.memory_id }],
+      });
+      expect(await snapshot(card.id)).toEqual(before);
+
+      // 4. TWO CONVERSATIONS PROMOTING ONE LOOP AT ONCE: exactly one card, and
+      // the other caller is told it already exists rather than hitting an
+      // internal error on the unique index.
+      const race = await Promise.all(
+        [agent, other].map((client) =>
+          client.callTool('card', {
+            action: 'promote_loop',
+            loop_id: control.memory_id,
+            title: 'Rotate the edge certificates',
+          })
+        )
+      );
+      expect(race.filter((result) => !(result.isError ?? false))).toHaveLength(
+        1
+      );
+      const refused = race.find((result) => result.isError ?? false);
+      expect(contentText(refused!)).toMatch(/already has a card/u);
+
+      // 5. A CARD CANNOT CLAIM SOMEONE ELSE'S LOOP. Called directly, card_create
+      // would otherwise accept any memory id as an origin (the foreign key
+      // ignores RLS), and that pointer now shields the loop from hygiene. The
+      // stranger writes in their OWN scope; only the origin is not theirs.
+      const foreign = await remember(agent, {
+        content: `e2e handover marker ${stamp}: archive the stale feature flags — owner review still open`,
+        kind: 'task',
+      });
+      const strangerToken = await passwordGrantToken(seed.userB);
+      const strangerAgent = await McpTestClient.connect(strangerToken);
+      let strangerScope = '';
+      try {
+        const own = await strangerAgent.callTool('remember', {
+          content: `e2e handover marker ${stamp}: a loop of the stranger's own`,
+          kind: 'task',
+          project_hint: `/tmp/zm-e2e-board-stranger-${stamp}`,
+        });
+        expect(own.isError ?? false).toBe(false);
+        strangerScope = firstJson<{ scope: string }>(own).scope;
+      } finally {
+        await strangerAgent.close();
+      }
+      const stranger = createClient(
+        e2eEnv.supabaseUrl,
+        e2eEnv.supabaseAnonKey,
+        {
+          auth: { persistSession: false },
+          global: { headers: { Authorization: `Bearer ${strangerToken}` } },
+        }
+      );
+      const { data: claimed } = await stranger.rpc('card_create', {
+        p_scope: strangerScope,
+        p_title: 'Not mine to claim',
+        p_origin_loop_id: foreign.memory_id,
+      });
+      expect((claimed as { error?: string } | null)?.error).toBe('not_found');
+    } finally {
+      await agent.close();
+      await other.close();
+    }
+  });
 });
