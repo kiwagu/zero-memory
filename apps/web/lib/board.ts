@@ -149,6 +149,27 @@ export const cardViewSchema = z.object({
 });
 export type CardView = z.infer<typeof cardViewSchema>;
 
+/**
+ * A page of the card's feed: memories born in the conversations bound to it,
+ * newest first. Derived on read, so nothing here is stored on the card.
+ */
+export const cardFeedSchema = z.object({
+  feed: z
+    .array(
+      z.object({
+        memory_id: z.string(),
+        kind: z.string(),
+        preview: z.string(),
+        thread: z.string(),
+        created_at: z.string(),
+      })
+    )
+    .default([]),
+  has_more: z.boolean().default(false),
+  next_before: z.string().nullable().default(null),
+});
+export type CardFeed = z.infer<typeof cardFeedSchema>;
+
 /** Literal keys only (lint-enforced): dynamic `t(\`board.${…}\`)` is banned. */
 export function cardStateLabel(state: string, t: WebTranslator): string {
   switch (state) {

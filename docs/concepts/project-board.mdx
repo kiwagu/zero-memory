@@ -64,6 +64,26 @@ Every target is authorized per reader. A memory you may not read arrives as an
 id with no preview, exactly as it does in the activity feed, so a shared card
 stays legible without leaking what is behind its references.
 
+## A bound conversation fills the card
+
+Attaching a conversation to a card — an attachment of kind `thread` — binds
+it. From then on, every memory that conversation writes in the card's scope
+belongs to the card's **feed** without being attached one by one. The
+discipline is one call when the work starts, not one per fact.
+
+The feed is derived when it is read, from where each memory was born. Nothing
+is copied onto the card, so the feed follows the memories themselves: one that
+is forgotten or superseded leaves it, one that is restored comes back, and
+detaching the conversation empties it. Memories the conversation wrote before
+it was bound belong too — what counts is the conversation, not the moment.
+
+Three rules keep the feed the card's own. Only memories in the card's scope
+are listed, so a personal note written in the same conversation stays out. A
+memory that is also attached explicitly is listed once, with the attachments.
+And reading the feed is not a recall: a memory is not strengthened merely for
+sitting on an open card. Like everything else on a card, the feed is read with
+the reader's own rights — a memory you may not read is simply not in it.
+
 ## Promoting a loop
 
 When a loop turns out to be a piece of work rather than a handover, promote
@@ -124,22 +144,27 @@ statement of your own; it can answer another note through `reply_to`, with a
 `relation` of `supports`, `disputes` or `corrects`. `attach` and `detach`
 point the card at an artifact or stop pointing at it, by `ref_kind` —
 `memory`, `entity`, `thread`, `card` or `url` — and `ref_target`. Attaching
-the same target twice changes nothing.
+the same target twice changes nothing. Attaching your own conversation binds
+it, so attach it once when you start working on a card:
 
 ```json
 {
   "action": "attach",
   "card_id": "crd_...",
-  "ref_kind": "memory",
-  "ref_target": "mem_..."
+  "ref_kind": "thread",
+  "ref_target": "thr_..."
 }
 ```
 
+The `thread` field every write accepts only records which conversation wrote
+that entry; it does not bind anything.
+
 `board` is the read side: `list` a scope's cards, narrowed to one column with
 `state` or to matching titles with `query`; `get` one card with its
-attachments and a page of its history, where `after_seq` reads only what
-happened since you last looked; or `resolve` a project-local number such as
-`#42` into its card.
+attachments, a page of its history — where `after_seq` reads only what
+happened since you last looked — and a page of its feed, newest first,
+continued with the `feed_before` cursor each page returns; or `resolve` a
+project-local number such as `#42` into its card.
 
 `create`, `promote_loop`, `move`, `note` and `attach` accept an
 `idempotency_key`: a retry with the same key after a timeout returns the first
@@ -171,8 +196,9 @@ Opening a card lifts it over the board in a dialog, so the columns stay in
 view, and the address bar still names the card: the step is navigable,
 shareable and reloadable, and closing it goes back to the board. A pasted link
 or a reload lands on the same card as a page of its own. Either way it shows
-the document, what the card points at, and its whole history: who moved it,
-between which states, and why.
+the document, what the card points at, what its bound conversations have
+remembered, and its whole history: who moved it, between which states, and
+why.
 
 The page has no control that changes a card. That is deliberate and it is
 tested: a drag has nowhere to put a justification, so moving happens where the

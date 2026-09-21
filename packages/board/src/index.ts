@@ -23,6 +23,7 @@ export type {
   BoardView,
   CardAuthorship,
   CardEventView,
+  CardFeedItemView,
   CardReadView,
   CardRefView,
   CardWrite,

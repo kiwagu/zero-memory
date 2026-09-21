@@ -23,15 +23,18 @@ import {
   cardRefHref,
   cardRelationLabel,
   cardStateLabel,
+  cardFeedSchema,
   cardStateVariant,
   cardViewSchema,
 } from '@/lib/board';
 import { getRequestMessages } from '@/lib/i18n';
-import { formatTimestamp, scopeLabel } from '@/lib/memory';
+import { formatTimestamp, kindLabel, scopeLabel } from '@/lib/memory';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 /** Events fetched per view. */
 const HISTORY_LIMIT = 200;
+/** The newest feed entries shown on a card; older ones stay reachable by MCP. */
+const FEED_LIMIT = 50;
 
 /**
  * One card: its document, what it points at, and everything that happened.
@@ -64,6 +67,22 @@ export async function CardView({
     notFound();
   }
   const { card, refs, events, has_more: hasMore } = parsed.data;
+
+  // The feed is read under the same session, so a memory this reader may not
+  // open never arrives — there is nothing to hide, unlike an attachment.
+  const { data: feedData } = await supabase.rpc('card_feed', {
+    p_card_id: id,
+    p_limit: FEED_LIMIT,
+  });
+  const feed = cardFeedSchema.safeParse(feedData ?? {});
+  const feedItems: LinkedMemoryItem[] = (
+    feed.success ? feed.data.feed : []
+  ).map((item) => ({
+    type: kindLabel(item.kind, t),
+    href: `/memory/${item.memory_id}`,
+    preview: item.preview,
+  }));
+  const feedHasMore = feed.success && feed.data.has_more;
 
   const badges: BadgeListItem[] = [
     {
@@ -181,6 +200,23 @@ export async function CardView({
             linkComponent={Link}
           />
         )}
+      </DetailSection>
+
+      <DetailSection title={t('board.feed')} data-testid="card-feed">
+        {feedItems.length === 0 ? (
+          <EmptyState compact>{t('board.noFeed')}</EmptyState>
+        ) : (
+          <LinkedMemoryList
+            items={feedItems}
+            hiddenLabel={t('board.refHidden')}
+            linkComponent={Link}
+          />
+        )}
+        {feedHasMore ? (
+          <p className="text-muted-foreground mt-3 text-xs">
+            {t('board.moreFeed')}
+          </p>
+        ) : null}
       </DetailSection>
 
       <DetailSection title={t('board.history')}>
