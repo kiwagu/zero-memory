@@ -38,11 +38,18 @@ Archiving is the single terminal act: it takes a card off the board and
 freezes it. Reversible shelving is the `parked` state, which stays on the
 board and moves back like any other.
 
+A card's **feed** is derived, never stored. Attaching a conversation (a
+`thread` reference) binds it, and `readCard` then returns, beside the history,
+the live memories that conversation wrote in the card's scope — computed at
+read time from each memory's own provenance, under the reader's rights, and
+without recording a recall. Detaching the conversation is the whole undo.
+
 ## Key exports
 
 - `CardService` — the application service: `createCard`, `promoteLoop`,
   `editCard`, `moveCard`, `archiveCard`, `attachRef`, `detachRef`,
-  `noteCard`, `readCard`, `listBoard`, `resolveCard`. Every call returns a
+  `noteCard`, `readCard` (history and feed, each on its own cursor),
+  `listBoard`, `resolveCard`. Every call returns a
   `Result`; a no-op (re-attaching the same target, an edit that changes
   nothing) is a success that reports `changed: false`.
 - `ICardRepository`, `CARD_REPOSITORY`, `injectCardRepository` — the port and
