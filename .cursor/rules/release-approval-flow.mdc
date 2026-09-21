@@ -84,10 +84,14 @@ promoting stage, restarting services, or touching the live database.
       the subject stays one line:
 
       ```
-      git merge --squash <branch>
+      git -c merge.ff=true merge --squash <branch>
       git commit -m "<type(scope): subject>" \
                  -m "Squashed-from: <branch> (<short-sha>)"
       ```
+
+      The `-c merge.ff=true` is required, not decoration: this repository
+      stores `merge.ff=false`, which git reads as `--no-ff`, and a plain
+      `git merge --squash` refuses to combine the two.
 
       The feature branch SURVIVES its landing: it is the only remaining
       carrier of how the work got there, step by step. Deleting a landed
@@ -108,8 +112,10 @@ promoting stage, restarting services, or touching the live database.
    out whole, and `git log --grep='Squashed-from: <branch>'` finds where a
    branch landed. `merge.ff=false`, set in the repository config by
    `scripts/setup-git-merge-policy.sh` (run by `prepare`/`postinstall`),
-   still guards the `dev` merges against git's silent fast-forward; a
-   squash is not affected by it.
+   still guards the `dev` merges against git's silent fast-forward. The
+   squash onto `main` is its one deliberate exception, overridden for that
+   single command as shown in (d) rather than by changing the stored
+   policy.
 
    Applying a schema change to a serving deployment and any data one-shots
    there are the owner's manual steps — hand over exact commands, and
