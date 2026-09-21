@@ -156,9 +156,10 @@ const MS_PER_DAY = 86_400_000;
 const SUPERSEDE_HINT =
   'Live memories similar to what you just wrote. If this write REPLACES one of ' +
   'them, declare it — call remember again with ' +
-  'links:[{type:"supersedes",dst:"<id>"}] (or link(supersedes)) so the old ' +
-  'version is retired instead of left as a duplicate someone must later ' +
-  'reconcile. If they are different facets of the topic, ignore this.';
+  'links:[{type:"supersedes",dst:"<id>"}] so the old version is retired ' +
+  'instead of left as a duplicate someone must later reconcile. The link ' +
+  'tool is not a substitute: it records the relation and retires nothing. ' +
+  'If they are different facets of the topic, ignore this.';
 
 /**
  * How many typed-link neighbours a single hit may contribute, and how many a

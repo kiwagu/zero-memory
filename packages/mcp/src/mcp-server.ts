@@ -2083,8 +2083,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'Record an explicit relation. Pass two entity NAMES (e.g. src ' +
         '"alpha", dst "postgres", type "uses") to create a knowledge-graph ' +
         'edge — unknown entities are resolved or created automatically. ' +
-        'Pass two memory UUIDs to link the memories themselves ' +
-        '(relates_to, supersedes, contradicts, derived_from).',
+        'Pass two memory ids to link the memories themselves ' +
+        '(relates_to, supersedes, contradicts, derived_from). A memory link ' +
+        'records the relation only: `supersedes` here retires nothing. To ' +
+        'replace a memory, declare the supersede on remember (links).',
       inputSchema: linkInputSchema.shape,
       outputSchema: linkOutputSchema.shape,
     },

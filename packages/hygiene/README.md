@@ -177,6 +177,20 @@ waved through.
 
 Tuning: `DEFAULT_JUDGE_RESCAN_CONFIG` (`judge-rescan.ts`).
 
+## Loop closure
+
+`LoopClosureDetector` closes open loops whose work newer memories report as
+done: the `find_loop_closure_evidence` rollup pairs each live loop with its
+newest similar non-loop memories, `LoopClosureJudge` decides, and only a
+confident verdict naming shown evidence closes the loop (reversibly, audited).
+`loop_closure_checks` is the re-judge guard, keyed on the newest evidence a
+loop was judged against: a loop is judged again only when newer evidence
+appears. Restoring a loop (`HygieneResolver.restoreMemory`) re-arms that guard
+on the current evidence (`holdReopened`), so a person's reopen is not undone
+on the next run by the same evidence.
+
+Tuning: `DEFAULT_LOOP_CLOSURE_CONFIG` (`loop-closure.ts`).
+
 ## Single-subject disputes (challenge / stale-suspect)
 
 The review queue holds two dispute shapes: judge PAIRS (`duplicate |

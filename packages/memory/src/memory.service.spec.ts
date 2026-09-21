@@ -306,6 +306,10 @@ describe('MemoryService.remember', () => {
     // Content is truncated to a recognisable preview, not a full read.
     expect(out.similar_existing?.[0]?.content).toHaveLength(200);
     expect(out.hint).toContain('supersedes');
+    // The hint names only the path that retires: a link() call records the
+    // relation and leaves the old version live.
+    expect(out.hint).not.toContain('link(supersedes)');
+    expect(out.hint).toContain('retires nothing');
   });
 
   it('caps supersede candidates at 10', async () => {

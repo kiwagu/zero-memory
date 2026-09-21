@@ -1,7 +1,8 @@
 /**
  * Declared supersede on write, end-to-end: a `supersedes` link on remember
  * retires the named old memory atomically (reversibly — restore revives it),
- * never touches a foreign memory, and closes an open loop the same way.
+ * never touches a foreign memory, and closes an open loop the same way. A
+ * `supersedes` link made with the link tool records the relation only.
  */
 import { expect, test } from '@playwright/test';
 
@@ -147,6 +148,70 @@ test.describe('Declared supersede over MCP', () => {
       expect(pack.open_loops.map((loop) => loop.id)).not.toContain(taskId);
     } finally {
       await mcp.close();
+    }
+  });
+
+  test('a supersedes link made with link() retires nothing; declaring it on remember does', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userB);
+    const mcp = await McpTestClient.connect(token);
+    // The outcome comes from another conversation, so the same-session
+    // refinement rule cannot retire the loop on its own and blur the claim.
+    const reporter = await McpTestClient.connect(token);
+    // Recall, not the briefing: the briefing lists a capped, oldest-first
+    // slice of loops, while recall finds any live one.
+    const live = async (): Promise<string> =>
+      contentText(
+        await mcp.callTool('recall', {
+          query: 'rotate the signing key of the release pipeline',
+          k: 10,
+        })
+      );
+    try {
+      const task = await mcp.callTool('remember', {
+        content:
+          'e2e link-only marker: rotate the signing key of the release ' +
+          'pipeline — see /shares/zm/keys.md',
+        kind: 'task',
+        scope: 'personal',
+      });
+      expect(task.isError ?? false).toBe(false);
+      const taskId = firstJson<{ memory_id: string }>(task).memory_id;
+
+      const outcome = {
+        content:
+          'e2e link-only marker: the release pipeline signs with the rotated ' +
+          'key since this morning',
+        kind: 'fact',
+        scope: 'personal',
+      };
+      const done = await reporter.callTool('remember', outcome);
+      expect(done.isError ?? false).toBe(false);
+      const doneId = firstJson<{ memory_id: string }>(done).memory_id;
+
+      // The link tool records the relation and nothing more: the loop the
+      // outcome "supersedes" is still live.
+      const linked = await reporter.callTool('link', {
+        src: doneId,
+        dst: taskId,
+        type: 'supersedes',
+      });
+      expect(linked.isError ?? false).toBe(false);
+      expect(await live()).toContain(taskId);
+
+      // What the hint tells an agent to do instead: remember the outcome again
+      // with the supersede declared. The write is absorbed into the memory it
+      // repeats, and the declaration still retires the loop.
+      const declared = await reporter.callTool('remember', {
+        ...outcome,
+        links: [{ dst: taskId, type: 'supersedes' }],
+      });
+      expect(declared.isError ?? false).toBe(false);
+      expect(firstJson<{ memory_id: string }>(declared).memory_id).toBe(doneId);
+      expect(await live()).not.toContain(taskId);
+    } finally {
+      await mcp.close();
+      await reporter.close();
     }
   });
 });
