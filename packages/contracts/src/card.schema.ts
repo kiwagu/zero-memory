@@ -272,6 +272,35 @@ export const cardFeedItemSchema = z.object({
 });
 export type CardFeedItem = z.infer<typeof cardFeedItemSchema>;
 
+/** A card as a briefing names it: enough to recognise it, never its body. */
+export const briefingWorkCardSchema = z.object({
+  id: cardIdSchema,
+  number: z.number().int().positive(),
+  title: z.string(),
+  state: cardStateSchema,
+});
+export type BriefingWorkCard = z.infer<typeof briefingWorkCardSchema>;
+
+/**
+ * The project's work in progress, as a briefing carries it: the card the
+ * calling conversation is bound to (with the reason it sits in its column and
+ * how much hangs on it), how many cards are active and waiting, and the first
+ * few of them. A pointer set, not the board — `board` reads the rest.
+ */
+export const briefingWorkSchema = z.object({
+  bound_card: briefingWorkCardSchema
+    .extend({
+      state_reason: z.string().nullable(),
+      refs: z.number().int().nonnegative(),
+      updated_at: z.string(),
+    })
+    .nullable(),
+  active: z.number().int().nonnegative(),
+  waiting: z.number().int().nonnegative(),
+  lead: z.array(briefingWorkCardSchema),
+});
+export type BriefingWork = z.infer<typeof briefingWorkSchema>;
+
 /** One row of the board listing. */
 export const boardCardSchema = z.object({
   id: cardIdSchema,

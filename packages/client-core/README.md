@@ -42,11 +42,17 @@ consume the same core (see the R3 client-adapters direction).
   This is the full-text channel for every client; MCP `instructions` also
   inline rules for uncapped clients, while known capped clients only receive
   the router and inventory.
+- `work-section.logic.ts` — `renderBoardSummary(work)`: the project board's
+  lines in a briefing (the card bound to this conversation with its reason,
+  active/waiting counts, the first few cards), phrased as declared state, never
+  as instructions. `splitOpenLoops` drains the server's `work` field out of the
+  pack alongside the loops, and the watcher renders both as ONE work section.
 - `brief-budget.logic.ts` — fitting a briefing into the hook channel, whose
   client spills anything past ~10,000 characters to a file and shows only a
   preview: `resolveHookBudgetChars` (default 9,000), `planSectionBudgets`
   (the split decided before rendering — project line first, a floor held for
-  the open loops whenever there are any, the rules' ceiling from the rest),
+  the work in progress whenever there is any, the rules' ceiling from the
+  rest),
   `renderPackWithinBudget` (whole memories while they fit, then one-line
   stubs) and `composeWithinBudget` (strict priority order, naming whatever
   had to go).

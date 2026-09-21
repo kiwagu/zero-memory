@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { briefingWorkSchema } from './card.schema.js';
 import { anyRegisteredIdSchema } from './entity-prefixes.js';
 
 import {
@@ -544,6 +545,16 @@ export const buildContextOutputSchema = z.object({
   open_loops: z.array(contextMemorySchema).default([]),
   /** Total active open loops, so a capped list can say "and N more". */
   open_loops_total: z.number().int().min(0).default(0),
+  /**
+   * The project board's work in progress (briefing calls pinned to a
+   * project that name a `max_tokens` budget — what the session hooks send):
+   * the card bound to this conversation, active/waiting counts and the first
+   * few cards. Present only when the project has such work — and then the
+   * ranked memories leg gives up one row for it, so the pack does not grow.
+   * Open loops attached to a card named here are left out of `open_loops`:
+   * they are reached through their card.
+   */
+  work: briefingWorkSchema.optional(),
   /** Session attachment state (absent only on older servers). */
   session: sessionAttachmentSchema.optional(),
 });

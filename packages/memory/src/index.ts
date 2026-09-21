@@ -43,6 +43,8 @@ export * from './supersede-aperture.js';
 export * from './translation-state.vo.js';
 export * from './translator.js';
 export * from './translator.provider.js';
+export * from './briefing-work.reader.js';
+export * from './briefing-work.reader.provider.js';
 export * from './user-rules.reader.js';
 export * from './user-rules.reader.provider.js';
 export * from './verification.js';

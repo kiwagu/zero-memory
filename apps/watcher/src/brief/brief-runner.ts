@@ -11,6 +11,7 @@ import {
   mergeStandingRules,
   parseBriefingPack,
   planSectionBudgets,
+  renderBoardSummary,
   renderOfflineBriefing,
   renderOpenLoopsSection,
   renderStandingRulesSection,
@@ -75,6 +76,19 @@ const TRUNK_BRANCHES = new Set(['main', 'dev', 'stage', 'master']);
 
 /** The composer's blank lines around the rules and loops, generously. */
 const SECTION_GAPS_CHARS = 8;
+
+/**
+ * The work section: the board's lines, then the loops no card there covers.
+ * One section on purpose — both answer "what is in progress here", and two
+ * blocks saying it twice is how a briefing fills with repetition.
+ */
+const joinWorkSection = (
+  boardBlock: string | null,
+  loopSection: string | null
+): string | null =>
+  [boardBlock, loopSection]
+    .filter((part): part is string => part !== null)
+    .join('\n\n') || null;
 
 /**
  * Why a live briefing could not be served, per classified server state — the
@@ -409,10 +423,13 @@ const runSessionStart = async (
   // then render against what the rules actually used, TRIMMED with the rest
   // counted rather than dropped whole by the composer below.
   const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
+  // The work section is the project board's lines plus the open loops no
+  // card there covers; it holds the floor whenever either is present.
+  const boardBlock = merged.work ? renderBoardSummary(merged.work) : null;
   const plan = planSectionBudgets(
     budget,
     projectLine?.length ?? 0,
-    merged.loops.length > 0
+    merged.loops.length > 0 || boardBlock !== null
   );
   const rulesSection = renderStandingRulesSection(rules, plan.rules);
   const loopSection = renderOpenLoopsSection(
@@ -424,9 +441,11 @@ const runSessionStart = async (
       budget -
         (projectLine?.length ?? 0) -
         (rulesSection?.length ?? 0) -
+        (boardBlock?.length ?? 0) -
         SECTION_GAPS_CHARS
     )
   );
+  const workSection = joinWorkSection(boardBlock, loopSection);
 
   // THE CHANNEL BUDGET. Past a client-side threshold the whole payload is
   // spilled to a file and replaced by a preview, so an over-long briefing is
@@ -437,7 +456,7 @@ const runSessionStart = async (
   const spentBySections =
     (projectLine?.length ?? 0) +
     (rulesSection?.length ?? 0) +
-    (loopSection?.length ?? 0);
+    (workSection?.length ?? 0);
   const perTopicBudget = Math.max(
     0,
     Math.floor((budget - spentBySections) / Math.max(splits.length, 1))
@@ -458,7 +477,7 @@ const runSessionStart = async (
     [
       { name: 'the project line', text: projectLine },
       { name: 'the standing rules', text: rulesSection },
-      { name: 'the open loops', text: loopSection },
+      { name: 'the work in progress', text: workSection },
       ...packs.map(({ topic, trimmed }) => ({
         name: `the "${topic}" pack`,
         text: trimmed.text || null,
@@ -652,7 +671,12 @@ const runTask = async (
   // the loops are held a floor, the rules get a ceiling.
   const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
   const leadChars = (banner?.length ?? 0) + TASK_LOOKUP_INSTRUCTION.length;
-  const plan = planSectionBudgets(budget, leadChars, split.loops.length > 0);
+  const boardBlock = split.work ? renderBoardSummary(split.work) : null;
+  const plan = planSectionBudgets(
+    budget,
+    leadChars,
+    split.loops.length > 0 || boardBlock !== null
+  );
   const rulesSection = rulesNeedDelivery({
     epoch: session?.epoch ?? 0,
     ...(session?.rules_epoch !== undefined && {
@@ -667,9 +691,14 @@ const runTask = async (
     new Date(),
     Math.max(
       0,
-      budget - leadChars - (rulesSection?.length ?? 0) - SECTION_GAPS_CHARS
+      budget -
+        leadChars -
+        (rulesSection?.length ?? 0) -
+        (boardBlock?.length ?? 0) -
+        SECTION_GAPS_CHARS
     )
   );
+  const workSection = joinWorkSection(boardBlock, loopSection);
   const trimmed = renderPackWithinBudget(
     projectTopic,
     split.payload,
@@ -678,7 +707,7 @@ const runTask = async (
       budget -
         (banner?.length ?? 0) -
         (rulesSection?.length ?? 0) -
-        (loopSection?.length ?? 0)
+        (workSection?.length ?? 0)
     )
   );
   const composed = composeWithinBudget(
@@ -686,7 +715,7 @@ const runTask = async (
       { name: 'the project/thread line', text: banner },
       { name: 'the task-lookup instruction', text: TASK_LOOKUP_INSTRUCTION },
       { name: 'the standing rules', text: rulesSection },
-      { name: 'the open loops', text: loopSection },
+      { name: 'the work in progress', text: workSection },
       { name: 'the memory pack', text: trimmed.text || null },
     ],
     budget

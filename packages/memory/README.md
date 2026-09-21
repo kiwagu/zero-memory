@@ -81,6 +81,15 @@ adapters live in `@workspace/persistence` and are bound in the app host.
 `SCOPE_ACCESS_SERVICE`, `IProjectBindingRepository` /
 `PROJECT_BINDING_REPOSITORY` — each with an `injectX()` decorator helper.
 
+`IBriefingWorkReader` / `BRIEFING_WORK_READER` (optional, like the rules
+readers) supplies the project board's work summary for a briefing. The
+service asks for it only on a BUDGETED briefing pinned to a project, and pays
+for it with one row of the ranked memories leg: on a production clone, six →
+five rows kept every brief probe while twelve → eleven lost two, so an
+unbudgeted call briefs exactly as before. Loops attached to a card the summary
+names leave `open_loops`. A read failure costs the summary, never the
+briefing.
+
 A write carries `PassageVectors` — a named `{ primary, overflow }` shape
 rather than a bare array, because the embedding model truncates its input to a
 fixed window without saying so and a long memory would otherwise be searchable

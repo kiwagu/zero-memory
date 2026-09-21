@@ -525,4 +525,141 @@ test.describe('Project board over MCP', () => {
       await elsewhere.close();
     }
   });
+
+  test('a briefing names the board work and reaches attached loops through their card', async () => {
+    const seed = await readSeedState();
+    const agent = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    const stamp = Date.now();
+    const hint = `/tmp/zm-e2e-board-brief-${stamp}`;
+    const bareHint = `/tmp/zm-e2e-board-bare-${stamp}`;
+
+    interface Pack {
+      memories: Array<{ id: string }>;
+      open_loops: Array<{ id: string }>;
+      open_loops_total: number;
+      work?: {
+        bound_card: {
+          number: number;
+          state: string;
+          state_reason: string | null;
+          refs: number;
+        } | null;
+        active: number;
+        waiting: number;
+        lead: Array<{ number: number }>;
+      };
+      session?: { thread?: string };
+    }
+    const brief = async (projectHint: string): Promise<Pack> => {
+      const result = await agent.callTool('build_context', {
+        topic: 'nightly jobs',
+        briefing: true,
+        max_tokens: 1200,
+        project_hint: projectHint,
+      });
+      expect(result.isError ?? false).toBe(false);
+      return firstJson<Pack>(result);
+    };
+    const remember = async (args: Record<string, unknown>) => {
+      const stored = await agent.callTool('remember', args);
+      expect(stored.isError ?? false).toBe(false);
+      return firstJson<{ memory_id: string; scope: string }>(stored);
+    };
+
+    try {
+      const first = await brief(hint);
+      const thread = first.session?.thread;
+      expect(thread).toMatch(/^thr_/u);
+      // A project with no board work carries no summary.
+      expect(first.work).toBeUndefined();
+
+      // Enough knowledge that the ranked leg would fill its six rows.
+      const facts = [
+        'the nightly export runs after the vacuum, never before it',
+        'the report build waits for the backup to finish',
+        'the backup window is four in the morning',
+        'the vacuum is skipped on the first of the month',
+        'the export writes to the cold bucket, never the warm one',
+        'the report build retries twice before paging',
+        'the cold bucket keeps ninety days of exports',
+      ];
+      let scope = '';
+      for (const fact of facts) {
+        scope = (
+          await remember({
+            content: `e2e brief marker ${stamp}: ${fact}`,
+            kind: 'fact',
+            project_hint: hint,
+          })
+        ).scope;
+      }
+      const loop = await remember({
+        content: `e2e brief marker ${stamp}: open loop — confirm the vacuum schedule with ops`,
+        kind: 'task',
+        project_hint: hint,
+      });
+
+      const created = await agent.callTool('card', {
+        action: 'create',
+        scope,
+        title: 'Keep the nightly jobs from colliding',
+      });
+      expect(created.isError ?? false).toBe(false);
+      const card = firstJson<CardResult>(created).card;
+      for (const [kind, target] of [
+        ['thread', thread],
+        ['memory', loop.memory_id],
+      ] as const) {
+        const attached = await agent.callTool('card_log', {
+          action: 'attach',
+          card_id: card.id,
+          ref_kind: kind,
+          ref_target: target,
+        });
+        expect(attached.isError ?? false).toBe(false);
+      }
+      const reason = 'the export and the vacuum overlapped twice this week';
+      const moved = await agent.callTool('card', {
+        action: 'move',
+        card_id: card.id,
+        to: 'active',
+        reason,
+      });
+      expect(moved.isError ?? false).toBe(false);
+
+      const pack = await brief(hint);
+      // THE SUMMARY: this conversation's card, with why it is where it is.
+      expect(pack.work?.bound_card?.number).toBe(card.number);
+      expect(pack.work?.bound_card?.state).toBe('active');
+      expect(pack.work?.bound_card?.state_reason).toBe(reason);
+      expect(pack.work?.bound_card?.refs).toBe(2);
+      expect(pack.work?.active).toBe(1);
+      // The attached loop is reached through its card, not listed again.
+      expect(pack.open_loops.map((l) => l.id)).not.toContain(loop.memory_id);
+      // DISPLACEMENT: 1200 tokens buy six ranked rows; the summary takes one.
+      expect(pack.memories.length).toBeLessThanOrEqual(5);
+
+      // An UNBUDGETED briefing stays exactly as it was: no summary, nothing
+      // displaced, and the loop still listed on its own. Only budgeted
+      // briefings pay a row for the summary — the displacement was measured
+      // harmless at the hooks' size and not at the default.
+      const unbudgeted = await agent.callTool('build_context', {
+        topic: 'nightly jobs',
+        briefing: true,
+        project_hint: hint,
+      });
+      expect(unbudgeted.isError ?? false).toBe(false);
+      const plain = firstJson<Pack>(unbudgeted);
+      expect(plain.work).toBeUndefined();
+      expect(plain.open_loops.map((l) => l.id)).toContain(loop.memory_id);
+
+      // A project with no board work is untouched.
+      const bare = await brief(bareHint);
+      expect(bare.work).toBeUndefined();
+    } finally {
+      await agent.close();
+    }
+  });
 });
