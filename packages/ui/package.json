@@ -8,7 +8,8 @@
     "lint": "eslint .",
     "lint:strict": "eslint . --max-warnings 0",
     "format": "bunx prettier --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:vitest": "vitest run"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -18,7 +19,9 @@
     "next-themes": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "react-markdown": "catalog:",
     "recharts": "3.8.0",
+    "remark-gfm": "catalog:",
     "shadcn": "catalog:",
     "tailwind-merge": "^3.6.0",
     "tw-animate-css": "catalog:"
@@ -32,7 +35,8 @@
     "@workspace/typescript-config": "workspace:*",
     "eslint": "catalog:",
     "tailwindcss": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "exports": {
     "./globals.css": "./src/styles/globals.css",
