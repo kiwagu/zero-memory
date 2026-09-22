@@ -90,6 +90,9 @@ export function remarkMemoryIdLinks() {
   return (tree: MdNode): void => linkifyChildren(tree);
 }
 
+/** A placeholder origin no real link can have (the `.invalid` TLD is reserved). */
+const INTERNAL_ORIGIN = 'https://app.invalid';
+
 export type LinkTarget =
   | { kind: 'internal'; href: string }
   | { kind: 'external'; href: string; domain: string }
@@ -104,8 +107,22 @@ export function classifyHref(href: string | null | undefined): LinkTarget {
   if (!href) {
     return { kind: 'blocked' };
   }
-  if (href.startsWith('/') && !href.startsWith('//')) {
-    return { kind: 'internal', href };
+  if (href.startsWith('/')) {
+    // Resolve against a placeholder origin: a path is internal only if it
+    // stays there. Browsers read `//host`, `/\host` and similar as another
+    // host, and the resolved form is what they would actually follow.
+    try {
+      const url = new URL(href, INTERNAL_ORIGIN);
+      if (url.origin === INTERNAL_ORIGIN) {
+        return {
+          kind: 'internal',
+          href: `${url.pathname}${url.search}${url.hash}`,
+        };
+      }
+    } catch {
+      // Unparseable: nothing safe to point at.
+    }
+    return { kind: 'blocked' };
   }
   try {
     const url = new URL(href);

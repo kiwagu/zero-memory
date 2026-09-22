@@ -93,6 +93,12 @@ describe('classifyHref', () => {
     expect(classifyHref('//evil.example/x')).toEqual({ kind: 'blocked' });
   });
 
+  it('does not let a backslash smuggle another host into a path', () => {
+    // Browsers read `/\host` as `//host`, so it would leave the app unmarked.
+    expect(classifyHref('/\\evil.example/x')).toEqual({ kind: 'blocked' });
+    expect(classifyHref('/\t/evil.example')).toEqual({ kind: 'blocked' });
+  });
+
   it('names the domain of an external link', () => {
     expect(classifyHref('https://docs.example.com/a?b=1')).toEqual({
       kind: 'external',

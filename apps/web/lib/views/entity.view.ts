@@ -56,12 +56,14 @@ export async function loadEntityView(
           'src_entity:entities!edges_src_fkey(id, name), ' +
           'dst_entity:entities!edges_dst_fkey(id, name)'
       )
-      .or(`src.eq.${id},dst.eq.${id}`)
+      // The id as the database returned it, never the one from the request:
+      // it is spliced into a filter string.
+      .or(`src.eq.${entity.id},dst.eq.${entity.id}`)
       .limit(LIMIT),
     supabase
       .from('memory_entities')
       .select('memories(id, content, kind)')
-      .eq('entity_id', id)
+      .eq('entity_id', entity.id)
       .limit(LIMIT),
   ]);
   const edges = (edgesResult.data ?? []) as unknown as EdgeRow[];
