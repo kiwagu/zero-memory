@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -265,5 +265,24 @@ describe('the briefing tail', () => {
   it('does nothing when clearing a session that was never briefed', () => {
     expect(() => clearBriefTail(path, 'absent')).not.toThrow();
     expect(readBriefTail(path, 'absent')).toBeNull();
+  });
+
+  it('returns null for a malformed tail instead of the broken object', () => {
+    // A stale write (older watcher, truncated save) could hold a `tail`
+    // with no `memories` array — the shape the per-message drain relies on.
+    writeFileSync(
+      path,
+      JSON.stringify({
+        s1: {
+          injected_ids: [],
+          task_briefed: false,
+          epoch: 0,
+          at: 1,
+          tail: { topic: 'a project' },
+        },
+      })
+    );
+
+    expect(readBriefTail(path, 's1')).toBeNull();
   });
 });

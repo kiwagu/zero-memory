@@ -284,11 +284,22 @@ export const recordBriefTail = (
   saveBriefState(path, state);
 };
 
-/** This window's queued briefing remainder, or null while none is queued. */
+/**
+ * This window's queued briefing remainder, or null while none is queued.
+ * Guards the shape cheaply (an array `memories`) rather than trusting the
+ * disk outright — the file's own precedent, `readSessionThread` above,
+ * already does this for `thread`. A stale write from an older watcher or a
+ * truncated save could otherwise hand back a `tail` with no `memories`, and
+ * the per-message drain (Task 7) would throw on every message of that
+ * session instead of just skipping a queue that was never really there.
+ */
 export const readBriefTail = (
   path: string,
   sessionId: string
-): BriefTail | null => loadBriefState(path)[sessionId]?.tail ?? null;
+): BriefTail | null => {
+  const tail = loadBriefState(path)[sessionId]?.tail;
+  return tail !== undefined && Array.isArray(tail.memories) ? tail : null;
+};
 
 /**
  * Drops the queued remainder once it has drained to nothing — called by the
