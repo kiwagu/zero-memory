@@ -128,10 +128,19 @@ export function chainReducer(
         return state;
       }
       const branch = branchOf(state.panels, action.key);
+      const closed = state.panels.find((panel) => panel.key === action.key);
+      // Closing the panel the reader is on hands focus back to where it was
+      // opened from, so the keyboard continues from there.
+      const focus =
+        state.focus && branch.has(state.focus.key)
+          ? closed?.from
+            ? { key: closed.from, seq: state.focus.seq + 1 }
+            : null
+          : state.focus;
       return {
         panels: state.panels.filter((panel) => !branch.has(panel.key)),
         openOrder: state.openOrder.filter((key) => !branch.has(key)),
-        focus: state.focus && branch.has(state.focus.key) ? null : state.focus,
+        focus,
       };
     }
     case 'closeLast': {

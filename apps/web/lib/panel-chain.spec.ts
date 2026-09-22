@@ -53,6 +53,26 @@ describe('chainReducer', () => {
     expect(state.openOrder).toEqual([panelKey('memory', C)]);
   });
 
+  it('hands focus back to the source when the focused panel closes', () => {
+    let state = initialChain({ kind: 'card', id: CARD });
+    state = open(state, A, root);
+    state = open(state, B, panelKey('memory', A));
+    const seq = state.focus?.seq ?? 0;
+    state = chainReducer(state, { type: 'closeLast' });
+    expect(state.focus).toEqual({ key: panelKey('memory', A), seq: seq + 1 });
+    state = chainReducer(state, { type: 'close', key: panelKey('memory', A) });
+    expect(state.focus).toEqual({ key: root, seq: seq + 2 });
+  });
+
+  it('leaves focus alone when a panel elsewhere closes', () => {
+    let state = initialChain({ kind: 'card', id: CARD });
+    state = open(state, A, root);
+    state = open(state, C, root);
+    const focus = state.focus;
+    state = chainReducer(state, { type: 'close', key: panelKey('memory', A) });
+    expect(state.focus).toEqual(focus);
+  });
+
   it('closes the most recently opened panel first', () => {
     let state = initialChain({ kind: 'card', id: CARD });
     state = open(state, A, root);
