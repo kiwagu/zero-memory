@@ -44,6 +44,11 @@ describe('planTailChunk', () => {
       memory(2).id,
     ]);
     expect(chunk?.deliveredIds).toEqual([memory(2).id]);
+    // Pins which memory stays queued: the NON-preferred one, not the one
+    // just delivered. A naive `slice(1)` instead of filtering by id would
+    // drop memory(1) from the queue entirely and leave memory(2) — the
+    // delivered one — still queued for re-delivery next message.
+    expect(chunk?.remaining.map((memory) => memory.id)).toEqual([memory(1).id]);
   });
 
   it('falls back to a stub when the memory itself does not fit', () => {
