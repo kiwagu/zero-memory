@@ -43,6 +43,29 @@ export const DEFAULT_HOOK_BUDGET_CHARS = 9_000;
 const STUB_CONTENT_CHARS = 100;
 
 /**
+ * Maximum stub-line count the memory pack gets as a floor, regardless of how
+ * long the standing rules are. The floor prevents rules from consuming the
+ * entire channel, leaving the briefing unable to name the memories the session
+ * has not yet seen. Each stub line is a pointer the agent can pull by id, and
+ * the pack itself is one `build_context` call away.
+ */
+export const MEMORY_FLOOR_STUBS = 10;
+
+/**
+ * Character cost per stub line: the memory kind, up to STUB_CONTENT_CHARS of
+ * opening content, and the memory id.
+ */
+export const MEMORY_STUB_CHARS = 140;
+
+/**
+ * Calculates the memory floor in characters based on how many memories are
+ * available: the smaller of memoryCount and MEMORY_FLOOR_STUBS, times the cost
+ * per stub. Returns 0 when there are no memories to name.
+ */
+export const memoryFloorChars = (memoryCount: number): number =>
+  Math.min(Math.max(memoryCount, 0), MEMORY_FLOOR_STUBS) * MEMORY_STUB_CHARS;
+
+/**
  * Share of the channel held for the open loops whenever there are any. They
  * are the one part of a briefing the agent cannot learn another way — the
  * rules also live in the repository's instruction files, the pack is one
@@ -57,6 +80,8 @@ const SECTION_SEPARATORS_CHARS = 16;
 export interface SectionBudgets {
   /** The standing rules' ceiling; pinned rules may still exceed it. */
   readonly rules: number;
+  /** Space held for the memory pack, protecting it from rules overspend. */
+  readonly memoryFloor: number;
 }
 
 /**
@@ -67,20 +92,30 @@ export interface SectionBudgets {
  * the rules did not fit either, so the briefing lost both. The loops render
  * afterwards against what the rules ACTUALLY used, so a short rules block
  * leaves them more than the floor.
+ *
+ * The memory floor is subtracted before the rules ceiling, so non-pinned rules
+ * become headlines before the floor is lost; pinned rules stay outside the
+ * ceiling and can end up displacing the floor in the limit.
  */
 export const planSectionBudgets = (
   budgetChars: number,
   projectLineChars: number,
-  hasLoops: boolean
-): SectionBudgets => ({
-  rules: Math.max(
-    0,
-    budgetChars -
-      projectLineChars -
-      (hasLoops ? Math.floor(budgetChars * LOOPS_BUDGET_SHARE) : 0) -
-      SECTION_SEPARATORS_CHARS
-  ),
-});
+  hasLoops: boolean,
+  memoryCount = 0
+): SectionBudgets => {
+  const memoryFloor = memoryFloorChars(memoryCount);
+  return {
+    memoryFloor,
+    rules: Math.max(
+      0,
+      budgetChars -
+        projectLineChars -
+        (hasLoops ? Math.floor(budgetChars * LOOPS_BUDGET_SHARE) : 0) -
+        memoryFloor -
+        SECTION_SEPARATORS_CHARS
+    ),
+  };
+};
 
 /** Resolves the budget knob, falling back to the measured default. */
 export const resolveHookBudgetChars = (raw: string | undefined): number => {

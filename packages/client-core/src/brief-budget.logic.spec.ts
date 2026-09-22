@@ -5,6 +5,8 @@ import {
   composeWithinBudget,
   DEFAULT_HOOK_BUDGET_CHARS,
   LOOPS_BUDGET_SHARE,
+  MEMORY_FLOOR_STUBS,
+  memoryFloorChars,
   planSectionBudgets,
   renderMemoryStub,
   resolveHookBudgetChars,
@@ -262,5 +264,26 @@ describe('the briefing split, end to end', () => {
     expect(composed.text).toContain(rules[1]!.text);
     expect(composed.text).toContain('[headline]');
     expect(composed.text).toContain('handover 3');
+  });
+});
+
+describe('planSectionBudgets — memory floor', () => {
+  it('holds a floor for the memory pack, so long rules cannot take it all', () => {
+    const plan = planSectionBudgets(9_000, 500, true, 12);
+    expect(plan.memoryFloor).toBe(memoryFloorChars(12));
+    expect(plan.rules).toBe(9_000 - 500 - 2_250 - plan.memoryFloor - 16);
+  });
+
+  it('asks for no floor when the pack has no memories', () => {
+    expect(planSectionBudgets(9_000, 500, true, 0).memoryFloor).toBe(0);
+  });
+
+  it('never asks for more floor than the memories it has', () => {
+    expect(memoryFloorChars(3)).toBeLessThan(memoryFloorChars(10));
+    expect(memoryFloorChars(50)).toBe(memoryFloorChars(MEMORY_FLOOR_STUBS));
+  });
+
+  it('gives the rules nothing rather than a negative ceiling', () => {
+    expect(planSectionBudgets(600, 500, true, 12).rules).toBe(0);
   });
 });
