@@ -80,7 +80,11 @@ const SECTION_SEPARATORS_CHARS = 16;
 export interface SectionBudgets {
   /** The standing rules' ceiling; pinned rules may still exceed it. */
   readonly rules: number;
-  /** Space held for the memory pack, protecting it from rules overspend. */
+  /**
+   * Space held for the memory pack, protecting it from rules overspend; the
+   * floor yields to pinned standing rules, which stay exempt from the ceiling
+   * and may displace it in the limit.
+   */
   readonly memoryFloor: number;
 }
 
@@ -144,6 +148,16 @@ export interface TrimmedPack {
   readonly text: string;
   /** Ids delivered IN FULL — the only ones a later briefing may dedup away. */
   readonly deliveredIds: string[];
+  /**
+   * Memories that did not arrive WHOLE, including the ones named by a stub —
+   * a stub points at a memory, it does not deliver it.
+   */
+  readonly remaining: ContextMemory[];
+  /**
+   * True when the pack had memories but not even one fit in the budget — the
+   * briefing is starved, not just trimmed.
+   */
+  readonly starved: boolean;
 }
 
 /**
@@ -169,7 +183,12 @@ export const renderPackWithinBudget = (
   const header = `Persistent memory briefing for "${topic}" (from the zero-memory server):\n`;
   const parsed = buildContextOutputSchema.safeParse(payload);
   if (!parsed.success) {
-    return { text: header + JSON.stringify(payload), deliveredIds: [] };
+    return {
+      text: header + JSON.stringify(payload),
+      deliveredIds: [],
+      remaining: [],
+      starved: false,
+    };
   }
   const pack = parsed.data;
   const ordered: Array<{
@@ -251,7 +270,12 @@ export const renderPackWithinBudget = (
     }
   }
 
-  return { text: parts.join('\n\n'), deliveredIds };
+  return {
+    text: parts.join('\n\n'),
+    deliveredIds,
+    remaining: dropped,
+    starved: deliveredIds.length === 0 && ordered.length > 0,
+  };
 };
 
 export interface BudgetedSection {

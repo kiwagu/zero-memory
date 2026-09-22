@@ -49,6 +49,46 @@ describe('hook budget', () => {
   });
 });
 
+describe('renderPackWithinBudget — what it leaves behind', () => {
+  it('reports the memories that did not arrive whole', () => {
+    const memory1 = memory('mem_aaaaaaaaaaaaaaaa.01kzzzzzz1', 'x'.repeat(50));
+    const memory2 = memory(
+      'mem_bbbbbbbbbbbbbbbb.01kzzzzzz2',
+      'x'.repeat(4_000)
+    );
+    const trimmed = renderPackWithinBudget(
+      'topic',
+      pack([memory1, memory2]),
+      1_200
+    );
+    expect(trimmed.deliveredIds).toEqual(['mem_aaaaaaaaaaaaaaaa.01kzzzzzz1']);
+    expect(trimmed.remaining.map((m) => m.id)).toEqual([
+      'mem_bbbbbbbbbbbbbbbb.01kzzzzzz2',
+    ]);
+    expect(trimmed.starved).toBe(false);
+  });
+
+  it('marks a pack that had memories but could not show one', () => {
+    const memory1 = memory(
+      'mem_aaaaaaaaaaaaaaaa.01kzzzzzz1',
+      'x'.repeat(4_000)
+    );
+    const trimmed = renderPackWithinBudget('topic', pack([memory1]), 60);
+    expect(trimmed.deliveredIds).toEqual([]);
+    expect(trimmed.remaining.map((m) => m.id)).toEqual([
+      'mem_aaaaaaaaaaaaaaaa.01kzzzzzz1',
+    ]);
+    expect(trimmed.starved).toBe(true);
+  });
+
+  it('is not starved when there was nothing to show', () => {
+    const trimmed = renderPackWithinBudget('topic', pack([]), 60);
+    expect(trimmed.starved).toBe(false);
+    expect(trimmed.remaining).toEqual([]);
+    expect(trimmed.text).toBe('');
+  });
+});
+
 describe('renderPackWithinBudget', () => {
   it('keeps whole memories and stubs the rest', () => {
     const body = 'x'.repeat(500);
