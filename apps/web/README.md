@@ -24,15 +24,31 @@ dependency is `@workspace/db` for the generated database types.
 - `/activity` — owner-scoped activity derived from usage events.
 - `/memory/[id]` — one memory with provenance, entities, links, and a
   shared-with dialog listing the scope's members.
-- `/entities` — knowledge-graph entity search and details.
+- `/entities` — knowledge-graph entity search and details;
+  `/entities/[id]` — one entity with its edges and the memories that mention it.
+- `/board` — the project board, read-only; `/board/[id]` — one card. Opened
+  from the board, a card is a dialog over it, and its links open as a chain of
+  panels to its right.
 - `/reflections` — reflection candidates and review actions.
 - `/review` — duplicate/supersede/contradiction hygiene queue.
 - `/rules` — standing-rule candidates, delivery budget, and pins.
 - `/scopes` — scope creation and membership management.
 - `/settings` — provider credentials, memory transfer, and account deletion.
+- `/api/panels/[kind]/[id]` — the data behind one panel of the chain (`memory`,
+  `card` or `entity`): exactly what that resource's page shows, read under the
+  viewer's session; anything the viewer may not read is a 404.
 - `/login`, `/forgot-password`, `/reset-password` — Supabase auth flows.
   `proxy.ts` refreshes the session and redirects unauthenticated requests to
   `/login`.
+
+## Views
+
+A memory, a card and an entity each have one loader in `lib/views/*.view.ts`
+(server-only, the viewer's session) that returns serializable view data, and
+one view in `@workspace/ui`. Pages render the view from the loader; a panel of
+the chain gets the same data from `/api/panels/…` and renders the same view.
+The chain's rules — insert after the source, no duplicates, close a branch,
+Escape order — are the pure reducer in `lib/panel-chain.ts`.
 
 ## Run
 
