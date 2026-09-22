@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import type { BriefTail } from '@workspace/client-core';
 import { startsNewEpoch } from '@workspace/client-core';
 
 /**
@@ -52,6 +53,16 @@ export interface SessionBriefState {
    * one, which is the honest state to render (no token beats a wrong one).
    */
   thread?: string;
+  /**
+   * The remainder of this window's first briefing — what did not fit and is
+   * still queued to ride along with later messages, one memory per message,
+   * until `planTailChunk` (client-core) drains it. It is a property of the
+   * context WINDOW, not of the session as a whole: `stampSessionStart` drops
+   * it exactly where it drops `rules_epoch`, on an epoch boundary, because a
+   * window that lost its context earns a fresh briefing, not the previous
+   * window's leftovers.
+   */
+  tail?: BriefTail;
   /** Last update (epoch ms) — the pruning key. */
   at: number;
 }
@@ -104,6 +115,11 @@ const preserved = (
     started_at: existing.started_at,
   }),
   ...(existing?.thread !== undefined && { thread: existing.thread }),
+  // The tail is per-window, exactly like rules_epoch above — it rides the
+  // same flag rather than a second parameter, since both ask the identical
+  // question: is this still the window the current epoch's briefing built?
+  ...(keepRulesEpoch &&
+    existing?.tail !== undefined && { tail: existing.tail }),
 });
 
 /**
@@ -239,5 +255,57 @@ export const markTaskBriefed = (
     ...preserved(existing),
     at: now,
   };
+  saveBriefState(path, state);
+};
+
+/**
+ * Records the remainder of this window's first briefing — the queue
+ * `planTailChunk` (client-core) hands back one memory at a time on every
+ * later message. This is the only writer that sets `tail`; every other
+ * writer in this file must carry it forward untouched, which is what
+ * `preserved()` is for.
+ */
+export const recordBriefTail = (
+  path: string,
+  sessionId: string,
+  tail: BriefTail,
+  now: number = Date.now()
+): void => {
+  const state = loadBriefState(path);
+  const existing = state[sessionId];
+  state[sessionId] = {
+    injected_ids: existing?.injected_ids ?? [],
+    task_briefed: existing?.task_briefed ?? false,
+    epoch: existing?.epoch ?? 0,
+    ...preserved(existing),
+    tail,
+    at: now,
+  };
+  saveBriefState(path, state);
+};
+
+/** This window's queued briefing remainder, or null while none is queued. */
+export const readBriefTail = (
+  path: string,
+  sessionId: string
+): BriefTail | null => loadBriefState(path)[sessionId]?.tail ?? null;
+
+/**
+ * Drops the queued remainder once it has drained to nothing — called by the
+ * per-message hook after `planTailChunk` returns null. Rebuilding the entry
+ * without `tail` (rather than routing it through `preserved()`) is
+ * deliberate here: this writer's entire job is to make that one field stop
+ * being carried forward, so it must not re-add the field it exists to drop.
+ */
+export const clearBriefTail = (
+  path: string,
+  sessionId: string,
+  now: number = Date.now()
+): void => {
+  const state = loadBriefState(path);
+  const existing = state[sessionId];
+  if (!existing) return;
+  const { tail: _tail, ...rest } = existing;
+  state[sessionId] = { ...rest, at: now };
   saveBriefState(path, state);
 };

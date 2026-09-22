@@ -2,15 +2,21 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type { BriefTail } from '@workspace/client-core';
+import type { ContextMemory } from '@workspace/contracts';
+import { memoryIdSchema } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   briefStatePath,
+  clearBriefTail,
   loadBriefState,
   markRulesDelivered,
   markTaskBriefed,
   MAX_TRACKED_SESSIONS,
+  readBriefTail,
   readSessionThread,
+  recordBriefTail,
   recordSessionBriefing,
   recordSessionThread,
   stampSessionStart,
@@ -18,6 +24,9 @@ import {
 
 let dir: string;
 let path: string;
+// Extra temp dirs minted by tempStatePath() (one call per test in the tail
+// suite below, isolated from the shared `dir`/`path` the other tests share).
+const extraDirs: string[] = [];
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'zm-brief-state-'));
@@ -26,6 +35,31 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
+  for (const extra of extraDirs.splice(0)) {
+    rmSync(extra, { recursive: true, force: true });
+  }
+});
+
+/** A fresh, isolated state file path — one temp dir per call. */
+const tempStatePath = (): string => {
+  const tmpDir = mkdtempSync(join(tmpdir(), 'zm-brief-state-'));
+  extraDirs.push(tmpDir);
+  return join(tmpDir, 'session-briefs.json');
+};
+
+/** A realistic ContextMemory fixture — a schema-valid `mem_` id, not a stub. */
+const memoryFixture = (id: string): ContextMemory => ({
+  id: memoryIdSchema.parse(id),
+  content: 'a memory queued in the briefing tail',
+  kind: 'fact',
+  scope: 'proj.usr_test.zero_memory',
+  created_at: '2026-09-22T09:00:00Z',
+});
+
+const tailFixture = (): BriefTail => ({
+  topic: 'a project',
+  memories: [memoryFixture('mem_a1b2c3d4e5f6g7h8.01jd8x2p4q')],
+  takenAt: '2026-09-22T10:00:00Z',
 });
 
 describe('brief state file', () => {
@@ -212,5 +246,41 @@ describe('brief state file', () => {
     expect(
       Object.keys(JSON.parse(readFileSync(path, 'utf8'))) as string[]
     ).toHaveLength(MAX_TRACKED_SESSIONS);
+  });
+});
+
+describe('the briefing tail', () => {
+  it('survives the other writers, which rebuild the whole entry', () => {
+    const path = tempStatePath();
+    recordBriefTail(path, 's1', tailFixture());
+    markRulesDelivered(path, 's1');
+    recordSessionThread(path, 's1', 'thr_x');
+    expect(readBriefTail(path, 's1')?.memories).toHaveLength(1);
+  });
+
+  it('is dropped when a new context window starts', () => {
+    const path = tempStatePath();
+    recordBriefTail(path, 's1', tailFixture());
+    stampSessionStart(path, 's1', Date.now(), 'compact');
+    expect(readBriefTail(path, 's1')).toBeNull();
+  });
+
+  it('answers null for a session it never saw', () => {
+    expect(readBriefTail(tempStatePath(), 'absent')).toBeNull();
+  });
+
+  it('drops the tail once the queue has drained', () => {
+    const path = tempStatePath();
+    recordBriefTail(path, 's1', tailFixture());
+
+    clearBriefTail(path, 's1');
+
+    expect(readBriefTail(path, 's1')).toBeNull();
+  });
+
+  it('does nothing when clearing a session that was never briefed', () => {
+    const path = tempStatePath();
+    expect(() => clearBriefTail(path, 'absent')).not.toThrow();
+    expect(readBriefTail(path, 'absent')).toBeNull();
   });
 });
