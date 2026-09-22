@@ -139,6 +139,15 @@ export const renderMemoryStub = (memory: ContextMemory): string => {
   return `- [${memory.kind}] ${opening}${ellipsis} (id: ${memory.id})`;
 };
 
+/**
+ * Marks a briefing whose memory pack had memories but not even one fit in the
+ * budget. An empty pack (no memories at all) does not get this notice: there is
+ * nothing to say, and an extra line trains the reader to ignore it.
+ */
+export const renderStarvedPackNotice = (topic: string, count: number): string =>
+  `(${count} memory/memories for "${topic}" did not fit this briefing — ` +
+  'they arrive in the next messages, or call build_context for them now.)';
+
 export interface TrimmedPack {
   /**
    * The whole per-topic section: the pack as JSON carrying the memories that

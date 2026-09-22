@@ -9,6 +9,7 @@ import {
   memoryFloorChars,
   planSectionBudgets,
   renderMemoryStub,
+  renderStarvedPackNotice,
   resolveHookBudgetChars,
   renderPackWithinBudget,
 } from './brief-budget.logic.js';
@@ -46,6 +47,15 @@ describe('hook budget', () => {
     );
     expect(resolveHookBudgetChars('-5')).toBe(DEFAULT_HOOK_BUDGET_CHARS);
     expect(resolveHookBudgetChars('4000')).toBe(4000);
+  });
+});
+
+describe('renderStarvedPackNotice', () => {
+  it('names how many memories exist and how to reach them', () => {
+    const notice = renderStarvedPackNotice('zero-memory', 7);
+    expect(notice).toContain('7');
+    expect(notice).toContain('zero-memory');
+    expect(notice).toContain('build_context');
   });
 });
 
@@ -231,6 +241,30 @@ describe('composeWithinBudget', () => {
 
     expect(composed.omitted).toEqual([]);
     expect(composed.text).toBe('PROJECT: proj.x');
+  });
+
+  it('reports a section that was dropped for size', () => {
+    const composed = composeWithinBudget(
+      [
+        { name: 'the project line', text: 'p' },
+        { name: 'the memory pack', text: 'x'.repeat(500) },
+      ],
+      100
+    );
+    expect(composed.omitted).toEqual(['the memory pack']);
+    expect(composed.text).toContain('did not fit');
+  });
+
+  it('says nothing about a section that had nothing to say', () => {
+    const composed = composeWithinBudget(
+      [
+        { name: 'the project line', text: 'p' },
+        { name: 'the memory pack', text: null },
+      ],
+      9_000
+    );
+    expect(composed.omitted).toEqual([]);
+    expect(composed.text).toBe('p');
   });
 });
 
