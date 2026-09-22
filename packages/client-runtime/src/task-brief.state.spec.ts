@@ -250,6 +250,12 @@ describe('the briefing tail', () => {
     expect(readBriefTail(path, 's1')).toBeNull();
   });
 
+  it('survives a non-boundary stampSessionStart, e.g. a resume', () => {
+    recordBriefTail(path, 's1', tailFixture());
+    stampSessionStart(path, 's1', Date.now(), 'resume');
+    expect(readBriefTail(path, 's1')).not.toBeNull();
+  });
+
   it('answers null for a session it never saw', () => {
     expect(readBriefTail(path, 'absent')).toBeNull();
   });
