@@ -114,6 +114,18 @@ test.describe('Project board in the dashboard', () => {
     // names the card, so the step is navigable, shareable and reloadable.
     await tile.click();
     await expect(page.getByTestId('card-modal')).toBeVisible();
+    // One shared, thin scrollbar across the dashboard, and a scrollbar that
+    // appears never shifts the layout.
+    expect(
+      await page.evaluate(
+        () => getComputedStyle(document.documentElement).scrollbarWidth
+      )
+    ).toBe('thin');
+    expect(
+      await page.evaluate(
+        () => getComputedStyle(document.documentElement).scrollbarGutter
+      )
+    ).toBe('stable');
     await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
     // The board is still there underneath, not replaced.
     await expect(page.getByTestId('board')).toBeVisible();

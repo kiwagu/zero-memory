@@ -38,7 +38,7 @@ export function CardModal({ children }: { children: ReactNode }) {
   return (
     <Dialog open onOpenChange={handleOpenChange}>
       <DialogContent
-        className="max-h-[85vh] overflow-y-auto sm:max-w-3xl"
+        className="scrollbar-stable max-h-[85vh] overflow-y-auto sm:max-w-3xl"
         data-testid="card-modal"
       >
         {children}
