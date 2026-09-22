@@ -539,5 +539,15 @@
   "board.scope.latest": "Actividad más reciente",
   "board.scope.all": "Todos los tableros",
   "board.scope.latestNamed": "Actividad más reciente: {scope}",
-  "markdown.image": "imagen"
+  "markdown.image": "imagen",
+  "panels.previous": "Panel anterior",
+  "panels.next": "Panel siguiente",
+  "panels.close": "Cerrar panel",
+  "panels.from": "desde: {title}",
+  "panels.loading": "Cargando…",
+  "panels.unavailable": "No disponible",
+  "panels.retry": "Reintentar",
+  "panels.kind.memory": "Memoria",
+  "panels.kind.card": "Tarjeta",
+  "panels.kind.entity": "Entidad"
 }
