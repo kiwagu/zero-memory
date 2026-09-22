@@ -24,9 +24,6 @@ import {
 
 let dir: string;
 let path: string;
-// Extra temp dirs minted by tempStatePath() (one call per test in the tail
-// suite below, isolated from the shared `dir`/`path` the other tests share).
-const extraDirs: string[] = [];
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'zm-brief-state-'));
@@ -35,17 +32,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
-  for (const extra of extraDirs.splice(0)) {
-    rmSync(extra, { recursive: true, force: true });
-  }
 });
-
-/** A fresh, isolated state file path — one temp dir per call. */
-const tempStatePath = (): string => {
-  const tmpDir = mkdtempSync(join(tmpdir(), 'zm-brief-state-'));
-  extraDirs.push(tmpDir);
-  return join(tmpDir, 'session-briefs.json');
-};
 
 /** A realistic ContextMemory fixture — a schema-valid `mem_` id, not a stub. */
 const memoryFixture = (id: string): ContextMemory => ({
@@ -251,7 +238,6 @@ describe('brief state file', () => {
 
 describe('the briefing tail', () => {
   it('survives the other writers, which rebuild the whole entry', () => {
-    const path = tempStatePath();
     recordBriefTail(path, 's1', tailFixture());
     markRulesDelivered(path, 's1');
     recordSessionThread(path, 's1', 'thr_x');
@@ -259,18 +245,16 @@ describe('the briefing tail', () => {
   });
 
   it('is dropped when a new context window starts', () => {
-    const path = tempStatePath();
     recordBriefTail(path, 's1', tailFixture());
     stampSessionStart(path, 's1', Date.now(), 'compact');
     expect(readBriefTail(path, 's1')).toBeNull();
   });
 
   it('answers null for a session it never saw', () => {
-    expect(readBriefTail(tempStatePath(), 'absent')).toBeNull();
+    expect(readBriefTail(path, 'absent')).toBeNull();
   });
 
   it('drops the tail once the queue has drained', () => {
-    const path = tempStatePath();
     recordBriefTail(path, 's1', tailFixture());
 
     clearBriefTail(path, 's1');
@@ -279,7 +263,6 @@ describe('the briefing tail', () => {
   });
 
   it('does nothing when clearing a session that was never briefed', () => {
-    const path = tempStatePath();
     expect(() => clearBriefTail(path, 'absent')).not.toThrow();
     expect(readBriefTail(path, 'absent')).toBeNull();
   });
