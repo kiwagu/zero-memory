@@ -19,11 +19,24 @@ Components live under `src/components`, global styles under
 
 - `@workspace/ui/components/*` — shadcn primitives and composed product
   components for auth, dashboard, memories, entities, review, rules, scopes,
-  reflections, and settings.
+  reflections, and settings. Among them:
+  - `common/markdown` — the one renderer for narrative text (a memory, a card
+    body, notes, reasons, drafts): raw HTML shows as literal text, images never
+    load, script and data links render as plain text, external links open in a
+    new tab with their domain shown, memory ids become links. Lists and
+    previews keep their own compact rendering.
+  - `memory/memory-detail`, `board/card-detail`, `entity/entity-detail` — the
+    full views of a memory, a card and an entity. Each takes serializable data
+    plus slots, so a page and a panel render the same view.
+  - `panels/panel-strip` — the controlled strip of panels a dialog opens:
+    equal-width panels in one snapping row, paged by arrows at the screen
+    edges, each with its source and its ×.
+  - `entity/entity-edge-list` — an entity's edges as `src —type→ dst` lines.
 - `@workspace/ui/hooks/*` — shared client hooks such as the mobile breakpoint
   helper.
-- `@workspace/ui/lib/*` — class-name utilities, scope formatting, and
-  instruction-rule formatters.
+- `@workspace/ui/lib/*` — class-name utilities, scope formatting,
+  instruction-rule formatters, and the Markdown helpers (the remark plugins and
+  the link classifier behind `common/markdown`).
 - `@workspace/ui/globals.css` and `@workspace/ui/postcss.config` — shared
   Tailwind theme/styles and PostCSS configuration.
 
@@ -36,5 +49,7 @@ components so changes honor `components.json`:
 bunx --bun shadcn@latest add <component>
 ```
 
-Run `bun run typecheck` and `bun run lint:strict` from this package, or the
-corresponding root workspace checks.
+Run `bun run typecheck`, `bun run lint:strict` and `bun run test:vitest` from
+this package, or the corresponding root workspace checks. The unit tests cover
+display logic only: pure helpers and components rendered to static markup in
+node, with no DOM.
