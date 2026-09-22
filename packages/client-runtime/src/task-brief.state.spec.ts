@@ -291,4 +291,24 @@ describe('the briefing tail', () => {
 
     expect(readBriefTail(path, 's1')).toBeNull();
   });
+
+  it('returns null for a null tail instead of throwing', () => {
+    // Same stale-write family as the malformed-tail test above, but the
+    // literal shape `Array.isArray(tail.memories)` cannot survive
+    // unguarded: `tail` itself is null, not merely missing `memories`.
+    writeFileSync(
+      path,
+      JSON.stringify({
+        s1: {
+          injected_ids: [],
+          task_briefed: false,
+          epoch: 0,
+          at: 1,
+          tail: null,
+        },
+      })
+    );
+
+    expect(readBriefTail(path, 's1')).toBeNull();
+  });
 });

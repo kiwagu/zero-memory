@@ -298,7 +298,7 @@ export const readBriefTail = (
   sessionId: string
 ): BriefTail | null => {
   const tail = loadBriefState(path)[sessionId]?.tail;
-  return tail !== undefined && Array.isArray(tail.memories) ? tail : null;
+  return Array.isArray(tail?.memories) ? tail : null;
 };
 
 /**
