@@ -15,6 +15,7 @@ import {
 import { getRequestMessages } from '@/lib/i18n';
 import { formatTimestamp, kindLabel, scopeLabel } from '@/lib/memory';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { rowsOf } from '@/lib/views/query';
 
 /**
  * One card as its view needs it — loaded once, under the viewer's session,
@@ -38,10 +39,13 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
   const { t } = await getRequestMessages();
 
   const supabase = await createServerSupabaseClient();
-  const { data } = await supabase.rpc('card_get', {
-    p_card_id: id,
-    p_limit: HISTORY_LIMIT,
-  });
+  const data = rowsOf(
+    await supabase.rpc('card_get', {
+      p_card_id: id,
+      p_limit: HISTORY_LIMIT,
+    }),
+    'card'
+  );
 
   const parsed = data ? cardViewSchema.safeParse(data) : null;
   if (!parsed?.success) {
@@ -53,10 +57,13 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
 
   // The feed is read under the same session, so a memory this reader may not
   // open never arrives — there is nothing to hide, unlike an attachment.
-  const { data: feedData } = await supabase.rpc('card_feed', {
-    p_card_id: id,
-    p_limit: FEED_LIMIT,
-  });
+  const feedData = rowsOf(
+    await supabase.rpc('card_feed', {
+      p_card_id: id,
+      p_limit: FEED_LIMIT,
+    }),
+    'card feed'
+  );
   const feed = cardFeedSchema.safeParse(feedData ?? {});
   const feedItems: LinkedMemoryItem[] = (
     feed.success ? feed.data.feed : []

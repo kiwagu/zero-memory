@@ -3,6 +3,7 @@ import type { EntityDetailData } from '@workspace/ui/components/entity/entity-de
 import { getRequestMessages } from '@/lib/i18n';
 import { formatTimestamp, kindLabel, scopeLabel } from '@/lib/memory';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { rowsOf } from '@/lib/views/query';
 
 /**
  * One entity as its view needs it — loaded under the viewer's session and
@@ -39,11 +40,14 @@ export async function loadEntityView(
   const supabase = await createServerSupabaseClient();
   const { t } = await getRequestMessages();
 
-  const { data: entity } = await supabase
-    .from('entities')
-    .select('id, name, type, scope, created_at')
-    .eq('id', id)
-    .maybeSingle();
+  const entity = rowsOf(
+    await supabase
+      .from('entities')
+      .select('id, name, type, scope, created_at')
+      .eq('id', id)
+      .maybeSingle(),
+    'entity'
+  );
   if (!entity) {
     return null;
   }
@@ -66,8 +70,10 @@ export async function loadEntityView(
       .eq('entity_id', entity.id)
       .limit(LIMIT),
   ]);
-  const edges = (edgesResult.data ?? []) as unknown as EdgeRow[];
-  const memories = (memoriesResult.data ?? []) as unknown as LinkedMemoryRow[];
+  const edges = (rowsOf(edgesResult, 'entity edges') ??
+    []) as unknown as EdgeRow[];
+  const memories = (rowsOf(memoriesResult, 'entity memories') ??
+    []) as unknown as LinkedMemoryRow[];
 
   return {
     id: entity.id,

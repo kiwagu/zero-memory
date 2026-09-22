@@ -27,6 +27,7 @@ import {
 } from '@/lib/scope-members';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { currentUserEntityId } from '@/lib/user';
+import { rowsOf } from '@/lib/views/query';
 
 /**
  * One memory as its view needs it — loaded once, under the viewer's session,
@@ -116,11 +117,14 @@ export async function loadMemoryView(
   const supabase = await createServerSupabaseClient();
   const { t } = await getRequestMessages();
 
-  const { data: memoryData } = await supabase
-    .from('memories')
-    .select(MEMORY_COLUMNS)
-    .eq('id', id)
-    .maybeSingle();
+  const memoryData = rowsOf(
+    await supabase
+      .from('memories')
+      .select(MEMORY_COLUMNS)
+      .eq('id', id)
+      .maybeSingle(),
+    'memory'
+  );
   if (!memoryData) {
     return null;
   }
@@ -131,9 +135,12 @@ export async function loadMemoryView(
 
   // Targets for the manual move: the owner's project-scope memberships
   // (RLS-scoped). The component hides itself when there is nowhere to move.
-  const { data: moveScopeRows } = isOwner
-    ? await supabase.from('scope_members').select('scope')
-    : { data: [] as Array<{ scope: unknown }> };
+  const moveScopeRows = isOwner
+    ? rowsOf(
+        await supabase.from('scope_members').select('scope'),
+        'move targets'
+      )
+    : [];
   const moveTargets = [
     ...new Set(
       (moveScopeRows ?? [])
@@ -193,12 +200,15 @@ export async function loadMemoryView(
           .neq('id', id)
           .order('created_at', { ascending: true })
           .limit(SAME_SESSION_LIMIT)
-      : Promise.resolve({ data: [] as SameSessionRow[] }),
+      : Promise.resolve({ data: [] as SameSessionRow[], error: null }),
   ]);
 
-  const linkedEntities = (entitiesResult.data ?? []) as LinkedEntity[];
-  const linksOut = (linksOutResult.data ?? []) as unknown as LinkedMemory[];
-  const linksIn = (linksInResult.data ?? []) as unknown as LinkedMemory[];
+  const linkedEntities = (rowsOf(entitiesResult, 'memory entities') ??
+    []) as LinkedEntity[];
+  const linksOut = (rowsOf(linksOutResult, 'links out') ??
+    []) as unknown as LinkedMemory[];
+  const linksIn = (rowsOf(linksInResult, 'links in') ??
+    []) as unknown as LinkedMemory[];
   // A validity window, Zep-bitemporal style: "Valid <from> — <to|present>".
   const validityWindow = (from: string | null, to: string | null): string =>
     t('memory.validity.window', {
@@ -209,7 +219,7 @@ export async function loadMemoryView(
   // RLS-filtered supersession lineage (oldest first); only worth a section
   // when the memory actually has other versions than itself. Each row shows
   // its validity window instead of a bare creation timestamp.
-  const versions = versionsResult.data ?? [];
+  const versions = rowsOf(versionsResult, 'version history') ?? [];
   const versionItems = versions.map((version) => ({
     href: `/memory/${version.id}`,
     preview: version.content,
@@ -219,13 +229,17 @@ export async function loadMemoryView(
     invalidated: Boolean(version.invalidated_at),
   }));
   const writableScopes = [
-    ...new Set((scopesResult.data ?? []).map((row) => scopeLabel(row.scope))),
+    ...new Set(
+      (rowsOf(scopesResult, 'writable scopes') ?? []).map((row) =>
+        scopeLabel(row.scope)
+      )
+    ),
   ];
   // Presented with each sibling's KIND as its badge: the relation here is
   // "born in the same conversation", so a relation-type badge would overstate
   // what is known about the pair.
   const sameSessionItems = (
-    (sameSessionResult.data ?? []) as SameSessionRow[]
+    (rowsOf(sameSessionResult, 'same session') ?? []) as SameSessionRow[]
   ).map((row) => ({
     type: kindLabel(row.kind, t),
     href: `/memory/${row.id}`,
