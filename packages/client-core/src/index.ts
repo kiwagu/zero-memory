@@ -7,6 +7,7 @@ export {
   memoryFloorChars,
   planSectionBudgets,
   renderMemoryStub,
+  renderStarvedPackNotice,
   resolveHookBudgetChars,
   renderPackWithinBudget,
   type BudgetedSection,

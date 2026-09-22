@@ -9,10 +9,13 @@ import {
   markRulesDelivered,
   markTaskBriefed,
   projectScopeStatePath,
+  readBriefTail,
   recordProjectScope,
   recordSessionThread,
   stampSessionStart,
 } from '@workspace/client-runtime';
+import type { ContextMemory, ContextRule } from '@workspace/contracts';
+import { memoryIdSchema } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { branchNameToTopic, runBrief } from './brief-runner.js';
@@ -270,5 +273,153 @@ describe('per-message project/thread banner', () => {
     expect(loadBriefState(briefStatePath())[sessionId]?.task_briefed).toBe(
       true
     );
+  });
+});
+
+/**
+ * The session-start briefing keeps a floor for the memory pack even when the
+ * standing rules run long, and records whatever did not fit as this window's
+ * tail — driven end to end through `runBrief('session-start', …)` exactly
+ * like the banner suite above drives `runBrief('task', …)`, with no mid-level
+ * helper mocked out.
+ */
+describe('session-start memory floor', () => {
+  let stateDir: string;
+  let workDir: string;
+  let previousState: string | undefined;
+  const SESSION_ID = 'session-1';
+
+  // Realistic mem_ ids: entity-id's Crockford base32 shape (16 chars, a dot,
+  // 10 chars) — a literal id like 'mem_a' fails buildContextOutputSchema and
+  // would make every fixture in this suite silently degrade to the "did not
+  // parse" branch of renderPackWithinBudget instead of exercising the budget
+  // logic these tests are about.
+  const memory = (index: number, contentChars: number): ContextMemory => ({
+    id: memoryIdSchema.parse(
+      `mem_${String(index).padStart(16, '0')}.${'0'.repeat(10)}`
+    ),
+    content: 'm'.repeat(contentChars),
+    kind: 'fact',
+    scope: 'proj.usr_x.demo',
+    created_at: '2026-09-01T00:00:00Z',
+    score: 0.5,
+  });
+
+  const loop = (index: number, contentChars: number): ContextMemory => ({
+    id: memoryIdSchema.parse(
+      `mem_${String(index).padStart(16, '0')}.${'1'.repeat(10)}`
+    ),
+    content: 'l'.repeat(contentChars),
+    kind: 'task',
+    scope: 'proj.usr_x.demo',
+    created_at: '2026-09-01T00:00:00Z',
+    score: 0.5,
+  });
+
+  const pinnedRule = (textChars: number): ContextRule => ({
+    text: 'R'.repeat(textChars),
+    pinned: true,
+  });
+
+  const rule = (textChars: number): ContextRule => ({
+    text: 'r'.repeat(textChars),
+    pinned: false,
+  });
+
+  const runSessionStart = async (fixture: {
+    rules?: ContextRule[];
+    loops?: ContextMemory[];
+    memories?: ContextMemory[];
+  }): Promise<string> => {
+    vi.mocked(callBuildContext).mockResolvedValue({
+      memories: fixture.memories ?? [],
+      entities: [],
+      edges: [],
+      linked_memories: [],
+      recent: [],
+      rules: fixture.rules ?? [],
+      open_loops: fixture.loops ?? [],
+      open_loops_total: fixture.loops?.length ?? 0,
+      project_scope: 'proj.usr_x.demo',
+    });
+
+    let emitted: string | null = null;
+    const adapter: HookClient = {
+      // 'codex' (not 'claude') so runSessionStart never reaches the
+      // Claude-plugin-only checkForUpdate() call — this suite is about the
+      // budget split, not the update notice.
+      kind: 'codex',
+      ingestProvenance: 'test',
+      canTaskBrief: true,
+      canAnchorCompaction: false,
+      readInput: async () => ({
+        sessionId: SESSION_ID,
+        cwd: workDir,
+        prompt: '',
+        transcriptPath: '',
+        hookEventName: 'SessionStart',
+        toolName: '',
+        alreadyContinued: false,
+        source: '',
+        trigger: '',
+      }),
+      parse: () => {
+        throw new Error('session-start never parses a transcript');
+      },
+      emitSessionBrief: (context) => {
+        emitted = context;
+      },
+      emitTaskBrief: () => {},
+      emitTurnContext: () => {},
+      emitReceipt: () => {},
+      emitCompactionAnchor: () => {},
+    };
+
+    await runBrief('session-start', adapter);
+    return emitted ?? '';
+  };
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'zm-floor-state-'));
+    workDir = mkdtempSync(join(tmpdir(), 'zm-floor-work-'));
+    previousState = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = stateDir;
+  });
+
+  afterEach(() => {
+    vi.mocked(callBuildContext).mockReset();
+    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previousState;
+    rmSync(stateDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('keeps room for the memory pack even when the rules are long', async () => {
+    // Sized so the rules alone (one pinned, one long enough to survive the
+    // OLD unfloored ceiling in full) plus a wide spread of loops spend the
+    // channel down to single digits for the one remaining topic — the exact
+    // shape of the measured production defect: the pack gets nothing.
+    const briefing = await runSessionStart({
+      rules: [pinnedRule(200), rule(5_500)],
+      loops: Array.from({ length: 20 }, (_, i) => loop(900 + i, 200)),
+      memories: Array.from({ length: 12 }, (_, i) => memory(i, 900)),
+    });
+    // Before the fix, this much rules+loops content left the pack NOTHING —
+    // not even the id of the memory that led the ranked results.
+    expect(briefing).toContain('mem_0000000000000000');
+    expect(briefing.length).toBeLessThanOrEqual(9_000);
+  });
+
+  it('records no tail when the project has no memories at all', async () => {
+    await runSessionStart({ memories: [] });
+    expect(readBriefTail(briefStatePath(), SESSION_ID)).toBeNull();
+  });
+
+  it("records what did not fit as the window's tail", async () => {
+    await runSessionStart({
+      memories: Array.from({ length: 12 }, (_, i) => memory(i, 900)),
+    });
+    const tail = readBriefTail(briefStatePath(), SESSION_ID);
+    expect(tail?.memories.length).toBeGreaterThan(0);
   });
 });

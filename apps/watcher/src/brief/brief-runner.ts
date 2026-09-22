@@ -21,6 +21,7 @@ import {
   splitOpenLoops,
   splitStandingRules,
   renderPackWithinBudget,
+  renderStarvedPackNotice,
 } from '@workspace/client-core';
 import {
   briefCacheDir,
@@ -33,12 +34,14 @@ import {
   readBriefCache,
   readProjectScope,
   readSessionThread,
+  recordBriefTail,
   recordProjectScope,
   recordSessionBriefing,
   recordSessionThread,
   stampSessionStart,
   writeBriefCache,
 } from '@workspace/client-runtime';
+import { buildContextOutputSchema } from '@workspace/contracts';
 import { createLogger } from '@workspace/logger';
 
 import { hookClient, type HookClient, type HookInput } from '../hook-client.js';
@@ -117,6 +120,28 @@ const briefCacheTtlDays = (): number => {
 const packProjectScope = (payload: unknown): string | null => {
   const scope = (payload as { project_scope?: unknown } | null)?.project_scope;
   return typeof scope === 'string' && scope.length > 0 ? scope : null;
+};
+
+/**
+ * How many memories a topic's SPLIT payload still carries — across the three
+ * legs a pack can arrive in (the ranked hits, the linked-memory stubs' own
+ * bodies, and the recency leg), after standing rules and open loops have
+ * already been drained out of it by `splitStandingRules`/`splitOpenLoops`.
+ * Used only to size the PRIMARY topic's memory floor: a topic with nothing to
+ * say earns no floor, which is what keeps an empty project from getting a
+ * floor it will never use (and, downstream, from ever recording a tail).
+ * A payload that fails to parse (an older server, or the offline path) counts
+ * as zero rather than throwing — the floor then falls back to 0, same as
+ * before this change, which is the safe direction to fail in.
+ */
+const countPackMemories = (payload: unknown): number => {
+  const parsed = buildContextOutputSchema.safeParse(payload);
+  if (!parsed.success) return 0;
+  return (
+    parsed.data.memories.length +
+    parsed.data.linked_memories.length +
+    parsed.data.recent.length
+  );
 };
 
 /**
@@ -422,14 +447,24 @@ const runSessionStart = async (
   // full, the others in full while they fit and by headline after. The loops
   // then render against what the rules actually used, TRIMMED with the rest
   // counted rather than dropped whole by the composer below.
+  //
+  // The rules ceiling ALSO makes room for a memory floor now — measured on
+  // this project, a briefing whose rules ran long enough gave the pack
+  // NOTHING (not even a stub), which is silent for a session-start briefing:
+  // the agent is never told a pack existed at all. `splits[0]` is the PRIMARY
+  // topic (the project, not the branch), so its memory count is what sizes
+  // the floor; a project with nothing in it earns no floor to fight for.
   const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
   // The work section is the project board's lines plus the open loops no
   // card there covers; it holds the floor whenever either is present.
   const boardBlock = merged.work ? renderBoardSummary(merged.work) : null;
+  const projectPack = splits[0];
+  const projectMemories = countPackMemories(projectPack?.split.payload);
   const plan = planSectionBudgets(
     budget,
     projectLine?.length ?? 0,
-    merged.loops.length > 0 || boardBlock !== null
+    merged.loops.length > 0 || boardBlock !== null,
+    projectMemories
   );
   const rulesSection = renderStandingRulesSection(rules, plan.rules);
   const loopSection = renderOpenLoopsSection(
@@ -461,12 +496,19 @@ const runSessionStart = async (
     0,
     Math.floor((budget - spentBySections) / Math.max(splits.length, 1))
   );
-  const packs = splits.map((section) => ({
+  // The PRIMARY pack (index 0, the project topic) never renders under less
+  // than its floor, even when the even split above would give it less — the
+  // whole point of reserving `plan.memoryFloor` in the rules ceiling. Every
+  // other topic (the branch pack) keeps the plain even split; the floor is
+  // the project's alone, per the decision above.
+  const packBudget = (index: number): number =>
+    index === 0 ? Math.max(perTopicBudget, plan.memoryFloor) : perTopicBudget;
+  const packs = splits.map((section, index) => ({
     topic: section.topic,
     trimmed: renderPackWithinBudget(
       section.topic,
       section.split.payload,
-      perTopicBudget
+      packBudget(index)
     ),
   }));
 
@@ -478,9 +520,15 @@ const runSessionStart = async (
       { name: 'the project line', text: projectLine },
       { name: 'the standing rules', text: rulesSection },
       { name: 'the work in progress', text: workSection },
+      // A starved pack (memories existed but none fit, even the floor) says
+      // so instead of contributing nothing: silence here reads as "this
+      // topic has no memories", which is a different — and false — claim
+      // from "the memories didn't fit this channel this time".
       ...packs.map(({ topic, trimmed }) => ({
         name: `the "${topic}" pack`,
-        text: trimmed.text || null,
+        text: trimmed.starved
+          ? renderStarvedPackNotice(topic, trimmed.remaining.length)
+          : trimmed.text || null,
       })),
     ],
     budget
@@ -506,6 +554,25 @@ const runSessionStart = async (
       );
     } catch {
       // ignore: dedup degrades gracefully, the briefing still ships.
+    }
+  }
+  // Queue the PRIMARY pack's leftovers as this window's tail — what a stub
+  // above merely named, a later per-message drain still owes the agent in
+  // full. An empty project (no memories at all, so nothing was trimmed away)
+  // records NO tail: "nothing to say" and "did not fit" are different claims,
+  // and a queue that is always empty in practice teaches the reader to skip
+  // whatever announces it. Best-effort, same as `recordSessionBriefing`
+  // above — a state problem must never sink a briefing that already shipped.
+  const projectRemaining = packs[0]?.trimmed.remaining ?? [];
+  if (sessionId && projectPack && projectRemaining.length > 0) {
+    try {
+      recordBriefTail(briefStatePath(), sessionId, {
+        topic: projectPack.topic,
+        memories: projectRemaining,
+        takenAt: new Date().toISOString(),
+      });
+    } catch {
+      // ignore: the tail is an improvement, it must never sink a briefing.
     }
   }
   // Record the rules as delivered INTO THIS WINDOW only once they are actually
