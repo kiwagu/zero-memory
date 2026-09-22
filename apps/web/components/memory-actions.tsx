@@ -15,11 +15,14 @@ export function MemoryActions({
   invalidated,
   writableScopes,
   labels,
+  onDone,
 }: {
   memoryId: string;
   invalidated: boolean;
   writableScopes: string[];
   labels: MemoryActionsLabels;
+  /** Replaces the page refresh after an action — a panel reloads itself. */
+  onDone?: () => void;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +36,11 @@ export function MemoryActions({
         setError(result.error);
         return;
       }
-      router.refresh();
+      if (onDone) {
+        onDone();
+      } else {
+        router.refresh();
+      }
     });
   }
 
@@ -45,7 +52,11 @@ export function MemoryActions({
         setError(result.error);
         return;
       }
-      router.refresh();
+      if (onDone) {
+        onDone();
+      } else {
+        router.refresh();
+      }
     });
   }
 
