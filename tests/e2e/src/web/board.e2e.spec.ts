@@ -18,7 +18,7 @@ import { signInThroughForm } from '../helpers/web.js';
 const REASON = 'blocked on the owner picking a cutover window';
 
 interface CardResult {
-  card: { id: string; number: number };
+  card: { id: string; number: number; scope: string };
 }
 
 test.describe('Project board in the dashboard', () => {
@@ -32,6 +32,7 @@ test.describe('Project board in the dashboard', () => {
 
     let cardId: string;
     let cardNumber: number;
+    let cardScope: string;
     try {
       const loop = await mcp.callTool('remember', {
         content:
@@ -52,6 +53,7 @@ test.describe('Project board in the dashboard', () => {
       const card = firstJson<CardResult>(promoted).card;
       cardId = card.id;
       cardNumber = card.number;
+      cardScope = card.scope;
 
       const moved = await mcp.callTool('card', {
         action: 'move',
@@ -82,7 +84,9 @@ test.describe('Project board in the dashboard', () => {
     await signInThroughForm(page, seed.userA);
 
     // The board: the card sits in the column its state names.
-    await page.goto('/board');
+    // This card's own board, by scope: without one the page opens the board
+    // that moved last, and specs running in parallel keep moving theirs.
+    await page.goto(`/board?scope=${encodeURIComponent(cardScope)}`);
     await expect(page.getByTestId('board')).toBeVisible();
     const waiting = page.getByTestId('board-column-waiting');
     const tile = waiting.getByTestId('board-card').filter({
@@ -158,7 +162,7 @@ test.describe('Project board in the dashboard', () => {
     // Dismissing goes back to the board rather than pushing it again.
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('card-modal')).toBeHidden();
-    await expect(page).toHaveURL(/\/board$/);
+    await expect(page).toHaveURL(/\/board(\?[^/]*)?$/);
 
     // The same address opened DIRECTLY is a page of its own, not a dialog:
     // a reload or a pasted link must land on the card, not on nothing.
@@ -373,5 +377,212 @@ test.describe('Project board in the dashboard', () => {
         () => (window as unknown as { __pwned?: number }).__pwned
       )
     ).toBeUndefined();
+  });
+});
+
+/*
+ * The chain of panels a card dialog opens. A link inside the card opens its
+ * target as a twin panel to the right — memory, card or entity — and the
+ * canvas grows without losing anything: a new panel goes right after the one
+ * it was opened from, an open resource is never opened twice, × closes a panel
+ * with everything opened from it, and Escape unwinds by opening order before
+ * it closes the dialog. The address stays the card's throughout.
+ */
+test.describe('Panel chain in the card dialog', () => {
+  test('links in a card build a canvas of panels to its right', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const stamp = Date.now();
+    const entityName = `e2e-panel-entity-${stamp}`;
+    const cardTitle = `panel-chain card ${stamp}`;
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+
+    let aId: string;
+    let bId: string;
+    let cId: string;
+    let cardId: string;
+    let cardNumber: number;
+    let boardScope: string;
+    try {
+      const remember = async (args: Record<string, unknown>) => {
+        const stored = await mcp.callTool('remember', {
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-panel-chain',
+          ...args,
+        });
+        expect(stored.isError ?? false).toBe(false);
+        return firstJson<{ memory_id: string; scope: string }>(stored);
+      };
+      const b = await remember({
+        content: `panel-chain B ${stamp}: the retry budget is five attempts`,
+      });
+      bId = b.memory_id;
+      boardScope = b.scope;
+      aId = (
+        await remember({
+          content: `panel-chain A ${stamp}: the queue drains nightly, see ${bId}`,
+          entities: [{ name: entityName, type: 'concept' }],
+        })
+      ).memory_id;
+      cId = (
+        await remember({
+          content: `panel-chain C ${stamp}: cutover waits for the owner`,
+        })
+      ).memory_id;
+
+      const created = await mcp.callTool('card', {
+        action: 'create',
+        scope: b.scope,
+        title: cardTitle,
+        body: 'panel-chain card body',
+      });
+      expect(created.isError ?? false).toBe(false);
+      const card = firstJson<CardResult>(created).card;
+      cardId = card.id;
+      cardNumber = card.number;
+      for (const target of [aId, cId]) {
+        const attached = await mcp.callTool('card_log', {
+          action: 'attach',
+          card_id: cardId,
+          ref_kind: 'memory',
+          ref_target: target,
+        });
+        expect(attached.isError ?? false).toBe(false);
+      }
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    // The card's own board, by scope: without one the page opens the board
+    // that moved last, and specs running in parallel keep moving theirs.
+    const openCard = async () => {
+      await page.goto(`/board?scope=${encodeURIComponent(boardScope)}`);
+      await page
+        .getByTestId('board-card')
+        .filter({ hasText: cardTitle })
+        .click();
+      await expect(page.getByTestId('card-modal')).toBeVisible();
+    };
+    const order = () =>
+      page
+        .getByTestId('panel')
+        .evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute('data-panel-key'))
+        );
+    const panel = (key: string) => page.locator(`[data-panel-key="${key}"]`);
+    const refs = page.getByTestId('card-refs').first();
+    const cardKey = `card:${cardId}`;
+    const aKey = `memory:${aId}`;
+    const bKey = `memory:${bId}`;
+    const cKey = `memory:${cId}`;
+
+    await openCard();
+
+    // 1. A link in the card opens a twin panel to its right; the URL stays
+    //    the card's, and the panel says where it came from.
+    await refs.getByRole('link', { name: /panel-chain A/ }).click();
+    await expect.poll(order).toEqual([cardKey, aKey]);
+    await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
+    await expect(panel(aKey).getByTestId('panel-from')).toContainText(
+      `#${cardNumber}`
+    );
+
+    // 2. A memory id in A's text opens B right after A.
+    await panel(aKey).getByRole('link', { name: bId }).click();
+    await expect.poll(order).toEqual([cardKey, aKey, bKey]);
+
+    // 3. The same link again adds nothing.
+    await refs.getByRole('link', { name: /panel-chain A/ }).click();
+    await expect.poll(order).toEqual([cardKey, aKey, bKey]);
+
+    // 4. A second link from the card goes right after the card; the rest of
+    //    the canvas is kept.
+    await refs.getByRole('link', { name: /panel-chain C/ }).click();
+    await expect.poll(order).toEqual([cardKey, cKey, aKey, bKey]);
+
+    // 5. A modified click is a real navigation in a new tab, not a panel.
+    const [popup] = await Promise.all([
+      page.context().waitForEvent('page'),
+      refs
+        .getByRole('link', { name: /panel-chain C/ })
+        .click({ modifiers: ['ControlOrMeta'] }),
+    ]);
+    await popup.close();
+    await expect.poll(order).toEqual([cardKey, cKey, aKey, bKey]);
+
+    // 6. × on A closes A and B, which was opened from it.
+    await panel(aKey).getByTestId('panel-close').click();
+    await expect.poll(order).toEqual([cardKey, cKey]);
+
+    // 7. An entity chip opens the entity as a panel.
+    await refs.getByRole('link', { name: /panel-chain A/ }).click();
+    await expect.poll(order).toEqual([cardKey, aKey, cKey]);
+    await panel(aKey).getByRole('link', { name: entityName }).click();
+    const entityPanel = page.locator('[data-panel-key^="entity:"]');
+    await expect(entityPanel.getByTestId('entity-name').first()).toContainText(
+      entityName
+    );
+    const withEntity = await order();
+    expect(withEntity).toHaveLength(4);
+
+    // 8. Escape inside a nested dialog closes only that dialog.
+    await panel(aKey).getByRole('button', { name: 'Forget' }).click();
+    await expect(
+      page.getByRole('button', { name: 'Invalidate' })
+    ).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Invalidate' })).toBeHidden();
+    await expect.poll(order).toEqual(withEntity);
+
+    // 9. An action in a panel refreshes that panel.
+    await expect(panel(aKey).getByTestId('memory-validity')).toContainText(
+      'present'
+    );
+    await panel(aKey).getByRole('button', { name: 'Forget' }).click();
+    await page.getByRole('button', { name: 'Invalidate' }).click();
+    await expect(panel(aKey).getByTestId('memory-validity')).not.toContainText(
+      'present'
+    );
+
+    // 10. Escape unwinds by opening order, then closes the dialog.
+    for (let left = (await order()).length; left > 1; left -= 1) {
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => (await order()).length).toBe(left - 1);
+    }
+    await expect.poll(order).toEqual([cardKey]);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('card-modal')).toBeHidden();
+    await expect(page).toHaveURL(/\/board(\?[^/]*)?$/);
+
+    // 11. A resource gone by the time it is clicked shows "not available", and
+    //     a failed load offers a retry — never a broken panel.
+    await openCard();
+    await page.route(`**/api/panels/memory/${aId}`, (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: '{"error":"not_found"}',
+      })
+    );
+    await refs.getByRole('link', { name: /panel-chain A/ }).click();
+    await expect(panel(aKey).getByTestId('panel-unavailable')).toBeVisible();
+    await page.unroute(`**/api/panels/memory/${aId}`);
+
+    await page.route(`**/api/panels/memory/${cId}`, (route) =>
+      route.fulfill({ status: 500, body: 'boom' })
+    );
+    await refs.getByRole('link', { name: /panel-chain C/ }).click();
+    await expect(
+      panel(cKey).getByRole('button', { name: 'Retry' })
+    ).toBeVisible();
+    await page.unroute(`**/api/panels/memory/${cId}`);
+    await panel(cKey).getByRole('button', { name: 'Retry' }).click();
+    await expect(panel(cKey).getByTestId('memory-content')).toContainText(
+      'panel-chain C'
+    );
   });
 });
