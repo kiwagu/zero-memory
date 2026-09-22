@@ -584,5 +584,11 @@ test.describe('Panel chain in the card dialog', () => {
     await expect(panel(cKey).getByTestId('memory-content')).toContainText(
       'panel-chain C'
     );
+
+    // 12. A click on the empty space around the panels dismisses the dialog,
+    //     as a click outside it always has.
+    await page.getByTestId('panel-strip').click({ position: { x: 8, y: 8 } });
+    await expect(page.getByTestId('card-modal')).toBeHidden();
+    await expect(page).toHaveURL(/\/board(\?[^/]*)?$/);
   });
 });

@@ -20,7 +20,9 @@ import { cn } from '@workspace/ui/lib/utils';
  *
  * Controlled and display-only: which panels exist, their content and what a
  * close does all arrive from the app. `focus` brings a panel into view; its
- * `seq` lets the same panel be brought back again.
+ * `seq` lets the same panel be brought back again. A click on the empty
+ * space between and around the panels is `onEmptyClick` — the backdrop of
+ * whatever holds the strip.
  */
 
 interface PanelStripItem {
@@ -38,9 +40,10 @@ interface PanelStripProps {
   items: PanelStripItem[];
   labels: { previous: string; next: string };
   focus: { key: string; seq: number } | null;
+  onEmptyClick?: () => void;
 }
 
-function PanelStrip({ items, labels, focus }: PanelStripProps) {
+function PanelStrip({ items, labels, focus, onEmptyClick }: PanelStripProps) {
   const rowRef = React.useRef<HTMLDivElement>(null);
   const [edges, setEdges] = React.useState({ previous: false, next: false });
 
@@ -113,6 +116,11 @@ function PanelStrip({ items, labels, focus }: PanelStripProps) {
       <div
         ref={rowRef}
         className="scrollbar-none flex h-full w-full snap-x snap-mandatory scroll-px-16 items-center justify-center-safe gap-4 overflow-x-auto overflow-y-hidden px-16"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) {
+            onEmptyClick?.();
+          }
+        }}
       >
         {items.map((item, index) => (
           <React.Fragment key={item.key}>

@@ -262,6 +262,7 @@ export function PanelChain({
       <PanelStrip
         labels={{ previous: labels.previous, next: labels.next }}
         focus={state.focus}
+        onEmptyClick={onCloseRoot}
         items={state.panels.map((panel) => {
           const source = sourceOf(panel);
           return {
