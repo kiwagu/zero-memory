@@ -56,6 +56,10 @@ describe('Markdown', () => {
     expect(out).toContain('line one\nline two');
   });
 
+  it('keeps the number an ordered list starts at', () => {
+    expect(html('3. third\n4. fourth')).toContain('start="3"');
+  });
+
   it('renders inline density without block paragraphs', () => {
     expect(html('just a reason', 'inline')).not.toContain('<p');
   });

@@ -125,8 +125,11 @@ function components(
     ul: ({ children }) => (
       <ul className="list-disc space-y-1 pl-5">{children}</ul>
     ),
-    ol: ({ children }) => (
-      <ol className="list-decimal space-y-1 pl-5">{children}</ol>
+    // A list that starts at 3 in the text starts at 3 on screen.
+    ol: ({ children, start }) => (
+      <ol start={start} className="list-decimal space-y-1 pl-5">
+        {children}
+      </ol>
     ),
     li: ({ children }) => <li className="whitespace-pre-line">{children}</li>,
     blockquote: ({ children }) => (
