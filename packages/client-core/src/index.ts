@@ -78,6 +78,11 @@ export {
   startsNewEpoch,
 } from './context-epoch.logic.js';
 export {
+  planTailChunk,
+  type BriefTail,
+  type TailChunk,
+} from './brief-tail.logic.js';
+export {
   decideRecallGap,
   recallGapTally,
   recallGapTrigger,

@@ -56,6 +56,16 @@ consume the same core (see the R3 client-adapters direction).
   `renderPackWithinBudget` (whole memories while they fit, then one-line
   stubs) and `composeWithinBudget` (strict priority order, naming whatever
   had to go).
+- `brief-tail.logic.ts` — the queue for what the first briefing of an epoch
+  could not fit: `planTailChunk(tail, budgetChars, preferIds?)` picks the
+  next memory to send (preferring one of `preferIds`, the current message's
+  own topic, else the head of the queue), frames it as a continuation of the
+  same briefing with a count of what is left and the moment the pack was
+  taken, and falls back to a one-line stub when even that one memory does
+  not fit the message's budget — so a single oversized memory cannot stall
+  the rest of the queue behind it. Returns null once the queue is empty. Pure
+  planning only; the queue's storage and its drain from the per-message hook
+  are separate tasks.
 - `context-epoch.logic.ts` — what "the session has already been told this"
   means once a conversation outlives its context window. A briefing writes
   into the transcript, and compaction is exactly what discards the transcript,
