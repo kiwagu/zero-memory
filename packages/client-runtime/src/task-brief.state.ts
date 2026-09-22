@@ -100,14 +100,17 @@ const saveBriefState = (path: string, state: BriefStateFile): void => {
  * The optional fields every writer must carry over, in ONE place. Each writer
  * rebuilds the whole entry, so a field listed in only some of them is silently
  * dropped by the others — that is how a session loses state it never gave up.
- * `keepRulesEpoch: false` is the one deliberate exception (a new context window
- * un-delivers the rules).
+ * `keepWindowState: false` is the one deliberate exception: at an epoch
+ * boundary, every field scoped to the outgoing context window — currently
+ * `rules_epoch` and `tail` — is dropped rather than carried over, while
+ * everything else here still is. A future writer adding a THIRD per-window
+ * field belongs on this same flag, not a new parameter.
  */
 const preserved = (
   existing: SessionBriefState | undefined,
-  keepRulesEpoch = true
+  keepWindowState = true
 ): Partial<SessionBriefState> => ({
-  ...(keepRulesEpoch &&
+  ...(keepWindowState &&
     existing?.rules_epoch !== undefined && {
       rules_epoch: existing.rules_epoch,
     }),
@@ -115,10 +118,7 @@ const preserved = (
     started_at: existing.started_at,
   }),
   ...(existing?.thread !== undefined && { thread: existing.thread }),
-  // The tail is per-window, exactly like rules_epoch above — it rides the
-  // same flag rather than a second parameter, since both ask the identical
-  // question: is this still the window the current epoch's briefing built?
-  ...(keepRulesEpoch &&
+  ...(keepWindowState &&
     existing?.tail !== undefined && { tail: existing.tail }),
 });
 
