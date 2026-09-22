@@ -12,6 +12,7 @@ import {
 } from '@workspace/ui/components/common/badge-list';
 import { DetailSection } from '@workspace/ui/components/common/detail-section';
 import { EmptyState } from '@workspace/ui/components/common/empty-state';
+import { Markdown } from '@workspace/ui/components/common/markdown';
 import {
   LinkedMemoryList,
   type LinkedMemoryItem,
@@ -180,12 +181,13 @@ export async function CardView({
       {card.body.trim() !== '' ? (
         <Card>
           <CardContent className="p-4">
-            <div
-              className="text-sm leading-relaxed whitespace-pre-wrap"
+            <Markdown
               data-testid="card-body"
+              linkComponent={Link}
+              imageLabel={t('markdown.image')}
             >
               {card.body}
-            </div>
+            </Markdown>
           </CardContent>
         </Card>
       ) : null}
@@ -220,7 +222,11 @@ export async function CardView({
       </DetailSection>
 
       <DetailSection title={t('board.history')}>
-        <CardHistory entries={entries} emptyLabel={t('board.noHistory')} />
+        <CardHistory
+          entries={entries}
+          emptyLabel={t('board.noHistory')}
+          linkComponent={Link}
+        />
         {hasMore ? (
           <p className="text-muted-foreground mt-3 text-xs">
             {t('board.moreHistory')}

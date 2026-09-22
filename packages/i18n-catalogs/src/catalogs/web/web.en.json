@@ -538,5 +538,6 @@
   "board.noHistory": "Nothing has happened yet.",
   "board.scope.latest": "Latest activity",
   "board.scope.all": "All boards",
-  "board.scope.latestNamed": "Latest activity: {scope}"
+  "board.scope.latestNamed": "Latest activity: {scope}",
+  "markdown.image": "image"
 }

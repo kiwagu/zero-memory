@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 
 import { DescriptionList } from '@workspace/ui/components/common/description-list';
 import { DetailSection } from '@workspace/ui/components/common/detail-section';
+import { Markdown } from '@workspace/ui/components/common/markdown';
 import { EntityChipList } from '@workspace/ui/components/entity/entity-chip-list';
 import { LinkedMemoryList } from '@workspace/ui/components/memory/linked-memory-list';
 import { MemoryBadges } from '@workspace/ui/components/memory/memory-card';
@@ -311,9 +312,13 @@ export default async function MemoryDetailPage({
         >
           {memory.id}
         </div>
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">
+        <Markdown
+          data-testid="memory-content"
+          linkComponent={Link}
+          imageLabel={t('markdown.image')}
+        >
           {memory.content}
-        </p>
+        </Markdown>
         {(() => {
           const original = originalProps(memory, t);
           return original ? (

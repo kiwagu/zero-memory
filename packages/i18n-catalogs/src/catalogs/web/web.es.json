@@ -538,5 +538,6 @@
   "board.noHistory": "Todavía no ha pasado nada.",
   "board.scope.latest": "Actividad más reciente",
   "board.scope.all": "Todos los tableros",
-  "board.scope.latestNamed": "Actividad más reciente: {scope}"
+  "board.scope.latestNamed": "Actividad más reciente: {scope}",
+  "markdown.image": "imagen"
 }

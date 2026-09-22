@@ -318,4 +318,60 @@ test.describe('Project board in the dashboard', () => {
       'report build now waits'
     );
   });
+
+  test('a card body renders as markdown, and hostile markup stays inert', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    try {
+      // A card lives on a project board; the scope comes from a write routed
+      // by the same hint, the way the api board specs obtain it.
+      const anchor = await mcp.callTool('remember', {
+        content: 'board-markdown marker: anchors the card to its project',
+        kind: 'fact',
+        project_hint: '/tmp/zm-e2e-board-markdown',
+      });
+      expect(anchor.isError ?? false).toBe(false);
+      const scope = firstJson<{ scope: string }>(anchor).scope;
+
+      const created = await mcp.callTool('card', {
+        action: 'create',
+        scope,
+        title: 'Markdown card',
+        body: [
+          '**Goal** is readable.',
+          '',
+          '- first item',
+          '- second item',
+          '',
+          'Literal <Dialog> stays. <img src=x onerror="window.__pwned=1">',
+          '',
+          '[click me](javascript:window.__pwned=1)',
+        ].join('\n'),
+      });
+      expect(created.isError ?? false).toBe(false);
+      cardId = firstJson<CardResult>(created).card.id;
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    const body = page.getByTestId('card-body');
+    await expect(body.locator('strong')).toHaveText('Goal');
+    await expect(body.locator('li')).toHaveCount(2);
+    // Text that looks like markup is shown, never interpreted or dropped.
+    await expect(body).toContainText('<Dialog>');
+    await expect(body.locator('img')).toHaveCount(0);
+    await expect(body.locator('a', { hasText: 'click me' })).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __pwned?: number }).__pwned
+      )
+    ).toBeUndefined();
+  });
 });

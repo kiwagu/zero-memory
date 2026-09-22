@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@workspace/ui/components/select';
+import { Markdown } from '@workspace/ui/components/common/markdown';
 import { Switch } from '@workspace/ui/components/switch';
 import {
   RULE_EXPORT_FORMATS,
@@ -459,12 +460,9 @@ export function RuleCandidateQueue({
               </CardAction>
             </CardHeader>
             <CardContent className="space-y-3">
-              <pre
-                data-testid="rule-text"
-                className="bg-muted rounded-md p-3 font-mono text-sm break-words whitespace-pre-wrap"
-              >
-                {item.ruleText}
-              </pre>
+              <div data-testid="rule-text" className="bg-muted rounded-md p-3">
+                <Markdown>{item.ruleText}</Markdown>
+              </div>
               <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                 <span data-testid="rule-evidence">{evidence}</span>
                 {item.firstUsed ? (

@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { Badge } from '@workspace/ui/components/badge';
 import { EmptyState } from '@workspace/ui/components/common/empty-state';
+import { Markdown } from '@workspace/ui/components/common/markdown';
 
 /**
  * CardHistory — a card's append-only stream: what happened, who wrote it, and
@@ -31,9 +32,12 @@ interface CardHistoryEntry {
 function CardHistory({
   entries,
   emptyLabel,
+  linkComponent = 'a',
 }: {
   entries: CardHistoryEntry[];
   emptyLabel: string;
+  /** Client-router link injected by the app (e.g. next/link); plain <a> by default. */
+  linkComponent?: React.ElementType;
 }) {
   if (entries.length === 0) {
     return <EmptyState compact>{emptyLabel}</EmptyState>;
@@ -56,20 +60,27 @@ function CardHistory({
           </div>
 
           {entry.reason ? (
-            <p className="text-foreground/90 italic" data-testid="card-reason">
-              {entry.reason}
-            </p>
+            <div
+              className="text-foreground/90 italic"
+              data-testid="card-reason"
+            >
+              <Markdown density="inline" linkComponent={linkComponent}>
+                {entry.reason}
+              </Markdown>
+            </div>
           ) : null}
 
           {entry.note ? (
-            <p className="whitespace-pre-wrap" data-testid="card-note">
+            <div className="flex items-start gap-2" data-testid="card-note">
               {entry.note.relationLabel ? (
-                <Badge variant="ghost" className="mr-2 text-[11px]">
+                <Badge variant="ghost" className="text-[11px]">
                   {entry.note.relationLabel}
                 </Badge>
               ) : null}
-              {entry.note.text}
-            </p>
+              <Markdown linkComponent={linkComponent}>
+                {entry.note.text}
+              </Markdown>
+            </div>
           ) : null}
 
           {entry.refLabel ? (
