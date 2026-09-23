@@ -70,6 +70,7 @@ the attached project. See
 | Briefing after compaction | `SessionStart` re-fires (`compact`)      | not measured yet                     | `PostCompact` re-arms the next prompt      | `pre_llm_call`, once the briefing left the window  | —                      |
 | Session receipt           | hook (SessionEnd)                        | — (stop is fire-and-forget)          | —                                          | hook (`on_session_end`, logged)                    | —                      |
 | Recall-usage scoring      | ids from the transcript                  | — (results not recorded)             | ids from the rollout tool stream           | ids from `post_tool_call` results                  | —                      |
+| Landing check             | `PostToolUse` on `Bash`                  | `postToolUse` on `Shell`             | `PostToolUse` on `Bash`                    | `transform_tool_result` on `terminal`              | —                      |
 
 The first two compaction rows are one boundary and two different questions. The
 three hook-driven editors announce a compaction before it happens, so each can
@@ -155,7 +156,9 @@ plugin never runs. The MCP server is declared under `mcp_servers.zero-memory` in
 The lifecycle maps onto Hermes' own hooks: `pre_llm_call` is the only one
 whose return value reaches the model, so both briefings and the health warning
 are injected there; `post_llm_call` captures the turn; `post_tool_call` records
-recall results for the usefulness judge; `on_session_end` renders the receipt.
+recall results for the usefulness judge; `transform_tool_result` appends the
+landing check's line to a `terminal` result, the one channel that reaches the
+model right after a command; `on_session_end` renders the receipt.
 `/zm status | receipt | capture` covers in-session diagnostics.
 
 One structural difference is worth stating plainly, because it is the only

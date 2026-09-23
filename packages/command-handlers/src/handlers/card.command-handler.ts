@@ -45,6 +45,8 @@ export class CardCommandHandler implements ICommandHandler<
           title: command.title ?? missing('title', 'open'),
           body: command.body,
           state: command.state,
+          branch: command.branch,
+          noBranch: command.no_branch,
         });
         break;
       case 'promote_loop':
@@ -54,6 +56,8 @@ export class CardCommandHandler implements ICommandHandler<
           title: command.title ?? missing('title', 'promote into'),
           body: command.body,
           state: command.state,
+          branch: command.branch,
+          noBranch: command.no_branch,
         });
         break;
       case 'edit':
@@ -71,6 +75,21 @@ export class CardCommandHandler implements ICommandHandler<
           cardId: command.card_id ?? missing('card_id', 'move'),
           to: (command.to ?? missing('to', 'move')) as CardState,
           reason: command.reason ?? missing('reason', 'move'),
+          branch: command.branch,
+          noBranch: command.no_branch,
+          notLanded: command.not_landed,
+        });
+        break;
+      case 'land':
+        result = await this.service.landCard({
+          ...authorship,
+          cardId: command.card_id ?? missing('card_id', 'land'),
+          branch: command.branch ?? missing('branch', 'land'),
+          squashSha: command.squash_sha ?? missing('squash_sha', 'land'),
+          target: command.target ?? missing('target', 'land'),
+          reason: command.reason ?? missing('reason', 'land'),
+          to: command.to,
+          notLanded: command.not_landed,
         });
         break;
       case 'archive':

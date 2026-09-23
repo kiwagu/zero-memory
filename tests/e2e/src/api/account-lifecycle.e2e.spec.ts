@@ -302,6 +302,13 @@ test.describe('account lifecycle: hard_delete_user', () => {
       target: m1,
       attached_by: userId,
     });
+    await insertOrThrow(db, 'card_branches', {
+      card_id: cardId,
+      scope: sharedScope,
+      repo: 'acme/erasure',
+      branch: 'feature/erasure',
+      attached_by: userId,
+    });
     await insertOrThrow(db, 'usage_daily', {
       day: '2026-07-20',
       user_id: userId,

@@ -1,4 +1,8 @@
-import { cardRefSchema, type CardRef } from '@workspace/contracts';
+import {
+  cardRefSchema,
+  formatBranchRef,
+  type CardRef,
+} from '@workspace/contracts';
 import { Err, Ok, type Result } from 'oxide.ts';
 
 /**
@@ -10,7 +14,11 @@ import { Err, Ok, type Result } from 'oxide.ts';
  * each was written.
  */
 export const cardRefKey = (ref: CardRef): string =>
-  ref.kind === 'url' ? `url:${ref.url}` : `${ref.kind}:${ref.id}`;
+  ref.kind === 'url'
+    ? `url:${ref.url}`
+    : ref.kind === 'branch'
+      ? `branch:${formatBranchRef(ref)}`
+      : `${ref.kind}:${ref.id}`;
 
 /** Whether two references point at the same target. */
 export const sameCardRef = (left: CardRef, right: CardRef): boolean =>
@@ -27,8 +35,8 @@ export const parseCardRef = (value: unknown): Result<CardRef, string> => {
   const parsed = cardRefSchema.safeParse(value);
   if (!parsed.success) {
     return Err(
-      'Invalid reference: expected a memory, entity, thread, card or url ' +
-        'target.'
+      'Invalid reference: expected a memory, entity, thread, card, url or ' +
+        'branch target.'
     );
   }
   return Ok(parsed.data);
@@ -43,5 +51,10 @@ export const flattenCardRef = (
   ref: CardRef
 ): { kind: CardRef['kind']; target: string } => ({
   kind: ref.kind,
-  target: ref.kind === 'url' ? ref.url : ref.id,
+  target:
+    ref.kind === 'url'
+      ? ref.url
+      : ref.kind === 'branch'
+        ? formatBranchRef(ref)
+        : ref.id,
 });

@@ -1478,3 +1478,135 @@ describe('the briefing tail drains one memory per message', () => {
     expect(closest).toBeGreaterThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS - 10);
   });
 });
+
+/**
+ * The session-start briefing names the branches a card holds open, and adds
+ * a line when this machine's git already carries the squash of one — the
+ * landing the board never heard of. `main` is a trunk branch, so the
+ * briefing has one topic and exactly one server call.
+ */
+describe('session-start landing drift', () => {
+  let stateDir: string;
+  let workDir: string;
+  let previousState: string | undefined;
+
+  const git = (...args: string[]): string =>
+    execFileSync(
+      'git',
+      ['-c', 'user.email=test@example.com', '-c', 'user.name=test', ...args],
+      { cwd: workDir, encoding: 'utf8' }
+    ).trim();
+
+  const CARD_ID = 'crd_0000000000000019.0000000000';
+
+  const briefSessionStart = async (): Promise<string> => {
+    vi.mocked(callBuildContext).mockResolvedValue({
+      memories: [],
+      entities: [],
+      edges: [],
+      linked_memories: [],
+      recent: [],
+      rules: [],
+      open_loops: [],
+      open_loops_total: 0,
+      project_scope: 'proj.usr_x.demo',
+      work: {
+        bound_card: null,
+        active: 1,
+        waiting: 0,
+        lead: [
+          {
+            id: CARD_ID,
+            number: 19,
+            title: 'Cards know their branches',
+            state: 'active',
+          },
+        ],
+        open_branches: [
+          {
+            card_id: CARD_ID,
+            number: 19,
+            state: 'active',
+            repo: 'acme/memory-service',
+            branch: 'feature/x',
+          },
+        ],
+      },
+    });
+    let emitted = '';
+    const adapter: HookClient = {
+      // 'codex' so the Claude-only update check never runs here.
+      kind: 'codex',
+      ingestProvenance: 'test',
+      canTaskBrief: true,
+      canAnchorCompaction: false,
+      readInput: async () => ({
+        sessionId: 'drift-session',
+        cwd: workDir,
+        prompt: '',
+        transcriptPath: '',
+        hookEventName: 'SessionStart',
+        toolName: '',
+        alreadyContinued: false,
+        source: '',
+        trigger: '',
+      }),
+      parse: () => {
+        throw new Error('session-start never parses a transcript');
+      },
+      emitSessionBrief: (context) => {
+        emitted = context;
+      },
+      emitTaskBrief: () => {},
+      emitTurnContext: () => {},
+      emitReceipt: () => {},
+      emitCompactionAnchor: () => {},
+    };
+    await runBrief('session-start', adapter);
+    return emitted;
+  };
+
+  beforeEach(() => {
+    previousState = process.env.XDG_STATE_HOME;
+    stateDir = mkdtempSync(join(tmpdir(), 'zm-drift-state-'));
+    process.env.XDG_STATE_HOME = stateDir;
+    workDir = mkdtempSync(join(tmpdir(), 'zm-drift-work-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: workDir });
+    git('remote', 'add', 'origin', 'git@github.com:acme/memory-service.git');
+    git('commit', '-q', '--allow-empty', '-m', 'chore: start');
+    vi.mocked(callBuildContext).mockReset();
+  });
+
+  afterEach(() => {
+    if (previousState === undefined) {
+      delete process.env.XDG_STATE_HOME;
+    } else {
+      process.env.XDG_STATE_HOME = previousState;
+    }
+    rmSync(stateDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('names a landing git holds while the card still holds the branch open', async () => {
+    git(
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'feat: the work',
+      '-m',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    const text = await briefSessionStart();
+    expect(text).toContain(
+      'ZM-19 "Cards know their branches" [active] on feature/x'
+    );
+    expect(text).toContain('- ZM-19 [active]: branch feature/x landed as');
+  });
+
+  it('names the open branch and nothing more while it has not landed', async () => {
+    const text = await briefSessionStart();
+    expect(text).toContain('[active] on feature/x');
+    expect(text).not.toContain('landed as');
+  });
+});

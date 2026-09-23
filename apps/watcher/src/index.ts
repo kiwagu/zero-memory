@@ -30,6 +30,7 @@ import {
 import { runBrief } from './brief/brief-runner.js';
 import { runGuide } from './guide/guide-runner.js';
 import { runNudge } from './guide/nudge-runner.js';
+import { runLanding } from './landing/landing-runner.js';
 import { parseHooksArgs, runHooks } from './hooks/hooks-runner.js';
 import { parseImportArgs, runImport } from './import/import-runner.js';
 import {
@@ -159,6 +160,15 @@ const main = async (): Promise<void> => {
     // search (grep/glob). Keeps stdout for the frame; logs to stderr.
     process.env.LOG_STDERR = '1';
     await runNudge(hookClient(clientKindFromArgs(process.argv.slice(3))));
+    return;
+  }
+
+  if (command === 'landing') {
+    // PostToolUse companion on shell commands: a fresh squash whose card has
+    // no record of it gets one line in the same turn. Keeps stdout for the
+    // frame; logs to stderr.
+    process.env.LOG_STDERR = '1';
+    await runLanding(hookClient(clientKindFromArgs(process.argv.slice(3))));
     return;
   }
 

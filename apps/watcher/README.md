@@ -92,6 +92,11 @@ zero-memory-watcher guide           # emit the memory-first mandate as a hook's
                                     #   additionalContext (wire on SessionStart)
 zero-memory-watcher nudge           # PreToolUse: once-per-session "recall first"
                                     #   reminder on code search (grep/glob)
+zero-memory-watcher landing         # PostToolUse on shell commands: a fresh
+                                    #   squash (`Squashed-from: … ZM-N`) whose
+                                    #   board card has no record of its landing
+                                    #   gets one line with the exact `card land`
+                                    #   call; each squash checked once per machine
 zero-memory-watcher status          # UserPromptSubmit trailer: warn when the
                                     #   server is unreachable — naming WHICH
                                     #   server (cached per endpoint) AND run
@@ -131,7 +136,24 @@ the part the window's first briefing could not fit. That remainder is queued in
 the local session state (`$XDG_STATE_HOME/zero-memory/session-briefs.json`) and
 drains one memory per message, in the server's rank order, with no server call
 — so it also reaches a session whose server is unreachable. A compaction drops
-the queue with the window. See
+the queue with the window.
+
+`landing` runs after every shell command and nearly always ends after one git
+read. It looks at the newest commits on every local branch of the repository
+the command ran in — a release commit made by the same command may sit on top
+of the squash, and a squash made from another worktree lands on a branch this
+one has not checked out — and asks the board only about a squash that names a
+card and was not checked yet. The reminder names the branch the squash landed
+on (the remote's default branch or the usual trunk names first), not whatever
+is checked out afterwards. What each check found is kept in
+`$XDG_STATE_HOME/zero-memory/landing-checks.json`, so a landing is reminded
+about once. A lookup is bounded to five seconds and recorded as a failed
+attempt before it starts, so a server that is down or stalls is retried only
+after ten minutes, never on every command.
+It needs the project this repository was briefed as, so a repository no
+session has briefed yet stays silent. `brief session-start` adds the other
+half: when a branch the board still holds open has already landed in the local
+repository, the work section says so and names the call. See
 [`plugins/zero-memory-claude/`](../../plugins/zero-memory-claude/) and
 [`docs/getting-started/claude-code.mdx`](../../docs/getting-started/claude-code.mdx).
 

@@ -53,7 +53,8 @@ observes. They carry no version bump, because there is nothing to migrate;
 they are listed so a client that branched on the old behaviour can find out
 why it changed.
 
-| Change | What a client should know |
-| ------ | ------------------------- |
-
-_None recorded since the first public release._
+| Change                                                                                                                                                                                                     | What a client should know                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `card` `move` into `active` — and `create` / `promote_loop` straight into it — is refused with `branch_required` unless the call passes `branch` or `no_branch`, or the card already holds an open branch. | Pass the work's branch (`{repo, name}`) or `no_branch` with a reason. `promote_loop` opens in `active` by default, so it is covered too. |
+| `card` `move` out of `active` is refused with `branch_open` while the card holds an open branch.                                                                                                           | Record the landing with the new `land` action, or pass `not_landed` saying why the branch has not landed.                                |
+| Cards are labelled `ZM-N` instead of `#N` in briefing text, server messages and the dashboard.                                                                                                             | The number itself is unchanged and `board resolve` still takes it; only text that quoted `#N` reads differently.                         |

@@ -22,6 +22,10 @@ plugins/zero-memory-codex/
   so the commands are the watcher subcommands with `--client codex`:
   - `SessionStart` (matcher `startup|resume`) → `brief session-start`
   - `UserPromptSubmit` → `brief task` + `status`
+  - `PostToolUse` (matcher `Bash`) → `landing` — right after a shell command,
+    a squash whose board card has no record of its landing gets one line with
+    the exact `card` `land` call. Codex runs a new hook only after it is
+    trusted in `/hooks`, so updating the plugin asks for that once.
   - `Stop` → `ingest` (labeled `codex-stop-hook` in provenance)
   - `PreCompact` → `checkpoint` — captures the epoch about to be condensed
     while it is still whole, and advances the offset past the boundary. Capture
