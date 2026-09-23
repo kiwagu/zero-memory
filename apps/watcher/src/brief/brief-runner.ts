@@ -77,8 +77,16 @@ export type BriefMode = 'session-start' | 'task';
  * second lookup. */
 const TRUNK_BRANCHES = new Set(['main', 'dev', 'stage', 'master']);
 
-/** The composer's blank lines around the rules and loops, generously. */
-const SECTION_GAPS_CHARS = 8;
+/**
+ * What the composer charges beyond the sections' own text once every section
+ * is present: its `+2` for each of the lead line, the rules, the work section
+ * and the pack, plus the `\n\n` INSIDE the work section between the board and
+ * the loops. It used to be 8, which undercounted exactly that fully-loaded
+ * case: the loops were free to render two characters into the memory floor,
+ * and in a measurable set of shapes the pack was left one character short of
+ * it.
+ */
+const SECTION_GAPS_CHARS = 10;
 
 /**
  * The work section: the board's lines, then the loops no card there covers.
@@ -127,9 +135,10 @@ const packProjectScope = (payload: unknown): string | null => {
  * legs a pack can arrive in (the ranked hits, the linked-memory stubs' own
  * bodies, and the recency leg), after standing rules and open loops have
  * already been drained out of it by `splitStandingRules`/`splitOpenLoops`.
- * Used only to size the PRIMARY topic's memory floor: a topic with nothing to
- * say earns no floor, which is what keeps an empty project from getting a
- * floor it will never use (and, downstream, from ever recording a tail).
+ * Used only to size a memory floor — the session-start briefing's PRIMARY
+ * topic, and the task briefing's one topic: a topic with nothing to say earns
+ * no floor, which is what keeps an empty project from getting a floor it will
+ * never use (and, downstream, from ever recording a tail).
  * A payload that fails to parse (an older server, or the offline path) counts
  * as zero rather than throwing — the floor then falls back to 0, same as
  * before this change, which is the safe direction to fail in.
@@ -800,14 +809,29 @@ const runTask = async (
   // Same channel budget as the session-start briefing, and for the same
   // reason: this hook fires on a user message, where an over-long payload is
   // spilled to a file and the turn proceeds on a preview. And the same split:
-  // the loops are held a floor, the rules get a ceiling.
+  // the loops are held a floor, the rules get a ceiling, and the pack is held
+  // a memory floor the rules ceiling makes room for. This path needs the
+  // floor as much as the session-start one: whenever that briefing failed, or
+  // a compaction just opened a new window, THIS is the window's first
+  // briefing — and without the floor a long rules block left its pack
+  // nothing at all.
   const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
-  const leadChars = (banner?.length ?? 0) + TASK_LOOKUP_INSTRUCTION.length;
+  // The lead is TWO sections here — the banner and the task-lookup line —
+  // where the session-start briefing has one project line, and the composer
+  // charges each its own `+2`. SECTION_GAPS_CHARS below counts one lead join,
+  // so the banner's is counted here, with the banner.
+  const leadChars =
+    (banner ? banner.length + 2 : 0) + TASK_LOOKUP_INSTRUCTION.length;
   const boardBlock = split.work ? renderBoardSummary(split.work) : null;
+  // Counted on the payload the pack renders from — after dedup against the
+  // session-start briefing and after the rules and loops were split out — so
+  // the floor sizes to what this pack can actually name.
+  const packMemories = countPackMemories(split.payload);
   const plan = planSectionBudgets(
     budget,
     leadChars,
-    split.loops.length > 0 || boardBlock !== null
+    split.loops.length > 0 || boardBlock !== null,
+    packMemories
   );
   const rulesSection = rulesNeedDelivery({
     epoch: session?.epoch ?? 0,
@@ -821,26 +845,41 @@ const runTask = async (
     split.loops,
     split.total,
     new Date(),
+    // The floor is held on paper by the smaller rules ceiling, but the loops
+    // render against what is left AFTER the rules, so they must give it up
+    // here too — measured on the session-start path, an abundant loop supply
+    // otherwise fills the whole remainder and the pack never gets a budget
+    // to render against. Pinned rules still outrank both floors.
     Math.max(
       0,
       budget -
         leadChars -
         (rulesSection?.length ?? 0) -
         (boardBlock?.length ?? 0) -
-        SECTION_GAPS_CHARS
+        SECTION_GAPS_CHARS -
+        plan.memoryFloor
     )
   );
   const workSection = joinWorkSection(boardBlock, loopSection);
+  // The pack gets what the composer will actually leave it: every section it
+  // keeps is charged `text.length + 2`, the pack's own included. The pool
+  // used to be the budget minus the banner, rules and work alone — it forgot
+  // the task-lookup line and every join, so a pack that filled its own
+  // budget came out up to 166 characters too long and the composer dropped it
+  // whole. One topic, so no bump to the floor on top of this: the pool is
+  // the whole remainder, the floor is held upstream by the rules ceiling and
+  // the loops budget, and asking for more than the pool only buys a pack the
+  // composer then drops.
+  const spentBySections =
+    (banner ? banner.length + 2 : 0) +
+    TASK_LOOKUP_INSTRUCTION.length +
+    2 +
+    (rulesSection ? rulesSection.length + 2 : 0) +
+    (workSection ? workSection.length + 2 : 0);
   const trimmed = renderPackWithinBudget(
     projectTopic,
     split.payload,
-    Math.max(
-      0,
-      budget -
-        (banner?.length ?? 0) -
-        (rulesSection?.length ?? 0) -
-        (workSection?.length ?? 0)
-    )
+    Math.max(0, budget - spentBySections - 2)
   );
   const composed = composeWithinBudget(
     [
@@ -848,7 +887,15 @@ const runTask = async (
       { name: 'the task-lookup instruction', text: TASK_LOOKUP_INSTRUCTION },
       { name: 'the standing rules', text: rulesSection },
       { name: 'the work in progress', text: workSection },
-      { name: 'the memory pack', text: trimmed.text || null },
+      // A starved pack (memories existed, not one line fit) says so: silence
+      // would read as "this project has no memories", a different and false
+      // claim from "they did not fit this channel this time".
+      {
+        name: 'the memory pack',
+        text: trimmed.starved
+          ? renderStarvedPackNotice(projectTopic, trimmed.remaining.length)
+          : trimmed.text || null,
+      },
     ],
     budget
   );

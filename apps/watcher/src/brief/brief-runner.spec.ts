@@ -284,48 +284,48 @@ describe('per-message project/thread banner', () => {
  * like the banner suite above drives `runBrief('task', …)`, with no mid-level
  * helper mocked out.
  */
+// Fixtures shared by the two memory-floor suites below. Realistic mem_ ids:
+// entity-id's Crockford base32 shape (16 chars, a dot, 10 chars) — a literal
+// id like 'mem_a' fails buildContextOutputSchema and would make every fixture
+// silently degrade to the "did not parse" branch of renderPackWithinBudget
+// instead of exercising the budget logic these tests are about.
+const memory = (index: number, contentChars: number): ContextMemory => ({
+  id: memoryIdSchema.parse(
+    `mem_${String(index).padStart(16, '0')}.${'0'.repeat(10)}`
+  ),
+  content: 'm'.repeat(contentChars),
+  kind: 'fact',
+  scope: 'proj.usr_x.demo',
+  created_at: '2026-09-01T00:00:00Z',
+  score: 0.5,
+});
+
+const loop = (index: number, contentChars: number): ContextMemory => ({
+  id: memoryIdSchema.parse(
+    `mem_${String(index).padStart(16, '0')}.${'1'.repeat(10)}`
+  ),
+  content: 'l'.repeat(contentChars),
+  kind: 'task',
+  scope: 'proj.usr_x.demo',
+  created_at: '2026-09-01T00:00:00Z',
+  score: 0.5,
+});
+
+const pinnedRule = (textChars: number): ContextRule => ({
+  text: 'R'.repeat(textChars),
+  pinned: true,
+});
+
+const rule = (textChars: number): ContextRule => ({
+  text: 'r'.repeat(textChars),
+  pinned: false,
+});
+
 describe('session-start memory floor', () => {
   let stateDir: string;
   let workDir: string;
   let previousState: string | undefined;
   const SESSION_ID = 'session-1';
-
-  // Realistic mem_ ids: entity-id's Crockford base32 shape (16 chars, a dot,
-  // 10 chars) — a literal id like 'mem_a' fails buildContextOutputSchema and
-  // would make every fixture in this suite silently degrade to the "did not
-  // parse" branch of renderPackWithinBudget instead of exercising the budget
-  // logic these tests are about.
-  const memory = (index: number, contentChars: number): ContextMemory => ({
-    id: memoryIdSchema.parse(
-      `mem_${String(index).padStart(16, '0')}.${'0'.repeat(10)}`
-    ),
-    content: 'm'.repeat(contentChars),
-    kind: 'fact',
-    scope: 'proj.usr_x.demo',
-    created_at: '2026-09-01T00:00:00Z',
-    score: 0.5,
-  });
-
-  const loop = (index: number, contentChars: number): ContextMemory => ({
-    id: memoryIdSchema.parse(
-      `mem_${String(index).padStart(16, '0')}.${'1'.repeat(10)}`
-    ),
-    content: 'l'.repeat(contentChars),
-    kind: 'task',
-    scope: 'proj.usr_x.demo',
-    created_at: '2026-09-01T00:00:00Z',
-    score: 0.5,
-  });
-
-  const pinnedRule = (textChars: number): ContextRule => ({
-    text: 'R'.repeat(textChars),
-    pinned: true,
-  });
-
-  const rule = (textChars: number): ContextRule => ({
-    text: 'r'.repeat(textChars),
-    pinned: false,
-  });
 
   // Turns `workDir` into a real (if minimal) git repo on a non-trunk branch,
   // so `branchTopic()` resolves and `runSessionStart` briefs TWO topics
@@ -639,6 +639,225 @@ describe('session-start memory floor', () => {
         briefing.includes('they arrive in the next messages');
       expect(
         hasMemorySection,
+        `budget ${budgetChars}: no stub and no starved notice`
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * The per-message task briefing holds the same memory floor as the session-
+ * start one, driven end to end through `runBrief('task', …)`. It is not a
+ * second-class path: the FIRST briefing of a context window is a task
+ * briefing whenever the session-start briefing failed or a compaction just
+ * opened a new window, so a floor held on only one of the two paths is held
+ * in only some windows.
+ */
+describe('task briefing memory floor', () => {
+  let stateDir: string;
+  let workDir: string;
+  let previousState: string | undefined;
+  // `runTask` builds a briefing at most once per session (`task_briefed`),
+  // so every run here is its own session: a shared id would turn every run
+  // after the first into 'already-briefed' and never reach the budget code.
+  let runs = 0;
+
+  /** The composer's omission line, as it reads when it drops the pack. */
+  const PACK_DROPPED = "the memory pack did not fit this briefing's channel";
+
+  const runTask = async (fixture: {
+    rules?: ContextRule[];
+    loops?: ContextMemory[];
+    memories?: ContextMemory[];
+    /** Overrides `ZM_BRIEF_HOOK_BUDGET_CHARS` for this call, restored after. */
+    budgetChars?: number;
+  }): Promise<string> => {
+    vi.mocked(callBuildContext).mockResolvedValue({
+      memories: fixture.memories ?? [],
+      entities: [],
+      edges: [],
+      linked_memories: [],
+      recent: [],
+      rules: fixture.rules ?? [],
+      open_loops: fixture.loops ?? [],
+      open_loops_total: fixture.loops?.length ?? 0,
+      project_scope: 'proj.usr_x.demo',
+    });
+
+    const previousBudget = process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
+    if (fixture.budgetChars !== undefined) {
+      process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = String(fixture.budgetChars);
+    }
+
+    runs += 1;
+    let emitted: string | null = null;
+    const adapter: HookClient = {
+      kind: 'codex',
+      ingestProvenance: 'test',
+      canTaskBrief: true,
+      canAnchorCompaction: false,
+      readInput: async () => ({
+        sessionId: `task-session-${runs}`,
+        cwd: workDir,
+        prompt:
+          'add a retry with backoff to the ingest worker, it drops chunks',
+        transcriptPath: '',
+        hookEventName: 'UserPromptSubmit',
+        toolName: '',
+        alreadyContinued: false,
+        source: '',
+        trigger: '',
+      }),
+      parse: () => {
+        throw new Error('the task path never parses a transcript');
+      },
+      emitSessionBrief: () => {},
+      emitTaskBrief: (context) => {
+        emitted = context;
+      },
+      emitTurnContext: () => {},
+      emitReceipt: () => {},
+      emitCompactionAnchor: () => {},
+    };
+
+    try {
+      await runBrief('task', adapter);
+      return emitted ?? '';
+    } finally {
+      if (fixture.budgetChars !== undefined) {
+        if (previousBudget === undefined) {
+          delete process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
+        } else {
+          process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = previousBudget;
+        }
+      }
+    }
+  };
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'zm-task-floor-state-'));
+    // The topic this briefing is about is this directory's basename, and the
+    // starved-notice test below sizes its channel around the topic's length:
+    // a fixed prefix keeps it the same on every machine (mkdtemp appends six
+    // characters).
+    workDir = mkdtempSync(join(tmpdir(), 'zm-task-floor-work-'));
+    previousState = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = stateDir;
+  });
+
+  afterEach(() => {
+    vi.mocked(callBuildContext).mockReset();
+    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previousState;
+    rmSync(stateDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('keeps a stub of its pack even when the rules and the loops are long', async () => {
+    // The session-start suite's long-rules shape, on the task path: one
+    // pinned rule, a spread of loops, and one ordinary rule sized to arrive
+    // WHOLE under a ceiling that holds no memory floor and only by headline
+    // under one that does. Before the task path passed its pack's memory
+    // count, the plan held no floor: the rule took ~5,500 characters, the
+    // loops the rest, and the pack nothing. (5,000 rather than the other
+    // suite's 5,500: this path's lead — banner plus task-lookup line — runs
+    // ~250 characters longer, so 5,500 is headlined even without a floor
+    // and would not tell the two apart.)
+    const briefing = await runTask({
+      rules: [pinnedRule(200), rule(5_000)],
+      loops: Array.from({ length: 20 }, (_, i) => loop(900 + i, 200)),
+      memories: Array.from({ length: 12 }, (_, i) => memory(i, 900)),
+    });
+    expect(briefing.length).toBeLessThanOrEqual(9_000);
+    expect(briefing).toContain('mem_0000000000000000');
+    expect(briefing).not.toContain(PACK_DROPPED);
+  });
+
+  it('shows the starved notice when the pack is squeezed to literal zero', async () => {
+    // The lead here is the banner (581 characters for this scope) and the
+    // task-lookup line (156), with their joins ~741, so a 975-character
+    // channel leaves the pack ~232. That sits between the two thresholds
+    // that matter for this topic (25 characters): the starved notice needs
+    // ~149, while one stub of a 2,000-character memory needs ~310 (the
+    // block's intro, its "+N more" reserve and the stub itself). In
+    // production the squeeze comes from pinned rules, which outrank the
+    // floor; a small channel reaches the same shape without depending on
+    // the rules renderer's own layout.
+    const briefing = await runTask({
+      budgetChars: 975,
+      memories: [memory(0, 2_000)],
+    });
+    expect(briefing.length).toBeLessThanOrEqual(975);
+    // The notice unique to `renderStarvedPackNotice` — silence here would
+    // read as "this project has no memories", a different and false claim.
+    expect(briefing).toContain('they arrive in the next messages');
+    expect(briefing).not.toContain('mem_0000000000000000');
+    expect(briefing).not.toContain(PACK_DROPPED);
+  });
+
+  it('holds the memory floor against heavy open loops and stays within the channel', async () => {
+    // Far more loops than the channel could ever render: left unchecked they
+    // spend the whole remainder, including the room the floor holds for the
+    // pack. Nothing here outranks the floor (no pinned rules), so the pack
+    // must still NAME its lead memory — the starved notice alone would mean
+    // the loops took the floor after all.
+    const briefing = await runTask({
+      loops: Array.from({ length: 60 }, (_, i) => loop(900 + i, 200)),
+      memories: Array.from({ length: 12 }, (_, i) => memory(i, 900)),
+    });
+    expect(briefing.length).toBeLessThanOrEqual(9_000);
+    expect(briefing).toContain('mem_0000000000000000');
+    expect(briefing).not.toContain(PACK_DROPPED);
+  });
+
+  it("seats a one-memory pack's stub under heavy loops, wherever the loops stop", async () => {
+    // A pack of one is where a floor of bare stub widths failed: the stub
+    // block's own intro and "+N more" line did not fit in it, so whenever
+    // the loops left the pack no more than its floor it came back starved.
+    // The loops fill their budget in whole lines (~250 characters each), so
+    // what they leave over the floor depends on where the last line stops;
+    // sweeping one line's width of budgets lands them at every offset,
+    // including the one that leaves the pack exactly its floor.
+    const loops = Array.from({ length: 60 }, (_, i) => loop(900 + i, 200));
+    for (let budgetChars = 8_750; budgetChars <= 9_000; budgetChars += 1) {
+      const briefing = await runTask({
+        budgetChars,
+        loops,
+        memories: [memory(0, 900)],
+      });
+      expect(
+        briefing.length,
+        `budget ${budgetChars}: briefing is ${briefing.length} chars`
+      ).toBeLessThanOrEqual(budgetChars);
+      expect(briefing, `budget ${budgetChars}: no stub`).toContain(
+        'mem_0000000000000000'
+      );
+    }
+  });
+
+  it('never drops the pack wholesale, across a sweep of channel sizes', async () => {
+    // Every section competing at once — a rule long enough to hit its
+    // ceiling, loops enough to fill theirs, and sixty tiny memories whose
+    // ~51-character stubs let the pack land within a character or two of
+    // its own budget somewhere in a one-character sweep. That margin is
+    // exactly where an unreserved composer join cost, or a pack budget that
+    // forgot the task-lookup line, turns a pack that fits its own budget
+    // into one the composer drops whole. Swept around the production
+    // budget, where every section is present.
+    const memories = Array.from({ length: 60 }, (_, i) => memory(i, 3));
+    const loops = Array.from({ length: 60 }, (_, i) => loop(900 + i, 200));
+    const rules = [rule(3_000)];
+    for (let budgetChars = 8_800; budgetChars <= 9_000; budgetChars += 1) {
+      const briefing = await runTask({ budgetChars, rules, loops, memories });
+      expect(
+        briefing.length,
+        `budget ${budgetChars}: briefing is ${briefing.length} chars`
+      ).toBeLessThanOrEqual(budgetChars);
+      const hasMemorySection =
+        briefing.includes('mem_0000000000000000') ||
+        briefing.includes('they arrive in the next messages');
+      expect(
+        hasMemorySection && !briefing.includes(PACK_DROPPED),
         `budget ${budgetChars}: no stub and no starved notice`
       ).toBe(true);
     }
