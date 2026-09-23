@@ -86,8 +86,17 @@ promoting stage, restarting services, or touching the live database.
       ```
       git -c merge.ff=true merge --squash <branch>
       git commit -m "<type(scope): subject>" \
-                 -m "Squashed-from: <branch> (<short-sha>)"
+                 -m "Squashed-from: <branch> (<short-sha>) ZM-<N>"
       ```
+
+      `ZM-<N>` names the board card(s) the epic carries — several side by
+      side, `ZM-17 ZM-16` — and is omitted only when the work has no card. A
+      card is labelled `ZM-N` everywhere, and a forge never turns `ZM-N` into
+      a link, unlike `#N`. Record the landing on the card in the same step:
+      `card` `land` with the squash commit and the branch it landed on, which
+      moves the card (to `waiting` while a release or an acceptance is still
+      owed). The plugin hooks remind you right after the commit if you do
+      not.
 
       The `-c merge.ff=true` is required, not decoration: this repository
       stores `merge.ff=false`, which git reads as `--no-ff`, and a plain

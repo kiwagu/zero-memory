@@ -92,6 +92,11 @@ zero-memory-watcher guide           # emit the memory-first mandate as a hook's
                                     #   additionalContext (wire on SessionStart)
 zero-memory-watcher nudge           # PreToolUse: once-per-session "recall first"
                                     #   reminder on code search (grep/glob)
+zero-memory-watcher landing         # PostToolUse on shell commands: a fresh
+                                    #   squash (`Squashed-from: … ZM-N`) whose
+                                    #   board card has no record of its landing
+                                    #   gets one line with the exact `card land`
+                                    #   call; each squash checked once per machine
 zero-memory-watcher status          # UserPromptSubmit trailer: warn when the
                                     #   server is unreachable — naming WHICH
                                     #   server (cached per endpoint) AND run
@@ -131,7 +136,19 @@ the part the window's first briefing could not fit. That remainder is queued in
 the local session state (`$XDG_STATE_HOME/zero-memory/session-briefs.json`) and
 drains one memory per message, in the server's rank order, with no server call
 — so it also reaches a session whose server is unreachable. A compaction drops
-the queue with the window. See
+the queue with the window.
+
+`landing` runs after every shell command and nearly always ends after one git
+read. It looks at the newest commits of the repository the command ran in (a
+release commit made by the same command may sit on top of the squash), and
+asks the board only about a squash that names a card and was not checked yet.
+What each check found is kept in
+`$XDG_STATE_HOME/zero-memory/landing-checks.json`, so a landing is reminded
+about once; a check the server could not answer is retried after ten minutes.
+It needs the project this repository was briefed as, so a repository no
+session has briefed yet stays silent. `brief session-start` adds the other
+half: when a branch the board still holds open has already landed in the local
+repository, the work section says so and names the call. See
 [`plugins/zero-memory-claude/`](../../plugins/zero-memory-claude/) and
 [`docs/getting-started/claude-code.mdx`](../../docs/getting-started/claude-code.mdx).
 
