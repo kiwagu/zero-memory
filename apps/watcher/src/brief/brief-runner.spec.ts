@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -326,12 +327,51 @@ describe('session-start memory floor', () => {
     pinned: false,
   });
 
+  // Turns `workDir` into a real (if minimal) git repo on a non-trunk branch,
+  // so `branchTopic()` resolves and `runSessionStart` briefs TWO topics
+  // (project + branch) instead of one — needed to exercise anything about
+  // how the channel is split ACROSS topics, which a single-topic workDir
+  // can never reach (`branchTopic()` throws on "not a git repository" and
+  // is caught to null). `rev-parse --abbrev-ref HEAD` needs a real commit —
+  // an unborn branch (no commits yet) makes it fail — so this commits once,
+  // empty, before returning.
+  const initGitBranch = (branch: string): void => {
+    execFileSync('git', ['init', '-q'], { cwd: workDir });
+    execFileSync('git', ['checkout', '-q', '-b', branch], { cwd: workDir });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.email=test@example.com',
+        '-c',
+        'user.name=test',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'init',
+      ],
+      { cwd: workDir }
+    );
+  };
+
   const runSessionStart = async (fixture: {
     rules?: ContextRule[];
     loops?: ContextMemory[];
     memories?: ContextMemory[];
+    /**
+     * When set, `workDir` becomes a real git repo on this branch BEFORE the
+     * hook runs, so `callBuildContext` is called twice (project, then
+     * branch) and `splits.length === 2` — the only way to reach the
+     * cross-topic channel math at all.
+     */
+    branch?: string;
+    /** The SECOND (branch) topic's memories, only used with `branch`. */
+    branchMemories?: ContextMemory[];
+    /** Overrides `ZM_BRIEF_HOOK_BUDGET_CHARS` for this call, restored after. */
+    budgetChars?: number;
   }): Promise<string> => {
-    vi.mocked(callBuildContext).mockResolvedValue({
+    const projectResponse = {
       memories: fixture.memories ?? [],
       entities: [],
       edges: [],
@@ -341,7 +381,35 @@ describe('session-start memory floor', () => {
       open_loops: fixture.loops ?? [],
       open_loops_total: fixture.loops?.length ?? 0,
       project_scope: 'proj.usr_x.demo',
-    });
+    };
+    if (fixture.branch) {
+      initGitBranch(fixture.branch);
+      // The branch call carries no rules/loops of its own — this suite's
+      // two-topic test is about how the PACK budget splits, and reusing the
+      // project's rules/loops here would just dedupe back to the same
+      // numbers via mergeStandingRules/mergeOpenLoops, adding nothing.
+      const branchResponse = {
+        memories: fixture.branchMemories ?? [],
+        entities: [],
+        edges: [],
+        linked_memories: [],
+        recent: [],
+        rules: [],
+        open_loops: [],
+        open_loops_total: 0,
+        project_scope: 'proj.usr_x.demo',
+      };
+      vi.mocked(callBuildContext)
+        .mockResolvedValueOnce(projectResponse)
+        .mockResolvedValueOnce(branchResponse);
+    } else {
+      vi.mocked(callBuildContext).mockResolvedValue(projectResponse);
+    }
+
+    const previousBudget = process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
+    if (fixture.budgetChars !== undefined) {
+      process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = String(fixture.budgetChars);
+    }
 
     let emitted: string | null = null;
     const adapter: HookClient = {
@@ -375,8 +443,18 @@ describe('session-start memory floor', () => {
       emitCompactionAnchor: () => {},
     };
 
-    await runBrief('session-start', adapter);
-    return emitted ?? '';
+    try {
+      await runBrief('session-start', adapter);
+      return emitted ?? '';
+    } finally {
+      if (fixture.budgetChars !== undefined) {
+        if (previousBudget === undefined) {
+          delete process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
+        } else {
+          process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = previousBudget;
+        }
+      }
+    }
   };
 
   beforeEach(() => {
@@ -411,8 +489,13 @@ describe('session-start memory floor', () => {
   });
 
   it('records no tail when the project has no memories at all', async () => {
-    await runSessionStart({ memories: [] });
+    const briefing = await runSessionStart({ memories: [] });
     expect(readBriefTail(briefStatePath(), SESSION_ID)).toBeNull();
+    // Half of "no tail" is the state file; the other half is what the
+    // session actually reads. An empty project has nothing to say, which is
+    // a different claim from "it had memories and none fit" — the starved
+    // notice must not appear just because the pack happened to be empty.
+    expect(briefing).not.toContain('did not fit this briefing');
   });
 
   it("records what did not fit as the window's tail", async () => {
@@ -421,5 +504,71 @@ describe('session-start memory floor', () => {
     });
     const tail = readBriefTail(briefStatePath(), SESSION_ID);
     expect(tail?.memories.length).toBeGreaterThan(0);
+  });
+
+  it('charges the floor to the split instead of bumping it on top, so a second topic still fits', async () => {
+    // Two topics, no rules or loops — the only thing competing for the
+    // channel is the two packs, isolating the cross-topic arithmetic this
+    // test exists to pin. 12 large (2,000-char) primary memories spend
+    // almost the whole primary pack budget on their own (leaving little
+    // slack for a wrongly-unfunded bump to quietly eat), and 5 branch
+    // memories give the branch pack enough supply that an OVER-sized
+    // budget (the old, uncharged evenShare) and a correctly-charged one
+    // produce visibly different results rather than both maxing out on
+    // the same single item.
+    const briefing = await runSessionStart({
+      branch: 'feature/two-topics',
+      budgetChars: 2_208,
+      memories: Array.from({ length: 12 }, (_, i) => memory(i, 2_000)),
+      branchMemories: Array.from({ length: 5 }, (_, i) => memory(500 + i, 900)),
+    });
+    expect(briefing.length).toBeLessThanOrEqual(2_208);
+    // The primary pack's floor-guaranteed memory…
+    expect(briefing).toContain('mem_0000000000000000');
+    // …and the branch pack's own memory, NOT displaced by the primary
+    // taking more than its charged share. Before the fix, the primary's
+    // bump was funded from nowhere, so the OTHER topic still asked for its
+    // full (uncharged) even share — and `composeWithinBudget` (strict
+    // priority order), finding the total no longer fit, dropped the branch
+    // pack wholesale instead of giving it what was actually left.
+    expect(briefing).toContain('mem_0000000000000500');
+  });
+
+  it('still lands a stub when the per-topic budget is genuinely below the floor', async () => {
+    // Two topics again (a single topic's even share IS the whole channel's
+    // remainder, so there is no safe way for a bump to ask for more than
+    // that without composeWithinBudget rejecting the section outright —
+    // this scenario can only exist with a second topic funding the extra
+    // room, same as the previous test). 2,000-char memories are too big for
+    // even ONE to arrive whole at this budget, so the pack is a STUB list;
+    // the assertion targets a memory that only a stub list this LONG can
+    // reach — one the even share alone (1,022 chars) cannot, but the
+    // charged floor (1,400 chars) can.
+    const briefing = await runSessionStart({
+      branch: 'feature/two-topics',
+      budgetChars: 2_208,
+      memories: Array.from({ length: 12 }, (_, i) => memory(i, 2_000)),
+      branchMemories: Array.from({ length: 5 }, (_, i) => memory(500 + i, 900)),
+    });
+    expect(briefing.length).toBeLessThanOrEqual(2_208);
+    expect(briefing).toContain('mem_0000000000000007');
+  });
+
+  it('shows the starved notice when the pack is squeezed to literal zero', async () => {
+    // One memory too large for even its own floor's worth of budget: NOT
+    // EVEN A STUB fits, which is the one case the notice exists for — a
+    // trimmed pack that produced no text at all, as opposed to one that
+    // still named its memories by stub.
+    const briefing = await runSessionStart({
+      budgetChars: 700,
+      memories: [memory(0, 2_000)],
+    });
+    expect(briefing.length).toBeLessThanOrEqual(700);
+    // The specific starved-pack notice, not `composeWithinBudget`'s own
+    // generic omission line — the two share the opening clause ("did not
+    // fit this briefing"), so the assertion pins the wording that is
+    // unique to `renderStarvedPackNotice`.
+    expect(briefing).toContain('they arrive in the next messages');
+    expect(briefing).not.toContain('mem_0000000000000000');
   });
 });

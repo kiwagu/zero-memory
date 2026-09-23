@@ -492,17 +492,38 @@ const runSessionStart = async (
     (projectLine?.length ?? 0) +
     (rulesSection?.length ?? 0) +
     (workSection?.length ?? 0);
-  const perTopicBudget = Math.max(
+  const remainingChannelBudget = Math.max(0, budget - spentBySections);
+  const evenShare = Math.max(
     0,
-    Math.floor((budget - spentBySections) / Math.max(splits.length, 1))
+    Math.floor(remainingChannelBudget / Math.max(splits.length, 1))
   );
   // The PRIMARY pack (index 0, the project topic) never renders under less
   // than its floor, even when the even split above would give it less — the
-  // whole point of reserving `plan.memoryFloor` in the rules ceiling. Every
-  // other topic (the branch pack) keeps the plain even split; the floor is
-  // the project's alone, per the decision above.
+  // whole point of reserving `plan.memoryFloor` in the rules ceiling. The
+  // floor is CHARGED to the split rather than added on top of the even
+  // share: an earlier version bumped index 0 up to the floor without taking
+  // the difference from anywhere, so with two topics and a floor bigger than
+  // the even share the packs together could be handed more than
+  // `remainingChannelBudget` actually holds — and `composeWithinBudget`,
+  // which enforces the real channel limit afterwards in strict priority
+  // order, would then drop the SECOND pack wholesale (an omission line)
+  // rather than give it stubs, exactly the silent loss this floor exists to
+  // prevent for the first one. Charging it instead means every other topic
+  // (the branch pack) divides whatever is left once the primary's floor is
+  // honoured — never more than the pool the even split came from.
+  const primaryBudget = Math.max(evenShare, plan.memoryFloor);
+  const otherTopicsCount = Math.max(splits.length - 1, 0);
+  const otherBudget =
+    otherTopicsCount > 0
+      ? Math.max(
+          0,
+          Math.floor(
+            (remainingChannelBudget - primaryBudget) / otherTopicsCount
+          )
+        )
+      : 0;
   const packBudget = (index: number): number =>
-    index === 0 ? Math.max(perTopicBudget, plan.memoryFloor) : perTopicBudget;
+    index === 0 ? primaryBudget : otherBudget;
   const packs = splits.map((section, index) => ({
     topic: section.topic,
     trimmed: renderPackWithinBudget(
@@ -520,15 +541,22 @@ const runSessionStart = async (
       { name: 'the project line', text: projectLine },
       { name: 'the standing rules', text: rulesSection },
       { name: 'the work in progress', text: workSection },
-      // A starved pack (memories existed but none fit, even the floor) says
-      // so instead of contributing nothing: silence here reads as "this
-      // topic has no memories", which is a different — and false — claim
-      // from "the memories didn't fit this channel this time".
+      // A starved pack that rendered NOTHING (not even a stub) says so
+      // instead of contributing silence: silence here reads as "this topic
+      // has no memories", which is a different — and false — claim from "the
+      // memories didn't fit this channel this time". `trimmed.starved` alone
+      // is not the right trigger: it is true whenever no memory arrived
+      // WHOLE, even on a call that still fit one or more stub lines — and a
+      // stub names a real memory by id, which is strictly more useful than
+      // the generic notice, so it must win whenever it exists. The notice is
+      // only for the narrower case both conditions describe together: had
+      // memories, and the trim produced literally no text at all.
       ...packs.map(({ topic, trimmed }) => ({
         name: `the "${topic}" pack`,
-        text: trimmed.starved
-          ? renderStarvedPackNotice(topic, trimmed.remaining.length)
-          : trimmed.text || null,
+        text:
+          trimmed.starved && !trimmed.text
+            ? renderStarvedPackNotice(topic, trimmed.remaining.length)
+            : trimmed.text || null,
       })),
     ],
     budget
