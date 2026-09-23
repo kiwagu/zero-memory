@@ -827,9 +827,12 @@ const runTask = async (
     const context = sections.filter(Boolean).join('\n\n');
     if (context) adapter.emitTaskBrief(context);
   };
-  // The two returns below build no briefing, so each carries the next chunk
-  // of this window's tail beside the banner. Both sit behind `runBrief`'s
-  // ignore check: an ignored project gets no drain either.
+  // Every return below that builds no briefing carries the next chunk of this
+  // window's tail beside the banner: a short reply, an already-briefed
+  // session, a server that could not be reached, and a pack that dedup
+  // emptied. None of them carries a memory payload of its own, and the tail is
+  // local, so the offline case is exactly where it still arrives. All of them
+  // sit behind `runBrief`'s ignore check: an ignored project gets no drain.
   const drain = (): string | null =>
     sessionId
       ? drainTailChunk(statePath, sessionId, tailChunkBudget(banner))
@@ -882,8 +885,9 @@ const runTask = async (
     });
   } catch (error) {
     // The per-message identity is independent of server health. Preserve it
-    // even when the fresh task briefing cannot be fetched.
-    emit(banner);
+    // even when the fresh task briefing cannot be fetched — and the tail with
+    // it. The task briefing stays owed: the next substantive message retries.
+    emit(banner, drain());
     throw error;
   }
   const pack = parseBriefingPack(payload);
@@ -923,8 +927,9 @@ const runTask = async (
 
   const filtered = filterBriefingPack(pack, session?.injected_ids ?? []);
   if (isEmptyPack(filtered)) {
-    emit(banner);
-    return 'empty-after-dedup';
+    const chunk = drain();
+    emit(banner, chunk);
+    return chunk ? 'empty-after-dedup+tail-chunk' : 'empty-after-dedup';
   }
 
   // Loops the session-start briefing already showed are filtered out above;

@@ -14,6 +14,7 @@ import {
   readBriefTail,
   recordBriefTail,
   recordProjectScope,
+  recordSessionBriefing,
   recordSessionThread,
   stampSessionStart,
 } from '@workspace/client-runtime';
@@ -889,13 +890,28 @@ describe('the briefing tail drains one memory per message', () => {
       takenAt: '2026-09-23T10:00:00Z',
     });
 
-  const tailIds = (): string[] | null =>
-    readBriefTail(briefStatePath(), SESSION_ID)?.memories.map(
+  const tailIds = (sessionId = SESSION_ID): string[] | null =>
+    readBriefTail(briefStatePath(), sessionId)?.memories.map(
       (queued) => queued.id
     ) ?? null;
 
-  const injectedIds = (): string[] =>
-    loadBriefState(briefStatePath())[SESSION_ID]?.injected_ids ?? [];
+  const injectedIds = (sessionId = SESSION_ID): string[] =>
+    loadBriefState(briefStatePath())[sessionId]?.injected_ids ?? [];
+
+  /** Runs `body` under `ZM_BRIEF_HOOK_BUDGET_CHARS=budget`, restored after. */
+  const withBudget = async <T>(
+    budget: number,
+    body: () => Promise<T>
+  ): Promise<T> => {
+    const previous = process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
+    process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = String(budget);
+    try {
+      return await body();
+    } finally {
+      if (previous === undefined) delete process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
+      else process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = previous;
+    }
+  };
 
   const serverPack = (memories: ContextMemory[]) => ({
     memories,
@@ -1016,6 +1032,88 @@ describe('the briefing tail drains one memory per message', () => {
     expect(tailIds()).toEqual([queued[1]!.id]);
     expect(callBuildContext).not.toHaveBeenCalled();
   });
+
+  it('drains one chunk on a substantive prompt whose task-briefing call fails', async () => {
+    // The server is unreachable, so this message carries no pack — and the
+    // tail is local, so it is exactly the message the drain can still serve.
+    const queued = [memory(791, 300), memory(792, 300)];
+    seedTail(queued);
+    vi.mocked(callBuildContext).mockRejectedValueOnce(
+      new Error('server unreachable')
+    );
+
+    const briefing = await runHook('task', { prompt: SUBSTANTIVE });
+
+    expect(briefing).toContain('PROJECT: proj.usr_x.demo');
+    expect(briefing).toContain(CHUNK_FRAME);
+    expect(briefing).toContain(queued[0]!.id);
+    expect(tailIds()).toEqual([queued[1]!.id]);
+    // The task briefing is still owed: the next substantive message retries.
+    expect(loadBriefState(briefStatePath())[SESSION_ID]?.task_briefed).toBe(
+      false
+    );
+  });
+
+  it('drains one chunk on a substantive prompt whose task pack is empty after dedup', async () => {
+    const seen = memory(795, 300);
+    recordSessionBriefing(briefStatePath(), SESSION_ID, [seen.id]);
+    const queued = [memory(796, 300), memory(797, 300)];
+    seedTail(queued);
+    vi.mocked(callBuildContext).mockResolvedValueOnce(serverPack([seen]));
+
+    const briefing = await runHook('task', { prompt: SUBSTANTIVE });
+
+    expect(briefing).not.toContain('Persistent memory briefing');
+    expect(briefing).toContain(CHUNK_FRAME);
+    expect(briefing).toContain(queued[0]!.id);
+    expect(tailIds()).toEqual([queued[1]!.id]);
+    // The call succeeded, so this window's one task briefing is spent.
+    expect(loadBriefState(briefStatePath())[SESSION_ID]?.task_briefed).toBe(
+      true
+    );
+  });
+
+  it.each(['task', 'session-start'] as const)(
+    'records nothing as delivered, and loses nothing from the tail, when the composer drops the %s pack',
+    async (mode) => {
+      // Six long, distinct, non-pinned rules overrun their ceiling by
+      // headline at these budgets, and the composer — strict priority order —
+      // then drops the pack behind them whole. A dropped pack never reached
+      // the window: recording its memories as delivered would hide them from
+      // every later briefing of the window for good.
+      const rules = Array.from({ length: 6 }, (_, i) => ({
+        text: `${i} ${'r'.repeat(1_200)}`,
+        pinned: false,
+      }));
+      const pack = [memory(801, 40), memory(802, 40), memory(803, 40)];
+      const packIds: string[] = pack.map((packed) => packed.id);
+      let drops = 0;
+      for (let budget = 1_500; budget <= 5_500; budget += 50) {
+        const sessionId = `drop-${mode}-${budget}`;
+        vi.mocked(callBuildContext).mockResolvedValueOnce({
+          ...serverPack(pack),
+          rules,
+        });
+        const briefing = await withBudget(budget, () =>
+          runHook(mode, { prompt: SUBSTANTIVE, sessionId })
+        );
+        if (!/pack did not fit this briefing's channel/.test(briefing)) {
+          continue;
+        }
+        drops += 1;
+        expect(
+          injectedIds(sessionId).filter((id) => packIds.includes(id)),
+          `budget ${budget}: a dropped pack was recorded as delivered`
+        ).toEqual([]);
+        expect(
+          tailIds(sessionId),
+          `budget ${budget}: a dropped pack's memories left the tail`
+        ).toEqual(packIds);
+      }
+      // The sweep proves something only if the composer actually dropped it.
+      expect(drops).toBeGreaterThan(0);
+    }
+  );
 
   it('appends no chunk to the one task briefing, and settles the tail against what its pack delivered', async () => {
     // Session start: the lead memory is too large for the channel, so that
@@ -1157,6 +1255,13 @@ describe('the briefing tail drains one memory per message', () => {
       },
     ],
     ['holding an empty queue', () => seedTail([])],
+    [
+      'the JSON literal null',
+      () => {
+        mkdirSync(dirname(briefStatePath()), { recursive: true });
+        writeFileSync(briefStatePath(), 'null');
+      },
+    ],
   ])(
     'emits exactly the banner, and never throws, when the state file is %s',
     async (_, damage) => {
