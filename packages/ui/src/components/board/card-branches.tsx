@@ -4,7 +4,8 @@ import { Badge } from '@workspace/ui/components/badge';
 
 /**
  * CardBranches — where a card's work ran: each git branch with its
- * repository and whether it is still open or where it landed. Display-only;
+ * repository and whether it is still open or where it landed — the latest
+ * landing on the badge, any earlier ones beside it. Display-only;
  * every label arrives translated from the app.
  */
 
@@ -14,6 +15,11 @@ interface CardBranchItem {
   repo: string;
   /** "open", or "landed as <sha> on <target>", already translated. */
   stateLabel: string;
+  /**
+   * The landings before the latest ("earlier <sha>, …"), already translated;
+   * null when the branch landed at most once.
+   */
+  earlierLabel: string | null;
   landed: boolean;
 }
 
@@ -36,6 +42,14 @@ function CardBranches({ items }: { items: CardBranchItem[] }) {
           >
             {item.stateLabel}
           </Badge>
+          {item.earlierLabel ? (
+            <span
+              className="text-muted-foreground font-mono text-xs"
+              data-testid="card-branch-earlier"
+            >
+              {item.earlierLabel}
+            </span>
+          ) : null}
         </li>
       ))}
     </ul>

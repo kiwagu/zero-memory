@@ -535,6 +535,7 @@
   "board.noBranches": "Aún no hay ninguna rama registrada. El trabajo registra su rama al pasar a activo.",
   "board.branch.open": "abierta",
   "board.branch.landed": "integrada como {sha} en {target}",
+  "board.branch.earlier": "antes {shas}",
   "board.event.landed": "integrada",
   "board.declaration": "Declarado:",
   "board.copyLink": "Haz clic para copiar el enlace de la tarjeta",

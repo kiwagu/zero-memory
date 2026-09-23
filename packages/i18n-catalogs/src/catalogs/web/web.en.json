@@ -535,6 +535,7 @@
   "board.noBranches": "No branch recorded yet. Work records its branch when it moves into active.",
   "board.branch.open": "open",
   "board.branch.landed": "landed as {sha} on {target}",
+  "board.branch.earlier": "earlier {shas}",
   "board.event.landed": "landed",
   "board.declaration": "Declared:",
   "board.copyLink": "Click to copy the card's link",
