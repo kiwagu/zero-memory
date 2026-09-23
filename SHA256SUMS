@@ -1,3 +1,3 @@
-# zero-memory-watcher — version 0.29.1 (binary = plugin manifest) — built from git 31bb5ff-dirty (fix/compaction-window-dedup)  commit=31bb5ff1e1fc4cccb1bf89ca01cf1bf2a5071d1a-dirty
+# zero-memory-watcher — version 0.30.0 (binary = plugin manifest) — built from git d3fca09-dirty (feature/card-branches-and-landing)  commit=d3fca09061e4c4793bd25179192d98114a86af1d-dirty
 # build-env: bun=1.3.14  target=linux-x64  arch=x86_64  os=Ubuntu 26.04.1 LTS
-54300e706e0412f1d022725286cb0dbde233c0ef40fa1862b0977ccf133bc3fe  zero-memory-watcher
+84e879993cd2c8d9c8a5c9c45501b6a75b9817dd6234f11cb7f2d1e60efc4b6e  zero-memory-watcher
