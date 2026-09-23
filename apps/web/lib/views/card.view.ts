@@ -1,10 +1,13 @@
+import type { CardBranchItem } from '@workspace/ui/components/board/card-branches';
 import type { CardHistoryEntry } from '@workspace/ui/components/board/card-history';
 import type { CardDetailData } from '@workspace/ui/components/board/card-detail';
 import type { BadgeListItem } from '@workspace/ui/components/common/badge-list';
 import type { LinkedMemoryItem } from '@workspace/ui/components/memory/linked-memory-list';
 
 import {
+  cardBranchStateLabel,
   cardEventLabel,
+  cardLabel,
   cardRefHref,
   cardRelationLabel,
   cardStateLabel,
@@ -30,7 +33,7 @@ const FEED_LIMIT = 50;
 
 export interface CardViewData {
   id: string;
-  /** `#<number> <title>` — what names the card in a panel. */
+  /** `ZM-<number> <title>` — what names the card in a panel. */
   title: string;
   detail: CardDetailData;
 }
@@ -53,7 +56,7 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     // does not exist, and that is the intended answer.
     return null;
   }
-  const { card, refs, events, has_more: hasMore } = parsed.data;
+  const { card, refs, branches, events, has_more: hasMore } = parsed.data;
 
   // The feed is read under the same session, so a memory this reader may not
   // open never arrives — there is nothing to hide, unlike an attachment.
@@ -98,6 +101,14 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     };
   });
 
+  const branchItems: CardBranchItem[] = branches.map((branch) => ({
+    key: `${branch.repo}:${branch.branch}`,
+    name: branch.branch,
+    repo: branch.repo,
+    stateLabel: cardBranchStateLabel(branch, t),
+    landed: branch.state === 'landed',
+  }));
+
   const entries: CardHistoryEntry[] = events.map((event) => ({
     id: event.id,
     seqLabel: String(event.seq),
@@ -112,6 +123,9 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     actorLabel: event.agent_label ?? event.actor_id,
     timeLabel: formatTimestamp(event.created_at),
     reason: event.reason ?? undefined,
+    declaration: event.branch_note
+      ? { label: t('board.declaration'), text: event.branch_note }
+      : undefined,
     note: event.text
       ? {
           text: event.text,
@@ -121,16 +135,25 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
         }
       : undefined,
     refLabel:
-      event.ref_kind && event.ref_target
-        ? `${event.ref_kind}: ${event.ref_target}`
-        : undefined,
+      event.type === 'landed' && event.ref_target
+        ? `${event.ref_target} → ${event.target_branch ?? ''} (${(
+            event.squash_sha ?? ''
+          ).slice(0, 7)})`
+        : event.ref_kind && event.ref_target
+          ? `${event.ref_kind}: ${event.ref_target}`
+          : undefined,
   }));
 
   return {
     id: card.id,
-    title: `#${card.number} ${card.title}`,
+    title: `${cardLabel(card.number)} ${card.title}`,
     detail: {
-      number: card.number,
+      numberLabel: cardLabel(card.number),
+      link: {
+        href: `/board/${card.id}`,
+        copyHint: t('board.copyLink'),
+        copiedLabel: t('board.linkCopied'),
+      },
       title: card.title,
       badges,
       updatedLabel: `${t('board.updated')} ${formatTimestamp(card.updated_at)}`,
@@ -142,6 +165,11 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
           }
         : null,
       body: card.body,
+      branches: {
+        title: t('board.branches'),
+        items: branchItems,
+        emptyLabel: t('board.noBranches'),
+      },
       refs: {
         title: t('board.refs'),
         items: refItems,

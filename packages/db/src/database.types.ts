@@ -110,10 +110,65 @@ export type Database = {
           },
         ];
       };
+      card_branches: {
+        Row: {
+          attached_at: string;
+          attached_by: string;
+          branch: string;
+          card_id: string;
+          landed_at: string | null;
+          repo: string;
+          scope: unknown;
+          squash_sha: string | null;
+          state: string;
+          target_branch: string | null;
+        };
+        Insert: {
+          attached_at?: string;
+          attached_by?: string;
+          branch: string;
+          card_id: string;
+          landed_at?: string | null;
+          repo: string;
+          scope: unknown;
+          squash_sha?: string | null;
+          state?: string;
+          target_branch?: string | null;
+        };
+        Update: {
+          attached_at?: string;
+          attached_by?: string;
+          branch?: string;
+          card_id?: string;
+          landed_at?: string | null;
+          repo?: string;
+          scope?: unknown;
+          squash_sha?: string | null;
+          state?: string;
+          target_branch?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'card_branches_attached_by_fkey';
+            columns: ['attached_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_branches_card_id_fkey';
+            columns: ['card_id'];
+            isOneToOne: false;
+            referencedRelation: 'cards';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       card_events: {
         Row: {
           actor_id: string;
           agent_label: string | null;
+          branch_note: string | null;
           card_id: string;
           created_at: string;
           from_state: string | null;
@@ -128,6 +183,8 @@ export type Database = {
           revision: number | null;
           scope: unknown;
           seq: number;
+          squash_sha: string | null;
+          target_branch: string | null;
           thread: string | null;
           to_state: string | null;
           type: string;
@@ -135,6 +192,7 @@ export type Database = {
         Insert: {
           actor_id?: string;
           agent_label?: string | null;
+          branch_note?: string | null;
           card_id: string;
           created_at?: string;
           from_state?: string | null;
@@ -149,6 +207,8 @@ export type Database = {
           revision?: number | null;
           scope: unknown;
           seq: number;
+          squash_sha?: string | null;
+          target_branch?: string | null;
           thread?: string | null;
           to_state?: string | null;
           type: string;
@@ -156,6 +216,7 @@ export type Database = {
         Update: {
           actor_id?: string;
           agent_label?: string | null;
+          branch_note?: string | null;
           card_id?: string;
           created_at?: string;
           from_state?: string | null;
@@ -170,6 +231,8 @@ export type Database = {
           revision?: number | null;
           scope?: unknown;
           seq?: number;
+          squash_sha?: string | null;
+          target_branch?: string | null;
           thread?: string | null;
           to_state?: string | null;
           type?: string;
@@ -1801,7 +1864,10 @@ export type Database = {
         Args: {
           p_agent_label?: string;
           p_body?: string;
+          p_branch_name?: string;
+          p_branch_repo?: string;
           p_idempotency_key?: string;
+          p_no_branch?: string;
           p_origin_loop_id?: string;
           p_scope: string;
           p_state?: string;
@@ -1839,11 +1905,31 @@ export type Database = {
         Args: { p_after_seq?: number; p_card_id: string; p_limit?: number };
         Returns: Json;
       };
+      card_land: {
+        Args: {
+          p_agent_label?: string;
+          p_branch: string;
+          p_card_id: string;
+          p_idempotency_key?: string;
+          p_not_landed?: string;
+          p_reason: string;
+          p_repo: string;
+          p_squash_sha: string;
+          p_target: string;
+          p_thread?: string;
+          p_to_state?: string;
+        };
+        Returns: Json;
+      };
       card_move: {
         Args: {
           p_agent_label?: string;
+          p_branch_name?: string;
+          p_branch_repo?: string;
           p_card_id: string;
           p_idempotency_key?: string;
+          p_no_branch?: string;
+          p_not_landed?: string;
           p_reason: string;
           p_thread?: string;
           p_to_state: string;
@@ -1866,8 +1952,11 @@ export type Database = {
         Args: {
           p_agent_label?: string;
           p_body?: string;
+          p_branch_name?: string;
+          p_branch_repo?: string;
           p_idempotency_key?: string;
           p_loop_id: string;
+          p_no_branch?: string;
           p_state?: string;
           p_thread?: string;
           p_title: string;

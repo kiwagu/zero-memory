@@ -87,6 +87,7 @@ test.describe('Project board over MCP', () => {
         action: 'promote_loop',
         loop_id: loop.memory_id,
         title: 'Migrate the ingest worker off the legacy queue',
+        no_branch: 'an e2e fixture card with no code',
         body: 'Goal: no traffic on the legacy queue.\nBoundaries: no schema change.',
       });
       expect(promoted.isError ?? false).toBe(false);
@@ -100,6 +101,7 @@ test.describe('Project board over MCP', () => {
         action: 'promote_loop',
         loop_id: loop.memory_id,
         title: 'Second attempt at the same work',
+        no_branch: 'an e2e fixture card with no code',
       });
       expect(twice.isError ?? false).toBe(true);
 
@@ -626,6 +628,7 @@ test.describe('Project board over MCP', () => {
         card_id: card.id,
         to: 'active',
         reason,
+        no_branch: 'an e2e fixture card with no code',
       });
       expect(moved.isError ?? false).toBe(false);
 
@@ -735,6 +738,7 @@ test.describe('Project board over MCP', () => {
         action: 'promote_loop',
         loop_id: loop.memory_id,
         title: 'Move the billing export to parquet',
+        no_branch: 'an e2e fixture card with no code',
       });
       expect(promoted.isError ?? false).toBe(false);
       const card = firstJson<CardResult>(promoted).card;
@@ -745,9 +749,10 @@ test.describe('Project board over MCP', () => {
         action: 'promote_loop',
         loop_id: loop.memory_id,
         title: 'The same work again',
+        no_branch: 'an e2e fixture card with no code',
       });
       expect(twice.isError ?? false).toBe(true);
-      expect(contentText(twice)).toContain(`#${card.number}`);
+      expect(contentText(twice)).toContain(`ZM-${card.number}`);
 
       // 1. THE LOOP-CLOSURE JUDGE NEVER SEES A PROMOTED LOOP. Evidence that
       // reads like completion arrives later, from another conversation; the
@@ -813,6 +818,7 @@ test.describe('Project board over MCP', () => {
             action: 'promote_loop',
             loop_id: control.memory_id,
             title: 'Rotate the edge certificates',
+            no_branch: 'an e2e fixture card with no code',
           })
         )
       );

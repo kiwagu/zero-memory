@@ -28,6 +28,15 @@ export type CardId = z.infer<typeof cardIdSchema>;
 /** Mint a fresh card id (trusted construction). */
 export const newCardId = (): CardId => entityIdSchemas.card.create();
 
+/**
+ * A card's one label, everywhere it is named: the dashboard, a briefing, a
+ * server message and the squash trailer of the commit that landed its work.
+ * `ZM-` rather than `#`: a forge turns `#21` in a commit message into a link
+ * to its own issue 21, and a card with two labels would split every search
+ * between them. The number itself stays an integer; this is presentation.
+ */
+export const formatCardLabel = (number: number): string => `ZM-${number}`;
+
 /** A card-event id: a branded `cev_` entity id. */
 export const cardEventIdSchema = entityIdSchemas.card_event.schema;
 export type CardEventId = z.infer<typeof cardEventIdSchema>;
@@ -72,6 +81,7 @@ export const cardEventTypeSchema = z.enum([
   'attached',
   'detached',
   'noted',
+  'landed',
 ]);
 export type CardEventType = z.infer<typeof cardEventTypeSchema>;
 
@@ -157,6 +167,95 @@ export const cardIdempotencyKeySchema = z
   .max(CARD_LIMITS.idempotencyKey);
 
 /**
+ * A git repository as a card names it: `owner/name` from the remote the work
+ * is pushed to, or the repository's folder name when it has none. Never a
+ * `:` or whitespace — the `:` separates it from the branch wherever the two
+ * are written as one string.
+ */
+export const gitRepoSchema = z
+  .string()
+  .trim()
+  .regex(/^[^\s:]{1,200}$/u, {
+    message:
+      'A repository is owner/name (or its folder name), without spaces or ":"',
+  });
+
+/**
+ * Whether a string is a branch name git would accept, as far as a card
+ * cares: no whitespace, no ref-syntax characters, no `..`, not starting with
+ * `-` or ending with `/`. The store holds the same rule.
+ */
+export const isGitBranchName = (name: string): boolean =>
+  name.length >= 1 &&
+  name.length <= 250 &&
+  !/[\s:~^?*[\\]/u.test(name) &&
+  !name.includes('..') &&
+  !name.startsWith('-') &&
+  !name.endsWith('/');
+
+export const gitBranchNameSchema = z
+  .string()
+  .trim()
+  .refine(isGitBranchName, { message: 'Not a git branch name' });
+
+/** A commit, as a landing names it: 7 to 64 hex characters, lower-case. */
+export const gitCommitShaSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[0-9a-f]{7,64}$/u, {
+    message: 'A commit is 7 to 64 hex characters',
+  });
+
+/** The branch a card's work runs on. */
+export const cardBranchSchema = z.object({
+  repo: gitRepoSchema,
+  name: gitBranchNameSchema,
+});
+export type CardBranch = z.infer<typeof cardBranchSchema>;
+
+/** `<repo>:<branch>`: a branch written as one string. */
+export const formatBranchRef = (branch: CardBranch): string =>
+  `${branch.repo}:${branch.name}`;
+
+/** Read `<repo>:<branch>` back; the first `:` splits the two. */
+export const parseBranchRef = (value: string): CardBranch | null => {
+  const split = value.indexOf(':');
+  if (split <= 0) return null;
+  const parsed = cardBranchSchema.safeParse({
+    repo: value.slice(0, split),
+    name: value.slice(split + 1),
+  });
+  return parsed.success ? parsed.data : null;
+};
+
+/**
+ * What an agent declares when the branch rule does not hold: why work
+ * entering active has no code, or why an open branch leaving active has not
+ * landed. Recorded next to the move, never a substitute for its reason.
+ */
+export const cardDeclarationSchema = z
+  .string()
+  .trim()
+  .min(1, { message: 'A declaration must say why' })
+  .max(CARD_LIMITS.reason);
+
+export const cardBranchStateSchema = z.enum(['open', 'landed']);
+export type CardBranchState = z.infer<typeof cardBranchStateSchema>;
+
+/** A branch as a card reads it back. */
+export const cardBranchViewSchema = z.object({
+  repo: z.string(),
+  branch: z.string(),
+  state: cardBranchStateSchema,
+  squash_sha: z.string().nullable(),
+  target: z.string().nullable(),
+  landed_at: z.string().nullable(),
+  attached_at: z.string(),
+});
+export type CardBranchView = z.infer<typeof cardBranchViewSchema>;
+
+/**
  * A typed reference attached to a card.
  *
  * Attaching NEVER changes the target: not its scope, not its visibility, not
@@ -168,7 +267,8 @@ export const cardIdempotencyKeySchema = z
  * `task` or `open-question`, so it attaches as `memory`. A card's descent
  * from a loop is not an attachment at all — it is `originLoopId`, which
  * carries provenance and the guard that memory hygiene can never close a card
- * through the loop it came from.
+ * through the loop it came from. A `branch` is where the work's code lives:
+ * the repository and the branch, written `<repo>:<branch>` as one string.
  */
 export const cardRefSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('memory'), id: memoryIdSchema }),
@@ -176,6 +276,11 @@ export const cardRefSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('thread'), id: cardThreadIdSchema }),
   z.object({ kind: z.literal('card'), id: cardIdSchema }),
   z.object({ kind: z.literal('url'), url: z.url().max(CARD_LIMITS.url) }),
+  z.object({
+    kind: z.literal('branch'),
+    repo: gitRepoSchema,
+    name: gitBranchNameSchema,
+  }),
 ]);
 export type CardRef = z.infer<typeof cardRefSchema>;
 
@@ -186,6 +291,7 @@ export const CARD_REF_KINDS = [
   'thread',
   'card',
   'url',
+  'branch',
 ] as const;
 export type CardRefKind = (typeof CARD_REF_KINDS)[number];
 
@@ -194,7 +300,7 @@ export const cardSchema = z.object({
   id: cardIdSchema,
   /** The project scope the card lives in; membership decides who reads it. */
   scope: memoryScopeSchema,
-  /** Project-local number (`#42`); never reused once a card is archived. */
+  /** Project-local number, labelled `ZM-42`; never reused once archived. */
   number: z.number().int().positive(),
   title: cardTitleSchema,
   body: cardBodySchema,
@@ -236,6 +342,11 @@ export const cardEventSchema = z.object({
   relation: cardNoteRelationSchema.nullable(),
   ref_kind: z.enum(CARD_REF_KINDS).nullable(),
   ref_target: z.string().nullable(),
+  /** What the mover declared in place of the branch rule. */
+  branch_note: z.string().nullable().default(null),
+  /** For a landing: the commit the branch landed as, and where. */
+  squash_sha: z.string().nullable().default(null),
+  target_branch: z.string().nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
@@ -281,6 +392,16 @@ export const briefingWorkCardSchema = z.object({
 });
 export type BriefingWorkCard = z.infer<typeof briefingWorkCardSchema>;
 
+/** A branch still open on a live card, as a briefing names it. */
+export const briefingWorkBranchSchema = z.object({
+  card_id: cardIdSchema,
+  number: z.number().int().positive(),
+  state: cardStateSchema,
+  repo: z.string(),
+  branch: z.string(),
+});
+export type BriefingWorkBranch = z.infer<typeof briefingWorkBranchSchema>;
+
 /**
  * The project's work in progress, as a briefing carries it: the card the
  * calling conversation is bound to (with the reason it sits in its column and
@@ -298,6 +419,11 @@ export const briefingWorkSchema = z.object({
   active: z.number().int().nonnegative(),
   waiting: z.number().int().nonnegative(),
   lead: z.array(briefingWorkCardSchema),
+  /**
+   * Branches still open on live cards, freshest card first. Optional: a
+   * server that predates branches sends none, and that stays valid.
+   */
+  open_branches: z.array(briefingWorkBranchSchema).optional(),
 });
 export type BriefingWork = z.infer<typeof briefingWorkSchema>;
 
@@ -377,7 +503,7 @@ export const boardInputSchema = z.object({
     .int()
     .positive()
     .optional()
-    .describe('The project-local number for resolve, e.g. 42 for `#42`.'),
+    .describe('The project-local number for resolve, e.g. 42 for `ZM-42`.'),
   after_seq: z
     .number()
     .int()
@@ -411,18 +537,22 @@ export const boardOutputSchema = z.object({
   feed: z.array(cardFeedItemSchema).default([]),
   feed_has_more: z.boolean().default(false),
   feed_next_before: z.string().nullable().default(null),
+  /** For get: where the card's work ran, and where it landed. */
+  branches: z.array(cardBranchViewSchema).default([]),
 });
 export type BoardOutput = z.infer<typeof boardOutputSchema>;
 
 /** `card` — opening and steering one piece of work. */
 export const cardInputSchema = z.object({
   action: z
-    .enum(['create', 'promote_loop', 'edit', 'move', 'archive'])
+    .enum(['create', 'promote_loop', 'edit', 'move', 'archive', 'land'])
     .describe(
       'create: open a card. promote_loop: turn an open loop into one, ' +
         'recording where it came from and leaving the loop itself alone. ' +
         'edit: rewrite its text. move: declare where the work stands, with ' +
-        'the reason why. archive: take it off the board for good.'
+        'the reason why. archive: take it off the board for good. land: ' +
+        'record that a branch landed as a squash commit, and move the card ' +
+        '(to waiting unless `to` says otherwise).'
     ),
   card_id: cardIdSchema
     .optional()
@@ -439,12 +569,20 @@ export const cardInputSchema = z.object({
     ),
   state: cardStateSchema
     .optional()
-    .describe('Where a new card starts. Defaults to idea.'),
-  to: cardStateSchema.optional().describe('Where the card is moving.'),
+    .describe(
+      'Where a new card starts. Defaults to idea (promote_loop: active). ' +
+        'Starting in active needs `branch` or `no_branch`.'
+    ),
+  to: cardStateSchema
+    .optional()
+    .describe(
+      'Where the card is moving. For land: where it goes after landing; ' +
+        'defaults to waiting.'
+    ),
   reason: cardReasonSchema
     .optional()
     .describe(
-      'Why the state changed — required for move and archive. This is what ' +
+      'Why the state changed — required for move, archive and land. This is what ' +
         'the next reader has instead of guessing; there is no way to move a ' +
         'card without it.'
     ),
@@ -457,6 +595,34 @@ export const cardInputSchema = z.object({
       'Refuse the edit unless the card is still at this revision, so two ' +
         'writers cannot overwrite each other silently.'
     ),
+  branch: cardBranchSchema
+    .optional()
+    .describe(
+      'The git branch the work runs on: `repo` is owner/name from the git ' +
+        'remote origin (or the repository folder name without one), `name` ' +
+        'the branch. Work entering active (move, or create/promote_loop ' +
+        'straight into active) passes it unless the card already has an ' +
+        'open branch; land names the branch that landed.'
+    ),
+  no_branch: cardDeclarationSchema
+    .optional()
+    .describe(
+      'Work entering active without code — research, an operation, docs ' +
+        'outside git: say why. Stands in for `branch`.'
+    ),
+  not_landed: cardDeclarationSchema
+    .optional()
+    .describe(
+      'Leaving active while a branch is still open and has not landed: say ' +
+        'why. Without it such a move is refused; a branch that DID land is ' +
+        'recorded with land.'
+    ),
+  squash_sha: gitCommitShaSchema
+    .optional()
+    .describe('For land: the commit the branch landed as.'),
+  target: gitBranchNameSchema
+    .optional()
+    .describe('For land: the branch it landed on, e.g. main.'),
   ...authorshipFields,
 });
 export type CardInput = z.infer<typeof cardInputSchema>;
@@ -497,7 +663,8 @@ export const cardLogInputSchema = z.object({
     .describe(
       'What kind of artifact. An open loop is a memory, so attach it as one. ' +
         'Attaching a `thread` binds that conversation: what it remembers in ' +
-        "the card's scope then appears in the card's feed on its own."
+        "the card's scope then appears in the card's feed on its own. " +
+        'A `branch` target is `<repo>:<branch>`, e.g. `owner/name:feature/x`.'
     ),
   ref_target: z
     .string()

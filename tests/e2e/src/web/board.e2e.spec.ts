@@ -48,6 +48,7 @@ test.describe('Project board in the dashboard', () => {
         loop_id: loopId,
         title: 'Migrate the ingest worker',
         body: 'Goal: no traffic on the legacy queue.',
+        no_branch: 'an e2e fixture card with no code',
       });
       expect(promoted.isError ?? false).toBe(false);
       const card = firstJson<CardResult>(promoted).card;
@@ -96,7 +97,7 @@ test.describe('Project board in the dashboard', () => {
     // The reason the card is in THIS column rides on the tile, and survives
     // the note and the attachment that happened after the move.
     await expect(tile).toContainText(REASON);
-    await expect(tile).toContainText(`#${cardNumber}`);
+    await expect(tile).toContainText(`ZM-${cardNumber}`);
 
     // Narrower than its five columns, the board scrolls inside its own row.
     // The page itself never widens, so the header and the picker stay whole.
@@ -221,6 +222,7 @@ test.describe('Project board in the dashboard', () => {
         card_id: busyId,
         to: 'active',
         reason: 'starting here, which makes this the board that moved last',
+        no_branch: 'an e2e fixture card with no code',
       });
     } finally {
       await mcp.close();
@@ -488,7 +490,7 @@ test.describe('Panel chain in the card dialog', () => {
     await expect.poll(order).toEqual([cardKey, aKey]);
     await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
     await expect(panel(aKey).getByTestId('panel-from')).toContainText(
-      `#${cardNumber}`
+      `ZM-${cardNumber}`
     );
 
     // 2. A memory id in A's text opens B right after A.
@@ -590,5 +592,199 @@ test.describe('Panel chain in the card dialog', () => {
     await page.getByTestId('panel-strip').click({ position: { x: 8, y: 8 } });
     await expect(page.getByTestId('card-modal')).toBeHidden();
     await expect(page).toHaveURL(/\/board(\?[^/]*)?$/);
+  });
+  test('a card shows the branch its work ran on and where it landed', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    let cardNumber: number;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web branch marker ${Date.now()}: page the memory feed`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-branch',
+        })
+      ).scope;
+      const created = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'Page the memory feed',
+          state: 'active',
+          branch: { repo: 'acme/memory-service', name: 'feature/feed-pages' },
+        })
+      ).card;
+      cardId = created.id;
+      cardNumber = created.number;
+      const landed = await mcp.callTool('card', {
+        action: 'land',
+        card_id: cardId,
+        branch: { repo: 'acme/memory-service', name: 'feature/feed-pages' },
+        squash_sha: '4f11a55',
+        target: 'main',
+        reason: 'full e2e green; waits for the release',
+      });
+      expect(landed.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    // One label everywhere: the card is ZM-N here, as in its squash trailer.
+    await expect(page.getByTestId('card-detail')).toContainText(
+      `ZM-${cardNumber}`
+    );
+    await expect(page.getByTestId('card-detail')).not.toContainText(
+      `#${cardNumber}`
+    );
+    const branch = page.getByTestId('card-branch');
+    await expect(branch).toHaveCount(1);
+    await expect(branch).toContainText('feature/feed-pages');
+    await expect(branch).toContainText('acme/memory-service');
+    await expect(page.getByTestId('card-branch-state')).toContainText(
+      '4f11a55'
+    );
+    await expect(page.getByTestId('card-branch-state')).toContainText('main');
+    await expect(page.getByTestId('card-history')).toContainText('landed');
+  });
+  test('a card label stays on one line beside a long title', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let cardNumber: number;
+    try {
+      scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web label marker ${Date.now()}: a card with a long title`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-label',
+        })
+      ).scope;
+      cardNumber = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title:
+            'Translate imported memories into the canonical language before ' +
+            'they reach the index',
+        })
+      ).card.number;
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const label = page
+      .getByTestId('board-column-idea')
+      .getByTestId('board-card-number');
+    await expect(label).toHaveText(`ZM-${cardNumber}`);
+    // A label broken after its hyphen ("ZM-" over "3") is taller than one line.
+    expect(
+      await label.evaluate(
+        (node) =>
+          node.getBoundingClientRect().height <
+          parseFloat(getComputedStyle(node).lineHeight) * 1.5
+      )
+    ).toBe(true);
+  });
+  test('a long card title wraps in its own column beside the label', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web header marker ${Date.now()}: a card with a long title`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-header',
+        })
+      ).scope;
+      cardId = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title:
+            'Styled scrollbars that do not break the layout under long ' +
+            'content, even when the card title runs well past one line',
+        })
+      ).card.id;
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.goto(`/board/${cardId}`);
+    const label = await page.getByTestId('card-number').boundingBox();
+    const title = await page.getByTestId('card-title').boundingBox();
+    expect(label).not.toBeNull();
+    expect(title).not.toBeNull();
+    // The title wraps (the case under test) ...
+    expect(title!.height).toBeGreaterThan(label!.height * 1.5);
+    // ... inside its own column, starting on the label's line: no line holds
+    // the label alone, and every wrapped line keeps the label's indent.
+    expect(title!.y).toBeLessThan(label!.y + label!.height);
+    expect(title!.x).toBeGreaterThanOrEqual(label!.x + label!.width);
+  });
+  test("a card's label is its link, and a click copies it", async ({
+    page,
+    context,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    let cardNumber: number;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web link marker ${Date.now()}: a card whose label is copied`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-link',
+        })
+      ).scope;
+      const created = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'A card to link to',
+        })
+      ).card;
+      cardId = created.id;
+      cardNumber = created.number;
+    } finally {
+      await mcp.close();
+    }
+
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    const label = page.getByTestId('card-number');
+    await expect(label).toHaveText(`ZM-${cardNumber}`);
+    await expect(label).toHaveAttribute('href', `/board/${cardId}`);
+
+    await label.click();
+    // A plain click copies the card's full address and stays on the page.
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(new URL(`/board/${cardId}`, page.url()).toString());
+    await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
+    await expect(label).toHaveText(`ZM-${cardNumber}`);
   });
 });

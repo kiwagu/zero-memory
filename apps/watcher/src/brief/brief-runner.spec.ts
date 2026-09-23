@@ -31,6 +31,11 @@ vi.mock('@workspace/client-runtime', async (importOriginal) => ({
   callBuildContext: vi.fn(),
 }));
 
+// A sweep drives the whole briefing once per channel size — a hundred or more
+// runs in one test. That takes seconds on a workstation and several times
+// longer on a shared CI runner, past the default five-second limit.
+const SWEEP_TIMEOUT_MS = 60_000;
+
 describe('branchNameToTopic', () => {
   it('turns a feature branch into a space-separated topic', () => {
     expect(branchNameToTopic('feature/ui-extractor-settings')).toBe(
@@ -611,41 +616,45 @@ describe('session-start memory floor', () => {
     expect(hasMemorySection).toBe(true);
   });
 
-  it("reserves the composer's own per-section join cost, so a pack filled to its budget still lands", async () => {
-    // Single topic, no rules or loops: the project line is the only other
-    // section, so this isolates the composer's `+2`-per-section accounting
-    // from everything else this suite already covers. Sixty identical,
-    // tiny memories give the pack a DETERMINISTIC, small (~50-char) stub
-    // line cost with abundant supply — enough that across the swept budgets
-    // below, some of them land the render within just a few characters of
-    // its own allotted budget, which is exactly the margin an unreserved
-    // composer join cost eats. Swept rather than a single hand-picked
-    // number because the exact margin depends on the project line's own
-    // length, which this suite does not control (it comes from `workDir`'s
-    // real, environment-chosen tmp path) — sweeping finds it regardless.
-    //
-    // The range starts comfortably above `projectLine.length + memoryFloor`
-    // (the floor is ten stubs plus the stub block's intro — 1,601 for 60
-    // memories — and the project line runs ~500) so the memory floor is
-    // never the reason a budget is tight — only the composer's own
-    // per-section accounting is under test here. It sat at 2,000–2,100
-    // until the floor grew by 201 to seat that intro; it moved up by as much.
-    const memories = Array.from({ length: 60 }, (_, i) => memory(i, 3));
-    for (let budgetChars = 2_201; budgetChars <= 2_301; budgetChars += 1) {
-      const briefing = await runSessionStart({ budgetChars, memories });
-      expect(
-        briefing.length,
-        `budget ${budgetChars}: briefing is ${briefing.length} chars`
-      ).toBeLessThanOrEqual(budgetChars);
-      const hasMemorySection =
-        briefing.includes('mem_0000000000000000') ||
-        briefing.includes('they arrive in the next messages');
-      expect(
-        hasMemorySection,
-        `budget ${budgetChars}: no stub and no starved notice`
-      ).toBe(true);
-    }
-  });
+  it(
+    "reserves the composer's own per-section join cost, so a pack filled to its budget still lands",
+    async () => {
+      // Single topic, no rules or loops: the project line is the only other
+      // section, so this isolates the composer's `+2`-per-section accounting
+      // from everything else this suite already covers. Sixty identical,
+      // tiny memories give the pack a DETERMINISTIC, small (~50-char) stub
+      // line cost with abundant supply — enough that across the swept budgets
+      // below, some of them land the render within just a few characters of
+      // its own allotted budget, which is exactly the margin an unreserved
+      // composer join cost eats. Swept rather than a single hand-picked
+      // number because the exact margin depends on the project line's own
+      // length, which this suite does not control (it comes from `workDir`'s
+      // real, environment-chosen tmp path) — sweeping finds it regardless.
+      //
+      // The range starts comfortably above `projectLine.length + memoryFloor`
+      // (the floor is ten stubs plus the stub block's intro — 1,601 for 60
+      // memories — and the project line runs ~500) so the memory floor is
+      // never the reason a budget is tight — only the composer's own
+      // per-section accounting is under test here. It sat at 2,000–2,100
+      // until the floor grew by 201 to seat that intro; it moved up by as much.
+      const memories = Array.from({ length: 60 }, (_, i) => memory(i, 3));
+      for (let budgetChars = 2_201; budgetChars <= 2_301; budgetChars += 1) {
+        const briefing = await runSessionStart({ budgetChars, memories });
+        expect(
+          briefing.length,
+          `budget ${budgetChars}: briefing is ${briefing.length} chars`
+        ).toBeLessThanOrEqual(budgetChars);
+        const hasMemorySection =
+          briefing.includes('mem_0000000000000000') ||
+          briefing.includes('they arrive in the next messages');
+        expect(
+          hasMemorySection,
+          `budget ${budgetChars}: no stub and no starved notice`
+        ).toBe(true);
+      }
+    },
+    SWEEP_TIMEOUT_MS
+  );
 });
 
 /**
@@ -813,58 +822,66 @@ describe('task briefing memory floor', () => {
     expect(briefing).not.toContain(PACK_DROPPED);
   });
 
-  it("seats a one-memory pack's stub under heavy loops, wherever the loops stop", async () => {
-    // A pack of one is where a floor of bare stub widths failed: the stub
-    // block's own intro and "+N more" line did not fit in it, so whenever
-    // the loops left the pack no more than its floor it came back starved.
-    // The loops fill their budget in whole lines (~250 characters each), so
-    // what they leave over the floor depends on where the last line stops;
-    // sweeping one line's width of budgets lands them at every offset,
-    // including the one that leaves the pack exactly its floor.
-    const loops = Array.from({ length: 60 }, (_, i) => loop(900 + i, 200));
-    for (let budgetChars = 8_750; budgetChars <= 9_000; budgetChars += 1) {
-      const briefing = await runTask({
-        budgetChars,
-        loops,
-        memories: [memory(0, 900)],
-      });
-      expect(
-        briefing.length,
-        `budget ${budgetChars}: briefing is ${briefing.length} chars`
-      ).toBeLessThanOrEqual(budgetChars);
-      expect(briefing, `budget ${budgetChars}: no stub`).toContain(
-        'mem_0000000000000000'
-      );
-    }
-  });
+  it(
+    "seats a one-memory pack's stub under heavy loops, wherever the loops stop",
+    async () => {
+      // A pack of one is where a floor of bare stub widths failed: the stub
+      // block's own intro and "+N more" line did not fit in it, so whenever
+      // the loops left the pack no more than its floor it came back starved.
+      // The loops fill their budget in whole lines (~250 characters each), so
+      // what they leave over the floor depends on where the last line stops;
+      // sweeping one line's width of budgets lands them at every offset,
+      // including the one that leaves the pack exactly its floor.
+      const loops = Array.from({ length: 60 }, (_, i) => loop(900 + i, 200));
+      for (let budgetChars = 8_750; budgetChars <= 9_000; budgetChars += 1) {
+        const briefing = await runTask({
+          budgetChars,
+          loops,
+          memories: [memory(0, 900)],
+        });
+        expect(
+          briefing.length,
+          `budget ${budgetChars}: briefing is ${briefing.length} chars`
+        ).toBeLessThanOrEqual(budgetChars);
+        expect(briefing, `budget ${budgetChars}: no stub`).toContain(
+          'mem_0000000000000000'
+        );
+      }
+    },
+    SWEEP_TIMEOUT_MS
+  );
 
-  it('never drops the pack wholesale, across a sweep of channel sizes', async () => {
-    // Every section competing at once — a rule long enough to hit its
-    // ceiling, loops enough to fill theirs, and sixty tiny memories whose
-    // ~51-character stubs let the pack land within a character or two of
-    // its own budget somewhere in a one-character sweep. That margin is
-    // exactly where an unreserved composer join cost, or a pack budget that
-    // forgot the task-lookup line, turns a pack that fits its own budget
-    // into one the composer drops whole. Swept around the production
-    // budget, where every section is present.
-    const memories = Array.from({ length: 60 }, (_, i) => memory(i, 3));
-    const loops = Array.from({ length: 60 }, (_, i) => loop(900 + i, 200));
-    const rules = [rule(3_000)];
-    for (let budgetChars = 8_800; budgetChars <= 9_000; budgetChars += 1) {
-      const briefing = await runTask({ budgetChars, rules, loops, memories });
-      expect(
-        briefing.length,
-        `budget ${budgetChars}: briefing is ${briefing.length} chars`
-      ).toBeLessThanOrEqual(budgetChars);
-      const hasMemorySection =
-        briefing.includes('mem_0000000000000000') ||
-        briefing.includes('they arrive in the next messages');
-      expect(
-        hasMemorySection && !briefing.includes(PACK_DROPPED),
-        `budget ${budgetChars}: no stub and no starved notice`
-      ).toBe(true);
-    }
-  });
+  it(
+    'never drops the pack wholesale, across a sweep of channel sizes',
+    async () => {
+      // Every section competing at once — a rule long enough to hit its
+      // ceiling, loops enough to fill theirs, and sixty tiny memories whose
+      // ~51-character stubs let the pack land within a character or two of
+      // its own budget somewhere in a one-character sweep. That margin is
+      // exactly where an unreserved composer join cost, or a pack budget that
+      // forgot the task-lookup line, turns a pack that fits its own budget
+      // into one the composer drops whole. Swept around the production
+      // budget, where every section is present.
+      const memories = Array.from({ length: 60 }, (_, i) => memory(i, 3));
+      const loops = Array.from({ length: 60 }, (_, i) => loop(900 + i, 200));
+      const rules = [rule(3_000)];
+      for (let budgetChars = 8_800; budgetChars <= 9_000; budgetChars += 1) {
+        const briefing = await runTask({ budgetChars, rules, loops, memories });
+        expect(
+          briefing.length,
+          `budget ${budgetChars}: briefing is ${briefing.length} chars`
+        ).toBeLessThanOrEqual(budgetChars);
+        const hasMemorySection =
+          briefing.includes('mem_0000000000000000') ||
+          briefing.includes('they arrive in the next messages');
+        expect(
+          hasMemorySection && !briefing.includes(PACK_DROPPED),
+          `budget ${budgetChars}: no stub and no starved notice`
+        ).toBe(true);
+      }
+    },
+    SWEEP_TIMEOUT_MS
+  );
 });
 
 /**
@@ -1476,5 +1493,137 @@ describe('the briefing tail drains one memory per message', () => {
     expect(seen.stub).toBeGreaterThan(0);
     expect(seen.held).toBeGreaterThan(0);
     expect(closest).toBeGreaterThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS - 10);
+  });
+});
+
+/**
+ * The session-start briefing names the branches a card holds open, and adds
+ * a line when this machine's git already carries the squash of one — the
+ * landing the board never heard of. `main` is a trunk branch, so the
+ * briefing has one topic and exactly one server call.
+ */
+describe('session-start landing drift', () => {
+  let stateDir: string;
+  let workDir: string;
+  let previousState: string | undefined;
+
+  const git = (...args: string[]): string =>
+    execFileSync(
+      'git',
+      ['-c', 'user.email=test@example.com', '-c', 'user.name=test', ...args],
+      { cwd: workDir, encoding: 'utf8' }
+    ).trim();
+
+  const CARD_ID = 'crd_0000000000000019.0000000000';
+
+  const briefSessionStart = async (): Promise<string> => {
+    vi.mocked(callBuildContext).mockResolvedValue({
+      memories: [],
+      entities: [],
+      edges: [],
+      linked_memories: [],
+      recent: [],
+      rules: [],
+      open_loops: [],
+      open_loops_total: 0,
+      project_scope: 'proj.usr_x.demo',
+      work: {
+        bound_card: null,
+        active: 1,
+        waiting: 0,
+        lead: [
+          {
+            id: CARD_ID,
+            number: 19,
+            title: 'Cards know their branches',
+            state: 'active',
+          },
+        ],
+        open_branches: [
+          {
+            card_id: CARD_ID,
+            number: 19,
+            state: 'active',
+            repo: 'acme/memory-service',
+            branch: 'feature/x',
+          },
+        ],
+      },
+    });
+    let emitted = '';
+    const adapter: HookClient = {
+      // 'codex' so the Claude-only update check never runs here.
+      kind: 'codex',
+      ingestProvenance: 'test',
+      canTaskBrief: true,
+      canAnchorCompaction: false,
+      readInput: async () => ({
+        sessionId: 'drift-session',
+        cwd: workDir,
+        prompt: '',
+        transcriptPath: '',
+        hookEventName: 'SessionStart',
+        toolName: '',
+        alreadyContinued: false,
+        source: '',
+        trigger: '',
+      }),
+      parse: () => {
+        throw new Error('session-start never parses a transcript');
+      },
+      emitSessionBrief: (context) => {
+        emitted = context;
+      },
+      emitTaskBrief: () => {},
+      emitTurnContext: () => {},
+      emitReceipt: () => {},
+      emitCompactionAnchor: () => {},
+    };
+    await runBrief('session-start', adapter);
+    return emitted;
+  };
+
+  beforeEach(() => {
+    previousState = process.env.XDG_STATE_HOME;
+    stateDir = mkdtempSync(join(tmpdir(), 'zm-drift-state-'));
+    process.env.XDG_STATE_HOME = stateDir;
+    workDir = mkdtempSync(join(tmpdir(), 'zm-drift-work-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: workDir });
+    git('remote', 'add', 'origin', 'git@github.com:acme/memory-service.git');
+    git('commit', '-q', '--allow-empty', '-m', 'chore: start');
+    vi.mocked(callBuildContext).mockReset();
+  });
+
+  afterEach(() => {
+    if (previousState === undefined) {
+      delete process.env.XDG_STATE_HOME;
+    } else {
+      process.env.XDG_STATE_HOME = previousState;
+    }
+    rmSync(stateDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('names a landing git holds while the card still holds the branch open', async () => {
+    git(
+      'commit',
+      '-q',
+      '--allow-empty',
+      '-m',
+      'feat: the work',
+      '-m',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    const text = await briefSessionStart();
+    expect(text).toContain(
+      'ZM-19 "Cards know their branches" [active] on feature/x'
+    );
+    expect(text).toContain('- ZM-19 [active]: branch feature/x landed as');
+  });
+
+  it('names the open branch and nothing more while it has not landed', async () => {
+    const text = await briefSessionStart();
+    expect(text).toContain('[active] on feature/x');
+    expect(text).not.toContain('landed as');
   });
 });

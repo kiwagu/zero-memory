@@ -14,6 +14,8 @@ export const CARD_FAILURES = [
   'not_attached',
   'already_promoted',
   'invalid',
+  'branch_required',
+  'branch_open',
 ] as const;
 export type CardFailureCode = (typeof CARD_FAILURES)[number];
 
@@ -31,6 +33,12 @@ const DEFAULT_MESSAGE: Record<CardFailureCode, string> = {
   not_attached: 'Nothing is attached under that reference.',
   already_promoted: 'That loop already has a card.',
   invalid: 'The call is not a valid card command.',
+  branch_required:
+    'Work entering active needs its branch, or no_branch saying why it has ' +
+    'no code.',
+  branch_open:
+    'A branch is still open on this card: land it, or pass not_landed ' +
+    'saying why it has not landed.',
 };
 
 /** True when the string is one of the store's failure codes. */
@@ -62,13 +70,16 @@ export const toCardFailure = (
  * `archived`, `same_state`, `not_attached` and `already_promoted` all become
  * `conflict`: each one means the card exists and the caller may touch it, but
  * its current state refuses this particular call — which is exactly what
- * `conflict` says. The message keeps the specific reason.
+ * `conflict` says, and `branch_open` joins them for the same reason. The
+ * message keeps the specific reason. `branch_required` is a missing input,
+ * so it is `validation_failed` like any other.
  */
 export const cardFailureToErrorCode = (
   failure: CardFailure
 ): 'validation_failed' | 'not_found' | 'forbidden' | 'conflict' => {
   switch (failure.code) {
     case 'invalid':
+    case 'branch_required':
       return 'validation_failed';
     case 'not_found':
       return 'not_found';

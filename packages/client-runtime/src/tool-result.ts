@@ -49,6 +49,18 @@ export const toolErrorMessage = (result: unknown): string => {
   }
 };
 
+/** The taxonomy code of a FAILED tool result (`not_found`, …), or null. */
+export const toolErrorCode = (result: unknown): string | null => {
+  try {
+    const parsed = toolErrorSchema.safeParse(
+      JSON.parse(toolTextBlocks(result).join('\n'))
+    );
+    return parsed.success ? parsed.data.error.code : null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * The parsed JSON payload of a tool result — always its first text block.
  * Throws when there is no text content (a malformed result the caller should

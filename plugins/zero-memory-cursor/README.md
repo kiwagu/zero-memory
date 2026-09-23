@@ -28,6 +28,10 @@ plugins/zero-memory-cursor/
     (`user_message`) when the server is unreachable.
   - `preToolUse` (matcher `Grep|Glob`) → `nudge` — a once-per-session
     "recall first" reminder on code search (`agent_message`).
+  - `postToolUse` (matcher `Shell`) → `landing` — right after a shell command,
+    a squash whose board card has no record of its landing gets one line with
+    the exact `card` `land` call (`additional_context`; `afterShellExecution`
+    only observes, so it cannot carry the line).
   - `stop` → `ingest` — captures the new part of the session transcript into
     memory, labeled `cursor-stop-hook` in provenance.
   - `preCompact` → `checkpoint` — captures the epoch about to be condensed

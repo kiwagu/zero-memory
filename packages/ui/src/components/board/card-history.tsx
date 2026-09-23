@@ -23,6 +23,8 @@ interface CardHistoryEntry {
   actorLabel: string;
   timeLabel: string;
   reason?: string;
+  /** What the mover declared in place of the branch rule. */
+  declaration?: { label: string; text: string };
   /** An author's statement, with how it stands to the one it answers. */
   note?: { text: string; relationLabel?: string };
   /** What was attached or detached, as kind and target. */
@@ -68,6 +70,15 @@ function CardHistory({
                 {entry.reason}
               </Markdown>
             </div>
+          ) : null}
+
+          {entry.declaration ? (
+            <p className="text-sm" data-testid="card-declaration">
+              <span className="text-muted-foreground">
+                {entry.declaration.label}
+              </span>{' '}
+              {entry.declaration.text}
+            </p>
           ) : null}
 
           {entry.note ? (
