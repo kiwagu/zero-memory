@@ -65,12 +65,17 @@ describe('callCardBranches', () => {
     await new Promise<void>((resolve) => server!.listen(0, resolve));
     const { port } = server.address() as AddressInfo;
 
+    // The deadline has to outlast the initialize round trip, or it fires
+    // before the stalled request exists and the test proves nothing about it.
+    // A cold runner can take several hundred milliseconds for that first
+    // exchange, so the budget leaves room for it.
+    const deadlineMs = 1500;
     const started = Date.now();
     await expect(
-      callCardBranches('proj.x', 19, 300, `http://127.0.0.1:${port}/mcp`)
+      callCardBranches('proj.x', 19, deadlineMs, `http://127.0.0.1:${port}/mcp`)
     ).rejects.toThrow();
-    expect(Date.now() - started).toBeLessThan(2000);
+    expect(Date.now() - started).toBeLessThan(deadlineMs + 3000);
     expect(stalled).toBeGreaterThan(0);
     await expect.poll(() => stalledClosed).toBe(true);
-  });
+  }, 15_000);
 });
