@@ -63,9 +63,13 @@ export const recentSquashes = (
   count: number,
   sinceHours: number
 ): RecentSquash[] => {
+  // Only squash commits count toward the limit: ordinary work on another
+  // branch must not push a recent landing out of the window.
   const log = runGit(cwd, [
     'log',
     '--branches',
+    '-E',
+    '--grep=^Squashed-from: ',
     `-n${count}`,
     `--since=${sinceHours}.hours.ago`,
     '--format=%H%x1f%B%x1e',

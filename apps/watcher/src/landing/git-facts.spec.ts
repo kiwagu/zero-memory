@@ -131,6 +131,22 @@ describe('git facts', () => {
     ]);
   });
 
+  it('counts only squashes toward its limit, not ordinary work elsewhere', () => {
+    const squash = commit(
+      repo,
+      'q.txt',
+      'feat: landed',
+      'Squashed-from: feature/z (7654321) ZM-8'
+    );
+    git(repo, 'checkout', '-q', '-b', 'feature/busy');
+    for (let i = 0; i < 9; i += 1) {
+      commit(repo, `busy-${i}.txt`, `feat: ordinary work ${i}`);
+    }
+    expect(recentSquashes(repo, 8, 12).map((found) => found.sha)).toEqual([
+      squash,
+    ]);
+  });
+
   it('does not take a commit that only quotes a trailer for a landing', () => {
     commit(
       repo,
