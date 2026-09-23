@@ -124,6 +124,21 @@ describe('renderStandingRulesSection', () => {
     );
   });
 
+  it('keeps non-pinned rules inside the ceiling whenever their headlines fit', () => {
+    const rules = Array.from({ length: 8 }, (_, i) => ({
+      text: `Rule ${i} ${'r'.repeat(1_300)}`,
+      pinned: false,
+    }));
+    // The smallest this section can be: every rule by headline, plus footer.
+    const allHeadlines = renderStandingRulesSection(rules, 0)!.length;
+    for (let ceiling = allHeadlines; ceiling <= 12_000; ceiling += 97) {
+      expect(
+        renderStandingRulesSection(rules, ceiling)!.length,
+        `ceiling ${ceiling}`
+      ).toBeLessThanOrEqual(ceiling);
+    }
+  });
+
   it('carries the others in full while they fit and adds no footer when all do', () => {
     const section = renderStandingRulesSection(
       [

@@ -125,15 +125,37 @@ export const renderStandingRulesSection = (
   // push the section past its ceiling.
   let spent = header.length + footer(rules.length).length;
   let headlined = 0;
-  const lines = rules.map((rule, index) => {
+  const fulls = rules.map((rule, index) => {
     const pin = rule.pinned ? ' [pinned]' : '';
-    const full = `${index + 1}.${pin} ${rule.text}`;
-    if (rule.pinned || spent + full.length + 1 <= budgetChars) {
+    return `${index + 1}.${pin} ${rule.text}`;
+  });
+  const headlines = rules.map(
+    (rule, index) => `${index + 1}. ${ruleHeadline(rule.text)} [headline]`
+  );
+  // What every LATER rule will cost at the least — a pinned rule whole, any
+  // other by headline. A rule is admitted whole only if that is still left
+  // afterwards: admitting rules whole while they fit and then naming the rest
+  // past the ceiling let eight long unpinned rules overrun a default-budget
+  // briefing and push the memory pack out of it entirely.
+  const owedAfter = new Array<number>(rules.length).fill(0);
+  for (let index = rules.length - 2; index >= 0; index -= 1) {
+    const next = index + 1;
+    owedAfter[index] =
+      owedAfter[next]! +
+      (rules[next]!.pinned ? fulls[next]! : headlines[next]!).length +
+      1;
+  }
+  const lines = rules.map((rule, index) => {
+    const full = fulls[index]!;
+    if (
+      rule.pinned ||
+      spent + full.length + 1 + owedAfter[index]! <= budgetChars
+    ) {
       spent += full.length + 1;
       return full;
     }
     headlined += 1;
-    const headline = `${index + 1}. ${ruleHeadline(rule.text)} [headline]`;
+    const headline = headlines[index]!;
     spent += headline.length + 1;
     return headline;
   });
