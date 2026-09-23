@@ -7,10 +7,12 @@ import {
   filterBriefingPack,
   isEmptyPack,
   isSubstantivePrompt,
+  mergeBriefTail,
   mergeOpenLoops,
   mergeStandingRules,
   parseBriefingPack,
   planSectionBudgets,
+  planTailChunk,
   renderBoardSummary,
   renderOfflineBriefing,
   renderOpenLoopsSection,
@@ -21,24 +23,31 @@ import {
   splitOpenLoops,
   splitStandingRules,
   renderPackWithinBudget,
+  renderStarvedPackNotice,
+  type TailChunk,
+  type TrimmedPack,
 } from '@workspace/client-core';
 import {
   briefCacheDir,
   briefStatePath,
   clearBriefCache,
+  clearBriefTail,
   loadBriefState,
   markRulesDelivered,
   markTaskBriefed,
   projectScopeStatePath,
   readBriefCache,
+  readBriefTail,
   readProjectScope,
   readSessionThread,
+  recordBriefTail,
   recordProjectScope,
   recordSessionBriefing,
   recordSessionThread,
   stampSessionStart,
   writeBriefCache,
 } from '@workspace/client-runtime';
+import { buildContextOutputSchema } from '@workspace/contracts';
 import { createLogger } from '@workspace/logger';
 
 import { hookClient, type HookClient, type HookInput } from '../hook-client.js';
@@ -74,8 +83,16 @@ export type BriefMode = 'session-start' | 'task';
  * second lookup. */
 const TRUNK_BRANCHES = new Set(['main', 'dev', 'stage', 'master']);
 
-/** The composer's blank lines around the rules and loops, generously. */
-const SECTION_GAPS_CHARS = 8;
+/**
+ * What the composer charges beyond the sections' own text once every section
+ * is present: its `+2` for each of the lead line, the rules, the work section
+ * and the pack, plus the `\n\n` INSIDE the work section between the board and
+ * the loops. It used to be 8, which undercounted exactly that fully-loaded
+ * case: the loops were free to render two characters into the memory floor,
+ * and in a measurable set of shapes the pack was left one character short of
+ * it.
+ */
+const SECTION_GAPS_CHARS = 10;
 
 /**
  * The work section: the board's lines, then the loops no card there covers.
@@ -117,6 +134,29 @@ const briefCacheTtlDays = (): number => {
 const packProjectScope = (payload: unknown): string | null => {
   const scope = (payload as { project_scope?: unknown } | null)?.project_scope;
   return typeof scope === 'string' && scope.length > 0 ? scope : null;
+};
+
+/**
+ * How many memories a topic's SPLIT payload still carries — across the three
+ * legs a pack can arrive in (the ranked hits, the linked-memory stubs' own
+ * bodies, and the recency leg), after standing rules and open loops have
+ * already been drained out of it by `splitStandingRules`/`splitOpenLoops`.
+ * Used only to size a memory floor — the session-start briefing's PRIMARY
+ * topic, and the task briefing's one topic: a topic with nothing to say earns
+ * no floor, which is what keeps an empty project from getting a floor it will
+ * never use (and, downstream, from ever recording a tail).
+ * A payload that fails to parse (an older server, or the offline path) counts
+ * as zero rather than throwing — the floor then falls back to 0, same as
+ * before this change, which is the safe direction to fail in.
+ */
+const countPackMemories = (payload: unknown): number => {
+  const parsed = buildContextOutputSchema.safeParse(payload);
+  if (!parsed.success) return 0;
+  return (
+    parsed.data.memories.length +
+    parsed.data.linked_memories.length +
+    parsed.data.recent.length
+  );
 };
 
 /**
@@ -422,27 +462,48 @@ const runSessionStart = async (
   // full, the others in full while they fit and by headline after. The loops
   // then render against what the rules actually used, TRIMMED with the rest
   // counted rather than dropped whole by the composer below.
+  //
+  // The rules ceiling ALSO makes room for a memory floor now — measured on
+  // this project, a briefing whose rules ran long enough gave the pack
+  // NOTHING (not even a stub), which is silent for a session-start briefing:
+  // the agent is never told a pack existed at all. `splits[0]` is the PRIMARY
+  // topic (the project, not the branch), so its memory count is what sizes
+  // the floor; a project with nothing in it earns no floor to fight for.
   const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
   // The work section is the project board's lines plus the open loops no
   // card there covers; it holds the floor whenever either is present.
   const boardBlock = merged.work ? renderBoardSummary(merged.work) : null;
+  const projectPack = splits[0];
+  const projectMemories = countPackMemories(projectPack?.split.payload);
   const plan = planSectionBudgets(
     budget,
     projectLine?.length ?? 0,
-    merged.loops.length > 0 || boardBlock !== null
+    merged.loops.length > 0 || boardBlock !== null,
+    projectMemories
   );
   const rulesSection = renderStandingRulesSection(rules, plan.rules);
   const loopSection = renderOpenLoopsSection(
     merged.loops,
     merged.total,
     new Date(),
+    // `plan.memoryFloor` is held on PAPER by the smaller rules ceiling
+    // above, but the loops render against whatever is left AFTER rules —
+    // nothing before this subtracted the floor here too, so a rules block
+    // short enough to leave room did not stop the loops from spending that
+    // same room anyway. Measured: with only one topic, the loops' own
+    // budget has no ceiling of its own, so an abundant loop supply fills
+    // it completely — eating the floor the pack was promised before the
+    // pack ever gets a budget to render against. Pinned rules still
+    // outrank both floors (they are exempt from the ceiling above), same
+    // as today.
     Math.max(
       0,
       budget -
         (projectLine?.length ?? 0) -
         (rulesSection?.length ?? 0) -
         (boardBlock?.length ?? 0) -
-        SECTION_GAPS_CHARS
+        SECTION_GAPS_CHARS -
+        plan.memoryFloor
     )
   );
   const workSection = joinWorkSection(boardBlock, loopSection);
@@ -453,20 +514,81 @@ const runSessionStart = async (
   // believing it was briefed. Compose in priority order and let the pack, not
   // the rules or the loops, be what gives way: the pack is one build_context
   // call from the agent, the standing rules are not.
+  // `composeWithinBudget` below charges EVERY section it keeps — this one
+  // included — `text.length + 2` for the `\n\n` join it will cost once
+  // joined to its neighbours (even the leading section, which is exempt
+  // from being DROPPED for size but still pays this same +2 into the
+  // running spend every later section's own fit-check reads). A pool
+  // computed from the raw section lengths alone therefore overstates what
+  // is truly left for the packs by 2 characters per leading section that
+  // exists — small on its own, but it compounds with the same omission
+  // below for the packs themselves into a pack that measured itself as
+  // fitting its OWN budget (`renderPackWithinBudget`'s own guarantee) and
+  // still came out too long once the composer's join costs were added,
+  // which the composer answers by dropping that pack WHOLESALE rather than
+  // giving it stubs.
   const spentBySections =
-    (projectLine?.length ?? 0) +
-    (rulesSection?.length ?? 0) +
-    (workSection?.length ?? 0);
-  const perTopicBudget = Math.max(
+    (projectLine ? projectLine.length + 2 : 0) +
+    (rulesSection ? rulesSection.length + 2 : 0) +
+    (workSection ? workSection.length + 2 : 0);
+  // The packs divide what's left AFTER also setting aside the composer's
+  // own `+2` for EACH pack section that will exist — the other half of the
+  // same accounting the comment above describes, this time for sections
+  // this function is about to create rather than ones it already has.
+  const remainingChannelBudget = Math.max(
     0,
-    Math.floor((budget - spentBySections) / Math.max(splits.length, 1))
+    budget - spentBySections - 2 * splits.length
   );
-  const packs = splits.map((section) => ({
+  const evenShare = Math.max(
+    0,
+    Math.floor(remainingChannelBudget / Math.max(splits.length, 1))
+  );
+  // The PRIMARY pack (index 0, the project topic) never renders under less
+  // than its floor, even when the even split above would give it less — the
+  // whole point of reserving `plan.memoryFloor` in the rules ceiling. The
+  // floor is CHARGED to the split rather than added on top of the even
+  // share: an earlier version bumped index 0 up to the floor without taking
+  // the difference from anywhere, so with two topics and a floor bigger than
+  // the even share the packs together could be handed more than
+  // `remainingChannelBudget` actually holds — and `composeWithinBudget`,
+  // which enforces the real channel limit afterwards in strict priority
+  // order, would then drop the SECOND pack wholesale (an omission line)
+  // rather than give it stubs, exactly the silent loss this floor exists to
+  // prevent for the first one. Charging it instead means every other topic
+  // (the branch pack) divides whatever is left once the primary's floor is
+  // honoured — never more than the pool the even split came from.
+  //
+  // And the primary itself never gets more than the whole pool. When pinned
+  // rules or a small channel leave less than the floor, a pack budgeted past
+  // the pool renders a stub list the composer then drops WHOLE — an omission
+  // line in place of what the pool could have held. For one memory the
+  // floor now seats the stub block itself (its intro and "+N more" line), so
+  // without this cap a pool between the starved notice and one stub lost
+  // even the notice. With one topic the pool IS the even share, so this
+  // makes the bump a no-op there; the floor is held upstream by the rules
+  // ceiling and the loops budget.
+  const primaryBudget = Math.min(
+    Math.max(evenShare, plan.memoryFloor),
+    remainingChannelBudget
+  );
+  const otherTopicsCount = Math.max(splits.length - 1, 0);
+  const otherBudget =
+    otherTopicsCount > 0
+      ? Math.max(
+          0,
+          Math.floor(
+            (remainingChannelBudget - primaryBudget) / otherTopicsCount
+          )
+        )
+      : 0;
+  const packBudget = (index: number): number =>
+    index === 0 ? primaryBudget : otherBudget;
+  const packs = splits.map((section, index) => ({
     topic: section.topic,
     trimmed: renderPackWithinBudget(
       section.topic,
       section.split.payload,
-      perTopicBudget
+      packBudget(index)
     ),
   }));
 
@@ -478,9 +600,15 @@ const runSessionStart = async (
       { name: 'the project line', text: projectLine },
       { name: 'the standing rules', text: rulesSection },
       { name: 'the work in progress', text: workSection },
+      // A starved pack (memories existed but rendered nothing — not even a
+      // stub) says so instead of contributing silence: silence here reads as
+      // "this topic has no memories", which is a different — and false —
+      // claim from "the memories didn't fit this channel this time".
       ...packs.map(({ topic, trimmed }) => ({
         name: `the "${topic}" pack`,
-        text: trimmed.text || null,
+        text: trimmed.starved
+          ? renderStarvedPackNotice(topic, trimmed.remaining.length)
+          : trimmed.text || null,
       })),
     ],
     budget
@@ -508,6 +636,70 @@ const runSessionStart = async (
       // ignore: dedup degrades gracefully, the briefing still ships.
     }
   }
+  // Settle this window's tail — what a stub above merely named, the per-message
+  // drain still owes the agent in full. Every pack's leftovers join it, the
+  // primary's first: the floor is the primary pack's, but the promise that
+  // the rest arrives by itself is every pack's, and a starved branch pack
+  // says so too. Whatever ANY pack delivered whole leaves it — the branch
+  // pack can deliver what the project pack only named. And a resumed session
+  // start merges into the queue it already has instead of replacing it: a
+  // replacement would drop what was still owed, or re-send what just arrived.
+  // (A compaction has already emptied the queue by the time this runs.) An
+  // empty project records no tail at all: "nothing to say" and "did not fit"
+  // are different claims. Best-effort, same as `recordSessionBriefing` above —
+  // a state problem must never sink a briefing that already shipped.
+  if (sessionId && projectPack) {
+    try {
+      const statePath = briefStatePath();
+      const queued = readBriefTail(statePath, sessionId);
+      // Everything this WINDOW has already received whole, not only what this
+      // invocation delivered: on a resume, a memory an earlier briefing of the
+      // same window delivered can come back as another pack's leftover, and
+      // must not be queued for a second delivery. (A compaction clears this
+      // record, so a new window is owed everything again.)
+      const received = [
+        ...(loadBriefState(statePath)[sessionId]?.injected_ids ?? []),
+        ...packs.flatMap(({ trimmed }) => trimmed.deliveredIds),
+      ];
+      const memories = mergeBriefTail(
+        queued?.memories ?? [],
+        received,
+        packs.flatMap(({ trimmed }) => trimmed.remaining)
+      );
+      const queuedIds = new Set(
+        (queued?.memories ?? []).map((memory) => memory.id)
+      );
+      const kept = new Set(memories.map((memory) => memory.id));
+      // The label and the snapshot time describe what the queue now HOLDS. An
+      // older queue lends its label and its (earlier, so conservative) time
+      // only while one of its own items is still in it; a queue that drained
+      // completely says nothing about the memories that replace it.
+      const retainsQueued = memories.some((memory) => queuedIds.has(memory.id));
+      const newTopics = packs
+        .filter(({ trimmed }) =>
+          trimmed.remaining.some(
+            (memory) => kept.has(memory.id) && !queuedIds.has(memory.id)
+          )
+        )
+        .map(({ topic }) => topic);
+      const labels = new Set([
+        ...(retainsQueued && queued ? queued.topic.split(', ') : []),
+        ...newTopics,
+      ]);
+      if (memories.length > 0) {
+        recordBriefTail(statePath, sessionId, {
+          topic: [...labels].join(', ') || projectPack.topic,
+          memories,
+          takenAt:
+            retainsQueued && queued ? queued.takenAt : new Date().toISOString(),
+        });
+      } else if (queued) {
+        clearBriefTail(statePath, sessionId);
+      }
+    } catch {
+      // ignore: the tail is an improvement, it must never sink a briefing.
+    }
+  }
   // Record the rules as delivered INTO THIS WINDOW only once they are actually
   // in the emitted body: the task hook skips its own copy on that record, and
   // a briefing that failed or fell back to the offline cache never reaches
@@ -523,9 +715,129 @@ const runSessionStart = async (
 };
 
 /**
- * Task briefing: on the FIRST substantive prompt of a session, brief the agent
- * on the task at hand (the prompt becomes the build_context topic). One per
- * session, deduped against the ids the SessionStart briefing already injected.
+ * What one tail chunk may spend on a message that carries nothing else but
+ * the banner: the channel, less the banner and the `+2` join the composer
+ * charges every section it keeps — the banner's, and the chunk's own. Such a
+ * message is joined by `emit` rather than the composer, but it is held to
+ * the same accounting, so no message this hook sends can outgrow the channel.
+ */
+const tailChunkBudget = (banner: string | null): number =>
+  resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS) -
+  (banner ? banner.length + 2 : 0) -
+  2;
+
+/**
+ * THE TAIL, DELIVERED: one chunk of what this window's first briefing could
+ * not fit, taken from the session state — no server call — with the queue
+ * shrunk by exactly what the chunk carried. It rides on the messages that
+ * build no briefing of their own: short replies, and every message once the
+ * task briefing has run. That is nearly all of them, since a window builds at
+ * most one task briefing, and that one message carries its own pack instead
+ * — ONE memory payload per message, never a pack and a chunk side by side.
+ *
+ * The queue is written BEFORE the chunk is handed back for sending, and a
+ * failed write sends nothing: a queue that cannot shrink would otherwise hand
+ * every later message the same memory again. The record of what arrived whole
+ * comes after — the queue has already moved on by then, so failing there
+ * costs at most a later task briefing repeating that one memory, never the
+ * memory itself. Every step is best-effort: a state problem costs a message
+ * its chunk, never its banner.
+ */
+const drainTailChunk = (
+  statePath: string,
+  sessionId: string,
+  budgetChars: number
+): string | null => {
+  let chunk: TailChunk;
+  try {
+    const tail = readBriefTail(statePath, sessionId);
+    if (!tail) return null;
+    const planned = planTailChunk(tail, budgetChars);
+    if (!planned) {
+      // An empty queue left on disk: drop it so later messages stop reading it.
+      clearBriefTail(statePath, sessionId);
+      return null;
+    }
+    // Not even a stub fits beside this banner: the queue waits, untouched.
+    if (!planned.text) return null;
+    if (planned.remaining.length > 0) {
+      recordBriefTail(statePath, sessionId, {
+        ...tail,
+        memories: planned.remaining,
+      });
+    } else {
+      clearBriefTail(statePath, sessionId);
+    }
+    chunk = planned;
+  } catch {
+    return null;
+  }
+  if (chunk.deliveredIds.length > 0) {
+    try {
+      recordSessionBriefing(statePath, sessionId, chunk.deliveredIds);
+    } catch {
+      // ignore: dedup degrades gracefully, the chunk still ships.
+    }
+  }
+  return chunk.text;
+};
+
+/**
+ * Settles this window's tail against the one message that builds a task
+ * briefing. That message carries no chunk — its pack carries the memories —
+ * so the pack's outcome is written back instead: what it delivered WHOLE is
+ * recorded as injected and leaves the queue, and what it left over joins the
+ * queue. That is what makes its starved notice's "they arrive in the next
+ * messages" true, and when this is the window's first briefing (the
+ * session-start one failed, or a compaction just opened the window) it is
+ * where the tail begins.
+ *
+ * A tail that already exists keeps its topic and its snapshot time. Once the
+ * queue mixes two snapshots, the earlier moment is the honest one to state:
+ * the later one would claim the older memories are fresher than they are.
+ * Best-effort throughout — the briefing has already shipped.
+ */
+const settleTailAfterTaskBriefing = (
+  statePath: string,
+  sessionId: string,
+  topic: string,
+  pack: TrimmedPack
+): void => {
+  if (pack.deliveredIds.length > 0) {
+    try {
+      recordSessionBriefing(statePath, sessionId, pack.deliveredIds);
+    } catch {
+      // ignore: dedup degrades gracefully, the briefing already shipped.
+    }
+  }
+  try {
+    const tail = readBriefTail(statePath, sessionId);
+    const memories = mergeBriefTail(
+      tail?.memories ?? [],
+      pack.deliveredIds,
+      pack.remaining
+    );
+    if (memories.length > 0) {
+      recordBriefTail(statePath, sessionId, {
+        topic: tail?.topic ?? topic,
+        memories,
+        takenAt: tail?.takenAt ?? new Date().toISOString(),
+      });
+    } else if (tail) {
+      clearBriefTail(statePath, sessionId);
+    }
+  } catch {
+    // ignore: the tail is an improvement, it must never sink a briefing.
+  }
+};
+
+/**
+ * The per-message hook. On the FIRST substantive prompt of a context window it
+ * builds the task briefing — the project's pack, deduped against the ids the
+ * SessionStart briefing already injected; the prompt itself only decides
+ * whether this is that message. Every other message carries the banner and
+ * the next chunk of the window's tail, so what the first briefing could not
+ * fit arrives without the agent asking.
  */
 const runTask = async (
   adapter: HookClient,
@@ -560,6 +872,16 @@ const runTask = async (
     const context = sections.filter(Boolean).join('\n\n');
     if (context) adapter.emitTaskBrief(context);
   };
+  // Every return below that builds no briefing carries the next chunk of this
+  // window's tail beside the banner: a short reply, an already-briefed
+  // session, a server that could not be reached, and a pack that dedup
+  // emptied. None of them carries a memory payload of its own, and the tail is
+  // local, so the offline case is exactly where it still arrives. All of them
+  // sit behind `runBrief`'s ignore check: an ignored project gets no drain.
+  const drain = (): string | null =>
+    sessionId
+      ? drainTailChunk(statePath, sessionId, tailChunkBudget(banner))
+      : null;
 
   // The acknowledgement stop-list defaults to English; ZM_ACK_WORDS lets the
   // operator add their language's confirmations (no language bias in the core).
@@ -570,14 +892,16 @@ const runTask = async (
       resolveAcknowledgementWords(process.env.ZM_ACK_WORDS)
     )
   ) {
-    emit(banner);
-    return 'not-substantive';
+    const chunk = drain();
+    emit(banner, chunk);
+    return chunk ? 'not-substantive+tail-chunk' : 'not-substantive';
   }
 
   const session = loadBriefState(statePath)[sessionId];
   if (session?.task_briefed) {
-    emit(banner);
-    return 'already-briefed';
+    const chunk = drain();
+    emit(banner, chunk);
+    return chunk ? 'already-briefed+tail-chunk' : 'already-briefed';
   }
 
   // The prompt itself never leaves the machine: it is human text in the user's
@@ -606,8 +930,9 @@ const runTask = async (
     });
   } catch (error) {
     // The per-message identity is independent of server health. Preserve it
-    // even when the fresh task briefing cannot be fetched.
-    emit(banner);
+    // even when the fresh task briefing cannot be fetched — and the tail with
+    // it. The task briefing stays owed: the next substantive message retries.
+    emit(banner, drain());
     throw error;
   }
   const pack = parseBriefingPack(payload);
@@ -647,8 +972,9 @@ const runTask = async (
 
   const filtered = filterBriefingPack(pack, session?.injected_ids ?? []);
   if (isEmptyPack(filtered)) {
-    emit(banner);
-    return 'empty-after-dedup';
+    const chunk = drain();
+    emit(banner, chunk);
+    return chunk ? 'empty-after-dedup+tail-chunk' : 'empty-after-dedup';
   }
 
   // Loops the session-start briefing already showed are filtered out above;
@@ -668,14 +994,29 @@ const runTask = async (
   // Same channel budget as the session-start briefing, and for the same
   // reason: this hook fires on a user message, where an over-long payload is
   // spilled to a file and the turn proceeds on a preview. And the same split:
-  // the loops are held a floor, the rules get a ceiling.
+  // the loops are held a floor, the rules get a ceiling, and the pack is held
+  // a memory floor the rules ceiling makes room for. This path needs the
+  // floor as much as the session-start one: whenever that briefing failed, or
+  // a compaction just opened a new window, THIS is the window's first
+  // briefing — and without the floor a long rules block left its pack
+  // nothing at all.
   const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
-  const leadChars = (banner?.length ?? 0) + TASK_LOOKUP_INSTRUCTION.length;
+  // The lead is TWO sections here — the banner and the task-lookup line —
+  // where the session-start briefing has one project line, and the composer
+  // charges each its own `+2`. SECTION_GAPS_CHARS below counts one lead join,
+  // so the banner's is counted here, with the banner.
+  const leadChars =
+    (banner ? banner.length + 2 : 0) + TASK_LOOKUP_INSTRUCTION.length;
   const boardBlock = split.work ? renderBoardSummary(split.work) : null;
+  // Counted on the payload the pack renders from — after dedup against the
+  // session-start briefing and after the rules and loops were split out — so
+  // the floor sizes to what this pack can actually name.
+  const packMemories = countPackMemories(split.payload);
   const plan = planSectionBudgets(
     budget,
     leadChars,
-    split.loops.length > 0 || boardBlock !== null
+    split.loops.length > 0 || boardBlock !== null,
+    packMemories
   );
   const rulesSection = rulesNeedDelivery({
     epoch: session?.epoch ?? 0,
@@ -689,26 +1030,41 @@ const runTask = async (
     split.loops,
     split.total,
     new Date(),
+    // The floor is held on paper by the smaller rules ceiling, but the loops
+    // render against what is left AFTER the rules, so they must give it up
+    // here too — measured on the session-start path, an abundant loop supply
+    // otherwise fills the whole remainder and the pack never gets a budget
+    // to render against. Pinned rules still outrank both floors.
     Math.max(
       0,
       budget -
         leadChars -
         (rulesSection?.length ?? 0) -
         (boardBlock?.length ?? 0) -
-        SECTION_GAPS_CHARS
+        SECTION_GAPS_CHARS -
+        plan.memoryFloor
     )
   );
   const workSection = joinWorkSection(boardBlock, loopSection);
+  // The pack gets what the composer will actually leave it: every section it
+  // keeps is charged `text.length + 2`, the pack's own included. The pool
+  // used to be the budget minus the banner, rules and work alone — it forgot
+  // the task-lookup line and every join, so a pack that filled its own
+  // budget came out up to 166 characters too long and the composer dropped it
+  // whole. One topic, so no bump to the floor on top of this: the pool is
+  // the whole remainder, the floor is held upstream by the rules ceiling and
+  // the loops budget, and asking for more than the pool only buys a pack the
+  // composer then drops.
+  const spentBySections =
+    (banner ? banner.length + 2 : 0) +
+    TASK_LOOKUP_INSTRUCTION.length +
+    2 +
+    (rulesSection ? rulesSection.length + 2 : 0) +
+    (workSection ? workSection.length + 2 : 0);
   const trimmed = renderPackWithinBudget(
     projectTopic,
     split.payload,
-    Math.max(
-      0,
-      budget -
-        (banner?.length ?? 0) -
-        (rulesSection?.length ?? 0) -
-        (workSection?.length ?? 0)
-    )
+    Math.max(0, budget - spentBySections - 2)
   );
   const composed = composeWithinBudget(
     [
@@ -716,11 +1072,20 @@ const runTask = async (
       { name: 'the task-lookup instruction', text: TASK_LOOKUP_INSTRUCTION },
       { name: 'the standing rules', text: rulesSection },
       { name: 'the work in progress', text: workSection },
-      { name: 'the memory pack', text: trimmed.text || null },
+      // A starved pack (memories existed, not one line fit) says so: silence
+      // would read as "this project has no memories", a different and false
+      // claim from "they did not fit this channel this time".
+      {
+        name: 'the memory pack',
+        text: trimmed.starved
+          ? renderStarvedPackNotice(projectTopic, trimmed.remaining.length)
+          : trimmed.text || null,
+      },
     ],
     budget
   );
   emit(composed.text);
+  settleTailAfterTaskBriefing(statePath, sessionId, projectTopic, trimmed);
   return 'delivered';
 };
 

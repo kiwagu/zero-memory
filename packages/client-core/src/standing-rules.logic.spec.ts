@@ -124,6 +124,45 @@ describe('renderStandingRulesSection', () => {
     );
   });
 
+  it('keeps non-pinned rules inside the ceiling whenever their headlines fit', () => {
+    const rules = Array.from({ length: 8 }, (_, i) => ({
+      text: `Rule ${i} ${'r'.repeat(1_300)}`,
+      pinned: false,
+    }));
+    // The smallest this section can be: every rule by headline, plus footer.
+    const allHeadlines = renderStandingRulesSection(rules, 0)!.length;
+    for (let ceiling = allHeadlines; ceiling <= 12_000; ceiling += 97) {
+      expect(
+        renderStandingRulesSection(rules, ceiling)!.length,
+        `ceiling ${ceiling}`
+      ).toBeLessThanOrEqual(ceiling);
+    }
+  });
+
+  it('does not shorten a rule that fits whole alongside a short rule after it', () => {
+    // A short rule's headline, with its marker, is LONGER than the rule
+    // itself — so reserving later rules at headline size would shorten an
+    // earlier rule that fits whole with room for the rest.
+    const long = `Use explicit error handling: ${'x'.repeat(400)}`;
+    const rules = [
+      { text: long, pinned: false },
+      { text: 'Use Bun', pinned: false },
+    ];
+    // The renderer reserves its widest footer up front and counts a newline
+    // after every line, the last included, so "both whole" is promised from
+    // the ceiling that also holds those — the same point at which the renderer
+    // delivered both whole before it reserved room for later rules.
+    const footer = /\n\(\d+ rule\(s\) above[^\n]*$/.exec(
+      renderStandingRulesSection(rules, 0)!
+    )![0];
+    const floor = renderStandingRulesSection(rules)!.length + footer.length + 1;
+    for (let ceiling = floor; ceiling <= floor + 120; ceiling += 1) {
+      const section = renderStandingRulesSection(rules, ceiling)!;
+      expect(section, `ceiling ${ceiling}`).toContain(long);
+      expect(section, `ceiling ${ceiling}`).toContain('2. Use Bun');
+    }
+  });
+
   it('carries the others in full while they fit and adds no footer when all do', () => {
     const section = renderStandingRulesSection(
       [

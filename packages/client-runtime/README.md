@@ -35,6 +35,13 @@ per-client differences (event map, output frame, transcript source) live in the
   open at once, so a token kept per repository is overwritten by whichever
   session briefed last and the others begin quoting a conversation that is not
   theirs. A session with no token of its own renders the project line alone.
+  It also holds the current window's briefing TAIL (`recordBriefTail` /
+  `readBriefTail` / `clearBriefTail`): the `BriefTail` queue
+  (`@workspace/client-core`) of memories the first briefing of the epoch could
+  not fit, drained one per later message. Like `rules_epoch`, the tail is
+  per-window — `stampSessionStart` drops it on the same epoch boundary that
+  un-delivers the rules, so a window that lost its context gets a fresh
+  briefing rather than the previous window's leftovers.
 - `project-scope.state.ts` — the resolved project scope per repo root
   (`project-scopes.json`): the client half of the project handshake, so a later
   session (and the offline briefing) opens with the trusted project identity

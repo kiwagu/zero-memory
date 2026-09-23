@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import type { BriefTail } from '@workspace/client-core';
 import { startsNewEpoch } from '@workspace/client-core';
 
 /**
@@ -52,6 +53,16 @@ export interface SessionBriefState {
    * one, which is the honest state to render (no token beats a wrong one).
    */
   thread?: string;
+  /**
+   * The remainder of this window's first briefing — what did not fit and is
+   * still queued to ride along with later messages, one memory per message,
+   * until `planTailChunk` (client-core) drains it. It is a property of the
+   * context WINDOW, not of the session as a whole: `stampSessionStart` drops
+   * it exactly where it drops `rules_epoch`, on an epoch boundary, because a
+   * window that lost its context earns a fresh briefing, not the previous
+   * window's leftovers.
+   */
+  tail?: BriefTail;
   /** Last update (epoch ms) — the pruning key. */
   at: number;
 }
@@ -71,7 +82,16 @@ export const briefStatePath = (env: NodeJS.ProcessEnv = process.env): string =>
 
 export const loadBriefState = (path: string): BriefStateFile => {
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as BriefStateFile;
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    // Every reader indexes the result by session id and every writer assigns
+    // into it, so a file that parses to anything but a plain object — a
+    // literal `null`, an array, a string — would throw on every hook of every
+    // session. It is treated as the empty state it effectively is.
+    return typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+      ? (parsed as BriefStateFile)
+      : {};
   } catch {
     return {};
   }
@@ -89,14 +109,17 @@ const saveBriefState = (path: string, state: BriefStateFile): void => {
  * The optional fields every writer must carry over, in ONE place. Each writer
  * rebuilds the whole entry, so a field listed in only some of them is silently
  * dropped by the others — that is how a session loses state it never gave up.
- * `keepRulesEpoch: false` is the one deliberate exception (a new context window
- * un-delivers the rules).
+ * `keepWindowState: false` is the one deliberate exception: at an epoch
+ * boundary, every field scoped to the outgoing context window — currently
+ * `rules_epoch` and `tail` — is dropped rather than carried over, while
+ * everything else here still is. A future writer adding a THIRD per-window
+ * field belongs on this same flag, not a new parameter.
  */
 const preserved = (
   existing: SessionBriefState | undefined,
-  keepRulesEpoch = true
+  keepWindowState = true
 ): Partial<SessionBriefState> => ({
-  ...(keepRulesEpoch &&
+  ...(keepWindowState &&
     existing?.rules_epoch !== undefined && {
       rules_epoch: existing.rules_epoch,
     }),
@@ -104,6 +127,8 @@ const preserved = (
     started_at: existing.started_at,
   }),
   ...(existing?.thread !== undefined && { thread: existing.thread }),
+  ...(keepWindowState &&
+    existing?.tail !== undefined && { tail: existing.tail }),
 });
 
 /**
@@ -239,5 +264,69 @@ export const markTaskBriefed = (
     ...preserved(existing),
     at: now,
   };
+  saveBriefState(path, state);
+};
+
+/**
+ * Records the remainder of this window's first briefing — the queue
+ * `planTailChunk` (client-core) hands back one memory at a time on every
+ * later message. This is the only writer that sets `tail`; every other
+ * writer in this file must carry it forward untouched, which is what
+ * `preserved()` is for.
+ */
+export const recordBriefTail = (
+  path: string,
+  sessionId: string,
+  tail: BriefTail,
+  now: number = Date.now()
+): void => {
+  const state = loadBriefState(path);
+  const existing = state[sessionId];
+  state[sessionId] = {
+    injected_ids: existing?.injected_ids ?? [],
+    task_briefed: existing?.task_briefed ?? false,
+    epoch: existing?.epoch ?? 0,
+    ...preserved(existing),
+    tail,
+    at: now,
+  };
+  saveBriefState(path, state);
+};
+
+/**
+ * This window's queued briefing remainder, or null while none is queued.
+ * Guards the shape cheaply (an array `memories`) rather than trusting the
+ * disk outright — the file's own precedent, `readSessionThread` above,
+ * already does this for `thread`. A stale write from an older watcher or a
+ * truncated save could otherwise hand back a `tail` with no `memories`, and
+ * the per-message drain would throw on every message of that session
+ * instead of just skipping a queue that was never really there.
+ */
+export const readBriefTail = (
+  path: string,
+  sessionId: string
+): BriefTail | null => {
+  const tail = loadBriefState(path)[sessionId]?.tail;
+  return Array.isArray(tail?.memories) ? tail : null;
+};
+
+/**
+ * Drops the queued remainder once it has drained to nothing — called by the
+ * per-message hook when a chunk takes the last memory, or when a briefing's
+ * pack leaves nothing queued. Rebuilding the entry without `tail` (rather
+ * than routing it through `preserved()`) is deliberate here: this writer's
+ * entire job is to make that one field stop being carried forward, so it
+ * must not re-add the field it exists to drop.
+ */
+export const clearBriefTail = (
+  path: string,
+  sessionId: string,
+  now: number = Date.now()
+): void => {
+  const state = loadBriefState(path);
+  const existing = state[sessionId];
+  if (!existing) return;
+  const { tail: _tail, ...rest } = existing;
+  state[sessionId] = { ...rest, at: now };
   saveBriefState(path, state);
 };
