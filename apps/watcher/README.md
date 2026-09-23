@@ -139,12 +139,17 @@ drains one memory per message, in the server's rank order, with no server call
 the queue with the window.
 
 `landing` runs after every shell command and nearly always ends after one git
-read. It looks at the newest commits of the repository the command ran in (a
-release commit made by the same command may sit on top of the squash), and
-asks the board only about a squash that names a card and was not checked yet.
-What each check found is kept in
+read. It looks at the newest commits on every local branch of the repository
+the command ran in — a release commit made by the same command may sit on top
+of the squash, and a squash made from another worktree lands on a branch this
+one has not checked out — and asks the board only about a squash that names a
+card and was not checked yet. The reminder names the branch the squash landed
+on (the remote's default branch or the usual trunk names first), not whatever
+is checked out afterwards. What each check found is kept in
 `$XDG_STATE_HOME/zero-memory/landing-checks.json`, so a landing is reminded
-about once; a check the server could not answer is retried after ten minutes.
+about once. A lookup is bounded to five seconds and recorded as a failed
+attempt before it starts, so a server that is down or stalls is retried only
+after ten minutes, never on every command.
 It needs the project this repository was briefed as, so a repository no
 session has briefed yet stays silent. `brief session-start` adds the other
 half: when a branch the board still holds open has already landed in the local

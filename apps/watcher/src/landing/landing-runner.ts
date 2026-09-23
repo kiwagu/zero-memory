@@ -16,7 +16,12 @@ import { createLogger } from '@workspace/logger';
 
 import { hookClient, type HookClient } from '../hook-client.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
-import { findLanding, readGitFacts, recentSquashes } from './git-facts.js';
+import {
+  findLanding,
+  landingTarget,
+  readGitFacts,
+  recentSquashes,
+} from './git-facts.js';
 
 const logger = createLogger('landing');
 
@@ -26,11 +31,36 @@ const LOOKBACK_COMMITS = 8;
 const FRESH_HOURS = 12;
 /** Open branches a briefing checks against git, at most. */
 const DRIFT_BRANCHES = 10;
+/**
+ * How long one card lookup may take. The hook runs inside the client's own
+ * timeout (Hermes allows 20 s, Claude Code 60 s), and a stalled server must
+ * not use it up — let alone on every command after it.
+ */
+const LANDING_LOOKUP_TIMEOUT_MS = 5000;
+
+/** Reject when `promise` has not settled in `ms`. */
+const within = <T>(promise: Promise<T>, ms: number): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`no answer within ${ms} ms`)),
+      ms
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    );
+  });
 
 /**
  * `landing` — the check that runs right after a shell command.
  *
- * It looks at the last few commits of the repository the command ran in. A
+ * It looks at the newest commits of the repository the command ran in. A
  * squash whose trailer names a board card (`ZM-N`, or the earlier `#N`) and
  * that this machine has not checked yet is looked up on the board; if the
  * card has no record of that landing, one line tells the agent exactly what
@@ -42,15 +72,15 @@ const DRIFT_BRANCHES = 10;
  * Never throws: a hook must not break the session it observes.
  */
 export const runLanding = async (
-  adapter: HookClient = hookClient()
+  adapter: HookClient = hookClient(),
+  options: { lookupTimeoutMs?: number } = {}
 ): Promise<void> => {
+  const lookupTimeoutMs = options.lookupTimeoutMs ?? LANDING_LOOKUP_TIMEOUT_MS;
   try {
     const input = await adapter.readInput();
-    const facts = readGitFacts(input.cwd);
-    if (!facts || facts.head === null) return;
-
+    // One git read decides almost every run: no fresh squash, nothing to do.
     const statePath = landingCheckStatePath();
-    const due = recentSquashes(facts.root, LOOKBACK_COMMITS, FRESH_HOURS)
+    const due = recentSquashes(input.cwd, LOOKBACK_COMMITS, FRESH_HOURS)
       .flatMap(({ sha, trailers }) =>
         trailers.flatMap((trailer) =>
           trailer.cards.map((number) => ({
@@ -63,6 +93,8 @@ export const runLanding = async (
       )
       .filter((item) => landingCheckDue(statePath, item.key));
     if (due.length === 0) return;
+    const facts = readGitFacts(input.cwd);
+    if (!facts) return;
 
     const scope = readProjectScope(
       projectScopeStatePath(),
@@ -77,8 +109,15 @@ export const runLanding = async (
 
     const reminders: string[] = [];
     for (const item of due) {
+      // Recorded as a failed attempt BEFORE asking: a process the host kills
+      // mid-request then leaves the pause behind instead of nothing, and the
+      // next command does not stall on the same squash.
+      recordLandingCheck(statePath, item.key, 'error');
       try {
-        const found = await callCardBranches(scope, item.number);
+        const found = await within(
+          callCardBranches(scope, item.number, lookupTimeoutMs),
+          lookupTimeoutMs
+        );
         if (!found.card) {
           recordLandingCheck(statePath, item.key, 'no-card');
           continue;
@@ -94,6 +133,11 @@ export const runLanding = async (
           recordLandingCheck(statePath, item.key, 'recorded');
           continue;
         }
+        const target =
+          landingTarget(facts.root, item.sha, item.branch) ?? facts.head;
+        if (target === null) {
+          continue;
+        }
         // Marked BEFORE the line is emitted: a reminder nobody saw costs less
         // than one that repeats on every command.
         recordLandingCheck(statePath, item.key, 'reminded');
@@ -104,11 +148,10 @@ export const runLanding = async (
             repo: facts.identity,
             branch: item.branch,
             squashSha: item.sha,
-            target: facts.head,
+            target,
           })
         );
       } catch (error) {
-        recordLandingCheck(statePath, item.key, 'error');
         logger.warn('landing check could not ask the board', {
           error: String(error),
         });

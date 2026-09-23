@@ -5,6 +5,8 @@ import { join } from 'node:path';
 
 import {
   callCardBranches,
+  landingCheckDue,
+  landingCheckStatePath,
   projectScopeStatePath,
   recordProjectScope,
 } from '@workspace/client-runtime';
@@ -51,14 +53,14 @@ describe('runLanding', () => {
   let previous: string | undefined;
   let said: string[];
 
-  const adapter = (): HookClient => ({
+  const adapter = (cwd?: string): HookClient => ({
     kind: 'claude',
     ingestProvenance: 'test',
     canTaskBrief: true,
     canAnchorCompaction: false,
     readInput: async (): Promise<HookInput> => ({
       sessionId: 's1',
-      cwd: repo,
+      cwd: cwd ?? repo,
       prompt: '',
       transcriptPath: '',
       hookEventName: 'PostToolUse',
@@ -189,6 +191,67 @@ describe('runLanding', () => {
     await runLanding(adapter());
     expect(said).toEqual([]);
     expect(callCardBranches).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds a stalled server and records the attempt before asking', async () => {
+    commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    let recordedBeforeAsking = false;
+    vi.mocked(callCardBranches).mockImplementation(() => {
+      // A process killed by the host's hook timeout must still leave the
+      // attempt behind, or every later command stalls on the same squash.
+      recordedBeforeAsking = !landingCheckDue(
+        landingCheckStatePath(),
+        `${git(repo, 'rev-parse', 'HEAD')}#19`
+      );
+      return new Promise(() => {});
+    });
+    const started = Date.now();
+    await runLanding(adapter(), { lookupTimeoutMs: 200 });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(recordedBeforeAsking).toBe(true);
+    expect(said).toEqual([]);
+  });
+
+  it('names the branch the squash landed on, not the one checked out after it', async () => {
+    commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    git(repo, 'checkout', '-q', '-b', 'feature/next');
+    vi.mocked(callCardBranches).mockResolvedValue({ card: CARD, branches: [] });
+    await runLanding(adapter());
+    expect(said).toHaveLength(1);
+    expect(said[0]).toContain('"target":"main"');
+  });
+
+  it('notices a squash made from another worktree of the repository', async () => {
+    const worktree = `${repo}-wt`;
+    git(repo, 'worktree', 'add', '-q', '-b', 'feature/y', worktree);
+    try {
+      commit(
+        repo,
+        'b',
+        'feat: landed from the main checkout',
+        'Squashed-from: feature/y (1234567) ZM-19'
+      );
+      vi.mocked(callCardBranches).mockResolvedValue({
+        card: CARD,
+        branches: [],
+      });
+      await runLanding(adapter(worktree));
+      expect(said).toHaveLength(1);
+      expect(said[0]).toContain('"name":"feature/y"');
+      expect(said[0]).toContain('"target":"main"');
+    } finally {
+      git(repo, 'worktree', 'remove', '--force', worktree);
+    }
   });
 
   it('says nothing about a project it has never briefed', async () => {

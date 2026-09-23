@@ -101,6 +101,36 @@ describe('git facts', () => {
     expect(findLanding(repo, 'feature/none')).toBeNull();
   });
 
+  it('names the trunk as the target even after work moved to a new branch', () => {
+    const squash = commit(
+      repo,
+      'n.txt',
+      'feat: landed',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    git(repo, 'checkout', '-q', '-b', 'feature/next');
+    commit(repo, 'o.txt', 'feat: the next piece of work');
+    expect(findLanding(repo, 'feature/x')).toEqual({
+      sha: squash,
+      target: 'main',
+    });
+  });
+
+  it('sees a squash on any local branch, not only the one checked out', () => {
+    git(repo, 'checkout', '-q', '-b', 'feature/y');
+    git(repo, 'checkout', '-q', 'main');
+    const squash = commit(
+      repo,
+      'p.txt',
+      'feat: landed on main',
+      'Squashed-from: feature/y (1234567) ZM-7'
+    );
+    git(repo, 'checkout', '-q', 'feature/y');
+    expect(recentSquashes(repo, 8, 12).map((found) => found.sha)).toEqual([
+      squash,
+    ]);
+  });
+
   it('does not take a commit that only quotes a trailer for a landing', () => {
     commit(
       repo,
