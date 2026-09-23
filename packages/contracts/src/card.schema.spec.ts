@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  cardBranchViewSchema,
   cardInputSchema,
   cardRefSchema,
   formatBranchRef,
@@ -46,6 +47,36 @@ describe('git names on a card', () => {
     expect(parseBranchRef('no-colon')).toBeNull();
     expect(parseBranchRef('a b:feature/x')).toBeNull();
     expect(parseBranchRef('owner/name:')).toBeNull();
+  });
+
+  it('reads every landing of a branch, and a server that sends none', () => {
+    const branch = {
+      repo: 'o/n',
+      branch: 'feature/x',
+      state: 'landed',
+      squash_sha: 'bbbbbbb',
+      target: 'main',
+      landed_at: '2026-09-23T15:00:00Z',
+      attached_at: '2026-09-23T12:00:00Z',
+    };
+    const landings = [
+      {
+        squash_sha: 'aaaaaaa',
+        target: 'main',
+        landed_at: '2026-09-23T13:00:00Z',
+      },
+      {
+        squash_sha: 'bbbbbbb',
+        target: 'main',
+        landed_at: '2026-09-23T15:00:00Z',
+      },
+    ];
+    expect(
+      cardBranchViewSchema
+        .parse({ ...branch, landings })
+        .landings.map((l) => l.squash_sha)
+    ).toEqual(['aaaaaaa', 'bbbbbbb']);
+    expect(cardBranchViewSchema.parse(branch).landings).toEqual([]);
   });
 
   it('labels a card ZM-N, the one name it has everywhere', () => {

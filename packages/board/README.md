@@ -69,8 +69,10 @@ without recording a recall. Detaching the conversation is the whole undo.
   state refusal is a `conflict` (`branch_open` included); `branch_required`
   is a missing input, so it is `validation_failed`. The message keeps the
   specific reason.
-- `LandCardParams`, `CardBranchView` — a landing as the service takes it, and
-  a branch as a card reads it back.
+- `LandCardParams`, `CardBranchView`, `CardBranchLanding` — a landing as the
+  service takes it, and a branch as a card reads it back: its latest squash
+  commit, and every landing it had (a branch lands again when a fix is made in
+  the branch that brought the bug).
 - `parseCardRef`, `cardRefKey`, `sameCardRef`, `flattenCardRef` — the closed
   reference vocabulary (memory, entity, thread, card, url, branch — written
   `<repo>:<branch>`), the identity that makes attaching idempotent, and the

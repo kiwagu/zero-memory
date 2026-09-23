@@ -22,6 +22,7 @@ export type {
   BoardCardView,
   BoardView,
   CardAuthorship,
+  CardBranchLanding,
   CardBranchView,
   CardEventView,
   CardFeedItemView,

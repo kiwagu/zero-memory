@@ -152,6 +152,13 @@ recorded later. If the branch has not landed, pass `not_landed` with the
 reason instead; the branch stays open and can land later. Archiving a card is
 not a move and asks for neither.
 
+A branch can land more than once: a bug found after the squash is fixed in the
+branch that brought it, and the branch is squashed again. Record each landing
+with its own `land`. The branch then names its latest squash commit, and
+`board` `get` lists every landing under `landings`, oldest first; the dashboard
+shows the earlier ones beside the latest. Recording an earlier landing again is
+recording the same landing: it changes nothing, and the branch keeps its latest.
+
 `card_log` attaches or detaches a branch at any time, with `ref_kind: "branch"`
 and `ref_target: "<repo>:<branch>"`, for example
 `"acme/memory-service:feature/feed-pages"`.
