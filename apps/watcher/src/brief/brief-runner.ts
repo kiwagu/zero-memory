@@ -652,19 +652,46 @@ const runSessionStart = async (
     try {
       const statePath = briefStatePath();
       const queued = readBriefTail(statePath, sessionId);
+      // Everything this WINDOW has already received whole, not only what this
+      // invocation delivered: on a resume, a memory an earlier briefing of the
+      // same window delivered can come back as another pack's leftover, and
+      // must not be queued for a second delivery. (A compaction clears this
+      // record, so a new window is owed everything again.)
+      const received = [
+        ...(loadBriefState(statePath)[sessionId]?.injected_ids ?? []),
+        ...packs.flatMap(({ trimmed }) => trimmed.deliveredIds),
+      ];
       const memories = mergeBriefTail(
         queued?.memories ?? [],
-        packs.flatMap(({ trimmed }) => trimmed.deliveredIds),
+        received,
         packs.flatMap(({ trimmed }) => trimmed.remaining)
       );
-      const topics = packs
-        .filter(({ trimmed }) => trimmed.remaining.length > 0)
+      const queuedIds = new Set(
+        (queued?.memories ?? []).map((memory) => memory.id)
+      );
+      const kept = new Set(memories.map((memory) => memory.id));
+      // The label and the snapshot time describe what the queue now HOLDS. An
+      // older queue lends its label and its (earlier, so conservative) time
+      // only while one of its own items is still in it; a queue that drained
+      // completely says nothing about the memories that replace it.
+      const retainsQueued = memories.some((memory) => queuedIds.has(memory.id));
+      const newTopics = packs
+        .filter(({ trimmed }) =>
+          trimmed.remaining.some(
+            (memory) => kept.has(memory.id) && !queuedIds.has(memory.id)
+          )
+        )
         .map(({ topic }) => topic);
+      const labels = new Set([
+        ...(retainsQueued && queued ? queued.topic.split(', ') : []),
+        ...newTopics,
+      ]);
       if (memories.length > 0) {
         recordBriefTail(statePath, sessionId, {
-          topic: queued?.topic ?? (topics.join(', ') || projectPack.topic),
+          topic: [...labels].join(', ') || projectPack.topic,
           memories,
-          takenAt: queued?.takenAt ?? new Date().toISOString(),
+          takenAt:
+            retainsQueued && queued ? queued.takenAt : new Date().toISOString(),
         });
       } else if (queued) {
         clearBriefTail(statePath, sessionId);

@@ -1211,6 +1211,47 @@ describe('the briefing tail drains one memory per message', () => {
     expect(await runHook('task')).not.toContain(CHUNK_FRAME);
   });
 
+  it('never queues on resume a memory this window already received whole', async () => {
+    onBranch('feature/resume-after-delivery');
+    const a = memory(901, 12_000);
+    const b = memory(902, 300);
+    // First start: the project pack delivers B whole.
+    vi.mocked(callBuildContext)
+      .mockResolvedValueOnce(serverPack([b]))
+      .mockResolvedValueOnce(serverPack([]));
+    await runHook('session-start');
+    expect(injectedIds()).toContain(b.id);
+    // Resume: only the branch pack answers, and oversized A stubs out B too.
+    vi.mocked(callBuildContext)
+      .mockResolvedValueOnce(serverPack([]))
+      .mockResolvedValueOnce(serverPack([a, b]));
+
+    await runHook('session-start');
+
+    expect(tailIds()).toEqual([a.id]);
+  });
+
+  it('labels a resumed queue by what it holds, not by a queue that fully drained', async () => {
+    onBranch('feature/fresh-queue-label');
+    const b = memory(911, 300);
+    const d = memory(912, 12_000);
+    recordBriefTail(briefStatePath(), SESSION_ID, {
+      topic: 'old-topic',
+      memories: [b],
+      takenAt: '2026-09-20T08:00:00Z',
+    });
+    vi.mocked(callBuildContext)
+      .mockResolvedValueOnce(serverPack([b]))
+      .mockResolvedValueOnce(serverPack([d]));
+
+    await runHook('session-start');
+
+    const tail = readBriefTail(briefStatePath(), SESSION_ID);
+    expect(tail?.memories.map((queued) => queued.id)).toEqual([d.id]);
+    expect(tail?.topic).not.toContain('old-topic');
+    expect(tail?.takenAt).not.toBe('2026-09-20T08:00:00Z');
+  });
+
   it('appends no chunk to the one task briefing, and settles the tail against what its pack delivered', async () => {
     // Session start: the lead memory is too large for the channel, so that
     // pack delivers nothing whole and names all four by stub — every one of
