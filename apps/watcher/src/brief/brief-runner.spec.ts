@@ -542,8 +542,13 @@ describe('session-start memory floor', () => {
     // room, same as the previous test). 2,000-char memories are too big for
     // even ONE to arrive whole at this budget, so the pack is a STUB list;
     // the assertion targets a memory that only a stub list this LONG can
-    // reach — one the even share alone (1,022 chars) cannot, but the
-    // charged floor (1,400 chars) can.
+    // reach — one the even (un-bumped) share alone falls short of, but the
+    // charged floor of 1,400 chars (10 stubs' worth, for these 12
+    // memories) covers. Not asserting the exact even-share figure here on
+    // purpose: it shifts with the exact section-budgeting arithmetic (it
+    // already has, across earlier rounds of this fix), while the relation
+    // this test actually pins — floor rescues a memory the even share
+    // couldn't — does not.
     const briefing = await runSessionStart({
       branch: 'feature/two-topics',
       budgetChars: 2_208,
@@ -590,5 +595,40 @@ describe('session-start memory floor', () => {
       briefing.includes('mem_0000000000000000') ||
       briefing.includes('they arrive in the next messages');
     expect(hasMemorySection).toBe(true);
+  });
+
+  it("reserves the composer's own per-section join cost, so a pack filled to its budget still lands", async () => {
+    // Single topic, no rules or loops: the project line is the only other
+    // section, so this isolates the composer's `+2`-per-section accounting
+    // from everything else this suite already covers. Sixty identical,
+    // tiny memories give the pack a DETERMINISTIC, small (~50-char) stub
+    // line cost with abundant supply — enough that across the swept budgets
+    // below, some of them land the render within just a few characters of
+    // its own allotted budget, which is exactly the margin an unreserved
+    // composer join cost eats. Swept rather than a single hand-picked
+    // number because the exact margin depends on the project line's own
+    // length, which this suite does not control (it comes from `workDir`'s
+    // real, environment-chosen tmp path) — sweeping finds it regardless.
+    //
+    // The range starts comfortably above `projectLine.length + memoryFloor`
+    // (the floor is capped at 1,400 for 60 memories, and the project line
+    // itself runs under a few hundred characters) so the memory floor is
+    // never the reason a budget is tight — only the composer's own
+    // per-section accounting is under test here.
+    const memories = Array.from({ length: 60 }, (_, i) => memory(i, 3));
+    for (let budgetChars = 2_000; budgetChars <= 2_100; budgetChars += 1) {
+      const briefing = await runSessionStart({ budgetChars, memories });
+      expect(
+        briefing.length,
+        `budget ${budgetChars}: briefing is ${briefing.length} chars`
+      ).toBeLessThanOrEqual(budgetChars);
+      const hasMemorySection =
+        briefing.includes('mem_0000000000000000') ||
+        briefing.includes('they arrive in the next messages');
+      expect(
+        hasMemorySection,
+        `budget ${budgetChars}: no stub and no starved notice`
+      ).toBe(true);
+    }
   });
 });

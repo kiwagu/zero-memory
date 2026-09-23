@@ -499,11 +499,31 @@ const runSessionStart = async (
   // believing it was briefed. Compose in priority order and let the pack, not
   // the rules or the loops, be what gives way: the pack is one build_context
   // call from the agent, the standing rules are not.
+  // `composeWithinBudget` below charges EVERY section it keeps — this one
+  // included — `text.length + 2` for the `\n\n` join it will cost once
+  // joined to its neighbours (even the leading section, which is exempt
+  // from being DROPPED for size but still pays this same +2 into the
+  // running spend every later section's own fit-check reads). A pool
+  // computed from the raw section lengths alone therefore overstates what
+  // is truly left for the packs by 2 characters per leading section that
+  // exists — small on its own, but it compounds with the same omission
+  // below for the packs themselves into a pack that measured itself as
+  // fitting its OWN budget (`renderPackWithinBudget`'s own guarantee) and
+  // still came out too long once the composer's join costs were added,
+  // which the composer answers by dropping that pack WHOLESALE rather than
+  // giving it stubs.
   const spentBySections =
-    (projectLine?.length ?? 0) +
-    (rulesSection?.length ?? 0) +
-    (workSection?.length ?? 0);
-  const remainingChannelBudget = Math.max(0, budget - spentBySections);
+    (projectLine ? projectLine.length + 2 : 0) +
+    (rulesSection ? rulesSection.length + 2 : 0) +
+    (workSection ? workSection.length + 2 : 0);
+  // The packs divide what's left AFTER also setting aside the composer's
+  // own `+2` for EACH pack section that will exist — the other half of the
+  // same accounting the comment above describes, this time for sections
+  // this function is about to create rather than ones it already has.
+  const remainingChannelBudget = Math.max(
+    0,
+    budget - spentBySections - 2 * splits.length
+  );
   const evenShare = Math.max(
     0,
     Math.floor(remainingChannelBudget / Math.max(splits.length, 1))
