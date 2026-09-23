@@ -82,7 +82,16 @@ export const briefStatePath = (env: NodeJS.ProcessEnv = process.env): string =>
 
 export const loadBriefState = (path: string): BriefStateFile => {
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as BriefStateFile;
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    // Every reader indexes the result by session id and every writer assigns
+    // into it, so a file that parses to anything but a plain object — a
+    // literal `null`, an array, a string — would throw on every hook of every
+    // session. It is treated as the empty state it effectively is.
+    return typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+      ? (parsed as BriefStateFile)
+      : {};
   } catch {
     return {};
   }

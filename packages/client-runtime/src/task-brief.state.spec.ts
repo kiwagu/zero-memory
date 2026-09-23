@@ -60,6 +60,23 @@ describe('brief state file', () => {
     expect(loadBriefState(path)).toEqual({});
   });
 
+  it.each([
+    ['the JSON literal null', 'null'],
+    ['an array', '[]'],
+    ['a bare string', '"session-briefs"'],
+  ])('loads an empty state when the file parses to %s', (_, raw) => {
+    writeFileSync(path, raw);
+
+    expect(loadBriefState(path)).toEqual({});
+    // Every reader indexes the state by session id, and every writer assigns
+    // into it: none of them may throw on a file that parsed to a non-object.
+    expect(readSessionThread(path, 'sess-1')).toBeNull();
+    expect(readBriefTail(path, 'sess-1')).toBeNull();
+    const delivered = memoryIdSchema.parse('mem_a1b2c3d4e5f6g7h8.01jd8x2p4q');
+    recordSessionBriefing(path, 'sess-1', [delivered], 1);
+    expect(loadBriefState(path)['sess-1']?.injected_ids).toEqual([delivered]);
+  });
+
   it('records injected ids and merges them across re-briefings', () => {
     recordSessionBriefing(path, 'sess-1', ['mem_a', 'mem_b'], 1);
     recordSessionBriefing(path, 'sess-1', ['mem_b', 'mem_c'], 2);
