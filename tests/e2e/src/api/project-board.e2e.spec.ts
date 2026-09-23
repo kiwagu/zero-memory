@@ -953,3 +953,72 @@ test.describe('Project board over MCP', () => {
     expect(moved.error?.code).toBe('42501');
   });
 });
+
+test.describe('Finding a card on the board', () => {
+  test('a query finds a card by its label or by its title, and nothing else', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const agent = await McpTestClient.connect(token);
+    try {
+      const stamp = Date.now();
+      const scopeOf = async (tag: string): Promise<string> =>
+        firstJson<{ scope: string }>(
+          await agent.callTool('remember', {
+            content: `e2e board filter marker ${stamp} ${tag}: the edge proxy drops long polls`,
+            kind: 'fact',
+            project_hint: `/tmp/zm-e2e-board-filter-${tag}-${stamp}`,
+          })
+        ).scope;
+      const create = async (scope: string, title: string): Promise<CardRow> =>
+        firstJson<CardResult>(
+          await agent.callTool('card', { action: 'create', scope, title })
+        ).card;
+
+      const scope = await scopeOf('one');
+      const certs = await create(scope, 'Rotate the edge certificates');
+      const feed = await create(scope, 'Page the memory feed');
+      const list = async (query: string): Promise<string[]> =>
+        firstJson<BoardResult>(
+          await agent.callTool('board', { action: 'list', scope, query })
+        ).cards.map((card) => card.id);
+
+      // Every way a person writes the card's label finds that card alone.
+      for (const query of [
+        `ZM-${feed.number}`,
+        `zm-${feed.number}`,
+        `#${feed.number}`,
+        `${feed.number}`,
+        `  ZM-${feed.number} `,
+      ]) {
+        expect(await list(query), query).toEqual([feed.id]);
+      }
+      // A title fragment, in any case, still finds by title.
+      expect(await list('memory feed')).toEqual([feed.id]);
+      expect(await list('EDGE')).toEqual([certs.id]);
+      // A label nobody holds finds nothing — an empty answer, not another card.
+      expect(await list('ZM-999')).toEqual([]);
+
+      // Every board at once: a label is per project, so ZM-1 is card #1 of
+      // each board the reader can see.
+      const other = await scopeOf('two');
+      const otherFirst = await create(other, 'Tune the recall threshold');
+      const db = createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      const { data, error } = await db.rpc('board_list', {
+        p_query: `ZM-${certs.number}`,
+        p_limit: 200,
+      });
+      expect(error).toBeNull();
+      const ids = (data as { cards: Array<{ id: string }> }).cards.map(
+        (card) => card.id
+      );
+      expect(certs.number).toBe(otherFirst.number);
+      expect(ids).toEqual(expect.arrayContaining([certs.id, otherFirst.id]));
+      expect(ids).not.toContain(feed.id);
+    } finally {
+      await agent.close();
+    }
+  });
+});
