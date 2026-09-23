@@ -262,7 +262,23 @@ export const renderPackWithinBudget = (
       `Also in memory for "${topic}", named but not inlined — pull any by id ` +
       'with recall, or call build_context for the full pack:';
     const lines: string[] = [];
-    let stubSpent = spent + intro.length;
+    // Two costs this block owes that the per-line loop below must budget for
+    // AHEAD OF TIME — the same way `renderStandingRulesSection` reserves its
+    // widest footer before the first rule: the `\n\n` `parts.join` below
+    // costs when this block sits next to a whole-memories block above it
+    // (only when one was pushed), and the trailing `(+N more not listed)`
+    // line this block may still need once no further item fits. Skipping
+    // either reservation is exactly how a pack that measured itself as
+    // `<= budgetChars` came out a few characters LONGER once actually
+    // joined and appended — and the composer downstream enforces its own
+    // budget in this same strict, no-partial-credit way, so those few
+    // characters were the whole difference between a stub/starved-notice
+    // landing and the composer dropping the pack WHOLESALE. The tail
+    // reservation uses `dropped.length` — never smaller than the true
+    // `beyond` count the tail can end up printing — as its worst-case width.
+    const partsJoinReserve = deliveredIds.length > 0 ? 2 : 0;
+    const tailReserve = `\n(+${dropped.length} more not listed)`.length;
+    let stubSpent = spent + partsJoinReserve + intro.length + tailReserve;
     for (const memory of dropped) {
       const line = renderMemoryStub(memory);
       if (stubSpent + line.length + 1 > budgetChars) break;

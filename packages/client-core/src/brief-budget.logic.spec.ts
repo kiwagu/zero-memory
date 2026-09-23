@@ -194,6 +194,37 @@ describe('renderPackWithinBudget', () => {
     expect(rendered.text.length).toBeLessThanOrEqual(500);
   });
 
+  it('never renders longer than the budget it was given, at any budget', () => {
+    // A mixed pack — a couple of small memories (whole at nearly every
+    // budget below), a couple of medium ones (whole at generous budgets,
+    // stub-size at tighter ones), and a couple of large ones (never whole,
+    // always stub-or-dropped) — sized to cross every boundary this function
+    // has as the sweep runs: how many fit whole, how many fit as a stub,
+    // whether the `(+N more not listed)` tail shows, and whether the JSON
+    // envelope block and the stub block both exist and need their `\n\n`
+    // join. `text.length <= budgetChars` is the one invariant this function
+    // exists to guarantee — every caller downstream (the composer) enforces
+    // its own budget in the same strict, no-partial-credit way, so a pack
+    // that comes back even one character over gets dropped WHOLESALE by
+    // that composer instead of degrading to a stub or a starved notice.
+    const input = pack([
+      memory('mem_aaaaaaaaaaaaaaaa.01kzzzzzz1', 'x'.repeat(80)),
+      memory('mem_bbbbbbbbbbbbbbbb.01kzzzzzz2', 'x'.repeat(80)),
+      memory('mem_cccccccccccccccc.01kzzzzzz3', 'x'.repeat(400)),
+      memory('mem_dddddddddddddddd.01kzzzzzz4', 'x'.repeat(400)),
+      memory('mem_eeeeeeeeeeeeeeee.01kzzzzzz5', 'x'.repeat(1_500)),
+      memory('mem_ffffffffffffffff.01kzzzzzz6', 'x'.repeat(1_500)),
+    ]);
+
+    for (let budget = 50; budget <= 3_000; budget += 7) {
+      const rendered = renderPackWithinBudget('topic', input, budget);
+      expect(
+        rendered.text.length,
+        `budget ${budget}: rendered ${rendered.text.length} chars`
+      ).toBeLessThanOrEqual(budget);
+    }
+  });
+
   it('passes an unparseable payload through rather than losing a briefing', () => {
     const rendered = renderPackWithinBudget('topic', { nonsense: true }, 10);
 
