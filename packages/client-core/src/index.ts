@@ -79,6 +79,7 @@ export {
   startsNewEpoch,
 } from './context-epoch.logic.js';
 export {
+  mergeBriefTail,
   planTailChunk,
   type BriefTail,
   type TailChunk,

@@ -1,7 +1,11 @@
 import { contextMemorySchema } from '@workspace/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { planTailChunk, type BriefTail } from './brief-tail.logic.js';
+import {
+  mergeBriefTail,
+  planTailChunk,
+  type BriefTail,
+} from './brief-tail.logic.js';
 
 // Built through the contract, the same way the sibling brief-budget spec
 // does it: a hand-rolled literal would let an id shape the real pack can
@@ -39,18 +43,6 @@ describe('planTailChunk', () => {
     expect(chunk?.text).toContain('2026-09-22T10:00:00Z');
   });
 
-  it('prefers what the current message is about', () => {
-    const chunk = planTailChunk(tail(memory(1), memory(2)), 9_000, [
-      memory(2).id,
-    ]);
-    expect(chunk?.deliveredIds).toEqual([memory(2).id]);
-    // Pins which memory stays queued: the NON-preferred one, not the one
-    // just delivered. A naive `slice(1)` instead of filtering by id would
-    // drop memory(1) from the queue entirely and leave memory(2) — the
-    // delivered one — still queued for re-delivery next message.
-    expect(chunk?.remaining.map((memory) => memory.id)).toEqual([memory(1).id]);
-  });
-
   it('falls back to a stub when the memory itself does not fit', () => {
     const chunk = planTailChunk(tail(memory(1, 20_000)), 400);
     expect(chunk?.deliveredIds).toEqual([]);
@@ -58,7 +50,74 @@ describe('planTailChunk', () => {
     expect(chunk?.remaining).toEqual([]);
   });
 
+  it('sends nothing and keeps the whole queue when not even a stub fits', () => {
+    // A message whose own lead leaves the chunk less room than the frame:
+    // sending past the budget spills the whole message, and dropping the
+    // memory unsent loses it — so the queue simply waits.
+    const chunk = planTailChunk(tail(memory(1, 20_000), memory(2)), 100);
+    expect(chunk?.text).toBe('');
+    expect(chunk?.deliveredIds).toEqual([]);
+    expect(chunk?.remaining.map((m) => m.id)).toEqual([
+      memory(1).id,
+      memory(2).id,
+    ]);
+  });
+
+  it('never returns a chunk longer than its budget', () => {
+    const queue = tail(memory(1, 2_000), memory(2));
+    for (let budget = 0; budget <= 2_400; budget += 1) {
+      expect(planTailChunk(queue, budget)?.text.length).toBeLessThanOrEqual(
+        budget
+      );
+    }
+  });
+
   it('has nothing to send for an empty tail', () => {
     expect(planTailChunk(tail(), 9_000)).toBeNull();
+  });
+});
+
+describe('mergeBriefTail', () => {
+  it('drops from the queue what a briefing just delivered whole', () => {
+    const merged = mergeBriefTail(
+      [memory(1), memory(2), memory(3)],
+      [memory(2).id],
+      []
+    );
+    expect(merged.map((m) => m.id)).toEqual([memory(1).id, memory(3).id]);
+  });
+
+  it("queues a briefing's leftovers after what was already waiting", () => {
+    const merged = mergeBriefTail(
+      [memory(1), memory(2)],
+      [],
+      [memory(3), memory(4)]
+    );
+    expect(merged.map((m) => m.id)).toEqual([
+      memory(1).id,
+      memory(2).id,
+      memory(3).id,
+      memory(4).id,
+    ]);
+  });
+
+  it('queues a memory left over twice only once, where it already stood', () => {
+    const merged = mergeBriefTail(
+      [memory(1), memory(2)],
+      [],
+      [memory(3), memory(1), memory(3)]
+    );
+    expect(merged.map((m) => m.id)).toEqual([
+      memory(1).id,
+      memory(2).id,
+      memory(3).id,
+    ]);
+  });
+
+  it('never re-queues a leftover the same briefing delivered whole', () => {
+    // A pack can carry one memory in two legs (a ranked hit that is also
+    // recent): the copy that arrived whole settles it.
+    const merged = mergeBriefTail([], [memory(1).id], [memory(1), memory(2)]);
+    expect(merged.map((m) => m.id)).toEqual([memory(2).id]);
   });
 });

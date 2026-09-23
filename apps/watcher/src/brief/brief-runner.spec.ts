@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
+import { DEFAULT_HOOK_BUDGET_CHARS } from '@workspace/client-core';
 import {
   briefStatePath,
   callBuildContext,
@@ -11,6 +12,7 @@ import {
   markTaskBriefed,
   projectScopeStatePath,
   readBriefTail,
+  recordBriefTail,
   recordProjectScope,
   recordSessionThread,
   stampSessionStart,
@@ -861,5 +863,376 @@ describe('task briefing memory floor', () => {
         `budget ${budgetChars}: no stub and no starved notice`
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * The window's tail — what its first briefing could not fit — delivered by
+ * the per-message hook itself, one memory per message, with no action from
+ * the agent. Driven end to end through `runBrief`, against a real state file:
+ * the queue one message leaves behind is exactly what the next one reads.
+ */
+describe('the briefing tail drains one memory per message', () => {
+  let stateDir: string;
+  let workDir: string;
+  let previousState: string | undefined;
+  const SESSION_ID = 'drain-session';
+  /** How `planTailChunk` opens every chunk — present iff one was sent. */
+  const CHUNK_FRAME = 'Continuing the session briefing';
+  const SUBSTANTIVE =
+    'add a retry with backoff to the ingest worker, it drops chunks';
+
+  const seedTail = (memories: ContextMemory[]): void =>
+    recordBriefTail(briefStatePath(), SESSION_ID, {
+      topic: basename(workDir),
+      memories,
+      takenAt: '2026-09-23T10:00:00Z',
+    });
+
+  const tailIds = (): string[] | null =>
+    readBriefTail(briefStatePath(), SESSION_ID)?.memories.map(
+      (queued) => queued.id
+    ) ?? null;
+
+  const injectedIds = (): string[] =>
+    loadBriefState(briefStatePath())[SESSION_ID]?.injected_ids ?? [];
+
+  const serverPack = (memories: ContextMemory[]) => ({
+    memories,
+    entities: [],
+    edges: [],
+    linked_memories: [],
+    recent: [],
+    rules: [],
+    open_loops: [],
+    open_loops_total: 0,
+    project_scope: 'proj.usr_x.demo',
+  });
+
+  /** One hook invocation; returns what it put into the model's context. */
+  const runHook = async (
+    mode: 'task' | 'session-start',
+    { prompt = 'ok', sessionId = SESSION_ID } = {}
+  ): Promise<string> => {
+    let emitted: string | null = null;
+    const adapter: HookClient = {
+      // 'codex' keeps session start off the Claude-plugin update check.
+      kind: 'codex',
+      ingestProvenance: 'test',
+      canTaskBrief: true,
+      canAnchorCompaction: false,
+      readInput: async () => ({
+        sessionId,
+        cwd: workDir,
+        prompt,
+        transcriptPath: '',
+        hookEventName: mode === 'task' ? 'UserPromptSubmit' : 'SessionStart',
+        toolName: '',
+        alreadyContinued: false,
+        source: '',
+        trigger: '',
+      }),
+      parse: () => {
+        throw new Error('the briefing hooks never parse a transcript');
+      },
+      emitSessionBrief: (context) => {
+        emitted = context;
+      },
+      emitTaskBrief: (context) => {
+        emitted = context;
+      },
+      emitTurnContext: () => {},
+      emitReceipt: () => {},
+      emitCompactionAnchor: () => {},
+    };
+    await runBrief(mode, adapter);
+    return emitted ?? '';
+  };
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'zm-drain-state-'));
+    workDir = mkdtempSync(join(tmpdir(), 'zm-drain-work-'));
+    previousState = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = stateDir;
+    recordProjectScope(
+      projectScopeStatePath(),
+      resolveProjectHint(workDir),
+      'proj.usr_x.demo'
+    );
+  });
+
+  afterEach(() => {
+    vi.mocked(callBuildContext).mockReset();
+    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previousState;
+    rmSync(stateDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('delivers exactly one chunk on a short reply, and the stored tail shrinks by exactly one', async () => {
+    const queued = [memory(701, 300), memory(702, 300), memory(703, 300)];
+    seedTail(queued);
+
+    const briefing = await runHook('task');
+
+    expect(briefing).toContain('PROJECT: proj.usr_x.demo');
+    expect(briefing).toContain(CHUNK_FRAME);
+    expect(briefing).toContain(queued[0]!.id);
+    expect(briefing).not.toContain(queued[1]!.id);
+    expect(tailIds()).toEqual([queued[1]!.id, queued[2]!.id]);
+    // Taken from the state file alone: a short reply never calls the server.
+    expect(callBuildContext).not.toHaveBeenCalled();
+  });
+
+  it('empties the queue over successive short replies, and then sends no more chunks', async () => {
+    const queued = [memory(711, 300), memory(712, 300)];
+    seedTail(queued);
+
+    expect(await runHook('task')).toContain(queued[0]!.id);
+    const second = await runHook('task');
+    expect(second).toContain(queued[1]!.id);
+    expect(second).not.toContain(queued[0]!.id);
+    // Drained to nothing, the tail is cleared rather than kept as an empty
+    // queue every later message would have to read and skip.
+    expect(loadBriefState(briefStatePath())[SESSION_ID]).not.toHaveProperty(
+      'tail'
+    );
+
+    const third = await runHook('task');
+    expect(third).toContain('PROJECT: proj.usr_x.demo');
+    expect(third).not.toContain(CHUNK_FRAME);
+  });
+
+  it('drains one chunk on a substantive prompt once the task briefing has run', async () => {
+    markTaskBriefed(briefStatePath(), SESSION_ID);
+    const queued = [memory(721, 300), memory(722, 300)];
+    seedTail(queued);
+
+    const briefing = await runHook('task', { prompt: SUBSTANTIVE });
+
+    expect(briefing).toContain(CHUNK_FRAME);
+    expect(briefing).toContain(queued[0]!.id);
+    expect(briefing).not.toContain(queued[1]!.id);
+    expect(tailIds()).toEqual([queued[1]!.id]);
+    expect(callBuildContext).not.toHaveBeenCalled();
+  });
+
+  it('appends no chunk to the one task briefing, and settles the tail against what its pack delivered', async () => {
+    // Session start: the lead memory is too large for the channel, so that
+    // pack delivers nothing whole and names all four by stub — every one of
+    // them becomes this window's tail, recorded by the real session-start
+    // path rather than seeded.
+    const oversized = memory(731, 20_000);
+    const namedThenWhole = memory(732, 300);
+    const namedTwice = memory(733, 300);
+    const stillQueued = memory(734, 300);
+    vi.mocked(callBuildContext).mockResolvedValueOnce(
+      serverPack([oversized, namedThenWhole, namedTwice, stillQueued])
+    );
+    await runHook('session-start');
+    expect(tailIds()).toEqual([
+      oversized.id,
+      namedThenWhole.id,
+      namedTwice.id,
+      stillQueued.id,
+    ]);
+
+    // The task briefing filters its pack only on memories delivered WHOLE,
+    // so a memory session start merely named comes back in it. Here one of
+    // them now arrives whole, beside a new one; a new oversized memory ends
+    // the whole-memory run, leaving itself and the other named one over.
+    const fresh = memory(735, 300);
+    const freshOversized = memory(736, 20_000);
+    vi.mocked(callBuildContext).mockResolvedValueOnce(
+      serverPack([namedThenWhole, fresh, freshOversized, namedTwice])
+    );
+    const briefing = await runHook('task', { prompt: SUBSTANTIVE });
+
+    // One memory payload per message: this message's pack carries them.
+    expect(briefing).toContain('Persistent memory briefing');
+    expect(briefing).not.toContain(CHUNK_FRAME);
+    expect(briefing).not.toContain(oversized.id);
+    // What the pack delivered whole is recorded as injected…
+    expect(injectedIds()).toEqual(
+      expect.arrayContaining([namedThenWhole.id, fresh.id])
+    );
+    // …and leaves the queue; the pack's own leftovers join it after what was
+    // already queued, and the memory BOTH briefings left over is queued
+    // once, where it already stood.
+    expect(tailIds()).toEqual([
+      oversized.id,
+      namedTwice.id,
+      stillQueued.id,
+      freshOversized.id,
+    ]);
+  });
+
+  it("starts the window's tail from the task briefing's own leftovers when it is the window's first briefing", async () => {
+    // No session-start briefing landed (server down at start, say), so the
+    // task briefing is the first this window gets — and its starved or
+    // stubbed memories are promised to "arrive in the next messages".
+    const fits = memory(741, 300);
+    const oversized = memory(742, 20_000);
+    const after = memory(743, 300);
+    vi.mocked(callBuildContext).mockResolvedValueOnce(
+      serverPack([fits, oversized, after])
+    );
+    await runHook('task', { prompt: SUBSTANTIVE });
+
+    expect(injectedIds()).toEqual([fits.id]);
+    expect(tailIds()).toEqual([oversized.id, after.id]);
+
+    const next = await runHook('task');
+    expect(next).toContain(CHUNK_FRAME);
+    expect(next).toContain(oversized.id);
+  });
+
+  it("clears the tail when the task briefing's pack delivers all of it whole", async () => {
+    const queued = [memory(745, 300), memory(746, 300)];
+    seedTail(queued);
+    vi.mocked(callBuildContext).mockResolvedValueOnce(serverPack(queued));
+
+    await runHook('task', { prompt: SUBSTANTIVE });
+
+    expect(injectedIds()).toEqual(queued.map((whole) => whole.id));
+    expect(loadBriefState(briefStatePath())[SESSION_ID]).not.toHaveProperty(
+      'tail'
+    );
+  });
+
+  it('records a memory a chunk delivered whole as injected, so a later task briefing leaves it out', async () => {
+    const drained = memory(751, 300);
+    const queued = memory(752, 300);
+    seedTail([drained, queued]);
+
+    await runHook('task');
+    expect(injectedIds()).toContain(drained.id);
+
+    const fresh = memory(753, 300);
+    vi.mocked(callBuildContext).mockResolvedValueOnce(
+      serverPack([drained, fresh])
+    );
+    const briefing = await runHook('task', { prompt: SUBSTANTIVE });
+    expect(briefing).toContain(fresh.id);
+    expect(briefing).not.toContain(drained.id);
+  });
+
+  it("does not deliver the previous window's tail after a compaction", async () => {
+    const queued = memory(761, 300);
+    seedTail([queued]);
+    stampSessionStart(briefStatePath(), SESSION_ID, Date.now(), 'compact');
+
+    const briefing = await runHook('task');
+
+    expect(briefing).toContain('PROJECT: proj.usr_x.demo');
+    expect(briefing).not.toContain(CHUNK_FRAME);
+    expect(briefing).not.toContain(queued.id);
+  });
+
+  it.each([
+    ['missing', () => rmSync(briefStatePath(), { force: true })],
+    [
+      'truncated mid-write',
+      () => {
+        mkdirSync(dirname(briefStatePath()), { recursive: true });
+        writeFileSync(briefStatePath(), `{"${SESSION_ID}": {"tail": {"memo`);
+      },
+    ],
+    [
+      'carrying a tail with no queue in it',
+      () => {
+        mkdirSync(dirname(briefStatePath()), { recursive: true });
+        writeFileSync(
+          briefStatePath(),
+          JSON.stringify({
+            [SESSION_ID]: {
+              injected_ids: [],
+              task_briefed: false,
+              epoch: 0,
+              tail: { topic: 'x' },
+              at: 1,
+            },
+          })
+        );
+      },
+    ],
+    ['holding an empty queue', () => seedTail([])],
+  ])(
+    'emits exactly the banner, and never throws, when the state file is %s',
+    async (_, damage) => {
+      // The hook's normal output for this session: nothing queued, banner only.
+      const normal = await runHook('task', { sessionId: 'drain-baseline' });
+      expect(normal).toContain('PROJECT: proj.usr_x.demo');
+
+      damage();
+
+      expect(await runHook('task')).toBe(normal);
+      // And nothing is left for the next message to trip over: an empty
+      // queue is cleared rather than read and skipped on every message.
+      expect(tailIds()).toBeNull();
+    }
+  );
+
+  it('sends nothing at all in an ignored project, the tail included', async () => {
+    // No resolved project, so no banner: anything emitted here is the drain.
+    rmSync(projectScopeStatePath(), { force: true });
+    writeFileSync(join(workDir, '.zero-memory-ignore'), '');
+    const queued = memory(771, 300);
+    seedTail([queued]);
+
+    expect(await runHook('task')).toBe('');
+    expect(tailIds()).toEqual([queued.id]);
+  });
+
+  it('never lets a draining message exceed the channel, across banner and memory sizes', async () => {
+    // Every banner size here leaves a different room for the chunk, and the
+    // memory sizes sweep one character at a time across the point where the
+    // memory stops arriving whole and falls back to a stub — the edge where a
+    // chunk budgeted without the banner or the composer's join runs over. The
+    // largest banner leaves too little room for even a stub.
+    const seen = { whole: 0, stub: 0, held: 0 };
+    let closest = 0;
+    for (const padding of [0, 2_000, 6_000, 8_000, 8_350]) {
+      recordProjectScope(
+        projectScopeStatePath(),
+        resolveProjectHint(workDir),
+        `proj.usr_x.${'d'.repeat(padding)}`
+      );
+      const banner = await runHook('task', {
+        sessionId: `drain-banner-${padding}`,
+      });
+      const room = DEFAULT_HOOK_BUDGET_CHARS - banner.length;
+      const from = Math.max(1, room - 450);
+      for (let content = from; content <= from + 300; content += 1) {
+        const queued = memory(781, content);
+        seedTail([queued]);
+
+        const briefing = await runHook('task');
+
+        expect(
+          briefing.length,
+          `banner ${banner.length}, memory ${content}: ${briefing.length} chars`
+        ).toBeLessThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS);
+        if (!briefing.includes(CHUNK_FRAME)) {
+          // Nothing is lost at the edge: a chunk that could not be sent at
+          // all leaves the memory queued, untouched.
+          expect(tailIds(), `memory ${content} was dropped unsent`).toEqual([
+            queued.id,
+          ]);
+          seen.held += 1;
+        } else if (briefing.includes('"content":')) {
+          seen.whole += 1;
+        } else {
+          seen.stub += 1;
+        }
+        closest = Math.max(closest, briefing.length);
+      }
+    }
+    // The sweep proves something only if it reached every outcome and came
+    // right up to the edge of the channel.
+    expect(seen.whole).toBeGreaterThan(0);
+    expect(seen.stub).toBeGreaterThan(0);
+    expect(seen.held).toBeGreaterThan(0);
+    expect(closest).toBeGreaterThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS - 10);
   });
 });

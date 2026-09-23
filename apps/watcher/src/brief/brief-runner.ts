@@ -7,10 +7,12 @@ import {
   filterBriefingPack,
   isEmptyPack,
   isSubstantivePrompt,
+  mergeBriefTail,
   mergeOpenLoops,
   mergeStandingRules,
   parseBriefingPack,
   planSectionBudgets,
+  planTailChunk,
   renderBoardSummary,
   renderOfflineBriefing,
   renderOpenLoopsSection,
@@ -22,16 +24,20 @@ import {
   splitStandingRules,
   renderPackWithinBudget,
   renderStarvedPackNotice,
+  type TailChunk,
+  type TrimmedPack,
 } from '@workspace/client-core';
 import {
   briefCacheDir,
   briefStatePath,
   clearBriefCache,
+  clearBriefTail,
   loadBriefState,
   markRulesDelivered,
   markTaskBriefed,
   projectScopeStatePath,
   readBriefCache,
+  readBriefTail,
   readProjectScope,
   readSessionThread,
   recordBriefTail,
@@ -664,9 +670,129 @@ const runSessionStart = async (
 };
 
 /**
- * Task briefing: on the FIRST substantive prompt of a session, brief the agent
- * on the task at hand (the prompt becomes the build_context topic). One per
- * session, deduped against the ids the SessionStart briefing already injected.
+ * What one tail chunk may spend on a message that carries nothing else but
+ * the banner: the channel, less the banner and the `+2` join the composer
+ * charges every section it keeps — the banner's, and the chunk's own. Such a
+ * message is joined by `emit` rather than the composer, but it is held to
+ * the same accounting, so no message this hook sends can outgrow the channel.
+ */
+const tailChunkBudget = (banner: string | null): number =>
+  resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS) -
+  (banner ? banner.length + 2 : 0) -
+  2;
+
+/**
+ * THE TAIL, DELIVERED: one chunk of what this window's first briefing could
+ * not fit, taken from the session state — no server call — with the queue
+ * shrunk by exactly what the chunk carried. It rides on the messages that
+ * build no briefing of their own: short replies, and every message once the
+ * task briefing has run. That is nearly all of them, since a window builds at
+ * most one task briefing, and that one message carries its own pack instead
+ * — ONE memory payload per message, never a pack and a chunk side by side.
+ *
+ * The queue is written BEFORE the chunk is handed back for sending, and a
+ * failed write sends nothing: a queue that cannot shrink would otherwise hand
+ * every later message the same memory again. The record of what arrived whole
+ * comes after — the queue has already moved on by then, so failing there
+ * costs at most a later task briefing repeating that one memory, never the
+ * memory itself. Every step is best-effort: a state problem costs a message
+ * its chunk, never its banner.
+ */
+const drainTailChunk = (
+  statePath: string,
+  sessionId: string,
+  budgetChars: number
+): string | null => {
+  let chunk: TailChunk;
+  try {
+    const tail = readBriefTail(statePath, sessionId);
+    if (!tail) return null;
+    const planned = planTailChunk(tail, budgetChars);
+    if (!planned) {
+      // An empty queue left on disk: drop it so later messages stop reading it.
+      clearBriefTail(statePath, sessionId);
+      return null;
+    }
+    // Not even a stub fits beside this banner: the queue waits, untouched.
+    if (!planned.text) return null;
+    if (planned.remaining.length > 0) {
+      recordBriefTail(statePath, sessionId, {
+        ...tail,
+        memories: planned.remaining,
+      });
+    } else {
+      clearBriefTail(statePath, sessionId);
+    }
+    chunk = planned;
+  } catch {
+    return null;
+  }
+  if (chunk.deliveredIds.length > 0) {
+    try {
+      recordSessionBriefing(statePath, sessionId, chunk.deliveredIds);
+    } catch {
+      // ignore: dedup degrades gracefully, the chunk still ships.
+    }
+  }
+  return chunk.text;
+};
+
+/**
+ * Settles this window's tail against the one message that builds a task
+ * briefing. That message carries no chunk — its pack carries the memories —
+ * so the pack's outcome is written back instead: what it delivered WHOLE is
+ * recorded as injected and leaves the queue, and what it left over joins the
+ * queue. That is what makes its starved notice's "they arrive in the next
+ * messages" true, and when this is the window's first briefing (the
+ * session-start one failed, or a compaction just opened the window) it is
+ * where the tail begins.
+ *
+ * A tail that already exists keeps its topic and its snapshot time. Once the
+ * queue mixes two snapshots, the earlier moment is the honest one to state:
+ * the later one would claim the older memories are fresher than they are.
+ * Best-effort throughout — the briefing has already shipped.
+ */
+const settleTailAfterTaskBriefing = (
+  statePath: string,
+  sessionId: string,
+  topic: string,
+  pack: TrimmedPack
+): void => {
+  if (pack.deliveredIds.length > 0) {
+    try {
+      recordSessionBriefing(statePath, sessionId, pack.deliveredIds);
+    } catch {
+      // ignore: dedup degrades gracefully, the briefing already shipped.
+    }
+  }
+  try {
+    const tail = readBriefTail(statePath, sessionId);
+    const memories = mergeBriefTail(
+      tail?.memories ?? [],
+      pack.deliveredIds,
+      pack.remaining
+    );
+    if (memories.length > 0) {
+      recordBriefTail(statePath, sessionId, {
+        topic: tail?.topic ?? topic,
+        memories,
+        takenAt: tail?.takenAt ?? new Date().toISOString(),
+      });
+    } else if (tail) {
+      clearBriefTail(statePath, sessionId);
+    }
+  } catch {
+    // ignore: the tail is an improvement, it must never sink a briefing.
+  }
+};
+
+/**
+ * The per-message hook. On the FIRST substantive prompt of a context window it
+ * builds the task briefing — the project's pack, deduped against the ids the
+ * SessionStart briefing already injected; the prompt itself only decides
+ * whether this is that message. Every other message carries the banner and
+ * the next chunk of the window's tail, so what the first briefing could not
+ * fit arrives without the agent asking.
  */
 const runTask = async (
   adapter: HookClient,
@@ -701,6 +827,13 @@ const runTask = async (
     const context = sections.filter(Boolean).join('\n\n');
     if (context) adapter.emitTaskBrief(context);
   };
+  // The two returns below build no briefing, so each carries the next chunk
+  // of this window's tail beside the banner. Both sit behind `runBrief`'s
+  // ignore check: an ignored project gets no drain either.
+  const drain = (): string | null =>
+    sessionId
+      ? drainTailChunk(statePath, sessionId, tailChunkBudget(banner))
+      : null;
 
   // The acknowledgement stop-list defaults to English; ZM_ACK_WORDS lets the
   // operator add their language's confirmations (no language bias in the core).
@@ -711,14 +844,16 @@ const runTask = async (
       resolveAcknowledgementWords(process.env.ZM_ACK_WORDS)
     )
   ) {
-    emit(banner);
-    return 'not-substantive';
+    const chunk = drain();
+    emit(banner, chunk);
+    return chunk ? 'not-substantive+tail-chunk' : 'not-substantive';
   }
 
   const session = loadBriefState(statePath)[sessionId];
   if (session?.task_briefed) {
-    emit(banner);
-    return 'already-briefed';
+    const chunk = drain();
+    emit(banner, chunk);
+    return chunk ? 'already-briefed+tail-chunk' : 'already-briefed';
   }
 
   // The prompt itself never leaves the machine: it is human text in the user's
@@ -900,6 +1035,7 @@ const runTask = async (
     budget
   );
   emit(composed.text);
+  settleTailAfterTaskBriefing(statePath, sessionId, projectTopic, trimmed);
   return 'delivered';
 };
 

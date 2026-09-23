@@ -290,8 +290,8 @@ export const recordBriefTail = (
  * disk outright — the file's own precedent, `readSessionThread` above,
  * already does this for `thread`. A stale write from an older watcher or a
  * truncated save could otherwise hand back a `tail` with no `memories`, and
- * the per-message drain (Task 7) would throw on every message of that
- * session instead of just skipping a queue that was never really there.
+ * the per-message drain would throw on every message of that session
+ * instead of just skipping a queue that was never really there.
  */
 export const readBriefTail = (
   path: string,
@@ -303,10 +303,11 @@ export const readBriefTail = (
 
 /**
  * Drops the queued remainder once it has drained to nothing — called by the
- * per-message hook after `planTailChunk` returns null. Rebuilding the entry
- * without `tail` (rather than routing it through `preserved()`) is
- * deliberate here: this writer's entire job is to make that one field stop
- * being carried forward, so it must not re-add the field it exists to drop.
+ * per-message hook when a chunk takes the last memory, or when a briefing's
+ * pack leaves nothing queued. Rebuilding the entry without `tail` (rather
+ * than routing it through `preserved()`) is deliberate here: this writer's
+ * entire job is to make that one field stop being carried forward, so it
+ * must not re-add the field it exists to drop.
  */
 export const clearBriefTail = (
   path: string,
