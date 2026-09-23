@@ -22,7 +22,7 @@ import { EmptyState } from '@workspace/ui/components/common/empty-state';
 interface BoardColumnCard {
   id: string;
   href: string;
-  /** The project-local address, already formatted (e.g. `#42`). */
+  /** The project-local address, already formatted (e.g. `ZM-42`). */
   numberLabel: string;
   title: string;
   badges: BadgeListItem[];

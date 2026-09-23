@@ -1,6 +1,10 @@
 import * as React from 'react';
 
 import {
+  CardBranches,
+  type CardBranchItem,
+} from '@workspace/ui/components/board/card-branches';
+import {
   CardHistory,
   type CardHistoryEntry,
 } from '@workspace/ui/components/board/card-history';
@@ -18,8 +22,9 @@ import {
 } from '@workspace/ui/components/memory/linked-memory-list';
 
 /**
- * CardDetail — one card: its document, what it points at, what its bound
- * conversations remembered, and everything that happened to it.
+ * CardDetail — one card: its document, where its work ran, what it points
+ * at, what its bound conversations remembered, and everything that happened
+ * to it.
  *
  * Rendered by the card's page, by the dialog over the board and by a panel of
  * the chain, so the view knows none of them: everything arrives display-ready
@@ -29,7 +34,8 @@ import {
  */
 
 interface CardDetailData {
-  number: number;
+  /** The card's label, already formatted (e.g. `ZM-42`). */
+  numberLabel: string;
   title: string;
   badges: BadgeListItem[];
   /** "Updated <time>", already formatted. */
@@ -37,6 +43,8 @@ interface CardDetailData {
   /** Where the work came from, when it began as a handover. */
   originLoop: { label: string; id: string; href: string } | null;
   body: string;
+  /** The git branches its work ran on, open or landed. */
+  branches: { title: string; items: CardBranchItem[]; emptyLabel: string };
   refs: { title: string; items: LinkedMemoryItem[]; emptyLabel: string };
   feed: {
     title: string;
@@ -62,12 +70,13 @@ interface CardDetailProps extends CardDetailData {
 }
 
 function CardDetail({
-  number,
+  numberLabel,
   title,
   badges,
   updatedLabel,
   originLoop,
   body,
+  branches,
   refs,
   feed,
   history,
@@ -84,7 +93,7 @@ function CardDetail({
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
           <span className="text-muted-foreground text-sm tabular-nums">
-            #{number}
+            {numberLabel}
           </span>
           <h1 className="text-2xl font-semibold" data-testid="card-title">
             {title}
@@ -122,6 +131,14 @@ function CardDetail({
           </CardContent>
         </Card>
       ) : null}
+
+      <DetailSection title={branches.title} data-testid="card-branches-section">
+        {branches.items.length === 0 ? (
+          <EmptyState compact>{branches.emptyLabel}</EmptyState>
+        ) : (
+          <CardBranches items={branches.items} />
+        )}
+      </DetailSection>
 
       <DetailSection title={refs.title} data-testid="card-refs">
         {refs.items.length === 0 ? (
