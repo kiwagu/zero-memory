@@ -48,6 +48,7 @@ test.describe('Project board in the dashboard', () => {
         loop_id: loopId,
         title: 'Migrate the ingest worker',
         body: 'Goal: no traffic on the legacy queue.',
+        no_branch: 'an e2e fixture card with no code',
       });
       expect(promoted.isError ?? false).toBe(false);
       const card = firstJson<CardResult>(promoted).card;
@@ -221,6 +222,7 @@ test.describe('Project board in the dashboard', () => {
         card_id: busyId,
         to: 'active',
         reason: 'starting here, which makes this the board that moved last',
+        no_branch: 'an e2e fixture card with no code',
       });
     } finally {
       await mcp.close();

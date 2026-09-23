@@ -10,6 +10,7 @@ import {
   type CreateCardParams,
   type EditCardParams,
   type ICardRepository,
+  type LandCardParams,
   type ListBoardParams,
   type MoveCardParams,
   type NoteCardParams,
@@ -33,7 +34,8 @@ type BoardCommand =
   | 'card_edit'
   | 'card_archive'
   | 'card_attach'
-  | 'card_detach';
+  | 'card_detach'
+  | 'card_land';
 
 type BoardCommandArgs<T extends BoardCommand> =
   Database['public']['Functions'][T]['Args'];
@@ -76,7 +78,31 @@ const eventViewSchema = z.object({
   relation: z.string().nullable(),
   ref_kind: z.string().nullable(),
   ref_target: z.string().nullable(),
+  branch_note: z.string().nullable().default(null),
+  squash_sha: z.string().nullable().default(null),
+  target_branch: z.string().nullable().default(null),
   created_at: z.string(),
+});
+
+/** A branch as `card_get` returns it. */
+const branchViewSchema = z.object({
+  repo: z.string(),
+  branch: z.string(),
+  state: z.enum(['open', 'landed']),
+  squash_sha: z.string().nullable(),
+  target: z.string().nullable(),
+  landed_at: z.string().nullable(),
+  attached_at: z.string(),
+});
+
+/** The branch rule's arguments, as every command that meets it takes them. */
+const branchArgs = (params: {
+  branch?: { repo: string; name: string };
+  noBranch?: string;
+}) => ({
+  p_branch_repo: params.branch?.repo ?? undefined,
+  p_branch_name: params.branch?.name ?? undefined,
+  p_no_branch: params.noBranch ?? undefined,
 });
 
 /** A page of the derived feed, as `card_feed` returns it. */
@@ -102,6 +128,7 @@ const readViewSchema = z.object({
   error: z.string().optional(),
   card: z.unknown().optional(),
   refs: z.array(refViewSchema).default([]),
+  branches: z.array(branchViewSchema).default([]),
   events: z.array(eventViewSchema).default([]),
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
@@ -158,6 +185,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
+      ...branchArgs(params),
     });
   }
 
@@ -172,6 +200,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
+      ...branchArgs(params),
     });
   }
 
@@ -180,6 +209,24 @@ export class SupabaseCardRepository implements ICardRepository {
       p_card_id: params.cardId,
       p_to_state: params.to,
       p_reason: params.reason,
+      p_thread: params.thread ?? undefined,
+      p_agent_label: params.agentLabel ?? undefined,
+      p_idempotency_key: params.idempotencyKey ?? undefined,
+      ...branchArgs(params),
+      p_not_landed: params.notLanded ?? undefined,
+    });
+  }
+
+  async land(params: LandCardParams): Promise<Result<CardWrite, CardFailure>> {
+    return this.#write('card_land', {
+      p_card_id: params.cardId,
+      p_repo: params.branch.repo,
+      p_branch: params.branch.name,
+      p_squash_sha: params.squashSha,
+      p_target: params.target,
+      p_reason: params.reason,
+      p_to_state: params.to ?? undefined,
+      p_not_landed: params.notLanded ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
@@ -299,6 +346,7 @@ export class SupabaseCardRepository implements ICardRepository {
     return Ok({
       card: cardSchema.parse(parsed.card),
       refs: parsed.refs,
+      branches: parsed.branches,
       events: parsed.events as CardReadView['events'],
       has_more: parsed.has_more,
       next_after_seq: parsed.next_after_seq,

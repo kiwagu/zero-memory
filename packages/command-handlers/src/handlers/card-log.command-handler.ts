@@ -7,6 +7,7 @@ import { CardLogCommand } from '@workspace/commands';
 import {
   FailureError,
   failure,
+  parseBranchRef,
   type CardLogOutput,
   type CardRef,
 } from '@workspace/contracts';
@@ -26,6 +27,16 @@ const invalid = (message: string): FailureError =>
 const refFrom = (kind?: string, target?: string): CardRef => {
   if (!kind || !target) {
     throw invalid('`ref_kind` and `ref_target` are both required to attach.');
+  }
+  if (kind === 'branch') {
+    const branch = parseBranchRef(target);
+    if (!branch) {
+      throw invalid(
+        'A branch target is `<repo>:<branch>` — the repository as owner/name ' +
+          '(or its folder name) and a git branch name.'
+      );
+    }
+    return { kind: 'branch', ...branch };
   }
   const parsed = parseCardRef(
     kind === 'url' ? { kind, url: target } : { kind, id: target }

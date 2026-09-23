@@ -141,10 +141,24 @@ const CONFLICT = [
  * and reaches its column by moves, because a tile shows the reason of the
  * move that put it there — a card created straight into a column has none.
  */
+/** The repository the demo board's work runs in. */
+const DEMO_REPO = 'acme/memory-service';
+
 const BOARD: Array<{
   title: string;
   body: string;
-  moves: Array<{ to: string; reason: string }>;
+  /**
+   * Work entering active names its branch; work leaving it with the branch
+   * still open says why it has not landed.
+   */
+  moves: Array<{
+    to: string;
+    reason: string;
+    branch?: string;
+    notLanded?: string;
+  }>;
+  /** The branch that landed, recorded the way an agent records a squash. */
+  land?: { branch: string; sha: string; to: string; reason: string };
   note?: string;
   /** Points the card at the project's first memory. */
   attachAnchor?: boolean;
@@ -170,6 +184,7 @@ const BOARD: Array<{
         reason:
           'Imports skip translation today, so a non-English export never ' +
           'matches an English query.',
+        branch: 'feature/translate-imports',
       },
     ],
     note: 'The translator already records the source language; import only needs to call it.',
@@ -186,12 +201,15 @@ const BOARD: Array<{
         to: 'active',
         reason:
           'Long memories are the weakest case in the latest recall benchmark.',
+        branch: 'feature/embedding-swap',
       },
       {
         to: 'waiting',
         reason:
           'Waiting for the new model to publish its vector size; the ' +
           'migration plan depends on it.',
+        notLanded:
+          'The branch waits for the vector size; nothing to squash yet.',
       },
     ],
   },
@@ -205,14 +223,17 @@ const BOARD: Array<{
       {
         to: 'active',
         reason: 'The feed loaded the whole corpus on every visit.',
-      },
-      {
-        to: 'done',
-        reason:
-          'Shipped: keyset pages on (created_at, id), stable under ' +
-          'concurrent writes.',
+        branch: 'feature/feed-pages',
       },
     ],
+    land: {
+      branch: 'feature/feed-pages',
+      sha: '4f11a55',
+      to: 'done',
+      reason:
+        'Shipped: keyset pages on (created_at, id), stable under ' +
+        'concurrent writes.',
+    },
   },
   {
     title: 'Browser extension that captures decisions from web chats',
@@ -524,6 +545,21 @@ try {
         card_id: card.id,
         to: move.to,
         reason: move.reason,
+        ...(move.branch
+          ? { branch: { repo: DEMO_REPO, name: move.branch } }
+          : {}),
+        ...(move.notLanded ? { not_landed: move.notLanded } : {}),
+      });
+    }
+    if (spec.land) {
+      await boardCall('card', {
+        action: 'land',
+        card_id: card.id,
+        branch: { repo: DEMO_REPO, name: spec.land.branch },
+        squash_sha: spec.land.sha,
+        target: 'main',
+        to: spec.land.to,
+        reason: spec.land.reason,
       });
     }
   }
