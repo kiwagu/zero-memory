@@ -18,7 +18,7 @@ import { signInThroughForm } from '../helpers/web.js';
 const REASON = 'blocked on the owner picking a cutover window';
 
 interface CardResult {
-  card: { id: string; number: number };
+  card: { id: string; number: number; scope: string };
 }
 
 test.describe('Project board in the dashboard', () => {
@@ -32,6 +32,7 @@ test.describe('Project board in the dashboard', () => {
 
     let cardId: string;
     let cardNumber: number;
+    let cardScope: string;
     try {
       const loop = await mcp.callTool('remember', {
         content:
@@ -52,6 +53,7 @@ test.describe('Project board in the dashboard', () => {
       const card = firstJson<CardResult>(promoted).card;
       cardId = card.id;
       cardNumber = card.number;
+      cardScope = card.scope;
 
       const moved = await mcp.callTool('card', {
         action: 'move',
@@ -82,7 +84,9 @@ test.describe('Project board in the dashboard', () => {
     await signInThroughForm(page, seed.userA);
 
     // The board: the card sits in the column its state names.
-    await page.goto('/board');
+    // This card's own board, by scope: without one the page opens the board
+    // that moved last, and specs running in parallel keep moving theirs.
+    await page.goto(`/board?scope=${encodeURIComponent(cardScope)}`);
     await expect(page.getByTestId('board')).toBeVisible();
     const waiting = page.getByTestId('board-column-waiting');
     const tile = waiting.getByTestId('board-card').filter({
@@ -94,10 +98,38 @@ test.describe('Project board in the dashboard', () => {
     await expect(tile).toContainText(REASON);
     await expect(tile).toContainText(`#${cardNumber}`);
 
+    // Narrower than its five columns, the board scrolls inside its own row.
+    // The page itself never widens, so the header and the picker stay whole.
+    await page.setViewportSize({ width: 1100, height: 800 });
+    const row = page.getByTestId('board-columns');
+    await expect
+      .poll(() => row.evaluate((node) => node.scrollWidth > node.clientWidth))
+      .toBe(true);
+    expect(
+      await page.evaluate(
+        () =>
+          document.documentElement.scrollWidth <=
+          document.documentElement.clientWidth
+      )
+    ).toBe(true);
+    await page.setViewportSize({ width: 1280, height: 720 });
+
     // Opening a card is a DIALOG over the board — and the address bar still
     // names the card, so the step is navigable, shareable and reloadable.
     await tile.click();
     await expect(page.getByTestId('card-modal')).toBeVisible();
+    // One shared, thin scrollbar across the dashboard, and a scrollbar that
+    // appears never shifts the layout.
+    expect(
+      await page.evaluate(
+        () => getComputedStyle(document.documentElement).scrollbarWidth
+      )
+    ).toBe('thin');
+    expect(
+      await page.evaluate(
+        () => getComputedStyle(document.documentElement).scrollbarGutter
+      )
+    ).toBe('stable');
     await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
     // The board is still there underneath, not replaced.
     await expect(page.getByTestId('board')).toBeVisible();
@@ -130,7 +162,7 @@ test.describe('Project board in the dashboard', () => {
     // Dismissing goes back to the board rather than pushing it again.
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('card-modal')).toBeHidden();
-    await expect(page).toHaveURL(/\/board$/);
+    await expect(page).toHaveURL(/\/board(\?[^/]*)?$/);
 
     // The same address opened DIRECTLY is a page of its own, not a dialog:
     // a reload or a pasted link must land on the card, not on nothing.
@@ -226,5 +258,337 @@ test.describe('Project board in the dashboard', () => {
     await expect(page.getByTestId('board-scope-filter')).toContainText(
       'nothing_here'
     );
+  });
+
+  test('a card shows what its bound conversation remembered', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    // A fresh project per run, so the marker is born in THIS conversation
+    // rather than merged into a row from an earlier run.
+    const hint = `/tmp/zm-e2e-board-web-feed-${Date.now()}`;
+
+    let cardId: string;
+    try {
+      const pack = firstJson<{ session?: { thread?: string } }>(
+        await mcp.callTool('build_context', {
+          topic: 'card feed in the dashboard',
+          briefing: true,
+          project_hint: hint,
+        })
+      );
+      const thread = pack.session?.thread;
+      expect(thread).toBeTruthy();
+
+      const stored = await mcp.callTool('remember', {
+        content:
+          'board-web feed marker: the report build now waits for the backup ' +
+          'to finish',
+        kind: 'decision',
+        project_hint: hint,
+      });
+      expect(stored.isError ?? false).toBe(false);
+      const { scope } = firstJson<{ scope: string }>(stored);
+
+      const created = await mcp.callTool('card', {
+        action: 'create',
+        scope,
+        title: 'Order the nightly jobs',
+      });
+      expect(created.isError ?? false).toBe(false);
+      cardId = firstJson<CardResult>(created).card.id;
+
+      const bound = await mcp.callTool('card_log', {
+        action: 'attach',
+        card_id: cardId,
+        ref_kind: 'thread',
+        ref_target: thread,
+      });
+      expect(bound.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+
+    // Never attached, yet on the card: it was born in the bound conversation.
+    const feed = page.getByTestId('card-feed');
+    await expect(feed).toContainText('report build now waits');
+    await expect(page.getByTestId('card-refs')).not.toContainText(
+      'report build now waits'
+    );
+  });
+
+  test('a card body renders as markdown, and hostile markup stays inert', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    try {
+      // A card lives on a project board; the scope comes from a write routed
+      // by the same hint, the way the api board specs obtain it.
+      const anchor = await mcp.callTool('remember', {
+        content: 'board-markdown marker: anchors the card to its project',
+        kind: 'fact',
+        project_hint: '/tmp/zm-e2e-board-markdown',
+      });
+      expect(anchor.isError ?? false).toBe(false);
+      const scope = firstJson<{ scope: string }>(anchor).scope;
+
+      const created = await mcp.callTool('card', {
+        action: 'create',
+        scope,
+        title: 'Markdown card',
+        body: [
+          '**Goal** is readable.',
+          '',
+          '- first item',
+          '- second item',
+          '',
+          'Literal <Dialog> stays. <img src=x onerror="window.__pwned=1">',
+          '',
+          '[click me](javascript:window.__pwned=1)',
+        ].join('\n'),
+      });
+      expect(created.isError ?? false).toBe(false);
+      cardId = firstJson<CardResult>(created).card.id;
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    const body = page.getByTestId('card-body');
+    await expect(body.locator('strong')).toHaveText('Goal');
+    await expect(body.locator('li')).toHaveCount(2);
+    // Text that looks like markup is shown, never interpreted or dropped.
+    await expect(body).toContainText('<Dialog>');
+    await expect(body.locator('img')).toHaveCount(0);
+    await expect(body.locator('a', { hasText: 'click me' })).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __pwned?: number }).__pwned
+      )
+    ).toBeUndefined();
+  });
+});
+
+/*
+ * The chain of panels a card dialog opens. A link inside the card opens its
+ * target as a twin panel to the right — memory, card or entity — and the
+ * canvas grows without losing anything: a new panel goes right after the one
+ * it was opened from, an open resource is never opened twice, × closes a panel
+ * with everything opened from it, and Escape unwinds by opening order before
+ * it closes the dialog. The address stays the card's throughout.
+ */
+test.describe('Panel chain in the card dialog', () => {
+  test('links in a card build a canvas of panels to its right', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const stamp = Date.now();
+    const entityName = `e2e-panel-entity-${stamp}`;
+    const cardTitle = `panel-chain card ${stamp}`;
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+
+    let aId: string;
+    let bId: string;
+    let cId: string;
+    let cardId: string;
+    let cardNumber: number;
+    let boardScope: string;
+    try {
+      const remember = async (args: Record<string, unknown>) => {
+        const stored = await mcp.callTool('remember', {
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-panel-chain',
+          ...args,
+        });
+        expect(stored.isError ?? false).toBe(false);
+        return firstJson<{ memory_id: string; scope: string }>(stored);
+      };
+      const b = await remember({
+        content: `panel-chain B ${stamp}: the retry budget is five attempts`,
+      });
+      bId = b.memory_id;
+      boardScope = b.scope;
+      aId = (
+        await remember({
+          content: `panel-chain A ${stamp}: the queue drains nightly, see ${bId}`,
+          entities: [{ name: entityName, type: 'concept' }],
+        })
+      ).memory_id;
+      cId = (
+        await remember({
+          content: `panel-chain C ${stamp}: cutover waits for the owner`,
+        })
+      ).memory_id;
+
+      const created = await mcp.callTool('card', {
+        action: 'create',
+        scope: b.scope,
+        title: cardTitle,
+        body: 'panel-chain card body',
+      });
+      expect(created.isError ?? false).toBe(false);
+      const card = firstJson<CardResult>(created).card;
+      cardId = card.id;
+      cardNumber = card.number;
+      for (const target of [aId, cId]) {
+        const attached = await mcp.callTool('card_log', {
+          action: 'attach',
+          card_id: cardId,
+          ref_kind: 'memory',
+          ref_target: target,
+        });
+        expect(attached.isError ?? false).toBe(false);
+      }
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    // The card's own board, by scope: without one the page opens the board
+    // that moved last, and specs running in parallel keep moving theirs.
+    const openCard = async () => {
+      await page.goto(`/board?scope=${encodeURIComponent(boardScope)}`);
+      await page
+        .getByTestId('board-card')
+        .filter({ hasText: cardTitle })
+        .click();
+      await expect(page.getByTestId('card-modal')).toBeVisible();
+    };
+    const order = () =>
+      page
+        .getByTestId('panel')
+        .evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute('data-panel-key'))
+        );
+    const panel = (key: string) => page.locator(`[data-panel-key="${key}"]`);
+    const refs = page.getByTestId('card-refs').first();
+    const cardKey = `card:${cardId}`;
+    const aKey = `memory:${aId}`;
+    const bKey = `memory:${bId}`;
+    const cKey = `memory:${cId}`;
+
+    await openCard();
+
+    // 1. A link in the card opens a twin panel to its right; the URL stays
+    //    the card's, and the panel says where it came from.
+    await refs.getByRole('link', { name: /panel-chain A/ }).click();
+    await expect.poll(order).toEqual([cardKey, aKey]);
+    await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
+    await expect(panel(aKey).getByTestId('panel-from')).toContainText(
+      `#${cardNumber}`
+    );
+
+    // 2. A memory id in A's text opens B right after A.
+    await panel(aKey).getByRole('link', { name: bId }).click();
+    await expect.poll(order).toEqual([cardKey, aKey, bKey]);
+
+    // 3. The same link again adds nothing.
+    await refs.getByRole('link', { name: /panel-chain A/ }).click();
+    await expect.poll(order).toEqual([cardKey, aKey, bKey]);
+
+    // 4. A second link from the card goes right after the card; the rest of
+    //    the canvas is kept.
+    await refs.getByRole('link', { name: /panel-chain C/ }).click();
+    await expect.poll(order).toEqual([cardKey, cKey, aKey, bKey]);
+
+    // 5. A modified click is a real navigation in a new tab, not a panel.
+    const [popup] = await Promise.all([
+      page.context().waitForEvent('page'),
+      refs
+        .getByRole('link', { name: /panel-chain C/ })
+        .click({ modifiers: ['ControlOrMeta'] }),
+    ]);
+    await popup.close();
+    await expect.poll(order).toEqual([cardKey, cKey, aKey, bKey]);
+
+    // 6. × on A closes A and B, which was opened from it.
+    await panel(aKey).getByTestId('panel-close').click();
+    await expect.poll(order).toEqual([cardKey, cKey]);
+
+    // 7. An entity chip opens the entity as a panel.
+    await refs.getByRole('link', { name: /panel-chain A/ }).click();
+    await expect.poll(order).toEqual([cardKey, aKey, cKey]);
+    await panel(aKey).getByRole('link', { name: entityName }).click();
+    const entityPanel = page.locator('[data-panel-key^="entity:"]');
+    await expect(entityPanel.getByTestId('entity-name').first()).toContainText(
+      entityName
+    );
+    const withEntity = await order();
+    expect(withEntity).toHaveLength(4);
+
+    // 8. Escape inside a nested dialog closes only that dialog.
+    await panel(aKey).getByRole('button', { name: 'Forget' }).click();
+    await expect(
+      page.getByRole('button', { name: 'Invalidate' })
+    ).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Invalidate' })).toBeHidden();
+    await expect.poll(order).toEqual(withEntity);
+
+    // 9. An action in a panel refreshes that panel.
+    await expect(panel(aKey).getByTestId('memory-validity')).toContainText(
+      'present'
+    );
+    await panel(aKey).getByRole('button', { name: 'Forget' }).click();
+    await page.getByRole('button', { name: 'Invalidate' }).click();
+    await expect(panel(aKey).getByTestId('memory-validity')).not.toContainText(
+      'present'
+    );
+
+    // 10. Escape unwinds by opening order, then closes the dialog.
+    for (let left = (await order()).length; left > 1; left -= 1) {
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => (await order()).length).toBe(left - 1);
+    }
+    await expect.poll(order).toEqual([cardKey]);
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('card-modal')).toBeHidden();
+    await expect(page).toHaveURL(/\/board(\?[^/]*)?$/);
+
+    // 11. A resource gone by the time it is clicked shows "not available", and
+    //     a failed load offers a retry — never a broken panel.
+    await openCard();
+    await page.route(`**/api/panels/memory/${aId}`, (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: '{"error":"not_found"}',
+      })
+    );
+    await refs.getByRole('link', { name: /panel-chain A/ }).click();
+    await expect(panel(aKey).getByTestId('panel-unavailable')).toBeVisible();
+    await page.unroute(`**/api/panels/memory/${aId}`);
+
+    await page.route(`**/api/panels/memory/${cId}`, (route) =>
+      route.fulfill({ status: 500, body: 'boom' })
+    );
+    await refs.getByRole('link', { name: /panel-chain C/ }).click();
+    await expect(
+      panel(cKey).getByRole('button', { name: 'Retry' })
+    ).toBeVisible();
+    await page.unroute(`**/api/panels/memory/${cId}`);
+    await panel(cKey).getByRole('button', { name: 'Retry' }).click();
+    await expect(panel(cKey).getByTestId('memory-content')).toContainText(
+      'panel-chain C'
+    );
+
+    // 12. A click on the empty space around the panels dismisses the dialog,
+    //     as a click outside it always has.
+    await page.getByTestId('panel-strip').click({ position: { x: 8, y: 8 } });
+    await expect(page.getByTestId('card-modal')).toBeHidden();
+    await expect(page).toHaveURL(/\/board(\?[^/]*)?$/);
   });
 });

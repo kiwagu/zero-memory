@@ -1,5 +1,6 @@
 import type { IContext } from '@workspace/context';
 import {
+  briefingWorkSchema,
   CLIENT_SESSION_SOURCE_KEY,
   CORE_SCOPE,
   PERSONAL_SCOPE,
@@ -34,6 +35,7 @@ import type {
 import type { IMemoryRepository } from './memory.repository.js';
 import { MemoryService } from './memory.service.js';
 import type { IProjectBindingRepository } from './project-binding.repository.js';
+import type { IBriefingWorkReader } from './briefing-work.reader.js';
 import type { IProjectRulesReader } from './project-rules.reader.js';
 import type { IScopeAccessService } from './scope-access.service.js';
 import { ScopeRoutingService } from './scope-routing.service.js';
@@ -167,6 +169,7 @@ const makeService = (overrides?: {
   projectRules?: IProjectRulesReader;
   portabilityJudge?: IPortabilityJudge;
   threads?: ISessionThreadRepository;
+  briefingWork?: IBriefingWorkReader;
 }) => {
   const repository = overrides?.repository ?? makeRepository();
   const searchService = overrides?.searchService ?? makeSearchService();
@@ -195,7 +198,8 @@ const makeService = (overrides?: {
     overrides?.projectRules,
     undefined,
     portabilityJudge,
-    threads
+    threads,
+    overrides?.briefingWork
   );
   return {
     service,
@@ -302,6 +306,10 @@ describe('MemoryService.remember', () => {
     // Content is truncated to a recognisable preview, not a full read.
     expect(out.similar_existing?.[0]?.content).toHaveLength(200);
     expect(out.hint).toContain('supersedes');
+    // The hint names only the path that retires: a link() call records the
+    // relation and leaves the old version live.
+    expect(out.hint).not.toContain('link(supersedes)');
+    expect(out.hint).toContain('retires nothing');
   });
 
   it('caps supersede candidates at 10', async () => {
@@ -2643,5 +2651,170 @@ describe('MemoryService.remember entity anchoring', () => {
     expect(result.isOk()).toBe(true);
     expect(repository.insert).toHaveBeenCalledOnce();
     expect(result.unwrap().anchors).toBeUndefined();
+  });
+});
+
+describe('MemoryService.buildContext — the work summary', () => {
+  const HINT = '/home/someone/repos/quokka-tool';
+  const projectScope = `proj.${USER_ENTITY_ID.replace(/\./g, '_')}.quokka_tool`;
+  const work = briefingWorkSchema.parse({
+    bound_card: {
+      id: 'crd_0000000000000001.0000000000',
+      number: 3,
+      title: 'Wire the importer',
+      state: 'active',
+      state_reason: 'the importer blocks the release',
+      refs: 2,
+      updated_at: '2026-09-21T10:00:00Z',
+    },
+    active: 1,
+    waiting: 1,
+    lead: [
+      {
+        id: 'crd_0000000000000002.0000000000',
+        number: 4,
+        title: 'Retire the old parser',
+        state: 'waiting',
+      },
+    ],
+  });
+  const loop = (n: number) => ({
+    id: `mem_${String(n).padStart(16, '0')}.0000000000`,
+    content: `handover ${n}`,
+    kind: 'task',
+    scope: projectScope,
+    created_at: '2026-09-20T00:00:00Z',
+  });
+  const reader = (
+    read: Awaited<ReturnType<IBriefingWorkReader['forBriefing']>>
+  ): IBriefingWorkReader => ({
+    forBriefing: vi.fn().mockResolvedValue(read),
+  });
+
+  it('carries the summary and gives up one ranked row for it under a token budget', async () => {
+    const briefingWork = reader({ work, attachedLoopIds: [] });
+    const { service, graphService } = makeService({ briefingWork });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+      // The conversation is what the bound card is found through.
+      conversation_id: 'conversation-1',
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(result.unwrap().work).toEqual(work);
+    // 1200 tokens map to six rows; the summary displaces one of them.
+    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
+    expect(params.maxMemories).toBe(5);
+    expect(briefingWork.forBriefing).toHaveBeenCalledWith(
+      projectScope,
+      TEST_THREAD
+    );
+  });
+
+  it('leaves an unbudgeted briefing exactly as it was — no summary, no displacement', async () => {
+    // Measured on a production clone: dropping the default 12th row lost two
+    // brief probes, so only budgeted briefings pay a row for the summary.
+    const briefingWork = reader({ work, attachedLoopIds: [] });
+    const { service, graphService } = makeService({ briefingWork });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+    });
+
+    expect(result.unwrap().work).toBeUndefined();
+    expect(briefingWork.forBriefing).not.toHaveBeenCalled();
+    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
+    expect(params.maxMemories).toBeUndefined();
+  });
+
+  it('displaces nothing when the project has no work to summarise', async () => {
+    const { service, graphService } = makeService({
+      briefingWork: reader(null),
+    });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    expect(result.unwrap().work).toBeUndefined();
+    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
+    expect(params.maxMemories).toBe(6);
+  });
+
+  it('reaches a loop through its card instead of listing it a second time', async () => {
+    const graphService = makeGraphService();
+    vi.mocked(graphService.buildContext).mockResolvedValue({
+      memories: [],
+      entities: [],
+      edges: [],
+      linked_memories: [],
+      recent: [],
+      rules: [],
+      open_loops: [loop(1), loop(2)],
+      open_loops_total: 5,
+    } as never);
+    const { service } = makeService({
+      graphService,
+      briefingWork: reader({ work, attachedLoopIds: [loop(1).id] }),
+    });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    const pack = result.unwrap();
+    expect(pack.open_loops.map((l) => l.id)).toEqual([loop(2).id]);
+    // Only the listed loop is subtracted: the other three stay counted.
+    expect(pack.open_loops_total).toBe(4);
+  });
+
+  it('still briefs, without a summary, when the board cannot be read', async () => {
+    const briefingWork: IBriefingWorkReader = {
+      forBriefing: vi.fn().mockRejectedValue(new Error('board down')),
+    };
+    const { service, graphService } = makeService({ briefingWork });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(result.unwrap().work).toBeUndefined();
+    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
+    expect(params.maxMemories).toBe(6);
+  });
+
+  it('asks for no summary outside a briefing or without a project', async () => {
+    const briefingWork = reader({ work, attachedLoopIds: [] });
+    const { service } = makeService({ briefingWork });
+
+    // Both carry a budget, so only the missing briefing / project is why.
+    await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      max_tokens: 1200,
+    });
+    await service.buildContext({
+      topic: 'anything',
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    expect(briefingWork.forBriefing).not.toHaveBeenCalled();
   });
 });

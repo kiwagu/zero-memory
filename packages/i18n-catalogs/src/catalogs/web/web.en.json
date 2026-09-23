@@ -514,6 +514,9 @@
   "board.fromLoop": "Promoted from the open loop",
   "board.refs": "Attached",
   "board.noRefs": "Nothing attached yet.",
+  "board.feed": "From bound conversations",
+  "board.noFeed": "No conversation is bound to this card yet. An agent binds one by attaching it, and what that conversation remembers in this scope appears here on its own.",
+  "board.moreFeed": "Older memories are not shown.",
   "board.history": "History",
   "board.moreHistory": "Older entries are not shown.",
   "board.state.idea": "Idea",
@@ -535,5 +538,16 @@
   "board.noHistory": "Nothing has happened yet.",
   "board.scope.latest": "Latest activity",
   "board.scope.all": "All boards",
-  "board.scope.latestNamed": "Latest activity: {scope}"
+  "board.scope.latestNamed": "Latest activity: {scope}",
+  "markdown.image": "image",
+  "panels.previous": "Previous panel",
+  "panels.next": "Next panel",
+  "panels.close": "Close panel",
+  "panels.from": "from: {title}",
+  "panels.loading": "Loading…",
+  "panels.unavailable": "Not available",
+  "panels.retry": "Retry",
+  "panels.kind.memory": "Memory",
+  "panels.kind.card": "Card",
+  "panels.kind.entity": "Entity"
 }

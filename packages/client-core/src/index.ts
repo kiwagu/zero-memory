@@ -1,11 +1,18 @@
 export {
   composeWithinBudget,
   DEFAULT_HOOK_BUDGET_CHARS,
+  LOOPS_BUDGET_SHARE,
+  MEMORY_FLOOR_STUBS,
+  MEMORY_STUB_CHARS,
+  memoryFloorChars,
+  planSectionBudgets,
   renderMemoryStub,
+  renderStarvedPackNotice,
   resolveHookBudgetChars,
   renderPackWithinBudget,
   type BudgetedSection,
   type ComposedBriefing,
+  type SectionBudgets,
   type TrimmedPack,
 } from './brief-budget.logic.js';
 export {
@@ -14,6 +21,7 @@ export {
   splitOpenLoops,
   type OpenLoopsSplit,
 } from './open-loops.logic.js';
+export { renderBoardSummary } from './work-section.logic.js';
 export {
   DEFAULT_ANCHOR_BUDGET_CHARS,
   renderCompactionAnchor,
@@ -22,6 +30,7 @@ export {
 export {
   mergeStandingRules,
   renderStandingRulesSection,
+  ruleHeadline,
   splitStandingRules,
   type StandingRulesSplit,
 } from './standing-rules.logic.js';
@@ -69,6 +78,12 @@ export {
   rulesNeedDelivery,
   startsNewEpoch,
 } from './context-epoch.logic.js';
+export {
+  mergeBriefTail,
+  planTailChunk,
+  type BriefTail,
+  type TailChunk,
+} from './brief-tail.logic.js';
 export {
   decideRecallGap,
   recallGapTally,

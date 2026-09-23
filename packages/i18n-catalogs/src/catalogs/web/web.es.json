@@ -514,6 +514,9 @@
   "board.fromLoop": "Promovida desde el bucle abierto",
   "board.refs": "Adjuntos",
   "board.noRefs": "Nada adjunto todavía.",
+  "board.feed": "De las conversaciones vinculadas",
+  "board.noFeed": "Aún no hay ninguna conversación vinculada a esta tarjeta. Un agente la vincula adjuntándola, y lo que esa conversación recuerda en este ámbito aparece aquí por sí solo.",
+  "board.moreFeed": "Los recuerdos más antiguos no se muestran.",
   "board.history": "Historial",
   "board.moreHistory": "No se muestran las entradas más antiguas.",
   "board.state.idea": "Idea",
@@ -535,5 +538,16 @@
   "board.noHistory": "Todavía no ha pasado nada.",
   "board.scope.latest": "Actividad más reciente",
   "board.scope.all": "Todos los tableros",
-  "board.scope.latestNamed": "Actividad más reciente: {scope}"
+  "board.scope.latestNamed": "Actividad más reciente: {scope}",
+  "markdown.image": "imagen",
+  "panels.previous": "Panel anterior",
+  "panels.next": "Panel siguiente",
+  "panels.close": "Cerrar panel",
+  "panels.from": "desde: {title}",
+  "panels.loading": "Cargando…",
+  "panels.unavailable": "No disponible",
+  "panels.retry": "Reintentar",
+  "panels.kind.memory": "Memoria",
+  "panels.kind.card": "Tarjeta",
+  "panels.kind.entity": "Entidad"
 }

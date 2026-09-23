@@ -1,10 +1,13 @@
 export {
   briefStatePath,
+  clearBriefTail,
   loadBriefState,
   markRulesDelivered,
   markTaskBriefed,
   MAX_TRACKED_SESSIONS,
+  readBriefTail,
   readSessionThread,
+  recordBriefTail,
   recordSessionBriefing,
   recordSessionThread,
   stampSessionStart,

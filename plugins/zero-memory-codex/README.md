@@ -55,6 +55,9 @@ ZM_SERVER_URL=https://memory.example.com/mcp bash scripts/plugin-bundle/deploy-z
 
 Installs the binary, registers the MCP server, stages a local marketplace and
 `codex plugin add`s this plugin, and migrates off any legacy `config.toml [hooks]`
-block + `AGENTS.md` section. Then restart Codex, `/mcp` authenticate, and `/hooks`
+block (backing the file up first). `~/.codex/AGENTS.md` is never edited: a
+ZM-first section you keep there stays, beside the plugin skill. An MCP
+registration that already points at the server is left as is, so its login
+survives a re-run. Then restart Codex, `/mcp` authenticate, and `/hooks`
 review + trust (plugin hooks require trust too). Export a guest bundle for a LAN
 machine with `bash scripts/plugin-bundle/deploy-zm-codex.sh <dir>`.

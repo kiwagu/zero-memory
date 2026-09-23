@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   mergeStandingRules,
   renderStandingRulesSection,
+  ruleHeadline,
   splitStandingRules,
 } from './standing-rules.logic.js';
 
@@ -95,9 +96,112 @@ describe('renderStandingRulesSection', () => {
     expect(withoutPin).not.toContain('guaranteed reach every');
   });
 
-  it('carries a rule of any length in full — this channel has no cap', () => {
+  it('carries a rule of any length in full when no ceiling is given', () => {
     const long = 'x'.repeat(5000);
     const section = renderStandingRulesSection([{ text: long, pinned: true }]);
     expect(section).toContain(long);
+  });
+
+  const body = (headline: string): string =>
+    `${headline}. ${'The reasoning behind it runs on at length. '.repeat(30)}`;
+
+  it('keeps pinned rules whole even past the ceiling, and headlines the rest', () => {
+    const pinned = body('PINNED RULE: never touch production');
+    const ordinary = body('ORDINARY RULE ABOUT BRANCHES');
+    const section = renderStandingRulesSection(
+      [
+        { text: pinned, pinned: true },
+        { text: ordinary, pinned: false },
+      ],
+      800
+    )!;
+    // The guarantee the owner pinned it for outranks the ceiling.
+    expect(section).toContain(pinned);
+    expect(section).not.toContain(ordinary);
+    expect(section).toContain('2. ORDINARY RULE ABOUT BRANCHES [headline]');
+    expect(section).toContain(
+      '(1 rule(s) above are shown by headline only — call build_context'
+    );
+  });
+
+  it('keeps non-pinned rules inside the ceiling whenever their headlines fit', () => {
+    const rules = Array.from({ length: 8 }, (_, i) => ({
+      text: `Rule ${i} ${'r'.repeat(1_300)}`,
+      pinned: false,
+    }));
+    // The smallest this section can be: every rule by headline, plus footer.
+    const allHeadlines = renderStandingRulesSection(rules, 0)!.length;
+    for (let ceiling = allHeadlines; ceiling <= 12_000; ceiling += 97) {
+      expect(
+        renderStandingRulesSection(rules, ceiling)!.length,
+        `ceiling ${ceiling}`
+      ).toBeLessThanOrEqual(ceiling);
+    }
+  });
+
+  it('does not shorten a rule that fits whole alongside a short rule after it', () => {
+    // A short rule's headline, with its marker, is LONGER than the rule
+    // itself — so reserving later rules at headline size would shorten an
+    // earlier rule that fits whole with room for the rest.
+    const long = `Use explicit error handling: ${'x'.repeat(400)}`;
+    const rules = [
+      { text: long, pinned: false },
+      { text: 'Use Bun', pinned: false },
+    ];
+    // The renderer reserves its widest footer up front and counts a newline
+    // after every line, the last included, so "both whole" is promised from
+    // the ceiling that also holds those — the same point at which the renderer
+    // delivered both whole before it reserved room for later rules.
+    const footer = /\n\(\d+ rule\(s\) above[^\n]*$/.exec(
+      renderStandingRulesSection(rules, 0)!
+    )![0];
+    const floor = renderStandingRulesSection(rules)!.length + footer.length + 1;
+    for (let ceiling = floor; ceiling <= floor + 120; ceiling += 1) {
+      const section = renderStandingRulesSection(rules, ceiling)!;
+      expect(section, `ceiling ${ceiling}`).toContain(long);
+      expect(section, `ceiling ${ceiling}`).toContain('2. Use Bun');
+    }
+  });
+
+  it('carries the others in full while they fit and adds no footer when all do', () => {
+    const section = renderStandingRulesSection(
+      [
+        { text: 'short rule one', pinned: false },
+        { text: 'short rule two', pinned: false },
+      ],
+      2000
+    )!;
+    expect(section).toContain('1. short rule one');
+    expect(section).toContain('2. short rule two');
+    expect(section).not.toContain('[headline]');
+    expect(section).not.toContain('headline only');
+  });
+});
+
+describe('ruleHeadline', () => {
+  it('ends at the first sentence break after the opening', () => {
+    expect(
+      ruleHeadline(
+        'NO PRIVATE REFERENCES IN COMMITTED ARTIFACTS (every project) — the ' +
+          'rest explains why.'
+      )
+    ).toBe('NO PRIVATE REFERENCES IN COMMITTED ARTIFACTS (every project)');
+    expect(ruleHeadline('Production systems are READ-ONLY. Always.')).toBe(
+      'Production systems are READ-ONLY'
+    );
+  });
+
+  it('does not break inside an open parenthesis', () => {
+    expect(
+      ruleHeadline(
+        'NORTH STAR (keep it in view — not only when asked): the rest follows.'
+      )
+    ).toBe('NORTH STAR (keep it in view — not only when asked)');
+  });
+
+  it('caps an opening that never breaks', () => {
+    const headline = ruleHeadline('word '.repeat(100));
+    expect(headline.length).toBeLessThanOrEqual(161);
+    expect(headline.endsWith('…')).toBe(true);
   });
 });

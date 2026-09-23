@@ -1761,6 +1761,10 @@ export type Database = {
         Returns: Json;
       };
       board_scopes: { Args: never; Returns: Json };
+      briefing_work: {
+        Args: { p_scope: string; p_thread?: string };
+        Returns: Json;
+      };
       build_context: {
         Args: {
           briefing?: boolean;
@@ -1825,6 +1829,10 @@ export type Database = {
           p_thread?: string;
           p_title?: string;
         };
+        Returns: Json;
+      };
+      card_feed: {
+        Args: { p_before?: string; p_card_id: string; p_limit?: number };
         Returns: Json;
       };
       card_get: {

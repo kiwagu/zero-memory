@@ -33,6 +33,7 @@ import {
 } from '@workspace/extraction/testing';
 import {
   ACCOUNT_ERASER,
+  BRIEFING_WORK_READER,
   ENTITY_REPOSITORY,
   EXPORT_METRICS_READER,
   GRAPH_SERVICE,
@@ -64,6 +65,7 @@ import {
   SupabaseEntityRepository,
   SupabaseGraphService,
   SupabaseIngestLogRepository,
+  SupabaseBriefingWorkReader,
   SupabaseCardRepository,
   SupabaseMemoryExportReader,
   SupabaseMemoryRepository,
@@ -93,6 +95,7 @@ export const register = (c = container): void => {
   c.registerSingleton(EMBEDDING_SERVICE, E5SmallEmbeddingService);
   c.registerSingleton(MEMORY_REPOSITORY, SupabaseMemoryRepository);
   c.registerSingleton(CARD_REPOSITORY, SupabaseCardRepository);
+  c.registerSingleton(BRIEFING_WORK_READER, SupabaseBriefingWorkReader);
   c.registerSingleton(MEMORY_EXPORT_READER, SupabaseMemoryExportReader);
   c.registerSingleton(ACCOUNT_ERASER, SupabaseAccountEraser);
   c.registerSingleton(MEMORY_SEARCH_SERVICE, SupabaseMemorySearchService);

@@ -64,13 +64,50 @@ Every target is authorized per reader. A memory you may not read arrives as an
 id with no preview, exactly as it does in the activity feed, so a shared card
 stays legible without leaking what is behind its references.
 
+## A bound conversation fills the card
+
+Attaching a conversation to a card — an attachment of kind `thread` — binds
+it. From then on, every memory that conversation writes in the card's scope
+belongs to the card's **feed** without being attached one by one. The
+discipline is one call when the work starts, not one per fact.
+
+The feed is derived when it is read, from where each memory was born. Nothing
+is copied onto the card, so the feed follows the memories themselves: one that
+is forgotten or superseded leaves it, one that is restored comes back, and
+detaching the conversation empties it. Memories the conversation wrote before
+it was bound belong too — what counts is the conversation, not the moment.
+
+Three rules keep the feed the card's own. Only memories in the card's scope
+are listed, so a personal note written in the same conversation stays out. A
+memory that is also attached explicitly is listed once, with the attachments.
+And reading the feed is not a recall: a memory is not strengthened merely for
+sitting on an open card. Like everything else on a card, the feed is read with
+the reader's own rights — a memory you may not read is simply not in it.
+
 ## Promoting a loop
 
 When a loop turns out to be a piece of work rather than a handover, promote
 it. The card records which loop it came from, and the loop itself is left
 alone — deliberately. Closing it would erase the difference between work that
 was handed over and work that was finished, so memory hygiene can never close
-a card through the loop it grew from. A loop promotes into exactly one card.
+a card through the loop it grew from.
+
+From the moment of promotion the card is where that work's state lives, and
+nothing that happens to the loop reaches it:
+
+- Closing, forgetting, restoring or superseding the loop leaves the card's
+  state, revision and history exactly as they were.
+- The hygiene judge that closes finished loops skips a promoted one: the work
+  was handed over, not finished.
+- A duplicate or superseded verdict that would retire a promoted loop is not
+  applied automatically; it waits in the review queue for a person.
+- A briefing that names the card shows the loop through it, the same way as a
+  loop attached to the card. Where the card is not named, the loop still
+  arrives on its own.
+
+A loop promotes into exactly one card. Asking again, or two agents asking at
+the same moment, gets a refusal that names the card that already carries the
+work.
 
 ## Visibility
 
@@ -85,18 +122,131 @@ personal scope.
 Reading takes membership; writing takes write access. A reader who tries to
 move a card is told they may not, rather than that the card does not exist.
 
+## Working with cards
+
+Cards are written and read through three MCP tools. An agent calls them; there
+is nothing to type into a terminal.
+
+`card` opens and steers one piece of work. Opening one names the board it goes
+on — the project's scope, which `build_context` reports as `project_scope`:
+
+```json
+{
+  "action": "create",
+  "scope": "proj.…",
+  "title": "Paginate the memory feed",
+  "body": "Goal: the feed stays fast however large the corpus grows.\n\nDone when: a visit loads one page."
+}
+```
+
+A new card starts in `idea` unless `state` says otherwise. Moving it takes the
+reason:
+
+```json
+{
+  "action": "move",
+  "card_id": "crd_...",
+  "to": "active",
+  "reason": "The feed loaded the whole corpus on every visit."
+}
+```
+
+`promote_loop` takes a `loop_id` in place of a scope and opens the card as
+`active`. `edit` rewrites the title or the body; pass `expected_revision` and
+it refuses to overwrite a change someone made since you read the card.
+`archive` takes the card off the board and, like a move, needs a reason.
+
+`card_log` adds to the record without moving anything. A `note` is a
+statement of your own; it can answer another note through `reply_to`, with a
+`relation` of `supports`, `disputes` or `corrects`. `attach` and `detach`
+point the card at an artifact or stop pointing at it, by `ref_kind` —
+`memory`, `entity`, `thread`, `card` or `url` — and `ref_target`. Attaching
+the same target twice changes nothing. Attaching your own conversation binds
+it, so attach it once when you start working on a card:
+
+```json
+{
+  "action": "attach",
+  "card_id": "crd_...",
+  "ref_kind": "thread",
+  "ref_target": "thr_..."
+}
+```
+
+The `thread` field every write accepts only records which conversation wrote
+that entry; it does not bind anything.
+
+`board` is the read side: `list` a scope's cards, narrowed to one column with
+`state` or to matching titles with `query`; `get` one card with its
+attachments, a page of its history — where `after_seq` reads only what
+happened since you last looked — and a page of its feed, newest first,
+continued with the `feed_before` cursor each page returns; or `resolve` a
+project-local number such as `#42` into its card.
+
+`create`, `promote_loop`, `move`, `note` and `attach` accept an
+`idempotency_key`: a retry with the same key after a timeout returns the first
+result instead of writing a second row.
+
+## The board at the start of a session
+
+A session that opens on a project hears about its board before anything else
+it reads. A budgeted briefing — what the client hooks request — carries a few
+lines of it: the card this conversation is bound to, with its state and the
+reason it is there, how many cards are active and waiting, and the first three
+of them. The lines name the work; `board` reads it. They take the place of one
+row of memories the briefing would otherwise carry, so the briefing does not
+grow, and a loop attached to one of the named cards is left out of the loop
+list, since the card already points at it. A `build_context` call that names
+no budget carries no summary and briefs exactly as it did before.
+
 ## The board in the dashboard
 
-The dashboard shows the board as columns, and each tile carries the reason the
+The dashboard shows the board as one row of columns, which scrolls sideways
+when the window is too narrow for all five. Each tile carries the reason the
 card is in the column it is in — not merely what touched it last, since a note
 or an attachment says nothing about where the work stands.
+
+<Screenshot path="/board">
+
+![The project board as one row of state columns — idea, active, waiting, with the rest past the edge — each moved card showing the reason it was moved](/img/project-board.png)
+
+</Screenshot>
+
+A picker beside the title names the board on screen and switches between the
+boards you can read. With nothing chosen, the page opens on the board where a
+card changed most recently, and the picker says which board that is; **All
+boards** puts the cards of every scope side by side. A choice you make lands in
+the address, so a board you are watching can be linked and reloaded. A board
+with no cards stays selected and shows as empty — it is never swapped for a
+different one. The board refreshes itself while agents work on it, so it does
+not show a state that has already moved on.
 
 Opening a card lifts it over the board in a dialog, so the columns stay in
 view, and the address bar still names the card: the step is navigable,
 shareable and reloadable, and closing it goes back to the board. A pasted link
 or a reload lands on the same card as a page of its own. Either way it shows
-the document, what the card points at, and its whole history: who moved it,
-between which states, and why.
+the document, what the card points at, what its bound conversations have
+remembered, and its whole history: who moved it, between which states, and
+why.
+
+A link inside the card — an attachment, a memory in its feed, the loop it came
+from — opens its target as a panel to the right of the card, with the same
+look and the same actions as the page it stands for: a memory, another card, or
+an entity. A link inside that panel opens the next one right beside it, so the
+card and everything it leads to sit side by side as one canvas. Each panel says
+which panel it was opened from, and something already open is brought into
+view instead of opened twice. The panels scroll sideways under large arrows at
+the edges of the screen; × closes a panel together with everything opened from
+it, and Escape closes the most recently opened one before it closes the card.
+The address stays the card's while you do this, and a link opened with Ctrl or
+Cmd still opens its own page in a new tab.
+
+Text written to be read — a card's description, its notes and the reasons on
+its moves, and a memory itself — is shown as Markdown: lists, emphasis, code
+and tables render, and a memory id in the text becomes a link to that memory.
+Because that text may come from someone else, anything that looks like HTML is
+shown as the text it is, images are not loaded, and a link to another site
+opens in a new tab with its domain shown.
 
 The page has no control that changes a card. That is deliberate and it is
 tested: a drag has nowhere to put a justification, so moving happens where the

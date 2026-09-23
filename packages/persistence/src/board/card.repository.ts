@@ -79,6 +79,25 @@ const eventViewSchema = z.object({
   created_at: z.string(),
 });
 
+/** A page of the derived feed, as `card_feed` returns it. */
+const feedViewSchema = z.object({
+  error: z.string().optional(),
+  message: z.string().nullable().optional(),
+  feed: z
+    .array(
+      z.object({
+        memory_id: z.string(),
+        kind: z.string(),
+        preview: z.string(),
+        thread: z.string(),
+        created_at: z.string(),
+      })
+    )
+    .default([]),
+  has_more: z.boolean().default(false),
+  next_before: z.string().nullable().default(null),
+});
+
 const readViewSchema = z.object({
   error: z.string().optional(),
   card: z.unknown().optional(),
@@ -258,12 +277,34 @@ export class SupabaseCardRepository implements ICardRepository {
     if (parsed.error || parsed.card === undefined) {
       return Err(toCardFailure(parsed.error));
     }
+
+    // The feed is its own read with its own cursor: history pages forward by
+    // stream position, the feed backwards by when a memory was written.
+    const { data: feedData, error: feedError } = await this.#client().rpc(
+      'card_feed',
+      {
+        p_card_id: params.cardId,
+        p_before: params.feedBefore ?? undefined,
+        p_limit: params.limit ?? 50,
+      }
+    );
+    if (feedError) {
+      throw new Error(`card_feed failed: ${feedError.message}`);
+    }
+    const feed = feedViewSchema.parse(feedData ?? {});
+    if (feed.error) {
+      return Err(toCardFailure(feed.error, feed.message));
+    }
+
     return Ok({
       card: cardSchema.parse(parsed.card),
       refs: parsed.refs,
       events: parsed.events as CardReadView['events'],
       has_more: parsed.has_more,
       next_after_seq: parsed.next_after_seq,
+      feed: feed.feed,
+      feed_has_more: feed.has_more,
+      feed_next_before: feed.next_before,
     });
   }
 

@@ -42,6 +42,125 @@ export const DEFAULT_HOOK_BUDGET_CHARS = 9_000;
 /** How much of a memory a stub shows before the id. */
 const STUB_CONTENT_CHARS = 100;
 
+/**
+ * Maximum stub-line count the memory pack gets as a floor, regardless of how
+ * long the standing rules are. The floor prevents rules from consuming the
+ * entire channel, leaving the briefing unable to name the memories the session
+ * has not yet seen. Each stub line is a pointer the agent can pull by id, and
+ * the pack itself is one `build_context` call away.
+ */
+export const MEMORY_FLOOR_STUBS = 10;
+
+/**
+ * Character cost per stub line: the memory kind, up to STUB_CONTENT_CHARS of
+ * opening content, and the memory id.
+ */
+export const MEMORY_STUB_CHARS = 140;
+
+/**
+ * The line that opens a pack's stub block. Shared with `memoryFloorChars` so
+ * the floor reserves exactly what `renderPackWithinBudget` spends.
+ */
+const stubBlockIntro = (topic: string): string =>
+  `Also in memory for "${topic}", named but not inlined — pull any by id ` +
+  'with recall, or call build_context for the full pack:';
+
+/** The stub block's closing count of memories that were not even named. */
+const moreNotListed = (count: number): string => `(+${count} more not listed)`;
+
+/**
+ * What the floor sets aside for the topic's name inside the stub block's
+ * intro line. The floor is planned before any pack renders and without its
+ * topic, so it cannot measure the name — and for the primary pack the topic
+ * is a directory's basename: across 44 checkouts and worktrees on one
+ * development machine the longest was 32 characters. The rest of the 64
+ * absorbs how far one stub line of long content runs past MEMORY_STUB_CHARS:
+ * up to 18 characters for the longest kind name, and it is that FIRST stub
+ * the floor must seat for a pack of one. A topic past ~46 characters can
+ * still starve a one-memory pack at exactly its floor; it then says so with
+ * the starved notice rather than going silent.
+ */
+const STUB_INTRO_TOPIC_ALLOWANCE = 64;
+
+/**
+ * Calculates the memory floor in characters based on how many memories are
+ * available: the smaller of memoryCount and MEMORY_FLOOR_STUBS, times the cost
+ * per stub — plus, whenever there is anything to name, the stub block's own
+ * fixed cost. `renderPackWithinBudget` spends that cost before it seats a
+ * single stub: the intro line (115 characters before the topic's name) and
+ * the widest "(+N more not listed)" line it reserves up front. Without it the
+ * floor of a one- or two-memory project was smaller than its intro plus one
+ * stub, so such a pack under loop pressure came back starved every time —
+ * the floor held, and still named nothing. Returns 0 when there are no
+ * memories to name.
+ */
+export const memoryFloorChars = (memoryCount: number): number => {
+  const stubs = Math.min(Math.max(memoryCount, 0), MEMORY_FLOOR_STUBS);
+  if (stubs === 0) return 0;
+  return (
+    stubBlockIntro('').length +
+    STUB_INTRO_TOPIC_ALLOWANCE +
+    `\n${moreNotListed(memoryCount)}`.length +
+    stubs * MEMORY_STUB_CHARS
+  );
+};
+
+/**
+ * Share of the channel held for the open loops whenever there are any. They
+ * are the one part of a briefing the agent cannot learn another way — the
+ * rules also live in the repository's instruction files, the pack is one
+ * build_context away — so they get a FLOOR rather than whatever the rules
+ * happen to leave.
+ */
+export const LOOPS_BUDGET_SHARE = 0.25;
+
+/** What the composer's blank lines between sections cost, generously. */
+const SECTION_SEPARATORS_CHARS = 16;
+
+export interface SectionBudgets {
+  /** The standing rules' ceiling; pinned rules may still exceed it. */
+  readonly rules: number;
+  /**
+   * Space held for the memory pack, protecting it from rules overspend; the
+   * floor yields to pinned standing rules, which stay exempt from the ceiling
+   * and may displace it in the limit.
+   */
+  readonly memoryFloor: number;
+}
+
+/**
+ * Splits the channel BEFORE the sections are rendered: the project line is
+ * spent first, the open loops are held a floor, and the rules get the rest as
+ * their ceiling. Without this split the rules took what they wanted and the
+ * loops rendered into the remainder — on this project, nothing — and then
+ * the rules did not fit either, so the briefing lost both. The loops render
+ * afterwards against what the rules ACTUALLY used, so a short rules block
+ * leaves them more than the floor.
+ *
+ * The memory floor is subtracted before the rules ceiling, so non-pinned rules
+ * become headlines before the floor is lost; pinned rules stay outside the
+ * ceiling and can end up displacing the floor in the limit.
+ */
+export const planSectionBudgets = (
+  budgetChars: number,
+  projectLineChars: number,
+  hasLoops: boolean,
+  memoryCount = 0
+): SectionBudgets => {
+  const memoryFloor = memoryFloorChars(memoryCount);
+  return {
+    memoryFloor,
+    rules: Math.max(
+      0,
+      budgetChars -
+        projectLineChars -
+        (hasLoops ? Math.floor(budgetChars * LOOPS_BUDGET_SHARE) : 0) -
+        memoryFloor -
+        SECTION_SEPARATORS_CHARS
+    ),
+  };
+};
+
 /** Resolves the budget knob, falling back to the measured default. */
 export const resolveHookBudgetChars = (raw: string | undefined): number => {
   const parsed = Number(raw);
@@ -60,6 +179,15 @@ export const renderMemoryStub = (memory: ContextMemory): string => {
   return `- [${memory.kind}] ${opening}${ellipsis} (id: ${memory.id})`;
 };
 
+/**
+ * Marks a briefing whose memory pack had memories but not even one fit in the
+ * budget. An empty pack (no memories at all) does not get this notice: there is
+ * nothing to say, and an extra line trains the reader to ignore it.
+ */
+export const renderStarvedPackNotice = (topic: string, count: number): string =>
+  `(${count} memory/memories for "${topic}" did not fit this briefing — ` +
+  'they arrive in the next messages, or call build_context for them now.)';
+
 export interface TrimmedPack {
   /**
    * The whole per-topic section: the pack as JSON carrying the memories that
@@ -69,6 +197,18 @@ export interface TrimmedPack {
   readonly text: string;
   /** Ids delivered IN FULL — the only ones a later briefing may dedup away. */
   readonly deliveredIds: string[];
+  /**
+   * Memories that did not arrive WHOLE, including the ones named by a stub —
+   * a stub points at a memory, it does not deliver it.
+   */
+  readonly remaining: ContextMemory[];
+  /**
+   * True when the pack had memories but not even one LINE fit in the budget —
+   * neither a whole memory NOR a stub. A stub list that did fit is a real,
+   * if partial, delivery (`text` names real ids), not starvation; the
+   * briefing is starved only when `text` came back empty.
+   */
+  readonly starved: boolean;
 }
 
 /**
@@ -94,7 +234,12 @@ export const renderPackWithinBudget = (
   const header = `Persistent memory briefing for "${topic}" (from the zero-memory server):\n`;
   const parsed = buildContextOutputSchema.safeParse(payload);
   if (!parsed.success) {
-    return { text: header + JSON.stringify(payload), deliveredIds: [] };
+    return {
+      text: header + JSON.stringify(payload),
+      deliveredIds: [],
+      remaining: [],
+      starved: false,
+    };
   }
   const pack = parsed.data;
   const ordered: Array<{
@@ -153,11 +298,25 @@ export const renderPackWithinBudget = (
   }
 
   if (dropped.length > 0) {
-    const intro =
-      `Also in memory for "${topic}", named but not inlined — pull any by id ` +
-      'with recall, or call build_context for the full pack:';
+    const intro = stubBlockIntro(topic);
     const lines: string[] = [];
-    let stubSpent = spent + intro.length;
+    // Two costs this block owes that the per-line loop below must budget for
+    // AHEAD OF TIME — the same way `renderStandingRulesSection` reserves its
+    // widest footer before the first rule: the `\n\n` `parts.join` below
+    // costs when this block sits next to a whole-memories block above it
+    // (only when one was pushed), and the trailing `(+N more not listed)`
+    // line this block may still need once no further item fits. Skipping
+    // either reservation is exactly how a pack that measured itself as
+    // `<= budgetChars` came out a few characters LONGER once actually
+    // joined and appended — and the composer downstream enforces its own
+    // budget in this same strict, no-partial-credit way, so those few
+    // characters were the whole difference between a stub/starved-notice
+    // landing and the composer dropping the pack WHOLESALE. The tail
+    // reservation uses `dropped.length` — never smaller than the true
+    // `beyond` count the tail can end up printing — as its worst-case width.
+    const partsJoinReserve = deliveredIds.length > 0 ? 2 : 0;
+    const tailReserve = `\n${moreNotListed(dropped.length)}`.length;
+    let stubSpent = spent + partsJoinReserve + intro.length + tailReserve;
     for (const memory of dropped) {
       const line = renderMemoryStub(memory);
       if (stubSpent + line.length + 1 > budgetChars) break;
@@ -167,16 +326,26 @@ export const renderPackWithinBudget = (
     const beyond = dropped.length - lines.length;
     if (lines.length > 0) {
       parts.push(
-        [
-          intro,
-          ...lines,
-          ...(beyond > 0 ? [`(+${beyond} more not listed)`] : []),
-        ].join('\n')
+        [intro, ...lines, ...(beyond > 0 ? [moreNotListed(beyond)] : [])].join(
+          '\n'
+        )
       );
     }
   }
 
-  return { text: parts.join('\n\n'), deliveredIds };
+  return {
+    text: parts.join('\n\n'),
+    deliveredIds,
+    remaining: dropped,
+    // Starved means the render produced NOTHING — no whole memory AND no
+    // stub line either. `deliveredIds.length === 0` alone is the wrong test:
+    // it is true even when a stub list fully rendered (a real, non-empty
+    // `parts` block naming real ids), which is strictly more useful than the
+    // generic starved notice a caller would show in its place. `parts` is
+    // empty exactly when the budget could not seat even the intro-plus-one-
+    // stub floor, which is the one case that notice exists for.
+    starved: parts.length === 0 && ordered.length > 0,
+  };
 };
 
 export interface BudgetedSection {

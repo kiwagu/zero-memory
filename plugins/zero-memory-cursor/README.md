@@ -67,7 +67,9 @@ ZM_SERVER_URL=https://memory.example.com/mcp bash scripts/plugin-bundle/deploy-z
 
 Installs the binary, drops the plugin in `~/.cursor/plugins/local/zero-memory`,
 registers the MCP server, and migrates any legacy direct `~/.cursor/hooks.json`
-entries into the plugin. Then finish the two one-time OAuth authorizations the
+entries into the plugin. Both JSON files are rewritten only when they must
+change, in place, after a backup under `~/.local/state/zero-memory/backups/`.
+Then finish the two one-time OAuth authorizations the
 script prints (the Cursor MCP connection and `zero-memory-watcher login`) and
 restart Cursor.
 

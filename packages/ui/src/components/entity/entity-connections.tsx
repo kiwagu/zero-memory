@@ -1,19 +1,15 @@
 import * as React from 'react';
 
-import { Badge } from '@workspace/ui/components/badge';
+import {
+  EntityEdgeList,
+  type EntityEdgeItem,
+} from '@workspace/ui/components/entity/entity-edge-list';
 
 /**
  * EntityConnections — the lazy `<details>` readout of an entity's graph
  * neighborhood: edges (src —type→ dst) and linked memories. Mechanism only:
  * data arrives display-ready, fetching is the caller's `onOpen` callback.
  */
-
-interface EntityEdgeItem {
-  srcName: string;
-  type: string;
-  dstName: string;
-  invalidated?: boolean;
-}
 
 interface EntityMemoryItem {
   href: string;
@@ -70,28 +66,11 @@ function EntityConnections({
               <p className="mb-1 text-xs font-medium text-muted-foreground">
                 {labels.edgesTitle} ({data.edges.length})
               </p>
-              {data.edges.length > 0 ? (
-                <ul className="space-y-1">
-                  {data.edges.map((edge, index) => (
-                    <li key={index} className="text-xs">
-                      <span className="font-medium">{edge.srcName}</span>
-                      <Badge variant="secondary" className="mx-1.5">
-                        {edge.type}
-                      </Badge>
-                      <span className="font-medium">{edge.dstName}</span>
-                      {edge.invalidated ? (
-                        <span className="ml-1.5 text-destructive">
-                          ({labels.invalidated})
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {labels.noEdges}
-                </p>
-              )}
+              <EntityEdgeList
+                edges={data.edges}
+                invalidatedLabel={labels.invalidated}
+                emptyLabel={labels.noEdges}
+              />
             </div>
             <div>
               <p className="mb-1 text-xs font-medium text-muted-foreground">

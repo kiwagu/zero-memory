@@ -2,8 +2,8 @@ import type { BoardInput, CardState } from '@workspace/contracts';
 import { Query, type QueryProps } from '@workspace/domain';
 
 /**
- * Read the board: a scope's cards, one card with its history, or the card a
- * project-local number points at. Props mirror `boardInputSchema`.
+ * Read the board: a scope's cards, one card with its history and feed, or the
+ * card a project-local number points at. Props mirror `boardInputSchema`.
  */
 export class BoardQuery extends Query implements BoardInput {
   public readonly action: BoardInput['action'];
@@ -14,6 +14,7 @@ export class BoardQuery extends Query implements BoardInput {
   public readonly card_id?: BoardInput['card_id'];
   public readonly number?: number;
   public readonly after_seq?: number;
+  public readonly feed_before?: BoardInput['feed_before'];
   public readonly limit?: number;
 
   constructor(props: QueryProps<BoardInput>) {
@@ -26,6 +27,7 @@ export class BoardQuery extends Query implements BoardInput {
     this.card_id = props.card_id;
     this.number = props.number;
     this.after_seq = props.after_seq;
+    this.feed_before = props.feed_before;
     this.limit = props.limit;
   }
 }

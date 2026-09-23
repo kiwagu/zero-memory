@@ -12,6 +12,11 @@
  * computed locally with the same model the server uses.
  *
  * Usage: SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… bun scripts/search-eval.ts
+ *
+ * EVAL_MAX_MEMORIES=<n> replays the brief holdout at a fixed size of the
+ * ranked memories leg instead of the function's default — the lever for a
+ * displacement measurement: run at n and at n − 1 on the same stack and
+ * compare hit-rate, junk share and pack size.
  */
 import { spawnSync } from 'node:child_process';
 
@@ -174,8 +179,20 @@ const topicEmbeddings = await embedder.embed(
   'query'
 );
 
+/** The ranked leg's size for this replay, or null for the SQL default. */
+const evalMaxMemories = (() => {
+  const raw = process.env.EVAL_MAX_MEMORIES;
+  if (raw === undefined || raw === '') return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`EVAL_MAX_MEMORIES must be a positive integer, got ${raw}`);
+  }
+  return parsed;
+})();
+
 let presentTotal = 0;
 let presentHits = 0;
+let packCharsSum = 0;
 let absentTotal = 0;
 let absentInPack = 0;
 const briefMisses: string[] = [];
@@ -189,12 +206,14 @@ for (const [index, group] of briefGroups.entries()) {
     topic_text: group.topic,
     briefing: true,
     ...(group.scopes ? { scope_filter: group.scopes } : {}),
+    ...(evalMaxMemories !== null ? { max_memories: evalMaxMemories } : {}),
   });
   if (error) {
     throw new Error(
       `build_context failed for "${group.topic}": ${error.message}`
     );
   }
+  packCharsSum += JSON.stringify(pack ?? {}).length;
   // The knowledge legs of the pack. `recent` appears with the recency slice;
   // open_loops stay out — loops are lifecycle reminders, not ranked knowledge.
   const result = pack as {
@@ -253,6 +272,11 @@ const briefMetrics = {
   absent_total: absentTotal,
   absent_in_pack: absentInPack,
   junk_share: ratio(absentInPack, absentTotal),
+  max_memories: evalMaxMemories,
+  avg_pack_chars:
+    briefGroups.length > 0
+      ? Math.round(packCharsSum / briefGroups.length)
+      : null,
 };
 
 process.stdout.write(

@@ -16,10 +16,11 @@
 #        pre_llm_call     -> session/task briefing + health warning (injects)
 #        post_llm_call    -> mirror the turn + ingest the delta (opt-in)
 #        post_tool_call   -> mirror recall results (the judge's channel)
-#        on_pre_compress  -> capture the epoch about to be compressed
 #        on_session_end   -> session value receipt
 #   3. the `zero-memory` MCP server under mcp_servers in config.yaml (NOT in
 #      the plugin — Hermes' config-driven MCP keeps the plain tool names)
+# config.yaml is edited only through Hermes' own commands, and backed up first
+# when they change it (zm-user-files.sh).
 #
 # Two modes, chosen by whether an export dir is given:
 #   bash deploy-zm-hermes.sh                       # INSTALL on this machine
@@ -135,6 +136,10 @@ if [ -n "$EXPORT_DIR" ]; then
     [ -f "$cand" ] && { install -m 0755 "$cand" "$EXPORT_DIR/zm-server-url.sh"; break; }
   done
   [ -f "$EXPORT_DIR/zm-server-url.sh" ] || warn "missing zm-server-url.sh — not staged."
+  for cand in "$SCRIPT_DIR/zm-user-files.sh" "${MARKET_ROOT:-/nonexistent}/scripts/zm-user-files.sh"; do
+    [ -f "$cand" ] && { install -m 0755 "$cand" "$EXPORT_DIR/zm-user-files.sh"; break; }
+  done
+  [ -f "$EXPORT_DIR/zm-user-files.sh" ] || warn "missing zm-user-files.sh — not staged."
   if [ -d "$PLUGIN_SRC" ]; then
     rm -rf "$EXPORT_DIR/plugins/zero-memory-hermes"
     mkdir -p "$EXPORT_DIR/plugins"
@@ -200,6 +205,13 @@ fi
 CONFIG_YAML="$PROFILE_DIR/config.yaml"
 PLUGIN_DEST="$PROFILE_DIR/plugins/zero-memory"
 
+# config.yaml belongs to Hermes, so Hermes edits it (see the wiring step below).
+# Checked before anything is installed, so a machine is never left half-wired.
+if ! command -v hermes >/dev/null 2>&1; then
+  echo "ERROR: the 'hermes' command is not on PATH — it is what edits $CONFIG_YAML." >&2
+  exit 1
+fi
+
 # --- which server? (asked, checked, then stored — see zm-server-url.sh) ------
 for cand in "$SCRIPT_DIR/zm-server-url.sh" "$SCRIPT_DIR/../zm-server-url.sh"; do
   # shellcheck source=scripts/zm-server-url.sh
@@ -212,6 +224,16 @@ fi
 zm_resolve_server_url || exit 1
 zm_store_server_url
 BASE_URL="$ZM_BASE_URL"
+
+# The rules for touching the user's own files (back up first, write in place).
+for cand in "$SCRIPT_DIR/zm-user-files.sh" "$SCRIPT_DIR/../zm-user-files.sh"; do
+  # shellcheck source=scripts/zm-user-files.sh
+  [ -f "$cand" ] && { . "$cand"; break; }
+done
+if ! command -v zm_keep_snapshot >/dev/null 2>&1; then
+  echo "ERROR: zm-user-files.sh not found next to this script." >&2
+  exit 1
+fi
 
 # --- install the watcher binary ---------------------------------------------
 mkdir -p "$HOME/.local/bin"
@@ -240,45 +262,35 @@ fi
 
 # --- wire config.yaml: enable the plugin + register the MCP server -----------
 # Hermes plugins are opt-in: discovery finds the directory, but nothing loads
-# until the name is in plugins.enabled. Both edits are idempotent and are made
-# with Python's YAML (already required by Hermes itself) rather than by text
-# munging, so an existing config keeps its other keys intact.
-python3 - "$CONFIG_YAML" "$ZM_SERVER_URL" <<'PY'
-import sys
-from pathlib import Path
+# until the name is in plugins.enabled. config.yaml is Hermes' own file, so the
+# edits go through Hermes' own commands, which write it the way Hermes does. A
+# script that loaded and re-dumped the YAML itself rewrote the whole file on
+# every run, changed or not, and dropped its comments and formatting. Each
+# command below writes only when its value is missing or different, and the
+# file's previous content is kept as a backup whenever it changed.
+hermes_profile() { HERMES_HOME="$PROFILE_DIR" hermes "$@"; }
+config_snapshot="$(zm_snapshot_file "$CONFIG_YAML")"
 
-import yaml
-
-config_path, server_url = Path(sys.argv[1]), sys.argv[2]
-config = {}
-if config_path.exists():
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-
-plugins = config.setdefault("plugins", {})
-enabled = plugins.setdefault("enabled", [])
-if "zero-memory" not in enabled:
-    enabled.append("zero-memory")
-    print("  + plugins.enabled: zero-memory")
+hermes_profile plugins enable zero-memory --no-allow-tool-override
 
 # Settings are only SEEDED, never overwritten: capture is the user's consent
 # decision, and re-running an installer must not silently turn it on.
-entries = plugins.setdefault("entries", {})
-settings = entries.setdefault("zero-memory", {}).setdefault("settings", {})
-settings.setdefault("capture", False)
+if ! hermes_profile config get plugins.entries.zero-memory.settings.capture >/dev/null 2>&1; then
+  hermes_profile config set plugins.entries.zero-memory.settings.capture false
+fi
 
-servers = config.setdefault("mcp_servers", {})
-existing = servers.get("zero-memory")
-if not isinstance(existing, dict) or existing.get("url") != server_url:
-    servers["zero-memory"] = {"url": server_url, "auth": "oauth", "enabled": True}
-    print(f"  + mcp_servers.zero-memory -> {server_url}")
+if [ "$(hermes_profile config get mcp_servers.zero-memory.url 2>/dev/null || true)" != "$ZM_SERVER_URL" ]; then
+  hermes_profile config set mcp_servers.zero-memory.url "$ZM_SERVER_URL"
+  hermes_profile config set mcp_servers.zero-memory.auth oauth
+  hermes_profile config set mcp_servers.zero-memory.enabled true
+fi
 
-config_path.parent.mkdir(parents=True, exist_ok=True)
-config_path.write_text(
-    yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8"
-)
-print(f"  wrote {config_path}")
-PY
-say "Wired config.yaml (plugin enabled + MCP server registered)"
+zm_keep_snapshot "$CONFIG_YAML" "$config_snapshot"
+if [ "$ZM_FILE_CHANGED" = 1 ]; then
+  say "Wired config.yaml (plugin enabled + MCP server registered)"
+else
+  say "config.yaml already wired — left untouched"
+fi
 
 # --- next steps -------------------------------------------------------------
 cat <<EOF

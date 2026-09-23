@@ -98,6 +98,11 @@ import { injectMemoryRepository } from './memory.repository.provider.js';
 import type { IMemoryRepository } from './memory.repository.js';
 import { Provenance } from './provenance.vo.js';
 import { injectProjectRulesReader } from './project-rules.reader.provider.js';
+import type {
+  BriefingWorkRead,
+  IBriefingWorkReader,
+} from './briefing-work.reader.js';
+import { injectBriefingWorkReader } from './briefing-work.reader.provider.js';
 import type { IProjectRulesReader } from './project-rules.reader.js';
 import { injectUserRulesReader } from './user-rules.reader.provider.js';
 import type { IUserRulesReader } from './user-rules.reader.js';
@@ -151,9 +156,10 @@ const MS_PER_DAY = 86_400_000;
 const SUPERSEDE_HINT =
   'Live memories similar to what you just wrote. If this write REPLACES one of ' +
   'them, declare it — call remember again with ' +
-  'links:[{type:"supersedes",dst:"<id>"}] (or link(supersedes)) so the old ' +
-  'version is retired instead of left as a duplicate someone must later ' +
-  'reconcile. If they are different facets of the topic, ignore this.';
+  'links:[{type:"supersedes",dst:"<id>"}] so the old version is retired ' +
+  'instead of left as a duplicate someone must later reconcile. The link ' +
+  'tool is not a substitute: it records the relation and retires nothing. ' +
+  'If they are different facets of the topic, ignore this.';
 
 /**
  * How many typed-link neighbours a single hit may contribute, and how many a
@@ -226,7 +232,11 @@ export class MemoryService {
     // Optional like the rules readers: without the adapter the server behaves
     // as it did before threads — per-call hints — rather than failing to boot.
     @injectSessionThreadRepository()
-    private readonly threads?: ISessionThreadRepository
+    private readonly threads?: ISessionThreadRepository,
+    // Optional like the rules readers: without the adapter a briefing simply
+    // carries no work summary and displaces nothing for one.
+    @injectBriefingWorkReader()
+    private readonly briefingWork?: IBriefingWorkReader
   ) {}
 
   async remember(
@@ -1214,13 +1224,72 @@ export class MemoryService {
       const ownerId = this.context.mustGetCurrentUserEntityId();
       scopes = [Scope.user(ownerId), Scope.core(ownerId)];
     }
-    const briefing = await this.graphService.buildContext({
+    // The thread assertion. A briefing is what the client hook runs on every
+    // user message, so this is where the environment states where the work is
+    // — and where an echoed token that disagrees with it gets overwritten.
+    // An echoed token with nothing new to assert rides back unchanged, so a
+    // conversation keeps one stable token for its lifetime. Asserted before
+    // the pack is built: the work summary needs it to find the card this
+    // conversation is bound to.
+    const threadToken =
+      (await this.#assertThread(
+        input.conversation_id,
+        pinnedScope,
+        input.thread
+      )) ?? input.thread;
+
+    // THE WORK SUMMARY (a BUDGETED briefing pinned to a project): the board's
+    // work in progress, named in a few lines. It DISPLACES rather than
+    // inflates — the ranked memories leg gives up one row for it — because a
+    // briefing that only ever grows is one the client spills to a file unread.
+    //
+    // Budgeted only, because that is where the displacement was measured
+    // harmless: on a production clone, 6 → 5 ranked rows (what the hooks ask
+    // for) kept every brief probe, while 12 → 11 (the unbudgeted default)
+    // lost two that sat exactly at rank 12. An unbudgeted call therefore
+    // briefs exactly as before; the board stays one `board` call away.
+    // Fail-open: a board problem never costs the session its briefing.
+    const budgets = contextBudgets(input.max_tokens);
+    let work: BriefingWorkRead | null = null;
+    if (
+      input.briefing === true &&
+      pinnedScope &&
+      budgets.maxMemories !== undefined &&
+      this.briefingWork
+    ) {
+      try {
+        work = await this.briefingWork.forBriefing(pinnedScope, threadToken);
+      } catch (error) {
+        this.#logger.warn('briefing work lookup failed; briefing without it', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const pack = await this.graphService.buildContext({
       topicEmbedding,
       topicText,
       scopes,
       briefing: input.briefing === true,
-      ...contextBudgets(input.max_tokens),
+      ...budgets,
+      ...(work && budgets.maxMemories !== undefined
+        ? { maxMemories: Math.max(1, budgets.maxMemories - 1) }
+        : {}),
     });
+
+    // ONE work section, not two: a loop attached to a card the summary names
+    // is reached through that card. Only the listed loops can be subtracted
+    // from the total — one attached beyond the list's cap stays counted,
+    // which over-reports by one rather than hiding a loop.
+    const attached = new Set(work?.attachedLoopIds ?? []);
+    const openLoops = pack.open_loops.filter((loop) => !attached.has(loop.id));
+    const briefing = {
+      ...pack,
+      open_loops: openLoops,
+      open_loops_total: Math.max(
+        openLoops.length,
+        pack.open_loops_total - (pack.open_loops.length - openLoops.length)
+      ),
+    };
 
     // RULES in a briefing come from two channels, merged General-first:
     //   - GENERAL (user-layer): the owner's promoted user-layer rules. They
@@ -1275,18 +1344,6 @@ export class MemoryService {
       (a, b) => Number(b.pinned) - Number(a.pinned)
     );
 
-    // The thread assertion. A briefing is what the client hook runs on every
-    // user message, so this is where the environment states where the work is
-    // — and where an echoed token that disagrees with it gets overwritten.
-    // An echoed token with nothing new to assert rides back unchanged, so a
-    // conversation keeps one stable token for its lifetime.
-    const threadToken =
-      (await this.#assertThread(
-        input.conversation_id,
-        pinnedScope,
-        input.thread
-      )) ?? input.thread;
-
     // Translation transparency: when the topic was rewritten, tell the caller
     // what was actually briefed on. project_scope reports the pin so clients
     // can persist the resolved project identity (and adapters stash it as the
@@ -1295,6 +1352,7 @@ export class MemoryService {
       ...briefing,
       rules,
       ...(pinnedScope ? { project_scope: pinnedScope } : {}),
+      ...(work ? { work: work.work } : {}),
       ...(threadToken
         ? { session: { attached_project: null, thread: threadToken } }
         : {}),

@@ -23,6 +23,11 @@ unrelated` with a confidence.
    - **Tier-HUMAN** (contradictions, low-confidence pairs): a row in
      `public.memory_review_queue` (deny-all) plus a `contradicts` link, for a
      person to resolve.
+   - An auto-resolution whose loser is a loop promoted to a card
+     (`cards.origin_loop_id`) is downgraded to Tier-HUMAN
+     (`protectPromotedLoop`): the card now carries that work, so retiring the
+     loop is a call for a person to make. The loop-closure judge skips such
+     loops entirely, in its SQL candidate query.
 
 Tuning lives in one place: `DEFAULT_HYGIENE_CONFIG` (`hygiene-verdict.ts`).
 
@@ -171,6 +176,20 @@ history, confidence does not separate real supersedes from pairs a person
 waved through.
 
 Tuning: `DEFAULT_JUDGE_RESCAN_CONFIG` (`judge-rescan.ts`).
+
+## Loop closure
+
+`LoopClosureDetector` closes open loops whose work newer memories report as
+done: the `find_loop_closure_evidence` rollup pairs each live loop with its
+newest similar non-loop memories, `LoopClosureJudge` decides, and only a
+confident verdict naming shown evidence closes the loop (reversibly, audited).
+`loop_closure_checks` is the re-judge guard, keyed on the newest evidence a
+loop was judged against: a loop is judged again only when newer evidence
+appears. Restoring a loop (`HygieneResolver.restoreMemory`) re-arms that guard
+on the current evidence (`holdReopened`), so a person's reopen is not undone
+on the next run by the same evidence.
+
+Tuning: `DEFAULT_LOOP_CLOSURE_CONFIG` (`loop-closure.ts`).
 
 ## Single-subject disputes (challenge / stale-suspect)
 
