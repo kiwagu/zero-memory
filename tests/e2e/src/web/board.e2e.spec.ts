@@ -660,6 +660,61 @@ test.describe('Panel chain in the card dialog', () => {
     );
     await expect(page.getByTestId('card-branch-state')).toContainText('main');
     await expect(page.getByTestId('card-history')).toContainText('landed');
+    // Landed once: nothing earlier to show.
+    await expect(page.getByTestId('card-branch-earlier')).toHaveCount(0);
+  });
+  test('a branch that landed again shows its earlier landing beside the latest', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web re-landing marker ${Date.now()}: a fix in its own branch`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-reland',
+        })
+      ).scope;
+      cardId = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'Fixed where it began',
+          state: 'active',
+          branch: { repo: 'acme/memory-service', name: 'feature/relanded' },
+        })
+      ).card.id;
+      for (const [sha, reason] of [
+        ['aaaaaaa', 'the feature landed'],
+        ['bbbbbbb', 'a bug fixed in the same branch'],
+      ]) {
+        const landed = await mcp.callTool('card', {
+          action: 'land',
+          card_id: cardId,
+          branch: { repo: 'acme/memory-service', name: 'feature/relanded' },
+          squash_sha: sha,
+          target: 'main',
+          reason,
+        });
+        expect(landed.isError ?? false).toBe(false);
+      }
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    await expect(page.getByTestId('card-branch')).toHaveCount(1);
+    await expect(page.getByTestId('card-branch-state')).toContainText(
+      'bbbbbbb'
+    );
+    const earlier = page.getByTestId('card-branch-earlier');
+    await expect(earlier).toContainText('aaaaaaa');
+    await expect(earlier).not.toContainText('bbbbbbb');
   });
   test('a card label stays on one line beside a long title', async ({
     page,

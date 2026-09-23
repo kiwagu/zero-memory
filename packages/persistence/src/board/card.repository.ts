@@ -84,7 +84,7 @@ const eventViewSchema = z.object({
   created_at: z.string(),
 });
 
-/** A branch as `card_get` returns it. */
+/** A branch as `card_get` returns it, with every landing it had. */
 const branchViewSchema = z.object({
   repo: z.string(),
   branch: z.string(),
@@ -93,6 +93,15 @@ const branchViewSchema = z.object({
   target: z.string().nullable(),
   landed_at: z.string().nullable(),
   attached_at: z.string(),
+  landings: z
+    .array(
+      z.object({
+        squash_sha: z.string(),
+        target: z.string().nullable(),
+        landed_at: z.string(),
+      })
+    )
+    .default([]),
 });
 
 /** The branch rule's arguments, as every command that meets it takes them. */

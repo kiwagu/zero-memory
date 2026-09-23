@@ -92,6 +92,35 @@ describe('isLandingRecorded', () => {
     ).toBe(true);
   });
 
+  it('counts every landing of a branch that landed more than once', () => {
+    const relanded = [
+      {
+        ...landed[0]!,
+        squash_sha: 'bbbbbbb',
+        landings: [{ squash_sha: 'abcdef1' }, { squash_sha: 'bbbbbbb' }],
+      },
+    ];
+    // The earlier squash, by a full sha, is on record too.
+    expect(
+      isLandingRecorded(relanded, 'o/n', 'feature/x', 'abcdef1234567890')
+    ).toBe(true);
+    expect(isLandingRecorded(relanded, 'o/n', 'feature/x', 'bbbbbbb')).toBe(
+      true
+    );
+    expect(isLandingRecorded(relanded, 'o/n', 'feature/x', '1234567')).toBe(
+      false
+    );
+    // A server that sends no landings: only the latest counts, as before.
+    expect(
+      isLandingRecorded(
+        [{ ...landed[0]!, squash_sha: 'bbbbbbb' }],
+        'o/n',
+        'feature/x',
+        'abcdef1'
+      )
+    ).toBe(false);
+  });
+
   it('does not take an open branch, another commit or another repository for a landing', () => {
     expect(
       isLandingRecorded(

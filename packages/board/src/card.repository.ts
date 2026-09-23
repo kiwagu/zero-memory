@@ -143,7 +143,18 @@ export interface CardEventView {
   created_at: string;
 }
 
-/** A branch as a reader sees it on its card. */
+/** One landing of a branch: the squash commit, where it went, and when. */
+export interface CardBranchLanding {
+  squash_sha: string;
+  target: string | null;
+  landed_at: string;
+}
+
+/**
+ * A branch as a reader sees it on its card. `squash_sha` is its latest
+ * landing; `landings` is every landing, oldest first — a branch lands again
+ * when a fix is made in the branch that brought the bug.
+ */
 export interface CardBranchView {
   repo: string;
   branch: string;
@@ -152,6 +163,7 @@ export interface CardBranchView {
   target: string | null;
   landed_at: string | null;
   attached_at: string;
+  landings: CardBranchLanding[];
 }
 
 /**

@@ -243,7 +243,20 @@ export const cardDeclarationSchema = z
 export const cardBranchStateSchema = z.enum(['open', 'landed']);
 export type CardBranchState = z.infer<typeof cardBranchStateSchema>;
 
-/** A branch as a card reads it back. */
+/** One landing of a branch: the squash commit, where it went, and when. */
+export const cardBranchLandingSchema = z.object({
+  squash_sha: z.string(),
+  target: z.string().nullable(),
+  landed_at: z.string(),
+});
+export type CardBranchLanding = z.infer<typeof cardBranchLandingSchema>;
+
+/**
+ * A branch as a card reads it back. `squash_sha` is its latest landing;
+ * `landings` is every landing, oldest first — a branch lands again when a fix
+ * is made in the branch that brought the bug. A server older than the field
+ * sends none, which reads as an empty list.
+ */
 export const cardBranchViewSchema = z.object({
   repo: z.string(),
   branch: z.string(),
@@ -252,6 +265,7 @@ export const cardBranchViewSchema = z.object({
   target: z.string().nullable(),
   landed_at: z.string().nullable(),
   attached_at: z.string(),
+  landings: z.array(cardBranchLandingSchema).default([]),
 });
 export type CardBranchView = z.infer<typeof cardBranchViewSchema>;
 

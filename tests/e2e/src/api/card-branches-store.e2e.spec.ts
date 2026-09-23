@@ -22,6 +22,12 @@ interface CardJson {
   state: string;
 }
 
+interface LandingJson {
+  squash_sha: string;
+  target: string | null;
+  landed_at: string;
+}
+
 interface BranchJson {
   repo: string;
   branch: string;
@@ -29,6 +35,7 @@ interface BranchJson {
   squash_sha: string | null;
   target: string | null;
   landed_at: string | null;
+  landings: LandingJson[];
 }
 
 interface EventJson {
@@ -657,6 +664,81 @@ test.describe('The branch rule in the store', () => {
       p_reason: 'not mine',
     });
     expect(foreign.error).toBe('not_found');
+  });
+
+  test('a branch that lands again keeps every landing, and an earlier one recorded again changes nothing', async () => {
+    // A bug found on main is fixed in the branch that brought it, and that
+    // branch is squashed again — so one branch can land more than once.
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `branch-reland-${Date.now()}`);
+    const db = asUser(token);
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Fixed in the branch that brought it',
+    });
+    await rpc(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'waiting',
+      p_reason: 'set by hand',
+    });
+    const land = (branch: string, sha: string, reason: string) =>
+      rpc<{ changed: boolean; error?: string }>(db, 'card_land', {
+        p_card_id: card.id,
+        p_repo: REPO,
+        p_branch: branch,
+        p_squash_sha: sha,
+        p_target: 'main',
+        p_reason: reason,
+      });
+
+    expect(
+      (await land('feature/relanded', 'aaaaaaa', 'the feature')).changed
+    ).toBe(true);
+    expect(
+      (
+        await land(
+          'feature/relanded',
+          'bbbbbbb',
+          'the fix, from the same branch'
+        )
+      ).changed
+    ).toBe(true);
+    expect(
+      (await land('feature/other', 'ccccccc', 'another branch')).changed
+    ).toBe(true);
+
+    const read = await rpc<CardGetJson>(db, 'card_get', { p_card_id: card.id });
+    const relanded = read.branches.find((b) => b.branch === 'feature/relanded');
+    const other = read.branches.find((b) => b.branch === 'feature/other');
+    // The row keeps the latest landing; the landings keep all of them, oldest
+    // first, and each branch only its own.
+    expect(relanded).toMatchObject({ state: 'landed', squash_sha: 'bbbbbbb' });
+    expect(relanded?.landings.map((l) => l.squash_sha)).toEqual([
+      'aaaaaaa',
+      'bbbbbbb',
+    ]);
+    expect(relanded?.landings[0]).toMatchObject({ target: 'main' });
+    expect(relanded?.landings[0]?.landed_at).toBeTruthy();
+    expect(other?.landings.map((l) => l.squash_sha)).toEqual(['ccccccc']);
+
+    // Recording the earlier squash again — say, from a reminder that could
+    // not see the later one — is already on record, by a short or a longer
+    // sha, and must not wind the row back to it.
+    const again = await land(
+      'feature/relanded',
+      'aaaaaaa1234',
+      'recorded again'
+    );
+    expect(again.error).toBeUndefined();
+    expect(again.changed).toBe(false);
+    const after = await rpc<CardGetJson>(db, 'card_get', {
+      p_card_id: card.id,
+    });
+    const kept = after.branches.find((b) => b.branch === 'feature/relanded');
+    expect(kept?.squash_sha).toBe('bbbbbbb');
+    expect(kept?.landings).toHaveLength(2);
+    expect(after.events.filter((e) => e.type === 'landed')).toHaveLength(3);
   });
 
   test('the old six-argument move still resolves, and each command keeps one signature', async () => {

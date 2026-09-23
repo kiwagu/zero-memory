@@ -80,6 +80,12 @@ export const isLandingRecorded = (
     branch: string;
     state: string;
     squash_sha: string | null;
+    /**
+     * Every landing of the branch. A branch lands again when a fix is made
+     * in the branch that brought the bug, and its earlier squashes stay on
+     * record; a server that sends none leaves only the latest to compare.
+     */
+    landings?: ReadonlyArray<{ squash_sha: string }>;
   }>,
   repo: string,
   branch: string,
@@ -90,8 +96,10 @@ export const isLandingRecorded = (
       item.repo === repo &&
       item.branch === branch &&
       item.state === 'landed' &&
-      item.squash_sha !== null &&
-      sameCommit(item.squash_sha, sha)
+      ((item.squash_sha !== null && sameCommit(item.squash_sha, sha)) ||
+        (item.landings ?? []).some((landing) =>
+          sameCommit(landing.squash_sha, sha)
+        ))
   );
 
 /** A landing git shows: which card, which branch, which commit, where. */

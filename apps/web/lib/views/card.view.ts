@@ -5,6 +5,7 @@ import type { BadgeListItem } from '@workspace/ui/components/common/badge-list';
 import type { LinkedMemoryItem } from '@workspace/ui/components/memory/linked-memory-list';
 
 import {
+  cardBranchEarlierLabel,
   cardBranchStateLabel,
   cardEventLabel,
   cardLabel,
@@ -106,6 +107,7 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     name: branch.branch,
     repo: branch.repo,
     stateLabel: cardBranchStateLabel(branch, t),
+    earlierLabel: cardBranchEarlierLabel(branch, t),
     landed: branch.state === 'landed',
   }));
 

@@ -150,7 +150,10 @@ export const cardEventSchema = z.object({
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
 
-/** A git branch the card's work ran on, open or landed. */
+/**
+ * A git branch the card's work ran on, open or landed. `squash_sha` is its
+ * latest landing; `landings` is every landing, oldest first.
+ */
 export const cardBranchSchema = z.object({
   repo: z.string(),
   branch: z.string(),
@@ -159,6 +162,15 @@ export const cardBranchSchema = z.object({
   target: z.string().nullable(),
   landed_at: z.string().nullable(),
   attached_at: z.string(),
+  landings: z
+    .array(
+      z.object({
+        squash_sha: z.string(),
+        target: z.string().nullable(),
+        landed_at: z.string(),
+      })
+    )
+    .default([]),
 });
 export type CardBranch = z.infer<typeof cardBranchSchema>;
 
@@ -247,6 +259,28 @@ export function cardBranchStateLabel(
     });
   }
   return t('board.branch.open');
+}
+
+/**
+ * The landings before the latest, in words, or null when the branch landed
+ * at most once. A branch lands again when a fix is made in the branch that
+ * brought the bug; the badge names the latest landing, this the rest.
+ */
+export function cardBranchEarlierLabel(
+  branch: CardBranch,
+  t: WebTranslator
+): string | null {
+  const latest = branch.squash_sha;
+  const earlier = branch.landings
+    .map((landing) => landing.squash_sha)
+    .filter(
+      (sha) =>
+        latest === null || !(sha.startsWith(latest) || latest.startsWith(sha))
+    )
+    .map((sha) => sha.slice(0, 7));
+  return earlier.length > 0
+    ? t('board.branch.earlier', { shas: earlier.join(', ') })
+    : null;
 }
 
 export function cardRelationLabel(relation: string, t: WebTranslator): string {

@@ -156,6 +156,44 @@ describe('runLanding', () => {
           target: 'main',
           landed_at: 'x',
           attached_at: 'x',
+          landings: [],
+        },
+      ],
+    });
+    await runLanding(adapter());
+    expect(said).toEqual([]);
+  });
+
+  it('stays silent about the earlier squash of a branch that landed again', async () => {
+    // A bug fixed in the branch that brought it: the branch lands twice, and
+    // its row names only the second squash.
+    const first = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    const second = commit(
+      repo,
+      'c',
+      'fix: the bug, in the same branch',
+      'Squashed-from: feature/x (abcdef2) ZM-19'
+    );
+    vi.mocked(callCardBranches).mockResolvedValue({
+      card: CARD,
+      branches: [
+        {
+          repo: 'acme/memory-service',
+          branch: 'feature/x',
+          state: 'landed',
+          squash_sha: second.slice(0, 7),
+          target: 'main',
+          landed_at: 'x',
+          attached_at: 'x',
+          landings: [
+            { squash_sha: first.slice(0, 7), target: 'main', landed_at: 'x' },
+            { squash_sha: second.slice(0, 7), target: 'main', landed_at: 'x' },
+          ],
         },
       ],
     });
