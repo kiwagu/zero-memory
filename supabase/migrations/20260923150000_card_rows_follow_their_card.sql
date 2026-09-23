@@ -14,13 +14,19 @@
 --     (replaced)
 --   - policy "scope writers append to the stream as themselves" on
 --     public.card_events (replaced)
+--   - table public.cards: the update grant narrows to the columns the board
+--     commands change
 --
 -- Special considerations:
 --   - The board commands write both tables with the card's own scope, so
 --     they are unaffected; only a direct insert naming another scope is
 --     refused.
---   - Neither table has an update policy, so an insert is the only way a row
---     gets in, and this is the only check that needs the card.
+--   - Neither child table has an update policy, so an insert is the only way
+--     a row gets in there. The copy of the scope on those rows stays right
+--     only while the card keeps its own scope, so the card's scope, number,
+--     author and origin can no longer be updated either: the board commands
+--     change the title, body, state, revision, archive stamp and updated_at,
+--     and nothing else.
 
 set search_path = public, extensions;
 
@@ -58,3 +64,9 @@ with check (
        and c.scope operator(extensions.=) card_events.scope
   )
 );
+
+-- A card keeps the scope it was opened in: the rows hanging off it copy that
+-- scope, and the policies above rely on the copy being right.
+revoke update on public.cards from authenticated;
+grant update (title, body, state, revision, updated_at, archived_at)
+  on public.cards to authenticated;

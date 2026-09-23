@@ -910,7 +910,7 @@ test.describe('Project board over MCP', () => {
       kind: 'url',
       target: 'https://example.invalid/planted',
     });
-    expect(plantedRef.error).not.toBeNull();
+    expect(plantedRef.error?.code).toBe('42501');
     const plantedEvent = await db.from('card_events').insert({
       card_id: card.id,
       scope: own,
@@ -918,7 +918,7 @@ test.describe('Project board over MCP', () => {
       type: 'noted',
       note_text: 'planted',
     });
-    expect(plantedEvent.error).not.toBeNull();
+    expect(plantedEvent.error?.code).toBe('42501');
 
     // The card's own scope still takes its writer's rows, as it always did.
     const legit = await db.from('card_refs').insert({
@@ -928,5 +928,22 @@ test.describe('Project board over MCP', () => {
       target: 'https://example.invalid/legit',
     });
     expect(legit.error).toBeNull();
+    const legitEvent = await db.from('card_events').insert({
+      card_id: card.id,
+      scope: other,
+      seq: 999,
+      type: 'noted',
+      note_text: 'written in the card scope',
+    });
+    expect(legitEvent.error).toBeNull();
+
+    // And the card keeps its scope: moving it would strand every row that
+    // copied the old one.
+    const moved = await db
+      .from('cards')
+      .update({ scope: own })
+      .eq('id', card.id)
+      .select('id');
+    expect(moved.error?.code).toBe('42501');
   });
 });
