@@ -252,6 +252,22 @@ describe('the sibling clients carry the same boundary hooks', () => {
     expect(raw).toContain(`${WATCHER_BIN_NAME} ${command}`);
   });
 
+  it.each([
+    ['zero-memory-codex', 'PostToolUse', 'Bash', 'landing --client codex'],
+    ['zero-memory-cursor', 'postToolUse', 'Shell', 'landing --client cursor'],
+  ])(
+    'wires %s to check for an unrecorded landing after a shell command',
+    (plugin, event, matcher, command) => {
+      const hooks = (
+        JSON.parse(manifestOf(plugin)) as { hooks: Record<string, unknown[]> }
+      ).hooks;
+      expect(JSON.stringify(hooks[event])).toContain(`"matcher":"${matcher}"`);
+      expect(JSON.stringify(hooks[event])).toContain(
+        `${WATCHER_BIN_NAME} ${command}`
+      );
+    }
+  );
+
   it('wires Codex PostCompact to re-arm delivery after capture', () => {
     const raw = manifestOf('zero-memory-codex');
     const parsed = JSON.parse(raw) as { hooks: Record<string, unknown> };
