@@ -7,8 +7,11 @@
  * metric against the sum of the personal vitrines is proven separately on a
  * clone of live; here it is pinned where it is cheap and stable — the seat
  * count an operator answers for — plus an independent instance-wide count for
- * one aggregate, and the two structural guarantees.
+ * one aggregate, both read in the same database snapshot as the aggregate, and
+ * the two structural guarantees.
  */
+import { spawnSync } from 'node:child_process';
+
 import { createClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
@@ -25,35 +28,54 @@ const admin = () =>
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-/** Every seat on the instance, counted independently of the aggregate. */
-const countProfiles = async (): Promise<number> => {
-  const { count, error } = await admin()
-    .from('profiles')
-    .select('*', { count: 'exact', head: true });
-  expect(error).toBeNull();
-  return count ?? 0;
-};
-
-/** Live memories of the whole instance, by the same predicate the RPC uses. */
-const countLiveMemories = async (): Promise<number> => {
-  const { count, error } = await admin()
-    .from('memories')
-    .select('*', { count: 'exact', head: true })
-    .is('invalidated_at', null)
-    .is('superseded_by', null);
-  expect(error).toBeNull();
-  return count ?? 0;
-};
-
 /**
- * The aggregate must land inside the window the two independent counts define.
- * Either bound may be the larger one: rows are added by sibling specs and
- * removed by invalidation, so the interval is taken from the pair rather than
- * assumed to be ordered.
+ * The aggregate next to independent instance-wide counts, read from ONE
+ * snapshot: a repeatable-read transaction, so the function's own queries and
+ * the counts beside it see the same rows. Sibling specs write, invalidate and
+ * restore memories while this runs; two separate reads could straddle any of
+ * those, and no bracket of counts taken around the call survives a row that
+ * disappears and comes back in between.
  */
-const expectWithin = (actual: number, a: number, b: number): void => {
-  expect(actual).toBeGreaterThanOrEqual(Math.min(a, b));
-  expect(actual).toBeLessThanOrEqual(Math.max(a, b));
+const snapshotCounts = (): {
+  users_total: number;
+  profiles: number;
+  live_share_num: number;
+  live: number;
+} => {
+  const result = spawnSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      '--network',
+      'host',
+      '-i',
+      'supabase/postgres:17.6.1.136',
+      'psql',
+      'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-qtA',
+      '-c',
+      'begin transaction isolation level repeatable read read only; ' +
+        "select json_build_object('users_total', (m->>'users_total')::int, " +
+        "'profiles', (select count(*) from public.profiles), " +
+        "'live_share_num', (m->>'live_share_num')::int, " +
+        "'live', (select count(*) from public.memories " +
+        'where invalidated_at is null and superseded_by is null)) ' +
+        'from (select public.instance_metrics(30) as m) s; commit;',
+    ],
+    { encoding: 'utf8' }
+  );
+  if (result.status !== 0) {
+    throw new Error(`psql failed: ${result.stderr}`);
+  }
+  return JSON.parse(result.stdout.trim()) as {
+    users_total: number;
+    profiles: number;
+    live_share_num: number;
+    live: number;
+  };
 };
 
 test.describe('operator surface: instance_metrics', () => {
@@ -65,23 +87,13 @@ test.describe('operator surface: instance_metrics', () => {
     await seedInsightsUsage(a);
     await seedInsightsUsage(b);
 
-    // Convergence where it is stable: the seat count equals every profile —
-    // the aggregate spans the whole instance, not the caller.
-    //
-    // Both convergence checks BRACKET the aggregate between an independent
-    // count taken before and one taken after, instead of comparing against a
-    // single count. The suite runs its specs concurrently, so a sibling spec
-    // provisioning a user or writing a memory between the RPC and the count
-    // moves the true figure under the assertion — that is a property of the
-    // measurement, not a defect in the aggregate, and it made this spec fail
-    // once on a mismatch of exactly one. A bracket cannot be fooled by the
-    // thing this spec actually guards: a caller-scoped aggregate would sit at
-    // this spec's own two users, orders below an instance-wide bracket.
-    // Both "before" counts are taken BEFORE the aggregate is read: a count
-    // taken after it can already include a sibling spec's write, and then the
-    // aggregate lands below its own bracket.
-    const profilesBefore = await countProfiles();
-    const liveBefore = await countLiveMemories();
+    // Convergence where it is stable: the seat count equals every profile,
+    // and live_share_num every live memory of the instance — the aggregate
+    // spans the whole instance, not the caller. Read in one snapshot, so the
+    // comparison is exact however busy the sibling specs are.
+    const counts = snapshotCounts();
+    expect(counts.users_total).toBe(counts.profiles);
+    expect(counts.live_share_num).toBe(counts.live);
 
     const { data: inst, error } = await admin().rpc('instance_metrics', {
       p_days: 30,
@@ -95,14 +107,6 @@ test.describe('operator surface: instance_metrics', () => {
     // Seats are present and are the operator-only figures.
     expect(m).toHaveProperty('users_total');
     expect(m).toHaveProperty('users_active');
-
-    const profilesAfter = await countProfiles();
-    expectWithin(m.users_total as number, profilesBefore, profilesAfter);
-
-    // live_share_num aggregates the live memories of the whole instance —
-    // check it against an independent instance-wide count.
-    const liveAfter = await countLiveMemories();
-    expectWithin(m.live_share_num as number, liveBefore, liveAfter);
 
     // An end user, even authenticated, is denied the operator surface.
     const token = await passwordGrantToken(a);
