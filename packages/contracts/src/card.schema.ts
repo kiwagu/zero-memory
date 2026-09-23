@@ -508,7 +508,8 @@ export const boardInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      'Match card titles. Returns every candidate — it never picks one for you.'
+      'Match card titles, or a card label: `ZM-42`, `#42` or `42` also finds ' +
+        'card 42. Returns every candidate — it never picks one for you.'
     ),
   include_archived: z.boolean().optional(),
   card_id: cardIdSchema.optional().describe('Required for get.'),
