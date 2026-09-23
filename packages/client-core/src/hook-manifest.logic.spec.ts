@@ -84,6 +84,17 @@ describe('hookManifest', () => {
     }
   );
 
+  it.each(['plugin', 'full'] as const)(
+    'checks for an unrecorded landing after a shell command in the %s channel',
+    (profile) => {
+      expect(hookManifest(profile)).toContainEqual({
+        event: 'PostToolUse',
+        matcher: 'Bash',
+        command: 'landing',
+      });
+    }
+  );
+
   it('counts memory-tool calls under the mounted tool-name prefix', () => {
     const tracker = hookManifest('full').find(
       (e) => e.event === 'PostToolUse' && e.command === 'nudge'

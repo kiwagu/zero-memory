@@ -23,6 +23,17 @@ export {
 } from './open-loops.logic.js';
 export { renderBoardSummary } from './work-section.logic.js';
 export {
+  escapeGitRegex,
+  isLandingRecorded,
+  parseSquashTrailers,
+  renderLandingDrift,
+  renderLandingReminder,
+  repoIdentityFromRemote,
+  type LandingDrift,
+  type LandingFacts,
+  type SquashTrailer,
+} from './landing.logic.js';
+export {
   DEFAULT_ANCHOR_BUDGET_CHARS,
   renderCompactionAnchor,
   type CompactionAnchorInput,
