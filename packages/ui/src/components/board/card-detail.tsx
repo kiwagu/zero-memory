@@ -91,11 +91,19 @@ function CardDetail({
       {header}
 
       <header className="flex flex-col gap-2">
-        <div className="flex flex-wrap items-baseline gap-2">
-          <span className="text-muted-foreground text-sm whitespace-nowrap tabular-nums">
+        {/* The label and the title share one line; a long title wraps in its
+            own column, indented past the label, the way a board tile does. */}
+        <div className="flex items-baseline gap-2">
+          <span
+            className="text-muted-foreground shrink-0 text-sm whitespace-nowrap tabular-nums"
+            data-testid="card-number"
+          >
             {numberLabel}
           </span>
-          <h1 className="text-2xl font-semibold" data-testid="card-title">
+          <h1
+            className="min-w-0 text-2xl font-semibold"
+            data-testid="card-title"
+          >
             {title}
           </h1>
         </div>

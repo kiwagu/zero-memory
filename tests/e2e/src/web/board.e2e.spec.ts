@@ -698,4 +698,47 @@ test.describe('Panel chain in the card dialog', () => {
       )
     ).toBe(true);
   });
+  test('a long card title wraps in its own column beside the label', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web header marker ${Date.now()}: a card with a long title`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-header',
+        })
+      ).scope;
+      cardId = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title:
+            'Styled scrollbars that do not break the layout under long ' +
+            'content, even when the card title runs well past one line',
+        })
+      ).card.id;
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.goto(`/board/${cardId}`);
+    const label = await page.getByTestId('card-number').boundingBox();
+    const title = await page.getByTestId('card-title').boundingBox();
+    expect(label).not.toBeNull();
+    expect(title).not.toBeNull();
+    // The title wraps (the case under test) ...
+    expect(title!.height).toBeGreaterThan(label!.height * 1.5);
+    // ... inside its own column, starting on the label's line: no line holds
+    // the label alone, and every wrapped line keeps the label's indent.
+    expect(title!.y).toBeLessThan(label!.y + label!.height);
+    expect(title!.x).toBeGreaterThanOrEqual(label!.x + label!.width);
+  });
 });
