@@ -77,15 +77,17 @@ test.describe('operator surface: instance_metrics', () => {
     // once on a mismatch of exactly one. A bracket cannot be fooled by the
     // thing this spec actually guards: a caller-scoped aggregate would sit at
     // this spec's own two users, orders below an instance-wide bracket.
+    // Both "before" counts are taken BEFORE the aggregate is read: a count
+    // taken after it can already include a sibling spec's write, and then the
+    // aggregate lands below its own bracket.
     const profilesBefore = await countProfiles();
+    const liveBefore = await countLiveMemories();
 
     const { data: inst, error } = await admin().rpc('instance_metrics', {
       p_days: 30,
     });
     expect(error).toBeNull();
     const m = inst as Record<string, unknown>;
-
-    const liveBefore = await countLiveMemories();
 
     // Content-free: the one content-bearing field the vitrine exposes must not
     // cross onto the operator surface.
