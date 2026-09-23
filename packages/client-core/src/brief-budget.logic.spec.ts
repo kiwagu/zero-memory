@@ -1,4 +1,4 @@
-import { contextMemorySchema } from '@workspace/contracts';
+import { contextMemorySchema, memoryKindSchema } from '@workspace/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -407,4 +407,26 @@ describe('planSectionBudgets — memory floor', () => {
   it('gives the rules nothing rather than a negative ceiling', () => {
     expect(planSectionBudgets(600, 500, true, 12).rules).toBe(0);
   });
+
+  it.each(memoryKindSchema.options)(
+    'seats the stub block itself, so ONE %s memory handed exactly its floor still gets a stub',
+    (kind) => {
+      // A floor of one stub's width alone is not a floor: before the first
+      // stub line, the renderer spends its intro line (~115 characters plus
+      // the topic) and reserves its "(+N more not listed)" line, so a one-
+      // memory project squeezed down to its floor came back starved every
+      // time. Content far too long to arrive whole, so the stub is at its
+      // widest, and a real project directory name as the topic.
+      const trimmed = renderPackWithinBudget(
+        'zero-memory',
+        pack([
+          memory('mem_aaaaaaaaaaaaaaaa.01kzzzzzz1', 'x'.repeat(4_000), kind),
+        ]),
+        memoryFloorChars(1)
+      );
+      expect(trimmed.starved).toBe(false);
+      expect(trimmed.text).toContain('(id: mem_aaaaaaaaaaaaaaaa.01kzzzzzz1)');
+      expect(trimmed.text.length).toBeLessThanOrEqual(memoryFloorChars(1));
+    }
+  );
 });

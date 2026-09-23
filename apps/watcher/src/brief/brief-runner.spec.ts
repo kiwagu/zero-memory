@@ -516,13 +516,19 @@ describe('session-start memory floor', () => {
     // budget (the old, uncharged evenShare) and a correctly-charged one
     // produce visibly different results rather than both maxing out on
     // the same single item.
+    //
+    // 2,409 is this shape's original 2,208 plus the 201 characters the
+    // primary's floor grew by once it began seating the stub block's own
+    // intro and "+N more" line: the same room is left for the branch pack as
+    // before, and with the floor uncharged no budget from 2,200 to 2,700
+    // passes, so the number does not decide what the test pins.
     const briefing = await runSessionStart({
       branch: 'feature/two-topics',
-      budgetChars: 2_208,
+      budgetChars: 2_409,
       memories: Array.from({ length: 12 }, (_, i) => memory(i, 2_000)),
       branchMemories: Array.from({ length: 5 }, (_, i) => memory(500 + i, 900)),
     });
-    expect(briefing.length).toBeLessThanOrEqual(2_208);
+    expect(briefing.length).toBeLessThanOrEqual(2_409);
     // The primary pack's floor-guaranteed memory…
     expect(briefing).toContain('mem_0000000000000000');
     // …and the branch pack's own memory, NOT displaced by the primary
@@ -543,27 +549,32 @@ describe('session-start memory floor', () => {
     // even ONE to arrive whole at this budget, so the pack is a STUB list;
     // the assertion targets a memory that only a stub list this LONG can
     // reach — one the even (un-bumped) share alone falls short of, but the
-    // charged floor of 1,400 chars (10 stubs' worth, for these 12
-    // memories) covers. Not asserting the exact even-share figure here on
+    // charged floor (10 stubs' worth plus the stub block's intro, for these
+    // 12 memories) covers. Same budget as the previous test, for the same
+    // reason. Not asserting the exact even-share figure here on
     // purpose: it shifts with the exact section-budgeting arithmetic (it
     // already has, across earlier rounds of this fix), while the relation
     // this test actually pins — floor rescues a memory the even share
     // couldn't — does not.
     const briefing = await runSessionStart({
       branch: 'feature/two-topics',
-      budgetChars: 2_208,
+      budgetChars: 2_409,
       memories: Array.from({ length: 12 }, (_, i) => memory(i, 2_000)),
       branchMemories: Array.from({ length: 5 }, (_, i) => memory(500 + i, 900)),
     });
-    expect(briefing.length).toBeLessThanOrEqual(2_208);
+    expect(briefing.length).toBeLessThanOrEqual(2_409);
     expect(briefing).toContain('mem_0000000000000007');
   });
 
   it('shows the starved notice when the pack is squeezed to literal zero', async () => {
-    // One memory too large for even its own floor's worth of budget: NOT
-    // EVEN A STUB fits, which is the one case the notice exists for — a
-    // trimmed pack that produced no text at all, as opposed to one that
-    // still named its memories by stub.
+    // A channel so small that the project line leaves the pack less than
+    // one stub of this 2,000-character memory needs: NOT EVEN A STUB fits,
+    // which is the one case the notice exists for — a trimmed pack that
+    // produced no text at all, as opposed to one that still named its
+    // memories by stub. The pool is below the floor here (one memory's
+    // floor seats its stub block), so this also pins that the pack renders
+    // into what is left rather than being budgeted its floor, filling it
+    // with a stub, and being dropped whole by the composer.
     const briefing = await runSessionStart({
       budgetChars: 700,
       memories: [memory(0, 2_000)],
@@ -611,12 +622,13 @@ describe('session-start memory floor', () => {
     // real, environment-chosen tmp path) — sweeping finds it regardless.
     //
     // The range starts comfortably above `projectLine.length + memoryFloor`
-    // (the floor is capped at 1,400 for 60 memories, and the project line
-    // itself runs under a few hundred characters) so the memory floor is
+    // (the floor is ten stubs plus the stub block's intro — 1,601 for 60
+    // memories — and the project line runs ~500) so the memory floor is
     // never the reason a budget is tight — only the composer's own
-    // per-section accounting is under test here.
+    // per-section accounting is under test here. It sat at 2,000–2,100
+    // until the floor grew by 201 to seat that intro; it moved up by as much.
     const memories = Array.from({ length: 60 }, (_, i) => memory(i, 3));
-    for (let budgetChars = 2_000; budgetChars <= 2_100; budgetChars += 1) {
+    for (let budgetChars = 2_201; budgetChars <= 2_301; budgetChars += 1) {
       const briefing = await runSessionStart({ budgetChars, memories });
       expect(
         briefing.length,

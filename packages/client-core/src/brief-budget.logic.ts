@@ -58,12 +58,52 @@ export const MEMORY_FLOOR_STUBS = 10;
 export const MEMORY_STUB_CHARS = 140;
 
 /**
+ * The line that opens a pack's stub block. Shared with `memoryFloorChars` so
+ * the floor reserves exactly what `renderPackWithinBudget` spends.
+ */
+const stubBlockIntro = (topic: string): string =>
+  `Also in memory for "${topic}", named but not inlined — pull any by id ` +
+  'with recall, or call build_context for the full pack:';
+
+/** The stub block's closing count of memories that were not even named. */
+const moreNotListed = (count: number): string => `(+${count} more not listed)`;
+
+/**
+ * What the floor sets aside for the topic's name inside the stub block's
+ * intro line. The floor is planned before any pack renders and without its
+ * topic, so it cannot measure the name — and for the primary pack the topic
+ * is a directory's basename: across 44 checkouts and worktrees on one
+ * development machine the longest was 32 characters. The rest of the 64
+ * absorbs how far one stub line of long content runs past MEMORY_STUB_CHARS:
+ * up to 18 characters for the longest kind name, and it is that FIRST stub
+ * the floor must seat for a pack of one. A topic past ~46 characters can
+ * still starve a one-memory pack at exactly its floor; it then says so with
+ * the starved notice rather than going silent.
+ */
+const STUB_INTRO_TOPIC_ALLOWANCE = 64;
+
+/**
  * Calculates the memory floor in characters based on how many memories are
  * available: the smaller of memoryCount and MEMORY_FLOOR_STUBS, times the cost
- * per stub. Returns 0 when there are no memories to name.
+ * per stub — plus, whenever there is anything to name, the stub block's own
+ * fixed cost. `renderPackWithinBudget` spends that cost before it seats a
+ * single stub: the intro line (115 characters before the topic's name) and
+ * the widest "(+N more not listed)" line it reserves up front. Without it the
+ * floor of a one- or two-memory project was smaller than its intro plus one
+ * stub, so such a pack under loop pressure came back starved every time —
+ * the floor held, and still named nothing. Returns 0 when there are no
+ * memories to name.
  */
-export const memoryFloorChars = (memoryCount: number): number =>
-  Math.min(Math.max(memoryCount, 0), MEMORY_FLOOR_STUBS) * MEMORY_STUB_CHARS;
+export const memoryFloorChars = (memoryCount: number): number => {
+  const stubs = Math.min(Math.max(memoryCount, 0), MEMORY_FLOOR_STUBS);
+  if (stubs === 0) return 0;
+  return (
+    stubBlockIntro('').length +
+    STUB_INTRO_TOPIC_ALLOWANCE +
+    `\n${moreNotListed(memoryCount)}`.length +
+    stubs * MEMORY_STUB_CHARS
+  );
+};
 
 /**
  * Share of the channel held for the open loops whenever there are any. They
@@ -258,9 +298,7 @@ export const renderPackWithinBudget = (
   }
 
   if (dropped.length > 0) {
-    const intro =
-      `Also in memory for "${topic}", named but not inlined — pull any by id ` +
-      'with recall, or call build_context for the full pack:';
+    const intro = stubBlockIntro(topic);
     const lines: string[] = [];
     // Two costs this block owes that the per-line loop below must budget for
     // AHEAD OF TIME — the same way `renderStandingRulesSection` reserves its
@@ -277,7 +315,7 @@ export const renderPackWithinBudget = (
     // reservation uses `dropped.length` — never smaller than the true
     // `beyond` count the tail can end up printing — as its worst-case width.
     const partsJoinReserve = deliveredIds.length > 0 ? 2 : 0;
-    const tailReserve = `\n(+${dropped.length} more not listed)`.length;
+    const tailReserve = `\n${moreNotListed(dropped.length)}`.length;
     let stubSpent = spent + partsJoinReserve + intro.length + tailReserve;
     for (const memory of dropped) {
       const line = renderMemoryStub(memory);
@@ -288,11 +326,9 @@ export const renderPackWithinBudget = (
     const beyond = dropped.length - lines.length;
     if (lines.length > 0) {
       parts.push(
-        [
-          intro,
-          ...lines,
-          ...(beyond > 0 ? [`(+${beyond} more not listed)`] : []),
-        ].join('\n')
+        [intro, ...lines, ...(beyond > 0 ? [moreNotListed(beyond)] : [])].join(
+          '\n'
+        )
       );
     }
   }

@@ -542,7 +542,20 @@ const runSessionStart = async (
   // prevent for the first one. Charging it instead means every other topic
   // (the branch pack) divides whatever is left once the primary's floor is
   // honoured — never more than the pool the even split came from.
-  const primaryBudget = Math.max(evenShare, plan.memoryFloor);
+  //
+  // And the primary itself never gets more than the whole pool. When pinned
+  // rules or a small channel leave less than the floor, a pack budgeted past
+  // the pool renders a stub list the composer then drops WHOLE — an omission
+  // line in place of what the pool could have held. For one memory the
+  // floor now seats the stub block itself (its intro and "+N more" line), so
+  // without this cap a pool between the starved notice and one stub lost
+  // even the notice. With one topic the pool IS the even share, so this
+  // makes the bump a no-op there; the floor is held upstream by the rules
+  // ceiling and the loops budget.
+  const primaryBudget = Math.min(
+    Math.max(evenShare, plan.memoryFloor),
+    remainingChannelBudget
+  );
   const otherTopicsCount = Math.max(splits.length - 1, 0);
   const otherBudget =
     otherTopicsCount > 0
