@@ -1115,6 +1115,102 @@ describe('the briefing tail drains one memory per message', () => {
     }
   );
 
+  /** Puts `workDir` on a feature branch, so session start briefs two topics. */
+  const onBranch = (branch: string): void => {
+    execFileSync('git', ['init', '-q'], { cwd: workDir });
+    execFileSync('git', ['checkout', '-q', '-b', branch], { cwd: workDir });
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.email=test@example.com',
+        '-c',
+        'user.name=test',
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '-q',
+        '--no-verify',
+        '--allow-empty',
+        '-m',
+        'init',
+      ],
+      { cwd: workDir }
+    );
+  };
+
+  it.each(['session-start', 'task'] as const)(
+    'keeps the %s pack when many long non-pinned rules meet the default budget',
+    async (mode) => {
+      // Eight long rules nobody pinned. Admitting them whole while they fit,
+      // then naming the rest by headline past the ceiling, used to overrun the
+      // channel and push the whole memory pack out of the briefing.
+      const rules = Array.from({ length: 8 }, (_, i) => ({
+        text: `Rule ${i} ${'r'.repeat(1_300)}`,
+        pinned: false,
+      }));
+      const lead = memory(861, 2_000);
+      vi.mocked(callBuildContext).mockResolvedValueOnce({
+        ...serverPack([lead]),
+        rules,
+      });
+
+      const briefing = await runHook(mode, { prompt: SUBSTANTIVE });
+
+      expect(briefing.length).toBeLessThanOrEqual(9_000);
+      expect(briefing).toContain(lead.id);
+    }
+  );
+
+  it('queues what neither pack delivered, and nothing either pack did, across project and branch', async () => {
+    onBranch('feature/queue-both-packs');
+    // A and D are too large for any pack, so each leaves by stub; B is small
+    // and arrives WHOLE in the branch pack, although the project pack only
+    // named it. The queue owes A and D — and never B a second time.
+    const a = memory(871, 12_000);
+    const b = memory(872, 300);
+    const d = memory(873, 12_000);
+    vi.mocked(callBuildContext)
+      .mockResolvedValueOnce(serverPack([a, b]))
+      .mockResolvedValueOnce(serverPack([b, d]));
+
+    await runHook('session-start');
+
+    expect(tailIds()).toEqual([a.id, d.id]);
+    const drained = [
+      await runHook('task'),
+      await runHook('task'),
+      await runHook('task'),
+    ].join('\n');
+    expect(drained).toContain(a.id);
+    expect(drained).toContain(d.id);
+    expect(drained).not.toContain(`"id":"${b.id}"`);
+    expect(tailIds()).toBeNull();
+  });
+
+  it('merges a resumed session start into the queue it already had', async () => {
+    const a = memory(881, 12_000);
+    const c = memory(882, 12_000);
+    seedTail([a]);
+    vi.mocked(callBuildContext).mockResolvedValueOnce(serverPack([c]));
+
+    await runHook('session-start');
+
+    expect(tailIds()).toEqual([a.id, c.id]);
+  });
+
+  it('clears a queued memory that a resumed session start delivered whole', async () => {
+    const b = memory(891, 300);
+    seedTail([b]);
+    vi.mocked(callBuildContext).mockResolvedValueOnce(serverPack([b]));
+
+    const briefing = await runHook('session-start');
+
+    expect(briefing).toContain(b.id);
+    expect(tailIds()).toBeNull();
+    expect(await runHook('task')).not.toContain(CHUNK_FRAME);
+  });
+
   it('appends no chunk to the one task briefing, and settles the tail against what its pack delivered', async () => {
     // Session start: the lead memory is too large for the channel, so that
     // pack delivers nothing whole and names all four by stub — every one of

@@ -636,21 +636,39 @@ const runSessionStart = async (
       // ignore: dedup degrades gracefully, the briefing still ships.
     }
   }
-  // Queue the PRIMARY pack's leftovers as this window's tail — what a stub
-  // above merely named, a later per-message drain still owes the agent in
-  // full. An empty project (no memories at all, so nothing was trimmed away)
-  // records NO tail: "nothing to say" and "did not fit" are different claims,
-  // and a queue that is always empty in practice teaches the reader to skip
-  // whatever announces it. Best-effort, same as `recordSessionBriefing`
-  // above — a state problem must never sink a briefing that already shipped.
-  const projectRemaining = packs[0]?.trimmed.remaining ?? [];
-  if (sessionId && projectPack && projectRemaining.length > 0) {
+  // Settle this window's tail — what a stub above merely named, the per-message
+  // drain still owes the agent in full. Every pack's leftovers join it, the
+  // primary's first: the floor is the primary pack's, but the promise that
+  // the rest arrives by itself is every pack's, and a starved branch pack
+  // says so too. Whatever ANY pack delivered whole leaves it — the branch
+  // pack can deliver what the project pack only named. And a resumed session
+  // start merges into the queue it already has instead of replacing it: a
+  // replacement would drop what was still owed, or re-send what just arrived.
+  // (A compaction has already emptied the queue by the time this runs.) An
+  // empty project records no tail at all: "nothing to say" and "did not fit"
+  // are different claims. Best-effort, same as `recordSessionBriefing` above —
+  // a state problem must never sink a briefing that already shipped.
+  if (sessionId && projectPack) {
     try {
-      recordBriefTail(briefStatePath(), sessionId, {
-        topic: projectPack.topic,
-        memories: projectRemaining,
-        takenAt: new Date().toISOString(),
-      });
+      const statePath = briefStatePath();
+      const queued = readBriefTail(statePath, sessionId);
+      const memories = mergeBriefTail(
+        queued?.memories ?? [],
+        packs.flatMap(({ trimmed }) => trimmed.deliveredIds),
+        packs.flatMap(({ trimmed }) => trimmed.remaining)
+      );
+      const topics = packs
+        .filter(({ trimmed }) => trimmed.remaining.length > 0)
+        .map(({ topic }) => topic);
+      if (memories.length > 0) {
+        recordBriefTail(statePath, sessionId, {
+          topic: queued?.topic ?? (topics.join(', ') || projectPack.topic),
+          memories,
+          takenAt: queued?.takenAt ?? new Date().toISOString(),
+        });
+      } else if (queued) {
+        clearBriefTail(statePath, sessionId);
+      }
     } catch {
       // ignore: the tail is an improvement, it must never sink a briefing.
     }
