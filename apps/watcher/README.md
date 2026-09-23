@@ -122,7 +122,16 @@ hooks can never trip a long-running watcher.
 
 The `brief` and `ingest` subcommands are the plugin's hook entrypoints: they
 read the Claude Code hook JSON on stdin and (for `brief`) print a
-`hookSpecificOutput` frame on stdout, keeping all logging on stderr. See
+`hookSpecificOutput` frame on stdout, keeping all logging on stderr.
+
+`brief task` runs on every prompt, but builds a task briefing — one server call —
+at most once per context window, and only for a substantive prompt. Every other
+prompt still carries something: the next memory of the briefing's remainder,
+the part the window's first briefing could not fit. That remainder is queued in
+the local session state (`$XDG_STATE_HOME/zero-memory/session-briefs.json`) and
+drains one memory per message, in the server's rank order, with no server call
+— so it also reaches a session whose server is unreachable. A compaction drops
+the queue with the window. See
 [`plugins/zero-memory-claude/`](../../plugins/zero-memory-claude/) and
 [`docs/getting-started/claude-code.mdx`](../../docs/getting-started/claude-code.mdx).
 

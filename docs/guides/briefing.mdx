@@ -35,7 +35,9 @@ second delivery for standing rules that missed the context window.
 
 The prompt itself never leaves the machine. It decides only WHETHER the
 briefing is worth spending: short prompts, common one-word confirmations, and
-slash commands are skipped without any server call. What to ask about is not
+slash commands are skipped without any server call. They still carry the next
+piece of the briefing's remainder, read from local state (see
+[The rest of the briefing follows by itself](#the-rest-of-the-briefing-follows-by-itself)). What to ask about is not
 taken from it: subject-specific retrieval is the agent's own `recall`, in
 English, per the tool contract.
 
@@ -200,13 +202,45 @@ and replaced by a short preview, which is the worst outcome available. The
 briefing looks delivered while its most valuable payload goes unread.
 
 So the hook briefing is composed against a character budget below that
-threshold, and the budget is split before anything renders: the project line
-first, then a floor held for the work in progress — the board's lines and the
-open loops — whenever there is any, then the standing rules up to their
-ceiling, then the memory pack in what remains — whole memories while they
-fit, one-line stubs naming the rest. The work renders against what the rules
-actually used, so a short rules block leaves it more than its floor. Whatever is shortened says so and names where the
-full text is; nothing high in that order is pushed out by something lower.
+threshold, and the budget is split before anything renders:
+
+1. the project line;
+2. a floor held for the work in progress — the board's lines and the open
+   loops — whenever there is any;
+3. a floor held for the memory pack: room for about ten one-line stubs of the
+   project's pack, so a session always sees which memories exist and can pull
+   any of them by id;
+4. the standing rules, up to the ceiling that is left. Rules that are not
+   pinned shorten to their headlines first; pinned rules always arrive whole
+   and, when they alone are long enough, outrank both floors;
+5. the work and the memory pack, rendered against what was actually spent —
+   whole memories while they fit, one-line stubs naming the rest. A second
+   topic (the working branch's) lives on what the project's pack leaves.
+
+The work renders against what the rules actually used, so a short rules block
+leaves it more than its floor. Whatever is shortened says so and names where
+the full text is; nothing high in that order is pushed out by something lower.
+Two empty outcomes are kept apart: a project with no memories says nothing,
+while a pack that had memories but could not show a single line says how many
+there are and that they are on their way.
+
+### The rest of the briefing follows by itself
+
+The first briefing of a context window cannot carry everything, and asking the
+agent to fetch the rest would make delivery depend on its reading discipline —
+the dependence hooks exist to remove. So what did not fit is queued locally,
+per context window, and the following messages deliver it:
+
+- Each message that builds no briefing of its own — a short reply, a session
+  whose task briefing already ran, or one whose server could not be reached —
+  carries one queued memory, framed as a continuation with how many remain and
+  when the snapshot was taken.
+- The one message that does build a task briefing carries that briefing's pack
+  instead, and folds what its pack left over into the queue.
+- The queue drains in the order the server ranked the pack. The prompt never
+  leaves the machine, so there is no per-message relevance to rank by.
+- A compaction ends the window and drops the queue with it; the next window is
+  briefed afresh.
 
 ## Noise control
 
