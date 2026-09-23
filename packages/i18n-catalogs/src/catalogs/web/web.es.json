@@ -537,6 +537,8 @@
   "board.branch.landed": "integrada como {sha} en {target}",
   "board.event.landed": "integrada",
   "board.declaration": "Declarado:",
+  "board.copyLink": "Haz clic para copiar el enlace de la tarjeta",
+  "board.linkCopied": "Copiado",
   "board.relation.supports": "apoya",
   "board.relation.disputes": "discute",
   "board.relation.corrects": "corrige",

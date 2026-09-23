@@ -741,4 +741,50 @@ test.describe('Panel chain in the card dialog', () => {
     expect(title!.y).toBeLessThan(label!.y + label!.height);
     expect(title!.x).toBeGreaterThanOrEqual(label!.x + label!.width);
   });
+  test("a card's label is its link, and a click copies it", async ({
+    page,
+    context,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    let cardNumber: number;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web link marker ${Date.now()}: a card whose label is copied`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-link',
+        })
+      ).scope;
+      const created = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'A card to link to',
+        })
+      ).card;
+      cardId = created.id;
+      cardNumber = created.number;
+    } finally {
+      await mcp.close();
+    }
+
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    const label = page.getByTestId('card-number');
+    await expect(label).toHaveText(`ZM-${cardNumber}`);
+    await expect(label).toHaveAttribute('href', `/board/${cardId}`);
+
+    await label.click();
+    // A plain click copies the card's full address and stays on the page.
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(new URL(`/board/${cardId}`, page.url()).toString());
+    await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
+    await expect(label).toHaveText(`ZM-${cardNumber}`);
+  });
 });

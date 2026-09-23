@@ -537,6 +537,8 @@
   "board.branch.landed": "landed as {sha} on {target}",
   "board.event.landed": "landed",
   "board.declaration": "Declared:",
+  "board.copyLink": "Click to copy the card's link",
+  "board.linkCopied": "Copied",
   "board.relation.supports": "supports",
   "board.relation.disputes": "disputes",
   "board.relation.corrects": "corrects",

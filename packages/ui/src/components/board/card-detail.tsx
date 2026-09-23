@@ -4,6 +4,7 @@ import {
   CardBranches,
   type CardBranchItem,
 } from '@workspace/ui/components/board/card-branches';
+import { CardLabelLink } from '@workspace/ui/components/board/card-label-link';
 import {
   CardHistory,
   type CardHistoryEntry,
@@ -36,6 +37,8 @@ import {
 interface CardDetailData {
   /** The card's label, already formatted (e.g. `ZM-42`). */
   numberLabel: string;
+  /** The label is the card's link: where it points, and what a click says. */
+  link: { href: string; copyHint: string; copiedLabel: string };
   title: string;
   badges: BadgeListItem[];
   /** "Updated <time>", already formatted. */
@@ -71,6 +74,7 @@ interface CardDetailProps extends CardDetailData {
 
 function CardDetail({
   numberLabel,
+  link,
   title,
   badges,
   updatedLabel,
@@ -92,14 +96,15 @@ function CardDetail({
 
       <header className="flex flex-col gap-2">
         {/* The label and the title share one line; a long title wraps in its
-            own column, indented past the label, the way a board tile does. */}
+            own column, indented past the label, the way a board tile does.
+            The label is the card's link, and a click copies it. */}
         <div className="flex items-baseline gap-2">
-          <span
-            className="text-muted-foreground shrink-0 text-sm whitespace-nowrap tabular-nums"
-            data-testid="card-number"
-          >
-            {numberLabel}
-          </span>
+          <CardLabelLink
+            label={numberLabel}
+            href={link.href}
+            copyHint={link.copyHint}
+            copiedLabel={link.copiedLabel}
+          />
           <h1
             className="min-w-0 text-2xl font-semibold"
             data-testid="card-title"

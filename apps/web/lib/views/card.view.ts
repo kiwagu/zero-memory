@@ -149,6 +149,11 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     title: `${cardLabel(card.number)} ${card.title}`,
     detail: {
       numberLabel: cardLabel(card.number),
+      link: {
+        href: `/board/${card.id}`,
+        copyHint: t('board.copyLink'),
+        copiedLabel: t('board.linkCopied'),
+      },
       title: card.title,
       badges,
       updatedLabel: `${t('board.updated')} ${formatTimestamp(card.updated_at)}`,
