@@ -3,6 +3,8 @@
  * records the git branches its work ran on, a branch is visible exactly where
  * its card is, and a malformed branch never reaches the table.
  */
+import { spawnSync } from 'node:child_process';
+
 import { expect, test } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
@@ -211,5 +213,472 @@ test.describe('Card branches in the store', () => {
       branch: 'feature/forged',
     });
     expect(forged.error).not.toBeNull();
+  });
+});
+
+/** One statement against the e2e database, as the migration tests run it. */
+const psql = (query: string): string => {
+  const result = spawnSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      '--network',
+      'host',
+      '-i',
+      'supabase/postgres:17.6.1.136',
+      'psql',
+      'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-tA',
+      '-c',
+      query,
+    ],
+    { encoding: 'utf8' }
+  );
+  if (result.status !== 0) {
+    throw new Error(`psql failed: ${result.stderr}`);
+  }
+  return (result.stdout ?? '').trim();
+};
+
+test.describe('The branch rule in the store', () => {
+  test('work enters active with its branch, a stated reason for none, or a branch already open', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `branch-enter-${Date.now()}`);
+    const db = asUser(token);
+
+    // Opening straight into active needs the branch or a declaration.
+    const bare = await rpc<{ error?: string; message?: string }>(
+      db,
+      'card_create',
+      { p_scope: scope, p_title: 'Starts running', p_state: 'active' }
+    );
+    expect(bare.error).toBe('branch_required');
+    expect(bare.message).toMatch(/branch/u);
+
+    const both = await rpc<{ error?: string }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Both at once',
+      p_state: 'active',
+      p_branch_repo: REPO,
+      p_branch_name: 'feature/x',
+      p_no_branch: 'research only',
+    });
+    expect(both.error).toBe('invalid');
+
+    const idea = await rpc<{ error?: string }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'A branch on an idea',
+      p_branch_repo: REPO,
+      p_branch_name: 'feature/x',
+    });
+    expect(idea.error).toBe('invalid');
+
+    const withBranch = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Page the feed',
+      p_state: 'active',
+      p_branch_repo: REPO,
+      p_branch_name: 'feature/feed-pages',
+    });
+    expect(withBranch.card.state).toBe('active');
+    const opened = await rpc<CardGetJson>(db, 'card_get', {
+      p_card_id: withBranch.card.id,
+    });
+    expect(opened.branches).toEqual([
+      expect.objectContaining({ branch: 'feature/feed-pages', state: 'open' }),
+    ]);
+    expect(opened.events.map((event) => event.type)).toEqual([
+      'created',
+      'attached',
+    ]);
+
+    const noCode = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Measure the recall gap',
+      p_state: 'active',
+      p_no_branch: 'a measurement on the review stand, no code',
+    });
+    const declared = await rpc<CardGetJson>(db, 'card_get', {
+      p_card_id: noCode.card.id,
+    });
+    expect(declared.events[0]).toMatchObject({
+      type: 'created',
+      branch_note: 'a measurement on the review stand, no code',
+    });
+    expect(declared.branches).toEqual([]);
+
+    // A move into active meets the same rule.
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Idea first',
+    });
+    const refused = await rpc<{ error?: string }>(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'active',
+      p_reason: 'picking it up',
+    });
+    expect(refused.error).toBe('branch_required');
+    const moved = await rpc<{ card: CardJson }>(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'active',
+      p_reason: 'picking it up',
+      p_branch_repo: REPO,
+      p_branch_name: 'feature/idea-first',
+    });
+    expect(moved.card.state).toBe('active');
+    const events = (
+      await rpc<CardGetJson>(db, 'card_get', { p_card_id: card.id })
+    ).events;
+    expect(events.map((event) => event.type)).toEqual([
+      'created',
+      'attached',
+      'moved',
+    ]);
+
+    // Back from waiting to active on the SAME open branch needs nothing new.
+    await rpc(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'waiting',
+      p_reason: 'review',
+      p_not_landed: 'in review, not squashed yet',
+    });
+    const resumed = await rpc<{ error?: string; card?: CardJson }>(
+      db,
+      'card_move',
+      {
+        p_card_id: card.id,
+        p_to_state: 'active',
+        p_reason: 'review fixes on the same branch',
+      }
+    );
+    expect(resumed.error).toBeUndefined();
+    expect(resumed.card?.state).toBe('active');
+  });
+
+  test('work leaves active only by landing its branch or saying why it has not', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `branch-leave-${Date.now()}`);
+    const db = asUser(token);
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Swap the embedding model',
+      p_state: 'active',
+      p_branch_repo: REPO,
+      p_branch_name: 'feature/embeddings',
+    });
+
+    const blocked = await rpc<{ error?: string; message?: string }>(
+      db,
+      'card_move',
+      {
+        p_card_id: card.id,
+        p_to_state: 'waiting',
+        p_reason: 'done from my side',
+      }
+    );
+    expect(blocked.error).toBe('branch_open');
+    expect(blocked.message).toContain(`${REPO}:feature/embeddings`);
+    expect(blocked.message).toMatch(/land/u);
+
+    const notLanded = await rpc<{ error?: string }>(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'waiting',
+      p_reason: 'waiting for the model to publish its vector size',
+      p_not_landed:
+        'the branch waits for the vector size, nothing to squash yet',
+    });
+    expect(notLanded.error).toBeUndefined();
+    const moved = (
+      await rpc<CardGetJson>(db, 'card_get', { p_card_id: card.id })
+    ).events.at(-1);
+    expect(moved).toMatchObject({
+      type: 'moved',
+      branch_note:
+        'the branch waits for the vector size, nothing to squash yet',
+    });
+
+    // A declaration with nothing to declare is refused, not recorded.
+    const { card: plain } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Plain idea',
+    });
+    const stray = await rpc<{ error?: string }>(db, 'card_move', {
+      p_card_id: plain.id,
+      p_to_state: 'parked',
+      p_reason: 'later',
+      p_not_landed: 'nothing open',
+    });
+    expect(stray.error).toBe('invalid');
+
+    // Landing records the commit and moves the card, by default to waiting.
+    await rpc(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'active',
+      p_reason: 'the size is published',
+    });
+    const landed = await rpc<{ card: CardJson; changed: boolean }>(
+      db,
+      'card_land',
+      {
+        p_card_id: card.id,
+        p_repo: REPO,
+        p_branch: 'feature/embeddings',
+        p_squash_sha: 'ABCDEF1',
+        p_target: 'main',
+        p_reason: 'full e2e green; waits for the release',
+      }
+    );
+    expect(landed.changed).toBe(true);
+    expect(landed.card.state).toBe('waiting');
+    const after = await rpc<CardGetJson>(db, 'card_get', {
+      p_card_id: card.id,
+    });
+    expect(after.branches).toEqual([
+      expect.objectContaining({
+        branch: 'feature/embeddings',
+        state: 'landed',
+        squash_sha: 'abcdef1',
+        target: 'main',
+      }),
+    ]);
+    const tail = after.events.slice(-2);
+    expect(tail[0]).toMatchObject({
+      type: 'landed',
+      ref_kind: 'branch',
+      ref_target: `${REPO}:feature/embeddings`,
+      squash_sha: 'abcdef1',
+      target_branch: 'main',
+      reason: null,
+    });
+    expect(tail[1]).toMatchObject({
+      type: 'moved',
+      from_state: 'active',
+      to_state: 'waiting',
+      reason: 'full e2e green; waits for the release',
+    });
+
+    // The same landing again, short or full sha, changes nothing and writes
+    // nothing.
+    const count = after.events.length;
+    for (const sha of ['abcdef1', 'abcdef1234567890abcdef1234567890abcdef12']) {
+      const again = await rpc<{ changed: boolean }>(db, 'card_land', {
+        p_card_id: card.id,
+        p_repo: REPO,
+        p_branch: 'feature/embeddings',
+        p_squash_sha: sha,
+        p_target: 'main',
+        p_reason: 'retry',
+      });
+      expect(again.changed).toBe(false);
+    }
+    expect(
+      (await rpc<CardGetJson>(db, 'card_get', { p_card_id: card.id })).events
+    ).toHaveLength(count);
+
+    // A landed branch does not carry the card back into active.
+    const reentry = await rpc<{ error?: string }>(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'active',
+      p_reason: 'follow-up',
+    });
+    expect(reentry.error).toBe('branch_required');
+    const sameBranch = await rpc<{ error?: string; message?: string }>(
+      db,
+      'card_move',
+      {
+        p_card_id: card.id,
+        p_to_state: 'active',
+        p_reason: 'follow-up',
+        p_branch_repo: REPO,
+        p_branch_name: 'feature/embeddings',
+      }
+    );
+    expect(sameBranch.error).toBe('invalid');
+    expect(sameBranch.message).toMatch(/already landed/u);
+  });
+
+  test('a forgotten landing is recorded from any state but the archive', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `branch-late-${Date.now()}`);
+    const db = asUser(token);
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Shipped long ago',
+    });
+    await rpc(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'waiting',
+      p_reason: 'someone moved it by hand',
+    });
+
+    const late = await rpc<{ card: CardJson }>(db, 'card_land', {
+      p_card_id: card.id,
+      p_repo: REPO,
+      p_branch: 'feature/old-work',
+      p_squash_sha: '1234567',
+      p_target: 'main',
+      p_reason: 'released in 0.20.0 and accepted',
+      p_to_state: 'done',
+    });
+    expect(late.card.state).toBe('done');
+
+    // Landing in place: no move, and the reason stays on the landing itself.
+    const { card: stay } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Already waiting',
+    });
+    await rpc(db, 'card_move', {
+      p_card_id: stay.id,
+      p_to_state: 'waiting',
+      p_reason: 'set by hand',
+    });
+    await rpc(db, 'card_land', {
+      p_card_id: stay.id,
+      p_repo: REPO,
+      p_branch: 'feature/in-place',
+      p_squash_sha: '7654321',
+      p_target: 'main',
+      p_reason: 'recorded late, still waiting for the release',
+    });
+    const stayed = await rpc<CardGetJson>(db, 'card_get', {
+      p_card_id: stay.id,
+    });
+    expect(stayed.card.state).toBe('waiting');
+    expect(stayed.events.at(-1)).toMatchObject({
+      type: 'landed',
+      reason: 'recorded late, still waiting for the release',
+    });
+
+    // Archiving is not a move: an open branch does not hold a card on the
+    // board.
+    const { card: dropped } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Abandoned',
+      p_state: 'active',
+      p_branch_repo: REPO,
+      p_branch_name: 'feature/abandoned',
+    });
+    const abandoned = await rpc<{ error?: string }>(db, 'card_archive', {
+      p_card_id: dropped.id,
+      p_reason: 'abandoned before it landed',
+    });
+    expect(abandoned.error).toBeUndefined();
+
+    await rpc(db, 'card_archive', {
+      p_card_id: stay.id,
+      p_reason: 'folded elsewhere',
+    });
+    const archived = await rpc<{ error?: string }>(db, 'card_land', {
+      p_card_id: stay.id,
+      p_repo: REPO,
+      p_branch: 'feature/another',
+      p_squash_sha: '89abcde',
+      p_target: 'main',
+      p_reason: 'too late',
+    });
+    expect(archived.error).toBe('archived');
+
+    for (const [field, value] of [
+      ['p_squash_sha', 'xyz'],
+      ['p_target', 'main branch'],
+      ['p_repo', 'a b'],
+    ] as const) {
+      const bad = await rpc<{ error?: string }>(db, 'card_land', {
+        p_card_id: card.id,
+        p_repo: REPO,
+        p_branch: 'feature/old-work',
+        p_squash_sha: '1234567',
+        p_target: 'main',
+        p_reason: 'x',
+        [field]: value,
+      });
+      expect(bad.error, field).toBe('invalid');
+    }
+
+    const stranger = asUser(await passwordGrantToken(seed.userB));
+    const foreign = await rpc<{ error?: string }>(stranger, 'card_land', {
+      p_card_id: card.id,
+      p_repo: REPO,
+      p_branch: 'feature/x',
+      p_squash_sha: '1234567',
+      p_target: 'main',
+      p_reason: 'not mine',
+    });
+    expect(foreign.error).toBe('not_found');
+  });
+
+  test('the old six-argument move still resolves, and each command keeps one signature', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `branch-compat-${Date.now()}`);
+    const db = asUser(token);
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Compat',
+    });
+    // Exactly the arguments the previous server sends, by name.
+    const moved = await rpc<{ card: CardJson }>(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'waiting',
+      p_reason: 'as the previous server calls it',
+      p_thread: null,
+      p_agent_label: 'old-server',
+      p_idempotency_key: `compat-${Date.now()}`,
+    });
+    expect(moved.card.state).toBe('waiting');
+
+    expect(
+      psql(
+        "select proname || '=' || count(*) from pg_proc " +
+          "where pronamespace = 'public'::regnamespace and proname in " +
+          "('card_move', 'card_create', 'card_promote_loop', 'card_land') " +
+          'group by proname order by proname'
+      )
+    ).toBe(
+      [
+        'card_create=1',
+        'card_land=1',
+        'card_move=1',
+        'card_promote_loop=1',
+      ].join('\n')
+    );
+  });
+
+  test('a briefing names the open branches of the project', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `branch-brief-${Date.now()}`);
+    const db = asUser(token);
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Named in the briefing',
+      p_state: 'active',
+      p_branch_repo: REPO,
+      p_branch_name: 'feature/briefed',
+    });
+    const work = await rpc<{
+      open_branches: Array<{
+        card_id: string;
+        number: number;
+        state: string;
+        repo: string;
+        branch: string;
+      }>;
+    }>(db, 'briefing_work', { p_scope: scope });
+    expect(work.open_branches).toEqual([
+      {
+        card_id: card.id,
+        number: card.number,
+        state: 'active',
+        repo: REPO,
+        branch: 'feature/briefed',
+      },
+    ]);
   });
 });
