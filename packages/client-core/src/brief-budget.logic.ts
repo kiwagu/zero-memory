@@ -163,8 +163,10 @@ export interface TrimmedPack {
    */
   readonly remaining: ContextMemory[];
   /**
-   * True when the pack had memories but not even one fit in the budget — the
-   * briefing is starved, not just trimmed.
+   * True when the pack had memories but not even one LINE fit in the budget —
+   * neither a whole memory NOR a stub. A stub list that did fit is a real,
+   * if partial, delivery (`text` names real ids), not starvation; the
+   * briefing is starved only when `text` came back empty.
    */
   readonly starved: boolean;
 }
@@ -283,7 +285,14 @@ export const renderPackWithinBudget = (
     text: parts.join('\n\n'),
     deliveredIds,
     remaining: dropped,
-    starved: deliveredIds.length === 0 && ordered.length > 0,
+    // Starved means the render produced NOTHING — no whole memory AND no
+    // stub line either. `deliveredIds.length === 0` alone is the wrong test:
+    // it is true even when a stub list fully rendered (a real, non-empty
+    // `parts` block naming real ids), which is strictly more useful than the
+    // generic starved notice a caller would show in its place. `parts` is
+    // empty exactly when the budget could not seat even the intro-plus-one-
+    // stub floor, which is the one case that notice exists for.
+    starved: parts.length === 0 && ordered.length > 0,
   };
 };
 

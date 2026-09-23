@@ -97,6 +97,22 @@ describe('renderPackWithinBudget — what it leaves behind', () => {
     expect(trimmed.remaining).toEqual([]);
     expect(trimmed.text).toBe('');
   });
+
+  it('is not starved when a stub fit even though no whole memory did', () => {
+    // Content big enough that NO whole memory can ever fit the budget below,
+    // but the budget is comfortably above the intro-plus-one-stub floor — a
+    // real, partial delivery (a stub naming a real id), which is strictly
+    // more useful than the generic starved notice a caller would show in
+    // its place if this were (wrongly) reported as starved.
+    const memory1 = memory(
+      'mem_aaaaaaaaaaaaaaaa.01kzzzzzz1',
+      'x'.repeat(4_000)
+    );
+    const trimmed = renderPackWithinBudget('topic', pack([memory1]), 300);
+    expect(trimmed.starved).toBe(false);
+    expect(trimmed.deliveredIds).toEqual([]);
+    expect(trimmed.text).toContain('mem_aaaaaaaaaaaaaaaa.01kzzzzzz1');
+  });
 });
 
 describe('renderPackWithinBudget', () => {

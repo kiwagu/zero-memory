@@ -541,22 +541,15 @@ const runSessionStart = async (
       { name: 'the project line', text: projectLine },
       { name: 'the standing rules', text: rulesSection },
       { name: 'the work in progress', text: workSection },
-      // A starved pack that rendered NOTHING (not even a stub) says so
-      // instead of contributing silence: silence here reads as "this topic
-      // has no memories", which is a different — and false — claim from "the
-      // memories didn't fit this channel this time". `trimmed.starved` alone
-      // is not the right trigger: it is true whenever no memory arrived
-      // WHOLE, even on a call that still fit one or more stub lines — and a
-      // stub names a real memory by id, which is strictly more useful than
-      // the generic notice, so it must win whenever it exists. The notice is
-      // only for the narrower case both conditions describe together: had
-      // memories, and the trim produced literally no text at all.
+      // A starved pack (memories existed but rendered nothing — not even a
+      // stub) says so instead of contributing silence: silence here reads as
+      // "this topic has no memories", which is a different — and false —
+      // claim from "the memories didn't fit this channel this time".
       ...packs.map(({ topic, trimmed }) => ({
         name: `the "${topic}" pack`,
-        text:
-          trimmed.starved && !trimmed.text
-            ? renderStarvedPackNotice(topic, trimmed.remaining.length)
-            : trimmed.text || null,
+        text: trimmed.starved
+          ? renderStarvedPackNotice(topic, trimmed.remaining.length)
+          : trimmed.text || null,
       })),
     ],
     budget
