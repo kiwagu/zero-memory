@@ -216,6 +216,52 @@ test.describe('Card branches in the store', () => {
   });
 });
 
+test.describe('A branch belongs to its card', () => {
+  test("a branch row cannot claim a scope other than its card's", async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    // Two projects this user may write: a row written in one must not
+    // attach to a card of the other, or a writer of any scope could plant an
+    // open branch on a card they may only read.
+    const own = await projectScope(token, `branch-own-${Date.now()}`);
+    const other = await projectScope(token, `branch-other-${Date.now()}`);
+    const db = asUser(token);
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: other,
+      p_title: 'A card in the other project',
+    });
+
+    const planted = await db.from('card_branches').insert({
+      card_id: card.id,
+      scope: own,
+      repo: REPO,
+      branch: 'feature/planted',
+    });
+    expect(planted.error).not.toBeNull();
+
+    // A row recorded properly cannot be moved to another scope or card later.
+    await rpc(db, 'card_attach', {
+      p_card_id: card.id,
+      p_kind: 'branch',
+      p_target: `${REPO}:feature/real`,
+    });
+    const moved = await db
+      .from('card_branches')
+      .update({ scope: own })
+      .eq('card_id', card.id)
+      .eq('branch', 'feature/real')
+      .select('*');
+    expect(moved.error).not.toBeNull();
+
+    const read = await rpc<CardGetJson>(db, 'card_get', {
+      p_card_id: card.id,
+    });
+    expect(read.branches.map((branch) => branch.branch)).toEqual([
+      'feature/real',
+    ]);
+  });
+});
+
 /** One statement against the e2e database, as the migration tests run it. */
 const psql = (query: string): string => {
   const result = spawnSync(

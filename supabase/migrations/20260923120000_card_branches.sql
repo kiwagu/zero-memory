@@ -118,7 +118,11 @@ create index card_branches_attached_by_idx
   on public.card_branches (attached_by);
 
 revoke all on public.card_branches from anon, authenticated;
-grant select, insert, update, delete on public.card_branches to authenticated;
+grant select, insert, delete on public.card_branches to authenticated;
+-- A landing is the only update: the row's identity (its card, scope, repo,
+-- branch and author) never changes after it is recorded.
+grant update (state, squash_sha, target_branch, landed_at)
+  on public.card_branches to authenticated;
 grant select, insert, update, delete on public.card_branches to service_role;
 
 alter table public.card_branches enable row level security;
@@ -131,6 +135,9 @@ using (
   scope = any (((select private.visible_scopes()))::extensions.ltree[])
 );
 
+-- The row's scope must be its CARD's scope. The foreign key alone accepts any
+-- card id, so without this a writer of one scope could plant an open branch
+-- on a card of another scope it may only read.
 create policy "scope writers record branches as themselves"
 on public.card_branches
 for insert
@@ -138,6 +145,12 @@ to authenticated
 with check (
   attached_by = (select private.current_user_entity_id())
   and private.can_write(scope)
+  and exists (
+    select 1
+      from public.cards c
+     where c.id = card_branches.card_id
+       and c.scope operator(extensions.=) card_branches.scope
+  )
 );
 
 create policy "scope writers land the branches of their scopes"
@@ -145,7 +158,15 @@ on public.card_branches
 for update
 to authenticated
 using (private.can_write(scope))
-with check (private.can_write(scope));
+with check (
+  private.can_write(scope)
+  and exists (
+    select 1
+      from public.cards c
+     where c.id = card_branches.card_id
+       and c.scope operator(extensions.=) card_branches.scope
+  )
+);
 
 create policy "scope writers drop the branches of their scopes"
 on public.card_branches
