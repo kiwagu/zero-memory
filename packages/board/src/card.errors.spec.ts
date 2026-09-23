@@ -55,3 +55,17 @@ describe('cardFailureToErrorCode', () => {
     }
   });
 });
+
+describe('the branch rule', () => {
+  it('maps the branch rule onto the transport vocabulary', () => {
+    expect(cardFailureToErrorCode(toCardFailure('branch_required'))).toBe(
+      'validation_failed'
+    );
+    expect(cardFailureToErrorCode(toCardFailure('branch_open'))).toBe(
+      'conflict'
+    );
+    expect(
+      toCardFailure('branch_open', 'Branch o/n:x is still open').message
+    ).toContain('o/n:x');
+  });
+});

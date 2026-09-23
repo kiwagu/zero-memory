@@ -14,6 +14,7 @@ import {
   boardListSchema,
   boardScopesSchema,
   cardEventLabel,
+  cardLabel,
   cardStateLabel,
   cardStateVariant,
   resolveBoardScope,
@@ -85,7 +86,7 @@ export default async function BoardPage({
     cards: (byState.get(state) ?? []).map((card) => ({
       id: card.id,
       href: `/board/${card.id}`,
-      numberLabel: `#${card.number}`,
+      numberLabel: cardLabel(card.number),
       title: card.title,
       badges: [
         { label: scopeLabel(card.scope), variant: 'outline' as const },

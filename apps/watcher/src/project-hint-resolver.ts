@@ -1,5 +1,6 @@
-import { spawnSync } from 'node:child_process';
 import { dirname } from 'node:path';
+
+import { runGit } from './git.js';
 
 /**
  * Resolves a session's working directory to a STABLE PROJECT identity — the
@@ -33,20 +34,6 @@ export const resolveProjectHint = (rawCwd: string): string => {
 
 /** Clears the resolution cache — for tests. */
 export const clearProjectHintCache = (): void => cache.clear();
-
-const runGit = (cwd: string, args: readonly string[]): string | null => {
-  try {
-    const result = spawnSync('git', ['-C', cwd, ...args], {
-      encoding: 'utf8',
-      timeout: 2000,
-    });
-    if (result.status !== 0) return null;
-    const out = result.stdout.trim();
-    return out.length > 0 ? out : null;
-  } catch {
-    return null;
-  }
-};
 
 /**
  * The repository root for one level, collapsing a LINKED WORKTREE onto its main

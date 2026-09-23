@@ -71,6 +71,7 @@ export {
   type ServerProbe,
 } from './server-probe.js';
 export { callSessionReceipt } from './receipt-client.js';
+export { callCardBranches, type CardBranches } from './board-client.js';
 export { callRemember } from './capture-client.js';
 export { ImportClient } from './import-client.js';
 
@@ -91,3 +92,13 @@ export {
   readProjectScope,
   recordProjectScope,
 } from './project-scope.state.js';
+
+// Landing checks: which squash commits this machine already asked the board
+// about, so a landing is reminded about once.
+export {
+  LANDING_RETRY_MS,
+  landingCheckDue,
+  landingCheckStatePath,
+  recordLandingCheck,
+  type LandingCheckOutcome,
+} from './landing-check.state.js';

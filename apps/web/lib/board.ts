@@ -11,6 +11,13 @@ import type { WebTranslator } from '@workspace/i18n-catalogs/web';
  * authority either way — this file only has to describe what it sends.
  */
 
+/**
+ * A card's one label: the dashboard, a briefing and the squash trailer all
+ * call it ZM-N, so a search for one finds the others. Declared here rather
+ * than imported for the same bundler reason as the schemas below.
+ */
+export const cardLabel = (number: number): string => `ZM-${number}`;
+
 export const CARD_STATES = [
   'idea',
   'active',
@@ -136,13 +143,29 @@ export const cardEventSchema = z.object({
   relation: z.string().nullable(),
   ref_kind: z.string().nullable(),
   ref_target: z.string().nullable(),
+  branch_note: z.string().nullable().default(null),
+  squash_sha: z.string().nullable().default(null),
+  target_branch: z.string().nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
 
+/** A git branch the card's work ran on, open or landed. */
+export const cardBranchSchema = z.object({
+  repo: z.string(),
+  branch: z.string(),
+  state: z.enum(['open', 'landed']),
+  squash_sha: z.string().nullable(),
+  target: z.string().nullable(),
+  landed_at: z.string().nullable(),
+  attached_at: z.string(),
+});
+export type CardBranch = z.infer<typeof cardBranchSchema>;
+
 export const cardViewSchema = z.object({
   card: cardSchema,
   refs: z.array(cardRefSchema).default([]),
+  branches: z.array(cardBranchSchema).default([]),
   events: z.array(cardEventSchema).default([]),
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
@@ -205,9 +228,25 @@ export function cardEventLabel(type: string, t: WebTranslator): string {
       return t('board.event.detached');
     case 'noted':
       return t('board.event.noted');
+    case 'landed':
+      return t('board.event.landed');
     default:
       return type;
   }
+}
+
+/** Where a branch stands, in words: open, or where it landed. */
+export function cardBranchStateLabel(
+  branch: CardBranch,
+  t: WebTranslator
+): string {
+  if (branch.state === 'landed' && branch.squash_sha && branch.target) {
+    return t('board.branch.landed', {
+      sha: branch.squash_sha.slice(0, 7),
+      target: branch.target,
+    });
+  }
+  return t('board.branch.open');
 }
 
 export function cardRelationLabel(relation: string, t: WebTranslator): string {

@@ -58,6 +58,7 @@ import {
   noticeContext,
   type UpdateNotice,
 } from '../update/update-check.js';
+import { landingDriftFor } from '../landing/landing-runner.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
 import { resolveVersion } from '../version/version-runner.js';
 import {
@@ -472,7 +473,11 @@ const runSessionStart = async (
   const budget = resolveHookBudgetChars(process.env.ZM_BRIEF_HOOK_BUDGET_CHARS);
   // The work section is the project board's lines plus the open loops no
   // card there covers; it holds the floor whenever either is present.
-  const boardBlock = merged.work ? renderBoardSummary(merged.work) : null;
+  // A landing git already holds while the card still holds the branch open:
+  // checked here, once per session, because only this machine sees its git.
+  const boardBlock = merged.work
+    ? renderBoardSummary(merged.work, landingDriftFor(cwd, merged.work))
+    : null;
   const projectPack = splits[0];
   const projectMemories = countPackMemories(projectPack?.split.payload);
   const plan = planSectionBudgets(
