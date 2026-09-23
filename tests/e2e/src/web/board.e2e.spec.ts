@@ -33,12 +33,16 @@ test.describe('Project board in the dashboard', () => {
     let cardId: string;
     let cardNumber: number;
     let cardScope: string;
+    // A board of its own per attempt. A retry on a shared one would meet the
+    // loop the failed attempt already promoted (the same text deduplicates to
+    // the same memory, which cannot be promoted twice) and that attempt's card.
+    const hint = `/tmp/zm-e2e-board-web-${Date.now()}`;
     try {
       const loop = await mcp.callTool('remember', {
         content:
           'board-web marker: migrate the ingest worker off the legacy queue',
         kind: 'task',
-        project_hint: '/tmp/zm-e2e-board-web',
+        project_hint: hint,
       });
       expect(loop.isError ?? false).toBe(false);
       const { memory_id: loopId } = firstJson<{ memory_id: string }>(loop);
@@ -118,7 +122,11 @@ test.describe('Project board in the dashboard', () => {
     // Opening a card is a DIALOG over the board — and the address bar still
     // names the card, so the step is navigable, shareable and reloadable.
     await tile.click();
-    await expect(page.getByTestId('card-modal')).toBeVisible();
+    // The first card a run opens compiles the dialog's route on the dev
+    // server, which on a shared runner can take longer than a default wait.
+    await expect(page.getByTestId('card-modal')).toBeVisible({
+      timeout: 20_000,
+    });
     // One shared, thin scrollbar across the dashboard, and a scrollbar that
     // appears never shifts the layout.
     expect(
