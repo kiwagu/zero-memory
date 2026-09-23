@@ -547,6 +547,8 @@
   "board.noHistory": "Nothing has happened yet.",
   "board.scope.latest": "Latest activity",
   "board.scope.all": "All boards",
+  "board.search.placeholder": "ZM-42 or a title",
+  "board.search.submit": "Filter",
   "board.scope.latestNamed": "Latest activity: {scope}",
   "markdown.image": "image",
   "panels.previous": "Previous panel",

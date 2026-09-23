@@ -263,7 +263,8 @@ The `thread` field every write accepts only records which conversation wrote
 that entry; it does not bind anything.
 
 `board` is the read side: `list` a scope's cards, narrowed to one column with
-`state` or to matching titles with `query`; `get` one card with its
+`state` or with `query` to titles that match — or to a card by its label, since
+`ZM-42`, `#42` and `42` also find card 42; `get` one card with its
 attachments, a page of its history — where `after_seq` reads only what
 happened since you last looked — and a page of its feed, newest first,
 continued with the `feed_before` cursor each page returns; or `resolve` a
@@ -308,6 +309,14 @@ the address, so a board you are watching can be linked and reloaded. A board
 with no cards stays selected and shows as empty — it is never swapped for a
 different one. The board refreshes itself while agents work on it, so it does
 not show a state that has already moved on.
+
+A filter beside the picker narrows the cards on screen by label or by title:
+`ZM-42`, `#42` or `42` finds card 42, and any other text finds the cards whose
+title contains it. Press Enter or **Filter** to apply it. The filter lands in
+the address next to the board, so a narrowed board can be linked and survives a
+reload; with **All boards** a label finds that number on every board, since a
+card's number belongs to its project. When nothing matches, the columns stay
+empty; clearing the field shows the whole board again.
 
 Opening a card lifts it over the board in a dialog, so the columns stay in
 view, and the address bar still names the card: the step is navigable,

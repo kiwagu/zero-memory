@@ -333,6 +333,75 @@ test.describe('Project board in the dashboard', () => {
     );
   });
 
+  test('the filter beside the picker narrows the board by label or title, and the address keeps it', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let certs: CardResult['card'];
+    let feed: CardResult['card'];
+    try {
+      scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web filter marker ${Date.now()}: the edge proxy drops long polls`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-board-web-filter-${Date.now()}`,
+        })
+      ).scope;
+      const create = async (title: string) =>
+        firstJson<CardResult>(
+          await mcp.callTool('card', { action: 'create', scope, title })
+        ).card;
+      certs = await create('Rotate the edge certificates');
+      feed = await create('Page the memory feed');
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const tiles = page.getByTestId('board-card');
+    await expect(tiles).toHaveCount(2);
+    const search = page.getByTestId('board-search').getByRole('searchbox');
+
+    // The label a commit or a briefing names the card by.
+    await search.fill(`ZM-${feed.number}`);
+    await search.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`[?&]q=ZM-${feed.number}(&|$)`));
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText('Page the memory feed');
+    // The scope stays chosen, and a reload keeps the filter.
+    await expect(page).toHaveURL(/[?&]scope=/);
+    await page.reload();
+    await expect(tiles).toHaveCount(1);
+    await expect(search).toHaveValue(`ZM-${feed.number}`);
+
+    // A bare number and a title fragment find their cards too.
+    await search.fill(String(certs.number));
+    await search.press('Enter');
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText('Rotate the edge certificates');
+    await search.fill('memory feed');
+    await search.press('Enter');
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText('Page the memory feed');
+
+    // Nothing matches: the columns are empty — no other card stands in.
+    await search.fill('ZM-999');
+    await search.press('Enter');
+    await expect(page).toHaveURL(/[?&]q=ZM-999(&|$)/);
+    await expect(tiles).toHaveCount(0);
+
+    // An empty filter clears the query and shows the whole board again.
+    await search.fill('');
+    await search.press('Enter');
+    await expect(page).not.toHaveURL(/[?&]q=/);
+    await expect(tiles).toHaveCount(2);
+  });
+
   test('a card body renders as markdown, and hostile markup stays inert', async ({
     page,
   }) => {
