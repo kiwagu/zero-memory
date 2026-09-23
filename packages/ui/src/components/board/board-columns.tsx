@@ -90,7 +90,12 @@ function BoardColumns({
                 <Card className="hover:border-ring transition-colors">
                   <CardContent className="flex flex-col gap-2 p-3">
                     <div className="flex items-baseline gap-2">
-                      <span className="text-muted-foreground text-xs tabular-nums">
+                      {/* The label never breaks: `ZM-12` split after its
+                          hyphen reads as two things. The title wraps. */}
+                      <span
+                        className="text-muted-foreground shrink-0 text-xs whitespace-nowrap tabular-nums"
+                        data-testid="board-card-number"
+                      >
                         {card.numberLabel}
                       </span>
                       <span className="text-sm leading-snug font-medium">

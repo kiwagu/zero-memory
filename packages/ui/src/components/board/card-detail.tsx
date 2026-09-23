@@ -92,7 +92,7 @@ function CardDetail({
 
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-baseline gap-2">
-          <span className="text-muted-foreground text-sm tabular-nums">
+          <span className="text-muted-foreground text-sm whitespace-nowrap tabular-nums">
             {numberLabel}
           </span>
           <h1 className="text-2xl font-semibold" data-testid="card-title">

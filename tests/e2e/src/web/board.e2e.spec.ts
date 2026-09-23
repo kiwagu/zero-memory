@@ -653,4 +653,49 @@ test.describe('Panel chain in the card dialog', () => {
     await expect(page.getByTestId('card-branch-state')).toContainText('main');
     await expect(page.getByTestId('card-history')).toContainText('landed');
   });
+  test('a card label stays on one line beside a long title', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let cardNumber: number;
+    try {
+      scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web label marker ${Date.now()}: a card with a long title`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-label',
+        })
+      ).scope;
+      cardNumber = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title:
+            'Translate imported memories into the canonical language before ' +
+            'they reach the index',
+        })
+      ).card.number;
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const label = page
+      .getByTestId('board-column-idea')
+      .getByTestId('board-card-number');
+    await expect(label).toHaveText(`ZM-${cardNumber}`);
+    // A label broken after its hyphen ("ZM-" over "3") is taller than one line.
+    expect(
+      await label.evaluate(
+        (node) =>
+          node.getBoundingClientRect().height <
+          parseFloat(getComputedStyle(node).lineHeight) * 1.5
+      )
+    ).toBe(true);
+  });
 });
