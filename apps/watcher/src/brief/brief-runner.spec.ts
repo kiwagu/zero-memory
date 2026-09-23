@@ -571,4 +571,24 @@ describe('session-start memory floor', () => {
     expect(briefing).toContain('they arrive in the next messages');
     expect(briefing).not.toContain('mem_0000000000000000');
   });
+
+  it('holds the memory floor against the open loops, even with one topic', async () => {
+    // Single topic (no branch): abundant loops — far more than the channel
+    // could ever render — used to be free to spend the room this floor
+    // reserves, because the loops' own budget never subtracted it. Enough
+    // loops here to consume the ENTIRE remainder if given the chance.
+    const briefing = await runSessionStart({
+      loops: Array.from({ length: 60 }, (_, i) => loop(900 + i, 200)),
+      memories: Array.from({ length: 12 }, (_, i) => memory(i, 900)),
+    });
+    expect(briefing.length).toBeLessThanOrEqual(9_000);
+    // Either a stub survives, or — if the pack were still squeezed past
+    // even the floor — the honest starved notice does. What must NOT
+    // happen is neither: the loops silently taking the room the floor
+    // was supposed to hold for the pack.
+    const hasMemorySection =
+      briefing.includes('mem_0000000000000000') ||
+      briefing.includes('they arrive in the next messages');
+    expect(hasMemorySection).toBe(true);
+  });
 });

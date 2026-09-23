@@ -471,13 +471,24 @@ const runSessionStart = async (
     merged.loops,
     merged.total,
     new Date(),
+    // `plan.memoryFloor` is held on PAPER by the smaller rules ceiling
+    // above, but the loops render against whatever is left AFTER rules —
+    // nothing before this subtracted the floor here too, so a rules block
+    // short enough to leave room did not stop the loops from spending that
+    // same room anyway. Measured: with only one topic, the loops' own
+    // budget has no ceiling of its own, so an abundant loop supply fills
+    // it completely — eating the floor the pack was promised before the
+    // pack ever gets a budget to render against. Pinned rules still
+    // outrank both floors (they are exempt from the ceiling above), same
+    // as today.
     Math.max(
       0,
       budget -
         (projectLine?.length ?? 0) -
         (rulesSection?.length ?? 0) -
         (boardBlock?.length ?? 0) -
-        SECTION_GAPS_CHARS
+        SECTION_GAPS_CHARS -
+        plan.memoryFloor
     )
   );
   const workSection = joinWorkSection(boardBlock, loopSection);
