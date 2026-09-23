@@ -86,14 +86,15 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   // the drift guard sees it as deliberate rather than forgotten.
   session_threads: { kind: 'owned', ownerColumn: 'owner_id' },
   // Board rows are owned by WHOEVER WROTE THEM, not by the card's author. A
-  // card lives in a shared scope, so a co-member's notes and attachments on it
-  // are that person's content and leave with them; the card itself leaves with
-  // the person who opened it, taking the rest of its stream along its foreign
-  // keys. Splitting the three this way is what keeps one member's erasure from
-  // deleting another member's words.
+  // card lives in a shared scope, so a co-member's notes, attachments and
+  // recorded branches on it are that person's content and leave with them; the
+  // card itself leaves with the person who opened it, taking the rest of its
+  // stream along its foreign keys. Splitting them this way is what keeps one
+  // member's erasure from deleting another member's words.
   cards: { kind: 'owned', ownerColumn: 'created_by' },
   card_events: { kind: 'owned', ownerColumn: 'actor_id' },
   card_refs: { kind: 'owned', ownerColumn: 'attached_by' },
+  card_branches: { kind: 'owned', ownerColumn: 'attached_by' },
 
   // Transitively owned through the memory (no owner column of their own).
   memory_entities: {
