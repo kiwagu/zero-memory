@@ -27,10 +27,11 @@
 --     before the first write.
 --   - Which cards a state carries is decided by git ancestry in the
 --     observer's checkout, never here: release_candidates hands out the
---     landings of the cards with nothing released since they last landed (a
---     release marks what landed after the previous one, and a card that
---     lands again is a candidate again), and release_record keeps only the
---     live cards of the named scope among the ids it is given.
+--     cards with nothing released since they last landed (a release marks
+--     what landed after the previous one, and a card that lands again is a
+--     candidate again), each with only the landings since its last release,
+--     and release_record keeps only the live cards of the named scope among
+--     the ids it is given.
 --   - A card is recorded once per version however many observers report it.
 --     The first observer's row of the state is kept as it was; seeing the
 --     state again moves only its last sighting, so a version production
@@ -142,6 +143,7 @@ $$;
 
 -- 2. which cards could a state carry -----------------------------------------
 
+-- p_version stays for callers; a card qualifies by its landings, not by it.
 create or replace function public.release_candidates(p_scope text, p_version text)
 returns jsonb
 language plpgsql
@@ -162,13 +164,19 @@ begin
   return jsonb_build_object('cards', coalesce((
     select jsonb_agg(jsonb_build_object(
              'id', c.id, 'number', c.number, 'title', c.title, 'state', c.state,
+             -- Only the landings since the card's last release: an earlier
+             -- one is in every later release, so it proves nothing about
+             -- this one.
              'landings', (
                select jsonb_agg(jsonb_build_object(
                         'repo', split_part(e.ref_target, ':', 1),
                         'branch', substr(e.ref_target, length(split_part(e.ref_target, ':', 1)) + 2),
                         'squash_sha', e.squash_sha) order by e.seq)
                  from public.card_events e
-                where e.card_id = c.id and e.type = 'landed'))
+                where e.card_id = c.id and e.type = 'landed'
+                  and e.seq > coalesce((
+                        select max(r.seq) from public.card_events r
+                         where r.card_id = c.id and r.type = 'released'), 0)))
            order by c.number)
       from public.cards c
      where c.scope operator(extensions.=) v_scope
@@ -695,7 +703,8 @@ begin
                                 'observed_at', r.last_observed_at)
         from public.scope_releases r
        where r.scope operator(extensions.=) p_scope::extensions.ltree
-       order by r.last_observed_at desc limit 1),
+       order by r.last_observed_at desc, r.observed_at desc, r.version desc
+       limit 1),
     'open_branches', v_open
   );
 end;

@@ -512,11 +512,13 @@ test.describe('Release commands in the store', () => {
       });
     const candidates = async (version: string) =>
       (
-        await rpc<{ cards: Array<{ id: string }> }>(db, 'release_candidates', {
+        await rpc<{
+          cards: Array<{ id: string; landings: Array<{ squash_sha: string }> }>;
+        }>(db, 'release_candidates', {
           p_scope: scope,
           p_version: version,
         })
-      ).cards.map((c) => c.id);
+      ).cards;
 
     await land('aaaaaaa');
     await rpc(db, 'release_record', {
@@ -529,8 +531,14 @@ test.describe('Release commands in the store', () => {
     });
     expect(await candidates('1.1.0')).toEqual([]);
 
-    // A fix lands in the same branch: the next release carries it.
+    // A fix lands in the same branch: the next release carries it, and the
+    // candidate names only that landing — the earlier one is already in
+    // every later release, so it proves nothing about this one.
     await land('bbbbbbb');
-    expect(await candidates('1.1.0')).toEqual([card.id]);
+    const again = await candidates('1.1.0');
+    expect(again.map((c) => c.id)).toEqual([card.id]);
+    expect(again[0]?.landings).toEqual([
+      { repo: REPO, branch: 'feature/twice', squash_sha: 'bbbbbbb' },
+    ]);
   });
 });
