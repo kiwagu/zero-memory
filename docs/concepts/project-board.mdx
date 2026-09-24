@@ -245,8 +245,8 @@ A session's briefing names the project's production state — "Production: vX
 card a release reached also shows "shipped in vX" — the latest release that
 carried it, which stays true after a rollback — on its dashboard tile and in
 its detail, with the release itself as a `released` line in its history; a board's own setting — where its production state comes from, and
-what a release does to its cards — shows read-only above the columns, set
-only through `configure`, never from the dashboard.
+what a release does to its cards — shows read-only in the hint beside the
+board's title, set only through `configure`, never from the dashboard.
 
 The url is read by each member's own watcher, never by the server, and a
 redirect from it is never followed. Every member of the project can read the
@@ -354,7 +354,10 @@ no budget carries no summary and briefs exactly as it did before.
 The dashboard shows the board as one row of columns, which scrolls sideways
 when the window is too narrow for all five. Each tile carries the reason the
 card is in the column it is in — not merely what touched it last, since a note
-or an attachment says nothing about where the work stands.
+or an attachment says nothing about where the work stands. The icon beside
+the title says what the board is and, for a single board, where its
+production state comes from; it opens on hover or keyboard focus, so the page
+itself holds only the cards.
 
 <Screenshot path="/board">
 
