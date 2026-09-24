@@ -7,6 +7,7 @@ import {
   callCardBranches,
   landingCheckDue,
   landingCheckStatePath,
+  projectIgnored,
   projectScopeStatePath,
   readProjectScope,
   recordLandingCheck,
@@ -69,6 +70,7 @@ const within = <T>(promise: Promise<T>, ms: number): Promise<T> =>
  *
  * It reads commits rather than the command that ran, so a squash made by a
  * script is caught and a command that merely mentions a trailer is not.
+ * A folder the user ignored (`.zero-memory-ignore`) is left alone entirely.
  * Never throws: a hook must not break the session it observes.
  */
 export const runLanding = async (
@@ -78,6 +80,8 @@ export const runLanding = async (
   const lookupTimeoutMs = options.lookupTimeoutMs ?? LANDING_LOOKUP_TIMEOUT_MS;
   try {
     const input = await adapter.readInput();
+    // Nothing about an ignored project leaves the machine, not even a lookup.
+    if (projectIgnored(input.cwd)) return;
     // One git read decides almost every run: no fresh squash, nothing to do.
     const statePath = landingCheckStatePath();
     const due = recentSquashes(input.cwd, LOOKBACK_COMMITS, FRESH_HOURS)

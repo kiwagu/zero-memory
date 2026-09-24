@@ -292,6 +292,20 @@ describe('runLanding', () => {
     }
   });
 
+  it('asks nobody about a folder the user ignored', async () => {
+    writeFileSync(join(repo, '.zero-memory-ignore'), '');
+    commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    vi.mocked(callCardBranches).mockResolvedValue({ card: CARD, branches: [] });
+    await runLanding(adapter());
+    expect(said).toEqual([]);
+    expect(callCardBranches).not.toHaveBeenCalled();
+  });
+
   it('says nothing about a project it has never briefed', async () => {
     rmSync(projectScopeStatePath(), { force: true });
     commit(
