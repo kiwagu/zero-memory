@@ -160,6 +160,11 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   // `actor_id` but carries no personal content (ids, counters, flags only);
   // erasure severs the reference and keeps the audit row.
   audit_log: { kind: 'anonymize', column: 'actor_id' },
+  // A project's release setting and the production states it was observed
+  // in: configuration and a log, content-free. Erasure keeps the rows and
+  // severs who wrote them.
+  scope_release_settings: { kind: 'anonymize', column: 'updated_by' },
+  scope_releases: { kind: 'anonymize', column: 'observed_by' },
 
   // Not user data.
   oauth_clients: {
@@ -236,8 +241,8 @@ export const deletableTables = (): MappedTable[] =>
 
 /**
  * Tables that must hold zero rows attributable to a user after erasure — the
- * deleted tables plus the anonymized one (its reference is nulled, so no row
- * still points at the user).
+ * deleted tables plus the anonymized ones (their reference is nulled, so no
+ * row still points at the user).
  */
 export const userDataTables = (): MappedTable[] =>
   entries()

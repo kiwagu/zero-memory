@@ -179,6 +179,9 @@ export type Database = {
           ref_kind: string | null;
           ref_target: string | null;
           relation: string | null;
+          release_build: string | null;
+          release_commit: string | null;
+          release_version: string | null;
           reply_to: string | null;
           revision: number | null;
           scope: unknown;
@@ -203,6 +206,9 @@ export type Database = {
           ref_kind?: string | null;
           ref_target?: string | null;
           relation?: string | null;
+          release_build?: string | null;
+          release_commit?: string | null;
+          release_version?: string | null;
           reply_to?: string | null;
           revision?: number | null;
           scope: unknown;
@@ -227,6 +233,9 @@ export type Database = {
           ref_kind?: string | null;
           ref_target?: string | null;
           relation?: string | null;
+          release_build?: string | null;
+          release_commit?: string | null;
+          release_version?: string | null;
           reply_to?: string | null;
           revision?: number | null;
           scope?: unknown;
@@ -1621,6 +1630,85 @@ export type Database = {
           {
             foreignKeyName: 'scope_members_user_id_fkey';
             columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      scope_release_settings: {
+        Row: {
+          on_release: string;
+          scope: unknown;
+          tag_pattern: string;
+          tag_template: string;
+          updated_at: string;
+          updated_by: string | null;
+          version_field: string;
+          version_url: string | null;
+        };
+        Insert: {
+          on_release?: string;
+          scope: unknown;
+          tag_pattern?: string;
+          tag_template?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version_field?: string;
+          version_url?: string | null;
+        };
+        Update: {
+          on_release?: string;
+          scope?: unknown;
+          tag_pattern?: string;
+          tag_template?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version_field?: string;
+          version_url?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'scope_release_settings_updated_by_fkey';
+            columns: ['updated_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      scope_releases: {
+        Row: {
+          build: string | null;
+          observed_at: string;
+          observed_by: string | null;
+          release_commit: string;
+          scope: unknown;
+          source: string;
+          version: string;
+        };
+        Insert: {
+          build?: string | null;
+          observed_at?: string;
+          observed_by?: string | null;
+          release_commit: string;
+          scope: unknown;
+          source: string;
+          version: string;
+        };
+        Update: {
+          build?: string | null;
+          observed_at?: string;
+          observed_by?: string | null;
+          release_commit?: string;
+          scope?: unknown;
+          source?: string;
+          version?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'scope_releases_observed_by_fkey';
+            columns: ['observed_by'];
             isOneToOne: false;
             referencedRelation: 'profiles';
             referencedColumns: ['id'];
