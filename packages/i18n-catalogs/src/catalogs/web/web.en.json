@@ -550,7 +550,7 @@
   "board.search.placeholder": "ZM-42 or a title",
   "board.search.submit": "Filter",
   "board.scope.latestNamed": "Latest activity: {scope}",
-  "board.releasedIn": "in production v{version}",
+  "board.releasedIn": "shipped in v{version}",
   "board.event.released": "released",
   "board.release.settings": "Production: {source} · on release: {policy}",
   "board.release.tagsOnly": "release tags {template}",

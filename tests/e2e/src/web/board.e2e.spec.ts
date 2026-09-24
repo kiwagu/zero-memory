@@ -465,14 +465,14 @@ test.describe('Project board in the dashboard', () => {
       .getByTestId('board-column-waiting')
       .getByTestId('board-card')
       .filter({ hasText: 'Ship the feed pages' });
-    await expect(tile).toContainText('in production v1.4.0');
+    await expect(tile).toContainText('shipped in v1.4.0');
 
     await page.goto(`/board?scope=all`);
     await expect(page.getByTestId('board-release-settings')).toHaveCount(0);
 
     await page.goto(`/board/${cardId}`);
     await expect(page.getByTestId('card-detail')).toContainText(
-      'in production v1.4.0'
+      'shipped in v1.4.0'
     );
     await expect(page.getByTestId('card-history')).toContainText('released');
     await expect(page.getByTestId('card-history')).toContainText('v1.4.0');

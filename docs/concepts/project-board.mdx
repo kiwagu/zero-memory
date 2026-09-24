@@ -202,7 +202,8 @@ then its highest release instead: among the tags matching `tag_pattern`
 (default `v*`), the highest version `tag_template` (default `v{version}`)
 reads from them, a final release above its pre-releases — a matching tag it
 reads no version from is not a release. `tag_template` also maps a version
-to the tag that names it. `on_release` chooses what a release does to the cards it carries:
+to the tag that names it; it holds `{version}` once and otherwise only
+characters a git ref may hold. `on_release` chooses what a release does to the cards it carries:
 `record` (the default) only records it, `record_and_move_done` also moves
 the carried cards in `waiting` to `done`. `configure` changes only the
 fields it is given, and `version_url: null` clears a url that was set.
@@ -241,9 +242,9 @@ cards it carries — nothing on the board moves by itself.
 
 A session's briefing names the project's production state — "Production: vX
 … as of …" — and, for the cards it lists, the release that reached them. A
-card a release reached also shows "in production vX" on its dashboard tile
-and in its detail, with the release itself as a `released` line in its
-history; a board's own setting — where its production state comes from, and
+card a release reached also shows "shipped in vX" — the latest release that
+carried it, which stays true after a rollback — on its dashboard tile and in
+its detail, with the release itself as a `released` line in its history; a board's own setting — where its production state comes from, and
 what a release does to its cards — shows read-only above the columns, set
 only through `configure`, never from the dashboard.
 
