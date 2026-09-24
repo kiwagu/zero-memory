@@ -1,6 +1,6 @@
 {
   "name": "watcher",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
