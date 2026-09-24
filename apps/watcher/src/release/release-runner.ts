@@ -40,6 +40,8 @@ export const RELEASE_LOOKUP_TIMEOUT_MS = 5000;
  * together; at session start it shares the briefing's time.
  */
 export const RELEASE_CHECK_BUDGET_MS = 8000;
+/** The most cards one record takes (the release tool's own limit). */
+const RECORD_BATCH = 500;
 
 /** Why a check has nothing to say: what a manual run prints in its place. */
 type Quiet =
@@ -324,26 +326,41 @@ const inspectRelease = async (
     }
     // The last check may have been cut short by the budget, not answered.
     if (outOfTime()) return ranOut();
-    const result = await callRelease(
-      {
-        action: 'record',
-        scope,
-        version: current.version,
-        build: current.build,
-        release_commit: commit,
-        source,
-        card_ids: carried.map((c) => c.id),
-        // The landing each card was checked at: one that lands again before
-        // this record is skipped and waits for the release that ships it.
-        landing_seqs: carried.map((c) => c.landing_seq),
-      },
-      left()
-    );
+    // A first run over a long history can carry more cards than one record
+    // takes: they go in batches — and one record still goes when none is
+    // carried, as it records the state itself. The first batch says whether
+    // this machine saw the state first; every batch adds what it recorded
+    // and moved.
+    const recorded = new Set<string>();
+    const moved = new Set<string>();
+    let firstObserved: boolean | undefined;
+    for (let at = 0; at === 0 || at < carried.length; at += RECORD_BATCH) {
+      // Out of time between batches: tried again after the pause, when the
+      // store no longer offers the cards already recorded.
+      if (at > 0 && outOfTime()) return ranOut();
+      const batch = carried.slice(at, at + RECORD_BATCH);
+      const result = await callRelease(
+        {
+          action: 'record',
+          scope,
+          version: current.version,
+          build: current.build,
+          release_commit: commit,
+          source,
+          card_ids: batch.map((c) => c.id),
+          // The landing each card was checked at: one that lands again before
+          // this record is skipped and waits for the release that ships it.
+          landing_seqs: batch.map((c) => c.landing_seq),
+        },
+        left()
+      );
+      firstObserved ??= result.release?.first_observed;
+      for (const id of result.recorded ?? []) recorded.add(id);
+      for (const id of result.moved ?? []) moved.add(id);
+    }
     mark('recorded');
-    const recorded = new Set(result.recorded ?? []);
-    const moved = new Set(result.moved ?? []);
     const fresh = carried.filter((card) => recorded.has(card.id));
-    if (fresh.length === 0 && result.release?.first_observed === false) {
+    if (fresh.length === 0 && firstObserved === false) {
       // Another session saw this state first and marked its cards.
       return { line: renderReleaseKnown(current.version, current.build) };
     }

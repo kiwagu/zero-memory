@@ -581,6 +581,54 @@ describe('checkRelease', () => {
     expect(calls('record')[0]?.[0].card_ids).toHaveLength(100);
   });
 
+  it('records more than five hundred carried cards in batches, and counts them all', async () => {
+    const landed = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/1 (abcdef1) ZM-1'
+    );
+    git(repo, 'tag', 'v1.0.0', landed);
+    candidates = Array.from({ length: 501 }, (_, i) => ({
+      ...candidate(i + 1, landed),
+      state: i === 0 ? ('waiting' as const) : ('active' as const),
+    }));
+    vi.mocked(fetchDeployedVersion).mockResolvedValue({
+      version: '1.0.0',
+      build: null,
+    });
+    vi.mocked(isAncestorOf).mockImplementation(() => true);
+    // Like the store: only the first record of a state sees it first.
+    let records = 0;
+    vi.mocked(callRelease).mockImplementation(async (input) => {
+      if (input.action === 'settings') return { settings };
+      if (input.action === 'candidates') return { cards: candidates };
+      records += 1;
+      return {
+        release: {
+          version: input.version ?? '',
+          build: null,
+          release_commit: input.release_commit ?? '',
+          source: 'url',
+          observed_at: '2026-09-24T08:00:00Z',
+          first_observed: records === 1,
+        },
+        recorded: input.card_ids ?? [],
+        moved: [],
+      };
+    });
+
+    const line = await checkRelease(repo, { now: T0 });
+    expect(calls('record')).toHaveLength(2);
+    expect(calls('record')[0]?.[0].card_ids).toHaveLength(500);
+    expect(calls('record')[0]?.[0].landing_seqs).toHaveLength(500);
+    expect(calls('record')[1]?.[0]).toMatchObject({
+      card_ids: [cardId(501)],
+      landing_seqs: [601],
+    });
+    expect(line).toContain('v1.0.0 carries ZM-1, 500 more cards');
+  });
+
   it('leaves a folder the user ignored alone', async () => {
     writeFileSync(join(repo, '.zero-memory-ignore'), '');
     git(repo, 'tag', 'v0.25.0', commit(repo, 'b', 'chore(release): 0.25.0'));
