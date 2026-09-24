@@ -16,6 +16,7 @@ interface SearchFormProps {
   submitLabel: string;
   defaultValue?: string;
   onSearch: (q: string) => void;
+  testId?: string;
 }
 
 function SearchForm({
@@ -23,6 +24,7 @@ function SearchForm({
   submitLabel,
   defaultValue = '',
   onSearch,
+  testId,
 }: SearchFormProps) {
   return (
     <form
@@ -32,6 +34,7 @@ function SearchForm({
         onSearch(String(data.get('q') ?? '').trim());
       }}
       className="flex gap-2"
+      data-testid={testId}
     >
       <Input
         type="search"

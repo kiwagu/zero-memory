@@ -7,6 +7,7 @@ import {
 } from '@workspace/ui/components/board/board-columns';
 
 import { BoardFilter } from '@/components/board-filter.client';
+import { BoardSearch } from '@/components/board-search.client';
 import { BoardLive } from '@/components/board-live.client';
 import {
   ALL_BOARDS,
@@ -35,9 +36,11 @@ const REASON_CHARS = 120;
 export default async function BoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ scope?: string }>;
+  searchParams: Promise<{ scope?: string; q?: string }>;
 }) {
-  const { scope } = await searchParams;
+  const { scope, q } = await searchParams;
+  // A label (ZM-42, #42, 42) or a piece of a title; the store decides which.
+  const query = q?.trim() ?? '';
   const { t } = await getRequestMessages();
 
   const supabase = await createServerSupabaseClient();
@@ -66,6 +69,7 @@ export default async function BoardPage({
 
   const { data, error } = await supabase.rpc('board_list', {
     p_scope: selected ?? undefined,
+    p_query: query || undefined,
     p_limit: BOARD_LIMIT,
   });
 
@@ -117,43 +121,52 @@ export default async function BoardPage({
             for what is on screen rather than a form, so it costs a row of its
             own for nothing. Always present — hiding it with one board, or
             with an empty one, would leave the reader unable to see which
-            board they are looking at. An empty board filters to empty. */}
+            board they are looking at. An empty board filters to empty. The
+            filter beside it narrows the cards by label or title and lives in
+            the address with the board; nothing matching shows as nothing. */}
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold">{t('board.title')}</h1>
-          <BoardFilter
-            testId="board-scope-filter"
-            placeholder={
-              // The default row names the board it resolves to, so "opened on
-              // the latest activity" is visible rather than merely true.
-              value === '' && selected
-                ? t('board.scope.latestNamed', {
-                    scope: scopeOptionLabel(
-                      selected,
-                      aliasByScope.get(selected)
-                    ),
-                  })
-                : t('board.scope.latest')
-            }
-            value={value}
-            options={[
-              { value: ALL_BOARDS, label: t('board.scope.all') },
-              ...boards.map((board) => ({
-                value: board.scope,
-                label: scopeOptionLabel(
-                  board.scope,
-                  aliasByScope.get(board.scope)
-                ),
-                count: board.cards,
-              })),
-              // A board named in the address but holding nothing is still the
-              // board on screen, so the control says so instead of going blank.
-              ...(value !== '' &&
-              value !== ALL_BOARDS &&
-              !boards.some((board) => board.scope === value)
-                ? [{ value, label: scopeOptionLabel(value), count: 0 }]
-                : []),
-            ]}
-          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <BoardSearch
+              value={query}
+              placeholder={t('board.search.placeholder')}
+              submitLabel={t('board.search.submit')}
+            />
+            <BoardFilter
+              testId="board-scope-filter"
+              placeholder={
+                // The default row names the board it resolves to, so "opened on
+                // the latest activity" is visible rather than merely true.
+                value === '' && selected
+                  ? t('board.scope.latestNamed', {
+                      scope: scopeOptionLabel(
+                        selected,
+                        aliasByScope.get(selected)
+                      ),
+                    })
+                  : t('board.scope.latest')
+              }
+              value={value}
+              options={[
+                { value: ALL_BOARDS, label: t('board.scope.all') },
+                ...boards.map((board) => ({
+                  value: board.scope,
+                  label: scopeOptionLabel(
+                    board.scope,
+                    aliasByScope.get(board.scope)
+                  ),
+                  count: board.cards,
+                })),
+                // A board named in the address but holding nothing is still the
+                // board on screen, so the control says so instead of going blank.
+                ...(value !== '' &&
+                value !== ALL_BOARDS &&
+                !boards.some((board) => board.scope === value)
+                  ? [{ value, label: scopeOptionLabel(value), count: 0 }]
+                  : []),
+              ]}
+            />
+          </div>
         </div>
         <p className="text-muted-foreground text-sm">
           {t('board.description')}
