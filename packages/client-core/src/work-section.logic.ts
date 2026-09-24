@@ -34,9 +34,10 @@ const named = (card: BriefingWorkCard, work: BriefingWork): string => {
     .filter((branch) => branch.card_id === card.id)
     .map((branch) => branch.branch);
   const on = branches.length > 0 ? ` on ${branches.join(', ')}` : '';
+  const released = card.released_in ? ` released v${card.released_in}` : '';
   return (
     `${formatCardLabel(card.number)} "${clip(card.title, TITLE_MAX_CHARS)}" ` +
-    `[${card.state}]${on}`
+    `[${card.state}]${on}${released}`
   );
 };
 
@@ -46,6 +47,12 @@ export const renderBoardSummary = (
   drift: readonly LandingDrift[] = []
 ): string | null => {
   const lines: string[] = [];
+  if (work.production) {
+    const { version, build, observed_at } = work.production;
+    lines.push(
+      `- Production: v${version}${build ? ` (build ${build})` : ''} since ${observed_at}`
+    );
+  }
   const bound = work.bound_card;
   if (bound) {
     const reason = bound.state_reason
