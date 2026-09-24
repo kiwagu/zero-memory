@@ -198,7 +198,14 @@ test.describe('Release settings in the store', () => {
     });
     expect(none.settings).toBeNull();
 
-    for (const good of ['release/{version}', 'v{version}-final', '{version}']) {
+    for (const good of [
+      'release/{version}',
+      'v{version}-final',
+      '{version}',
+      'pkg@{version}',
+      '@scope/pkg@{version}',
+      'v{version}+stable',
+    ]) {
       const set = await rpc<{ settings: { tag_template: string } }>(
         db,
         'release_configure',

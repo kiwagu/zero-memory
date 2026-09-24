@@ -27,10 +27,13 @@ export const releaseVersionSchema = z
 export const releaseTagTemplateSchema = z
   .string()
   .max(100)
-  .regex(/^(?:[A-Za-z0-9._/][A-Za-z0-9._/-]*)?\{version\}[A-Za-z0-9._/-]*$/u, {
-    message:
-      'A tag template holds {version} once and otherwise only letters, digits, ".", "_", "/" and "-" (not first)',
-  });
+  .regex(
+    /^(?:[A-Za-z0-9._/@+][A-Za-z0-9._/@+-]*)?\{version\}[A-Za-z0-9._/@+-]*$/u,
+    {
+      message:
+        'A tag template holds {version} once and otherwise only letters, digits and . _ / @ + - (not "-" first)',
+    }
+  );
 
 /** Where a project's production state lives, and what a release does. */
 export const releaseSettingsSchema = z.object({
@@ -114,7 +117,7 @@ export const releaseInputSchema = z.object({
     .optional()
     .describe(
       'For configure: version to tag, e.g. "v{version}" (the default) or ' +
-        '"release/{version}". Only characters a git ref may hold.'
+        '"release/{version}" or "pkg@{version}". Only characters a git ref may hold.'
     ),
   tag_pattern: z
     .string()

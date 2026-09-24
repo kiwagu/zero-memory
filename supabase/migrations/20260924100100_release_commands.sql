@@ -117,11 +117,11 @@ begin
   end if;
   if coalesce(p_version_field, '') !~ '^[A-Za-z_][A-Za-z0-9_]{0,63}(\.[A-Za-z_][A-Za-z0-9_]{0,63}){0,4}$'
      or length(coalesce(p_tag_template, '')) > 100
-     or coalesce(p_tag_template, '') !~ '^([A-Za-z0-9._/][A-Za-z0-9._/-]*)?\{version\}[A-Za-z0-9._/-]*$'
+     or coalesce(p_tag_template, '') !~ '^([A-Za-z0-9._/@+][A-Za-z0-9._/@+-]*)?\{version\}[A-Za-z0-9._/@+-]*$'
      or length(coalesce(p_tag_pattern, '')) not between 1 and 100 or p_tag_pattern ~ '\s'
      or left(p_tag_pattern, 1) = '-' then
     return jsonb_build_object('error', 'invalid', 'message',
-      'version_field is a dotted field name; tag_template holds {version} once and otherwise only letters, digits, ".", "_", "/" and "-" (not first); tag_pattern is one glob.');
+      'version_field is a dotted field name; tag_template holds {version} once and otherwise only letters, digits and . _ / @ + - (not "-" first); tag_pattern is one glob.');
   end if;
 
   -- The policies check the admin again; the refusal above only makes the

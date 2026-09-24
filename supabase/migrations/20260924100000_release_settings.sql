@@ -67,7 +67,7 @@ create table public.scope_release_settings (
   -- hold, and it cannot start like an option.
   tag_template text not null default 'v{version}' check (
     length(tag_template) <= 100
-    and tag_template ~ '^([A-Za-z0-9._/][A-Za-z0-9._/-]*)?\{version\}[A-Za-z0-9._/-]*$'
+    and tag_template ~ '^([A-Za-z0-9._/@+][A-Za-z0-9._/@+-]*)?\{version\}[A-Za-z0-9._/@+-]*$'
   ),
   tag_pattern text not null default 'v*' check (
     length(tag_pattern) between 1 and 100 and tag_pattern !~ '\s'
