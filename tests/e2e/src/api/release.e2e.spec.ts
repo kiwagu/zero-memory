@@ -78,6 +78,42 @@ test.describe('Releases over MCP', () => {
       );
       expect(read.releases.map((r) => r.version)).toEqual(['1.0.0']);
 
+      // A release with no `build` (e.g. a tag-sourced one) must still
+      // record: the store's p_build has no default, so it must always be
+      // sent — even as null — never merely omitted from the RPC call.
+      const secondCard = firstJson<{ card: { id: string } }>(
+        await agent.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'A second card, tag-released with no build',
+          state: 'active',
+          branch: { repo: 'acme/memory-service', name: 'feature/tagged' },
+        })
+      ).card;
+      await agent.callTool('card', {
+        action: 'land',
+        card_id: secondCard.id,
+        branch: { repo: 'acme/memory-service', name: 'feature/tagged' },
+        squash_sha: 'ccccccc',
+        target: 'main',
+        reason: 'gate green',
+      });
+      const recordedNoBuild = firstJson<{
+        recorded: string[];
+        release: { build: string | null };
+      }>(
+        await agent.callTool('release', {
+          action: 'record',
+          scope,
+          version: '1.1.0',
+          release_commit: 'ddddddd',
+          source: 'tag',
+          card_ids: [secondCard.id],
+        })
+      );
+      expect(recordedNoBuild.recorded).toEqual([secondCard.id]);
+      expect(recordedNoBuild.release.build).toBeNull();
+
       const missing = await agent.callTool('release', {
         action: 'record',
         scope,
