@@ -18,6 +18,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveProjectHint } from '../project-hint-resolver.js';
+import { isAncestorOf } from './git-release.js';
 import { checkRelease, runRelease } from './release-runner.js';
 
 vi.mock('@workspace/client-runtime', async (importOriginal) => ({
@@ -25,6 +26,19 @@ vi.mock('@workspace/client-runtime', async (importOriginal) => ({
   callRelease: vi.fn(),
   fetchDeployedVersion: vi.fn(),
 }));
+// Real git unless a test says otherwise: a test can make an ancestry check
+// cost time without a slow repository.
+vi.mock('./git-release.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./git-release.js')>();
+  return { ...actual, isAncestorOf: vi.fn(actual.isAncestorOf) };
+});
+const actualGit =
+  await vi.importActual<typeof import('./git-release.js')>('./git-release.js');
+beforeEach(() => {
+  vi.mocked(isAncestorOf)
+    .mockReset()
+    .mockImplementation(actualGit.isAncestorOf);
+});
 
 const env = {
   GIT_AUTHOR_NAME: 't',
@@ -520,6 +534,51 @@ describe('checkRelease', () => {
     } finally {
       rmSync(other, { recursive: true, force: true });
     }
+  });
+
+  it('stops when its time runs out among the candidates, records nothing, and tries again after the pause', async () => {
+    const landed = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/23 (abcdef1) ZM-23'
+    );
+    git(repo, 'tag', 'v1.0.0', landed);
+    candidates = Array.from({ length: 100 }, (_, i) =>
+      candidate(100 + i, landed)
+    );
+    vi.mocked(fetchDeployedVersion).mockResolvedValue({
+      version: '1.0.0',
+      build: null,
+    });
+    // Each ancestry check costs a tenth of the budget.
+    let clock = Date.now();
+    const time = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    vi.mocked(isAncestorOf).mockImplementation(() => {
+      clock += 100;
+      return true;
+    });
+    try {
+      expect(await checkRelease(repo, { now: T0, budgetMs: 1000 })).toBeNull();
+    } finally {
+      time.mockRestore();
+    }
+    expect(calls('record')).toHaveLength(0);
+    const checks = vi.mocked(isAncestorOf).mock.calls;
+    expect(checks.length).toBeLessThan(100);
+    for (const [, , , timeoutMs] of checks) {
+      expect(timeoutMs).toBeGreaterThan(0);
+      expect(timeoutMs).toBeLessThanOrEqual(1000);
+    }
+
+    vi.mocked(isAncestorOf).mockImplementation(() => true);
+    expect(await checkRelease(repo, { now: T0 + 3 * MIN })).toBeNull(); // inside the retry pause
+    expect(calls('candidates')).toHaveLength(1);
+    expect(await checkRelease(repo, { now: T0 + 11 * MIN })).toContain(
+      'ZM-199'
+    );
+    expect(calls('record')).toHaveLength(1);
+    expect(calls('record')[0]?.[0].card_ids).toHaveLength(100);
   });
 
   it('leaves a folder the user ignored alone', async () => {

@@ -71,6 +71,16 @@ describe('release facts from git', () => {
     });
   });
 
+  it('runs no git once its time is spent', () => {
+    const a = commit(repo, 'a');
+    git(repo, 'tag', 'v1.0.0', a);
+    expect(tagCommit(repo, 'v1.0.0', 0)).toBeNull();
+    expect(latestTag(repo, 'v*', 'v{version}', 0)).toBeNull();
+    expect(isAncestorOf(repo, a, a, 0)).toBe(false);
+    expect(tagCommit(repo, 'v1.0.0', 2000)).toBe(a);
+    expect(isAncestorOf(repo, a, a, 2000)).toBe(true);
+  });
+
   it('tells a landing the release carries from one it does not', () => {
     const landed = commit(repo, 'a');
     const release = commit(repo, 'b');

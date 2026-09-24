@@ -22,8 +22,10 @@ import {
   writeReleaseState,
   type ReleaseCheckoutState,
 } from '@workspace/client-runtime';
+import type { ReleaseCandidate } from '@workspace/contracts';
 import { createLogger } from '@workspace/logger';
 
+import { GIT_TIMEOUT_MS } from '../git.js';
 import { readGitFacts } from '../landing/git-facts.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
 import { isAncestorOf, latestTag, tagCommit } from './git-release.js';
@@ -45,6 +47,7 @@ type Quiet =
   | 'no-project'
   | 'no-production'
   | 'no-server'
+  | 'no-time'
   | 'no-version'
   | 'not-a-checkout'
   | 'nothing-new';
@@ -57,6 +60,8 @@ const QUIET_LINES: Record<Quiet, string> = {
   'no-project': 'release: this folder is not a briefed project',
   'no-production': 'release: this project names no production state',
   'no-server': 'release: the server could not be asked — try again later',
+  'no-time':
+    'release: the check ran out of time before it finished — run it again',
   'no-version':
     "release: production's version could not be read (the version url did not answer with one)",
   'not-a-checkout': 'release: this folder is not a git checkout',
@@ -115,6 +120,14 @@ const inspectRelease = async (
         deadline - Date.now()
       )
     );
+  // Git gets what is left of the budget, at most its usual deadline; with
+  // nothing left it is not run at all.
+  const gitLeft = (): number => Math.min(GIT_TIMEOUT_MS, deadline - Date.now());
+  const outOfTime = (): boolean => deadline - Date.now() <= 0;
+  const ranOut = (): ReleaseCheck => {
+    logger.info('release check ran out of time; retrying later');
+    return quiet('no-time');
+  };
 
   const hint = resolveProjectHint(cwd);
   const scope = readProjectScope(projectScopeStatePath(), hint);
@@ -199,7 +212,13 @@ const inspectRelease = async (
     // checkout it silently finds nothing, which reads as "no tag yet" rather
     // than the actual reason — say so before it does.
     if (!readGitFacts(cwd)) return quiet('not-a-checkout');
-    const latest = latestTag(cwd, settings.tag_pattern, settings.tag_template);
+    const latest = latestTag(
+      cwd,
+      settings.tag_pattern,
+      settings.tag_template,
+      gitLeft()
+    );
+    if (!latest && outOfTime()) return ranOut();
     seen = latest ? { version: latest.version, build: null } : null;
   }
   if (!seen) return quiet('nothing-new');
@@ -241,8 +260,13 @@ const inspectRelease = async (
   const facts = readGitFacts(cwd);
   if (!facts) return quiet('not-a-checkout');
   const tag = tagForVersion(settings.tag_template, current.version);
-  const commit = tagCommit(facts.root, tag);
+  const commit = tagCommit(facts.root, tag, gitLeft());
   if (!commit) {
+    // Out of time is no proof the tag is missing: tried again after the pause.
+    if (outOfTime()) {
+      mark('error');
+      return ranOut();
+    }
     mark('no-tag');
     // Said once per version; a retry that still finds no tag stays quiet,
     // unless someone asked by hand.
@@ -284,16 +308,22 @@ const inspectRelease = async (
     // Only a card's LATEST landing here decides: marked on an older one while
     // its follow-up is not yet released, the card would close before the
     // follow-up ships, and the release that ships it would never be recorded.
-    const carried = cards.filter((card) => {
-      const here = card.landings.filter(
-        (landing) => landing.repo === facts.identity
-      );
-      const latest = here.at(-1);
-      return (
-        latest !== undefined &&
-        isAncestorOf(facts.root, latest.squash_sha, commit)
-      );
-    });
+    const carried: ReleaseCandidate[] = [];
+    for (const card of cards) {
+      const latest = card.landings
+        .filter((landing) => landing.repo === facts.identity)
+        .at(-1);
+      if (latest === undefined) continue;
+      // Out of time before every card is checked: nothing is recorded, as a
+      // record of part of the cards would leave the rest for a later release.
+      // The state stays failed and is tried again after the pause.
+      if (outOfTime()) return ranOut();
+      if (isAncestorOf(facts.root, latest.squash_sha, commit, gitLeft())) {
+        carried.push(card);
+      }
+    }
+    // The last check may have been cut short by the budget, not answered.
+    if (outOfTime()) return ranOut();
     const result = await callRelease(
       {
         action: 'record',
