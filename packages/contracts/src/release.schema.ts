@@ -18,6 +18,20 @@ export const releaseVersionSchema = z
     message: 'Give the version without a leading v (0.25.0, not v0.25.0)',
   });
 
+/**
+ * How a version becomes its tag: `{version}` once, and around it only
+ * characters a git ref may hold. The resulting tag is written into every
+ * member's session line (the missing-tag hint names the command to run), so it
+ * must carry nothing a shell would read — and it cannot start like an option.
+ */
+export const releaseTagTemplateSchema = z
+  .string()
+  .max(100)
+  .regex(/^(?:[A-Za-z0-9._/][A-Za-z0-9._/-]*)?\{version\}[A-Za-z0-9._/-]*$/u, {
+    message:
+      'A tag template holds {version} once and otherwise only letters, digits, ".", "_", "/" and "-" (not first)',
+  });
+
 /** Where a project's production state lives, and what a release does. */
 export const releaseSettingsSchema = z.object({
   scope: z.string(),
@@ -96,10 +110,12 @@ export const releaseInputSchema = z.object({
     .describe(
       'For configure: the JSON field holding the version. Default "version".'
     ),
-  tag_template: z
-    .string()
+  tag_template: releaseTagTemplateSchema
     .optional()
-    .describe('For configure: version to tag. Default "v{version}".'),
+    .describe(
+      'For configure: version to tag, e.g. "v{version}" (the default) or ' +
+        '"release/{version}". Only characters a git ref may hold.'
+    ),
   tag_pattern: z
     .string()
     .optional()
