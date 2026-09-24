@@ -85,8 +85,8 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
   }));
   const feedHasMore = feed.success && feed.data.has_more;
 
-  // Newest first: the production state that carries the card right now,
-  // when one does.
+  // Newest first: the latest production state that carried the card, when
+  // one does.
   const [latestRelease] = releases;
 
   const badges: BadgeListItem[] = [

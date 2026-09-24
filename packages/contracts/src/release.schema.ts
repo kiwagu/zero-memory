@@ -111,8 +111,8 @@ export const releaseInputSchema = z.object({
   version: releaseVersionSchema
     .optional()
     .describe(
-      'For record: the version, without a leading v. For candidates it is ' +
-        'accepted but does not filter.'
+      'Required for candidates and record. For record: the version, ' +
+        'without a leading v. For candidates it does not filter.'
     ),
   build: z
     .string()

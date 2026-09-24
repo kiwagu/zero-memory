@@ -514,6 +514,28 @@ describe('runRelease', () => {
     expect(await run()).toBe('release: nothing new for this project\n');
   });
 
+  it("says so when production's version could not be read", async () => {
+    vi.mocked(fetchDeployedVersion).mockReset().mockResolvedValue(null);
+    expect(await run()).toBe(
+      "release: production's version could not be read (the version url did not answer with one)\n"
+    );
+  });
+
+  it('says so when this folder is not a git checkout', async () => {
+    const bare = mkdtempSync(join(tmpdir(), 'zm-release-run-nogit-'));
+    recordProjectScope(
+      projectScopeStatePath(),
+      resolveProjectHint(bare),
+      'proj.usr_x.demo'
+    );
+    printed = [];
+    await runRelease(bare);
+    expect(printed.join('')).toBe(
+      'release: this folder is not a git checkout\n'
+    );
+    rmSync(bare, { recursive: true, force: true });
+  });
+
   it('says so when the user ignored this folder', async () => {
     writeFileSync(join(repo, '.zero-memory-ignore'), '');
     expect(await run()).toBe(

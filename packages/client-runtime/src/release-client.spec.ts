@@ -87,8 +87,17 @@ describe('fetchDeployedVersion', () => {
         2000
       )
     ).toBeNull();
+    const port = new URL(base).port;
+    expect(
+      await fetchDeployedVersion(
+        `http://u:p@127.0.0.1:${port}/healthz`,
+        'version',
+        2000
+      )
+    ).toBeNull();
     // Refused before any request was made — the count against the local
-    // server did not move for either url.
+    // server did not move for any of the three urls, including the one
+    // that could actually have reached it.
     expect(asked).toBe(2);
   });
 

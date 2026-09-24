@@ -40,7 +40,13 @@ export const RELEASE_CHECK_BUDGET_MS = 8000;
 
 /** Why a check has nothing to say: what a manual run prints in its place. */
 type Quiet =
-  'ignored' | 'no-project' | 'no-production' | 'no-server' | 'nothing-new';
+  | 'ignored'
+  | 'no-project'
+  | 'no-production'
+  | 'no-server'
+  | 'no-version'
+  | 'not-a-checkout'
+  | 'nothing-new';
 
 type ReleaseCheck = { line: string } | { line: null; quiet: Quiet };
 
@@ -50,6 +56,9 @@ const QUIET_LINES: Record<Quiet, string> = {
   'no-project': 'release: this folder is not a briefed project',
   'no-production': 'release: this project names no production state',
   'no-server': 'release: the server could not be asked — try again later',
+  'no-version':
+    "release: production's version could not be read (the version url did not answer with one)",
+  'not-a-checkout': 'release: this folder is not a git checkout',
   'nothing-new': 'release: nothing new for this project',
 };
 
@@ -69,11 +78,11 @@ interface ReleaseCheckOptions {
  * What production took since this machine last looked, as one line for the
  * session, or null when there is nothing new to say.
  *
- * The order keeps it cheap: almost every call reads local files only (the
- * ignore marker, the project's scope and its release state) and, for a
- * project whose state is its newest release tag, lists the tags once; the
- * setting and the url are asked at most every two minutes. The project's
- * setting names where production lives (a version url, else its newest
+ * The order keeps it cheap: almost every call resolves the project through
+ * git (`rev-parse`, cached per process) and reads local files (the ignore
+ * marker, the scope, the release state); a tag-mode project also lists its
+ * tags; the setting and the url are asked at most every two minutes. The
+ * project's setting names where production lives (a version url, else its newest
  * release tag); the state resolves to a commit through its tag in this
  * checkout; a card is carried when its latest landing here is an ancestor of
  * that commit; the release is recorded through the server and told once.
@@ -159,7 +168,7 @@ const inspectRelease = async (
         settings.version_field,
         left()
       ).catch(() => null);
-      if (!seen) return quiet('nothing-new');
+      if (!seen) return quiet('no-version');
       state.seen = seen;
       save();
     }
@@ -208,7 +217,7 @@ const inspectRelease = async (
 
   // 3. The state resolves to a commit through its tag, in this checkout.
   const facts = readGitFacts(cwd);
-  if (!facts) return quiet('nothing-new');
+  if (!facts) return quiet('not-a-checkout');
   const tag = tagForVersion(settings.tag_template, current.version);
   const commit = tagCommit(facts.root, tag);
   if (!commit) {

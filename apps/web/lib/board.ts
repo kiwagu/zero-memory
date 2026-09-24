@@ -280,8 +280,8 @@ export function cardEventLabel(type: string, t: WebTranslator): string {
 
 /**
  * A board's release policy, in words. Literal keys only (lint-enforced): the
- * setting is one of two enum values, so a switch stands in for the dynamic
- * `t(\`board.release.policy.${…}\`)` the brief sketched.
+ * setting is one of two enum values, so a switch maps each value to its
+ * literal key.
  */
 export function releasePolicyLabel(
   policy: 'record' | 'record_and_move_done',

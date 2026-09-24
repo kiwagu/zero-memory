@@ -806,8 +806,8 @@ export const TOOL_ANNOTATIONS = {
   // no-op, and a repeated note with the same key writes once.
   card_log: ADDITIVE_IDEMPOTENT,
   // configure replaces the whole settings row with the same inputs each
-  // time; record writes at most one `released` event per (card, version) —
-  // a repeat is a no-op on both writes it can make.
+  // time; a repeat of record writes no new card event and only refreshes
+  // when the state was last seen.
   release: ADDITIVE_IDEMPOTENT,
   delete_account: DESTRUCTIVE,
 } as const satisfies Record<string, ToolAnnotations>;
