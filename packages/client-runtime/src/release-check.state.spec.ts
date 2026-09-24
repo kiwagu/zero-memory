@@ -33,12 +33,17 @@ describe('the release check state', () => {
     writeReleaseState(path, 'proj.a', {
       seen: { version: '1.0.0', build: null },
       current: '1.0.0',
+      settings_attempt_at: T,
     });
     writeReleaseState(path, 'proj.b', {
       seen: { version: '2.0.0', build: 'x' },
     });
     expect(readReleaseState(path, 'proj.a').seen?.version).toBe('1.0.0');
     expect(readReleaseState(path, 'proj.a').current).toBe('1.0.0');
+    expect(readReleaseState(path, 'proj.a').settings_attempt_at).toBe(T);
+    expect(
+      readReleaseState(path, 'proj.b').settings_attempt_at
+    ).toBeUndefined();
     expect(readReleaseState(path, 'proj.b').seen?.build).toBe('x');
     expect(readReleaseState(path, 'proj.c')).toEqual({});
   });

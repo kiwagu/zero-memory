@@ -18,7 +18,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveProjectHint } from '../project-hint-resolver.js';
-import { checkRelease } from './release-runner.js';
+import { checkRelease, runRelease } from './release-runner.js';
 
 vi.mock('@workspace/client-runtime', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@workspace/client-runtime')>()),
@@ -243,18 +243,28 @@ describe('checkRelease', () => {
 
     vi.mocked(callRelease).mockRejectedValueOnce(new Error('server down')); // the setting
     expect(await checkRelease(repo, { now: T0 })).toBeNull();
+    expect(await checkRelease(repo, { now: T0 + MIN })).toBeNull(); // inside the setting's pause
+    expect(callRelease).toHaveBeenCalledTimes(1);
     expect(fetchDeployedVersion).not.toHaveBeenCalled();
 
     vi.mocked(callRelease)
       .mockImplementationOnce(async () => ({ settings }))
       .mockRejectedValueOnce(new Error('timeout')); // the candidates
-    expect(await checkRelease(repo, { now: T0 + MIN })).toBeNull();
+    expect(await checkRelease(repo, { now: T0 + 2 * MIN })).toBeNull();
     expect(await checkRelease(repo, { now: T0 + 5 * MIN })).toBeNull(); // inside the retry pause
     expect(calls('candidates')).toHaveLength(1);
 
     expect(await checkRelease(repo, { now: T0 + 12 * MIN })).toContain(
       'PRODUCTION IS AT v0.25.0'
     );
+  });
+
+  it('a stalled server is asked for the setting at most every two minutes', async () => {
+    vi.mocked(callRelease).mockRejectedValue(new Error('no answer'));
+    for (const at of [0, 30 * 1000, 90 * 1000, 2 * MIN]) {
+      expect(await checkRelease(repo, { now: T0 + at })).toBeNull();
+    }
+    expect(calls('settings')).toHaveLength(2);
   });
 
   it('takes the newest release tag as the state when the project has no url', async () => {
@@ -356,5 +366,159 @@ describe('checkRelease', () => {
     const line = await checkRelease(repo, { now: T0 });
     expect(line).not.toContain('ZM-23');
     expect(calls('record')[0]?.[0]).toMatchObject({ card_ids: [] });
+  });
+
+  it('a forced check names a missing tag each time and records inside the pause once the tag exists', async () => {
+    const landed = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/23 (abcdef1) ZM-23'
+    );
+    candidates = [candidate(23, landed)];
+    vi.mocked(fetchDeployedVersion).mockResolvedValue({
+      version: '0.25.0',
+      build: null,
+    });
+
+    expect(await checkRelease(repo, { now: T0 })).toContain(
+      'tag v0.25.0 is not in this repository'
+    );
+    expect(await checkRelease(repo, { now: T0 + MIN, force: true })).toContain(
+      'tag v0.25.0 is not in this repository'
+    );
+    git(repo, 'tag', 'v0.25.0', landed);
+    expect(await checkRelease(repo, { now: T0 + 2 * MIN })).toBeNull(); // the hook waits out the pause
+    expect(
+      await checkRelease(repo, { now: T0 + 3 * MIN, force: true })
+    ).toContain('ZM-23');
+    expect(calls('record')).toHaveLength(1);
+  });
+
+  it('leaves a folder the user ignored alone', async () => {
+    writeFileSync(join(repo, '.zero-memory-ignore'), '');
+    git(repo, 'tag', 'v0.25.0', commit(repo, 'b', 'chore(release): 0.25.0'));
+    vi.mocked(fetchDeployedVersion).mockResolvedValue({
+      version: '0.25.0',
+      build: null,
+    });
+    expect(await checkRelease(repo, { now: T0 })).toBeNull();
+    expect(await checkRelease(repo, { now: T0, force: true })).toBeNull();
+    expect(callRelease).not.toHaveBeenCalled();
+    expect(fetchDeployedVersion).not.toHaveBeenCalled();
+  });
+});
+
+describe('runRelease', () => {
+  let state: string;
+  let repo: string;
+  let previous: string | undefined;
+  let printed: string[];
+
+  const settings: ReleaseSettings = {
+    scope: 'proj.usr_x.demo',
+    version_url: 'https://api.example.com/healthz',
+    version_field: 'version',
+    tag_template: 'v{version}',
+    tag_pattern: 'v*',
+    on_release: 'record',
+    updated_at: '2026-09-24T00:00:00Z',
+  };
+  const answer = (value: ReleaseSettings | null) =>
+    vi.mocked(callRelease).mockImplementation(async (input) => {
+      if (input.action === 'settings') return { settings: value };
+      if (input.action === 'candidates') return { cards: [] };
+      return {
+        release: {
+          version: input.version ?? '',
+          build: input.build ?? null,
+          release_commit: input.release_commit ?? '',
+          source: input.source ?? 'url',
+          observed_at: '2026-09-24T08:00:00Z',
+          first_observed: true,
+        },
+        recorded: [],
+        moved: [],
+      };
+    });
+  const run = async (): Promise<string> => {
+    printed = [];
+    await runRelease(repo);
+    return printed.join('');
+  };
+
+  beforeEach(() => {
+    previous = process.env.XDG_STATE_HOME;
+    state = mkdtempSync(join(tmpdir(), 'zm-release-run-state-'));
+    process.env.XDG_STATE_HOME = state;
+    repo = mkdtempSync(join(tmpdir(), 'zm-release-run-repo-'));
+    git(repo, 'init', '-q', '-b', 'main');
+    git(
+      repo,
+      'remote',
+      'add',
+      'origin',
+      'git@github.com:acme/memory-service.git'
+    );
+    git(repo, 'tag', 'v0.25.0', commit(repo, 'a', 'chore(release): 0.25.0'));
+    recordProjectScope(
+      projectScopeStatePath(),
+      resolveProjectHint(repo),
+      'proj.usr_x.demo'
+    );
+    vi.mocked(callRelease).mockReset();
+    answer(settings);
+    vi.mocked(fetchDeployedVersion).mockReset().mockResolvedValue({
+      version: '0.25.0',
+      build: null,
+    });
+    vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+      printed.push(String(chunk));
+      return true;
+    });
+  });
+  afterEach(() => {
+    vi.mocked(process.stdout.write).mockRestore();
+    process.env.XDG_STATE_HOME = previous;
+    rmSync(state, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('prints what it found', async () => {
+    expect(await run()).toBe(
+      'PRODUCTION IS AT v0.25.0: no card on the board carries a landing in it.\n'
+    );
+  });
+
+  it('says so when this folder is not a briefed project', async () => {
+    rmSync(projectScopeStatePath(), { force: true });
+    expect(await run()).toBe('release: this folder is not a briefed project\n');
+  });
+
+  it('says so when the project names no production state', async () => {
+    answer(null);
+    expect(await run()).toBe(
+      'release: this project names no production state\n'
+    );
+  });
+
+  it('says so when the server could not be asked', async () => {
+    vi.mocked(callRelease).mockRejectedValue(new Error('server down'));
+    expect(await run()).toBe(
+      'release: the server could not be asked — try again later\n'
+    );
+  });
+
+  it('says there is nothing new once the state is recorded', async () => {
+    await run();
+    expect(await run()).toBe('release: nothing new for this project\n');
+  });
+
+  it('says so when the user ignored this folder', async () => {
+    writeFileSync(join(repo, '.zero-memory-ignore'), '');
+    expect(await run()).toBe(
+      'release: this folder is ignored (.zero-memory-ignore); nothing was checked\n'
+    );
+    expect(callRelease).not.toHaveBeenCalled();
   });
 });

@@ -17,6 +17,12 @@ export type ReleaseCheckOutcome = 'recorded' | 'rollback' | 'no-tag' | 'error';
 
 export interface ReleaseProjectState {
   settings?: { value: ReleaseSettings | null; fetched_at: number };
+  /**
+   * When the setting was last asked for, saved before asking: a server that
+   * accepts the connection and never answers then costs one pause, not a
+   * wait on every command.
+   */
+  settings_attempt_at?: number;
   last_fetch_at?: number;
   seen?: DeployedVersion;
   /** The version this machine last reported as production. */

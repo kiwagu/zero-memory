@@ -11,6 +11,7 @@ import {
 import {
   callRelease,
   fetchDeployedVersion,
+  projectIgnored,
   projectScopeStatePath,
   readProjectScope,
   readReleaseState,
@@ -37,27 +38,61 @@ export const RELEASE_LOOKUP_TIMEOUT_MS = 5000;
  */
 export const RELEASE_CHECK_BUDGET_MS = 8000;
 
+/** Why a check has nothing to say: what a manual run prints in its place. */
+type Quiet =
+  'ignored' | 'no-project' | 'no-production' | 'no-server' | 'nothing-new';
+
+type ReleaseCheck = { line: string } | { line: null; quiet: Quiet };
+
+const QUIET_LINES: Record<Quiet, string> = {
+  ignored:
+    'release: this folder is ignored (.zero-memory-ignore); nothing was checked',
+  'no-project': 'release: this folder is not a briefed project',
+  'no-production': 'release: this project names no production state',
+  'no-server': 'release: the server could not be asked — try again later',
+  'nothing-new': 'release: nothing new for this project',
+};
+
+interface ReleaseCheckOptions {
+  now?: number;
+  lookupTimeoutMs?: number;
+  budgetMs?: number;
+  /**
+   * A manual run: the setting and the url are asked now, a version that has
+   * not been recorded yet is tried again inside its pause, and a missing tag
+   * is named every time.
+   */
+  force?: boolean;
+}
+
 /**
  * What production took since this machine last looked, as one line for the
  * session, or null when there is nothing new to say.
  *
- * The order keeps it cheap: almost every call reads two state files and asks
- * neither git nor the network. The project's setting names where production
- * lives (a version url, else its newest release tag); the state resolves to a
- * commit through its tag in this checkout; a card is carried when its latest
- * landing here is an ancestor of that commit; the release is recorded through
- * the server and told once. Never throws for a server or url that cannot
- * answer: it stays quiet and tries again later.
+ * The order keeps it cheap: almost every call reads local files only (the
+ * ignore marker, the project's scope and its release state) and, for a
+ * project whose state is its newest release tag, lists the tags once; the
+ * setting and the url are asked at most every two minutes. The project's
+ * setting names where production lives (a version url, else its newest
+ * release tag); the state resolves to a commit through its tag in this
+ * checkout; a card is carried when its latest landing here is an ancestor of
+ * that commit; the release is recorded through the server and told once.
+ * Never throws for a server or url that cannot answer: it stays quiet and
+ * tries again later. A folder the user ignored is left alone.
  */
 export const checkRelease = async (
   cwd: string,
-  options: {
-    now?: number;
-    lookupTimeoutMs?: number;
-    budgetMs?: number;
-    force?: boolean;
-  } = {}
-): Promise<string | null> => {
+  options: ReleaseCheckOptions = {}
+): Promise<string | null> => (await inspectRelease(cwd, options)).line;
+
+/** The check itself, with the reason it has nothing to say. */
+const inspectRelease = async (
+  cwd: string,
+  options: ReleaseCheckOptions
+): Promise<ReleaseCheck> => {
+  const quiet = (why: Quiet): ReleaseCheck => ({ line: null, quiet: why });
+  // The check writes to the server: a project the user ignored sends nothing.
+  if (projectIgnored(cwd)) return quiet('ignored');
   const now = options.now ?? Date.now();
   const deadline = Date.now() + (options.budgetMs ?? RELEASE_CHECK_BUDGET_MS);
   const left = (): number =>
@@ -73,29 +108,37 @@ export const checkRelease = async (
     projectScopeStatePath(),
     resolveProjectHint(cwd)
   );
-  if (!scope) return null;
+  if (!scope) return quiet('no-project');
   const path = releaseCheckStatePath();
   const state = readReleaseState(path, scope);
   const save = (): void => writeReleaseState(path, scope, state);
 
-  // 1. The setting: cached, refreshed every ten minutes.
+  // 1. The setting: cached, refreshed every ten minutes. The attempt is saved
+  //    before asking, so a server that stalls is asked again only after the
+  //    two-minute pause; meanwhile a stale value serves as it is.
   let settings = state.settings?.value ?? null;
-  if (
-    options.force ||
+  const stale =
     !state.settings ||
-    now - state.settings.fetched_at >= RELEASE_SETTINGS_TTL_MS
-  ) {
+    now - state.settings.fetched_at >= RELEASE_SETTINGS_TTL_MS;
+  const pausing =
+    state.settings_attempt_at !== undefined &&
+    now - state.settings_attempt_at < RELEASE_FETCH_EVERY_MS;
+  if (options.force || (stale && !pausing)) {
+    state.settings_attempt_at = now;
+    save();
     try {
       settings =
         (await callRelease({ action: 'settings', scope }, left())).settings ??
         null;
     } catch {
-      return null; // server down: nothing to say; the next command asks again
+      return quiet('no-server'); // asked again after the pause
     }
     state.settings = { value: settings, fetched_at: now };
     save();
+  } else if (!state.settings) {
+    return quiet('no-server'); // the last attempt failed and is still pausing
   }
-  if (!settings) return null; // the project names no production: no trigger
+  if (!settings) return quiet('no-production'); // no production: no trigger
 
   // 2. The current state: the url at most every two minutes, else the last one
   //    seen; without a url, the newest release tag.
@@ -116,7 +159,7 @@ export const checkRelease = async (
         settings.version_field,
         left()
       ).catch(() => null);
-      if (!seen) return null;
+      if (!seen) return quiet('nothing-new');
       state.seen = seen;
       save();
     }
@@ -126,7 +169,7 @@ export const checkRelease = async (
     const version = tag ? versionFromTag(settings.tag_template, tag) : null;
     seen = version ? { version, build: null } : null;
   }
-  if (!seen) return null;
+  if (!seen) return quiet('nothing-new');
   // A state this machine handled before, but not the one it last reported, is
   // a return to it — a rollback, or forward again after one: handle it afresh.
   if (state.current !== undefined && state.current !== seen.version) {
@@ -139,9 +182,15 @@ export const checkRelease = async (
       );
     }
   }
-  if (!releaseHandledDue(state, seen.version, now)) return null;
+  const previous = state.handled?.[seen.version]?.outcome;
+  // A manual run tries a version that did not finish again inside its pause;
+  // one already recorded, or reported as a rollback, stays done.
+  const due =
+    options.force && (previous === 'no-tag' || previous === 'error')
+      ? true
+      : releaseHandledDue(state, seen.version, now);
+  if (!due) return quiet('nothing-new');
   const current = seen;
-  const previous = state.handled?.[current.version]?.outcome;
   const mark = (
     outcome: 'recorded' | 'no-tag' | 'rollback' | 'error'
   ): void => {
@@ -159,15 +208,16 @@ export const checkRelease = async (
 
   // 3. The state resolves to a commit through its tag, in this checkout.
   const facts = readGitFacts(cwd);
-  if (!facts) return null;
+  if (!facts) return quiet('nothing-new');
   const tag = tagForVersion(settings.tag_template, current.version);
   const commit = tagCommit(facts.root, tag);
   if (!commit) {
     mark('no-tag');
-    // Said once per version; a retry that still finds no tag stays quiet.
-    return previous === 'no-tag'
-      ? null
-      : renderMissingTag(current.version, tag);
+    // Said once per version; a retry that still finds no tag stays quiet,
+    // unless someone asked by hand.
+    return previous === 'no-tag' && !options.force
+      ? quiet('nothing-new')
+      : { line: renderMissingTag(current.version, tag) };
   }
 
   // 4. A version below the newest one recorded here is a rollback: the state is
@@ -194,7 +244,7 @@ export const checkRelease = async (
         left()
       );
       mark('rollback');
-      return renderRollback(current.version, newest);
+      return { line: renderRollback(current.version, newest) };
     }
     const { cards = [] } = await callRelease(
       { action: 'candidates', scope, version: current.version },
@@ -231,27 +281,33 @@ export const checkRelease = async (
     const fresh = carried.filter((card) => recorded.has(card.id));
     if (fresh.length === 0 && result.release?.first_observed === false) {
       // Another session saw this state first and marked its cards.
-      return renderReleaseKnown(current.version, current.build);
+      return { line: renderReleaseKnown(current.version, current.build) };
     }
-    return renderReleaseNotice({
-      version: current.version,
-      build: current.build,
-      policy: settings.on_release,
-      carried: fresh.map((c) => ({ number: c.number, state: c.state })),
-      moved: fresh.filter((c) => moved.has(c.id)).map((c) => c.number),
-    });
+    return {
+      line: renderReleaseNotice({
+        version: current.version,
+        build: current.build,
+        policy: settings.on_release,
+        carried: fresh.map((c) => ({ number: c.number, state: c.state })),
+        moved: fresh.filter((c) => moved.has(c.id)).map((c) => c.number),
+      }),
+    };
   } catch (error) {
     logger.info('release check failed; retrying later', {
       error: String(error),
     });
-    return null;
+    return quiet('no-server');
   }
 };
 
-/** `zero-memory-watcher release`: check this project now and print what was found. */
+/**
+ * `zero-memory-watcher release`: check this project now and print what was
+ * found, or why there is nothing to say — the tool for recording a release
+ * right after its missing tag was fetched or made.
+ */
 export const runRelease = async (
   cwd: string = process.cwd()
 ): Promise<void> => {
-  const line = await checkRelease(cwd, { force: true });
-  process.stdout.write(`${line ?? 'release: nothing new for this project'}\n`);
+  const found = await inspectRelease(cwd, { force: true });
+  process.stdout.write(`${found.line ?? QUIET_LINES[found.quiet]}\n`);
 };
