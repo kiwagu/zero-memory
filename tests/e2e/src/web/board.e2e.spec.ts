@@ -458,6 +458,13 @@ test.describe('Project board in the dashboard', () => {
 
     await signInThroughForm(page, seed.userA);
     await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    // What the board is and where production lives are read once, not on
+    // every visit: they sit in the hint beside the title, off the page itself.
+    await expect(page.getByTestId('board-hint-content')).toHaveCount(0);
+    await page.getByTestId('board-hint').hover();
+    await expect(page.getByTestId('board-hint-content')).toContainText(
+      'The board is a window'
+    );
     await expect(page.getByTestId('board-release-settings')).toContainText(
       'https://api.example.com/healthz'
     );
@@ -468,6 +475,10 @@ test.describe('Project board in the dashboard', () => {
     await expect(tile).toContainText('shipped in v1.4.0');
 
     await page.goto(`/board?scope=all`);
+    await page.getByTestId('board-hint').hover();
+    await expect(page.getByTestId('board-hint-content')).toContainText(
+      'The board is a window'
+    );
     await expect(page.getByTestId('board-release-settings')).toHaveCount(0);
 
     await page.goto(`/board/${cardId}`);
