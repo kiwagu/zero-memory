@@ -198,9 +198,11 @@ A project names its production state once, with the `release` tool's
 for localhost only, never with credentials, since every member of the
 project reads it — and the JSON field that holds the version (`version_field`,
 default `version`). A project that never deploys names no url; its state is
-then its newest release tag instead, matched by `tag_pattern` (default `v*`).
-`tag_template` (default `v{version}`) maps a version to the tag that names
-it. `on_release` chooses what a release does to the cards it carries:
+then its highest release instead: among the tags matching `tag_pattern`
+(default `v*`), the highest version `tag_template` (default `v{version}`)
+reads from them, a final release above its pre-releases — a matching tag it
+reads no version from is not a release. `tag_template` also maps a version
+to the tag that names it. `on_release` chooses what a release does to the cards it carries:
 `record` (the default) only records it, `record_and_move_done` also moves
 the carried cards in `waiting` to `done`. `configure` changes only the
 fields it is given, and `version_url: null` clears a url that was set.

@@ -46,9 +46,29 @@ describe('release facts from git', () => {
     git(repo, 'tag', 'v0.9.0', a);
     git(repo, 'tag', 'v0.10.0', a);
     git(repo, 'tag', 'nightly', a);
-    expect(latestTag(repo, 'v*')).toBe('v0.10.0');
-    expect(latestTag(repo, 'release-*')).toBeNull();
-    expect(latestTag(repo, '--contains')).toBeNull();
+    expect(latestTag(repo, 'v*', 'v{version}')).toEqual({
+      tag: 'v0.10.0',
+      version: '0.10.0',
+    });
+    expect(latestTag(repo, 'release-*', 'v{version}')).toBeNull();
+    expect(latestTag(repo, '--contains', 'v{version}')).toBeNull();
+  });
+
+  it('puts a final release above its pre-releases, and skips a tag that is no version', () => {
+    const a = commit(repo, 'a');
+    git(repo, 'tag', 'v1.2.0-rc.1', a);
+    git(repo, 'tag', 'v1.2.0', a);
+    git(repo, 'tag', 'v1.1.9', a);
+    git(repo, 'tag', 'vnext', a);
+    expect(latestTag(repo, 'v*', 'v{version}')).toEqual({
+      tag: 'v1.2.0',
+      version: '1.2.0',
+    });
+    git(repo, 'tag', 'v1.3.0-rc.1', a);
+    expect(latestTag(repo, 'v*', 'v{version}')).toEqual({
+      tag: 'v1.3.0-rc.1',
+      version: '1.3.0-rc.1',
+    });
   });
 
   it('tells a landing the release carries from one it does not', () => {

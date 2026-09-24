@@ -327,6 +327,7 @@ describe('checkRelease', () => {
       'Squashed-from: feature/23 (abcdef1) ZM-23'
     );
     git(repo, 'tag', 'v0.9.0', landed);
+    git(repo, 'tag', 'v0.10.0-rc.1', landed);
     const release = commit(repo, 'c', 'chore(release): 0.10.0');
     git(repo, 'tag', 'v0.10.0', release);
     git(repo, 'tag', 'nightly', release);

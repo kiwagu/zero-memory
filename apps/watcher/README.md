@@ -165,7 +165,7 @@ repository, the work section says so and names the call. See
 The release check runs the same way: inside the `landing` hook, after every
 shell command, and inside the session-start briefing — it checks whether the
 project's production state changed (a version url or, without one, the
-newest release tag) and records it on the board cards it carries.
+highest release among its tags) and records it on the board cards it carries.
 `zero-memory-watcher release` is the manual run of that same check: it checks
 now and prints what it found, the tool for recording a release right after a
 missing tag is fetched or made, or again for a card whose landing was recorded

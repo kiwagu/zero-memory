@@ -6,7 +6,6 @@ import {
   renderReleaseNotice,
   renderRollback,
   tagForVersion,
-  versionFromTag,
 } from '@workspace/client-core';
 import {
   callRelease,
@@ -85,8 +84,8 @@ interface ReleaseCheckOptions {
  * git (`rev-parse`, cached per process) and reads local files (the ignore
  * marker, the scope, the release state); a tag-mode project also lists its
  * tags; the setting and the url are asked at most every two minutes. The
- * project's setting names where production lives (a version url, else its newest
- * release tag); the state resolves to a commit through its tag in this
+ * project's setting names where production lives (a version url, else the
+ * highest release among its tags); the state resolves to a commit through its tag in this
  * checkout; a card is carried when its latest landing here is an ancestor of
  * that commit; the release is recorded through the server and told once in
  * each checkout.
@@ -160,7 +159,7 @@ const inspectRelease = async (
 
   // 2. The current state: the url at most every two minutes while it answers,
   //    ten after it failed to, else the last version it answered; without a
-  //    url, the newest release tag.
+  //    url, the highest release among its tags.
   let seen: DeployedVersion | null;
   let source: 'url' | 'tag';
   if (settings.version_url) {
@@ -200,9 +199,8 @@ const inspectRelease = async (
     // checkout it silently finds nothing, which reads as "no tag yet" rather
     // than the actual reason — say so before it does.
     if (!readGitFacts(cwd)) return quiet('not-a-checkout');
-    const tag = latestTag(cwd, settings.tag_pattern);
-    const version = tag ? versionFromTag(settings.tag_template, tag) : null;
-    seen = version ? { version, build: null } : null;
+    const latest = latestTag(cwd, settings.tag_pattern, settings.tag_template);
+    seen = latest ? { version: latest.version, build: null } : null;
   }
   if (!seen) return quiet('nothing-new');
   // A state this checkout handled before, but not the one it last reported, is
