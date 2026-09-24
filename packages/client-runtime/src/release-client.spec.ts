@@ -23,19 +23,21 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.on('end', () => resolve(body));
   });
 
-let server: Server | null = null;
+const servers: Server[] = [];
 const serve = async (handler: RequestListener): Promise<string> => {
-  server = createServer(handler);
-  await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
-  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const created = createServer(handler);
+  servers.push(created);
+  await new Promise<void>((resolve) => created.listen(0, '127.0.0.1', resolve));
+  return `http://127.0.0.1:${(created.address() as AddressInfo).port}`;
 };
 afterEach(async () => {
-  const running = server;
-  server = null;
-  if (running) {
-    running.closeAllConnections();
-    await new Promise((resolve) => running.close(resolve));
-  }
+  const running = servers.splice(0, servers.length);
+  await Promise.all(
+    running.map((one) => {
+      one.closeAllConnections();
+      return new Promise((resolve) => one.close(resolve));
+    })
+  );
 });
 
 describe('fetchDeployedVersion', () => {
@@ -85,6 +87,26 @@ describe('fetchDeployedVersion', () => {
         2000
       )
     ).toBeNull();
+    // Refused before any request was made — the count against the local
+    // server did not move for either url.
+    expect(asked).toBe(2);
+  });
+
+  it('does not follow a redirect, even to an address the url rule would allow directly', async () => {
+    let targetAsked = 0;
+    const target = await serve((_req, res) => {
+      targetAsked += 1;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ version: '9.9.9' }));
+    });
+    const base = await serve((_req, res) => {
+      res.writeHead(302, { location: `${target}/internal` });
+      res.end();
+    });
+    expect(
+      await fetchDeployedVersion(`${base}/healthz`, 'version', 2000)
+    ).toBeNull();
+    expect(targetAsked).toBe(0);
   });
 
   it('gives up at its deadline when the url never answers', async () => {

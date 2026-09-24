@@ -34,6 +34,13 @@ describe('parseDeployedVersion', () => {
     expect(parseDeployedVersion({ version: 'v 1' }, 'version')).toBeNull();
     expect(parseDeployedVersion({ version: '' }, 'version')).toBeNull();
   });
+
+  it.each(['unknown', 'dev', 'version', 'vv1.0.0'])(
+    'refuses a version that does not start with a digit: %s',
+    (raw) => {
+      expect(parseDeployedVersion({ version: raw }, 'version')).toBeNull();
+    }
+  );
 });
 
 describe('isReleaseUrl', () => {
@@ -56,11 +63,26 @@ describe('tags and versions', () => {
     expect(versionFromTag('v{version}', 'nightly')).toBeNull();
   });
 
+  it('refuses a build suffix and a leading v the placeholder itself carries', () => {
+    expect(versionFromTag('v{version}', 'v1.0.0+abc')).toBeNull();
+    expect(versionFromTag('{version}', 'v1.0.0')).toBeNull();
+    expect(
+      versionFromTag('release-{version}-final', 'release-1.0.0-final')
+    ).toBe('1.0.0');
+  });
+
   it('orders versions numerically, not as text', () => {
     expect(compareVersions('0.25.0', '0.24.3')).toBeGreaterThan(0);
     expect(compareVersions('0.9.0', '0.10.0')).toBeLessThan(0);
     expect(compareVersions('1.2.0', '1.2.0')).toBe(0);
     expect(compareVersions('1.2.0-rc.1', '1.2.0')).toBeLessThan(0);
+  });
+
+  it('orders pre-release identifiers numerically, not as text', () => {
+    expect(compareVersions('1.2.0-rc.2', '1.2.0-rc.10')).toBeLessThan(0);
+    expect(compareVersions('1.2.0-rc.10', '1.2.0')).toBeLessThan(0);
+    expect(compareVersions('1.2.0-alpha', '1.2.0-alpha.1')).toBeLessThan(0);
+    expect(compareVersions('1.2.0-rc-1', '1.2.0-rc-2')).toBeLessThan(0);
   });
 });
 

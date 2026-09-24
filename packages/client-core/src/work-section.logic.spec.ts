@@ -120,7 +120,7 @@ describe('renderBoardSummary', () => {
       },
     })!;
     expect(block).toContain(
-      '- Production: v0.25.0 (build 849d7cac) since 2026-09-24T08:00:00Z'
+      '- Production: v0.25.0 (build 849d7cac) as of 2026-09-24T08:00:00Z'
     );
     expect(block).toContain('ZM-21 "Memory floor" [active] released v0.25.0');
   });

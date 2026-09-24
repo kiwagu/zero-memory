@@ -28,9 +28,13 @@ export const fetchDeployedVersion = async (
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    // Manual, never followed: a project admin's url is read by every
+    // member's watcher, so a redirect could make each member's machine GET
+    // an address on its own network and publish whatever it answers.
     const res = await fetch(url, {
       signal: controller.signal,
       headers: { accept: 'application/json' },
+      redirect: 'manual',
     });
     if (!res.ok) return null;
     return parseDeployedVersion(await res.json(), field);

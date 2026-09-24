@@ -50,7 +50,7 @@ export const renderBoardSummary = (
   if (work.production) {
     const { version, build, observed_at } = work.production;
     lines.push(
-      `- Production: v${version}${build ? ` (build ${build})` : ''} since ${observed_at}`
+      `- Production: v${version}${build ? ` (build ${build})` : ''} as of ${observed_at}`
     );
   }
   const bound = work.bound_card;

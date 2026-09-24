@@ -6,8 +6,14 @@ export interface DeployedVersion {
   build: string | null;
 }
 
-const VERSION =
-  /^v?([0-9A-Za-z][0-9A-Za-z._-]{0,63})(?:\+([0-9A-Za-z._-]{1,64}))?$/u;
+const VERSION = /^v?([0-9][0-9A-Za-z._-]{0,63})(?:\+([0-9A-Za-z._-]{1,64}))?$/u;
+
+/**
+ * A tag's `{version}` slice, standing alone: digit-first, no build suffix,
+ * and no leading `v` of its own — any `v` a tag needs belongs in the
+ * template's literal prefix, not inside the placeholder.
+ */
+const STRICT_VERSION = /^[0-9][0-9A-Za-z._-]{0,63}$/u;
 
 const fieldOf = (body: unknown, field: string): unknown =>
   field
@@ -65,13 +71,55 @@ export const versionFromTag = (
   const [prefix = '', suffix = ''] = template.split('{version}');
   if (!tag.startsWith(prefix) || !tag.endsWith(suffix)) return null;
   const version = tag.slice(prefix.length, tag.length - suffix.length);
-  return VERSION.test(version) ? version : null;
+  return STRICT_VERSION.test(version) ? version : null;
+};
+
+/** The point after which a version's identifiers stop being release order. */
+const splitPreRelease = (version: string): [string, string | undefined] => {
+  const at = version.indexOf('-');
+  return at === -1
+    ? [version, undefined]
+    : [version.slice(0, at), version.slice(at + 1)];
+};
+
+/** An identifier compares numerically when both sides are all digits. */
+const compareIdentifier = (a: string, b: string): number => {
+  const numeric = /^[0-9]+$/u;
+  return numeric.test(a) && numeric.test(b)
+    ? Number(a) - Number(b)
+    : a.localeCompare(b);
+};
+
+/**
+ * Semver precedence for the pre-release part: dot-separated identifiers
+ * compared left to right (numeric identifiers numerically, everything else
+ * as text); a shorter list that is a prefix of a longer one sorts first; no
+ * pre-release outranks any pre-release.
+ */
+const comparePreRelease = (
+  a: string | undefined,
+  b: string | undefined
+): number => {
+  if (a === undefined && b === undefined) return 0;
+  if (a === undefined) return 1;
+  if (b === undefined) return -1;
+  const partsA = a.split('.');
+  const partsB = b.split('.');
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i += 1) {
+    const identifierA = partsA[i];
+    const identifierB = partsB[i];
+    if (identifierA === undefined) return -1;
+    if (identifierB === undefined) return 1;
+    const identifier = compareIdentifier(identifierA, identifierB);
+    if (identifier !== 0) return identifier;
+  }
+  return 0;
 };
 
 /** Numeric by dotted part; a pre-release sorts before its release. */
 export const compareVersions = (a: string, b: string): number => {
-  const [coreA = '', preA] = a.split('-', 2);
-  const [coreB = '', preB] = b.split('-', 2);
+  const [coreA, preA] = splitPreRelease(a);
+  const [coreB, preB] = splitPreRelease(b);
   const partsA = coreA.split('.');
   const partsB = coreB.split('.');
   for (let i = 0; i < Math.max(partsA.length, partsB.length); i += 1) {
@@ -84,9 +132,7 @@ export const compareVersions = (a: string, b: string): number => {
       return x - y;
     }
   }
-  if (preA === undefined && preB !== undefined) return 1;
-  if (preA !== undefined && preB === undefined) return -1;
-  return (preA ?? '').localeCompare(preB ?? '');
+  return comparePreRelease(preA, preB);
 };
 
 export interface CarriedCard {
