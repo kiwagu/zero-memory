@@ -207,8 +207,9 @@ fields it is given, and `version_url: null` clears a url that was set.
 
 Each member's client watcher checks for a change after every shell command —
 in the same pass as the landing check — and again at the start of a session.
-The url is asked at most once every two minutes per project, the setting at
-most once every ten; nothing runs as a daemon; a project that names no
+The url is asked at most once every two minutes per project — ten after it
+failed to answer, and a version it answered before is not acted on meanwhile —
+the setting at most once every ten; nothing runs as a daemon; a project that names no
 production state costs only that ten-minute look at its setting; a folder
 the user ignored is left alone.
 

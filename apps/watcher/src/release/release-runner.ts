@@ -16,6 +16,7 @@ import {
   readProjectScope,
   readReleaseState,
   RELEASE_FETCH_EVERY_MS,
+  RELEASE_RETRY_MS,
   RELEASE_SETTINGS_TTL_MS,
   releaseCheckStatePath,
   releaseHandledDue,
@@ -149,29 +150,42 @@ const inspectRelease = async (
   }
   if (!settings) return quiet('no-production'); // no production: no trigger
 
-  // 2. The current state: the url at most every two minutes, else the last one
-  //    seen; without a url, the newest release tag.
+  // 2. The current state: the url at most every two minutes while it answers,
+  //    ten after it failed to, else the last version it answered; without a
+  //    url, the newest release tag.
   let seen: DeployedVersion | null;
   let source: 'url' | 'tag';
   if (settings.version_url) {
     source = 'url';
-    seen = state.seen ?? null;
+    const pause =
+      state.url_failed_at === undefined
+        ? RELEASE_FETCH_EVERY_MS
+        : RELEASE_RETRY_MS;
     if (
       options.force ||
-      !state.last_fetch_at ||
-      now - state.last_fetch_at >= RELEASE_FETCH_EVERY_MS
+      state.last_fetch_at === undefined ||
+      now - state.last_fetch_at >= pause
     ) {
       state.last_fetch_at = now;
-      save(); // throttled even when the url fails
-      seen = await fetchDeployedVersion(
+      save(); // throttled even when the url stalls
+      const read = await fetchDeployedVersion(
         settings.version_url,
         settings.version_field,
         left()
       ).catch(() => null);
-      if (!seen) return quiet('no-version');
-      state.seen = seen;
+      // A url that did not answer says nothing about production: what it
+      // said before is dropped, so no record rides on a stale reading.
+      if (read) {
+        state.seen = read;
+        delete state.url_failed_at;
+      } else {
+        delete state.seen;
+        state.url_failed_at = now;
+      }
       save();
     }
+    seen = state.seen ?? null;
+    if (!seen) return quiet('no-version');
   } else {
     source = 'tag';
     // Without a url, the tag search runs straight on `cwd`: outside a git

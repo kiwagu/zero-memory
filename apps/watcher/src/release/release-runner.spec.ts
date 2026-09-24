@@ -173,7 +173,10 @@ describe('checkRelease', () => {
   });
 
   it('asks the url at most every two minutes, and nothing at all when no production is named', async () => {
-    vi.mocked(fetchDeployedVersion).mockResolvedValue(null);
+    vi.mocked(fetchDeployedVersion).mockResolvedValue({
+      version: '0.25.0',
+      build: null,
+    });
     await checkRelease(repo, { now: T0 });
     await checkRelease(repo, { now: T0 + MIN });
     expect(fetchDeployedVersion).toHaveBeenCalledTimes(1);
@@ -185,6 +188,51 @@ describe('checkRelease', () => {
     await checkRelease(repo, { now: T0 + 30 * MIN });
     expect(fetchDeployedVersion).toHaveBeenCalledTimes(2);
     expect(calls('candidates')).toHaveLength(0);
+  });
+
+  it('drives nothing from a url that failed to answer, and asks it again only after ten minutes', async () => {
+    const landed = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/23 (abcdef1) ZM-23'
+    );
+    git(repo, 'tag', 'v0.25.0', landed);
+    candidates = [candidate(23, landed)];
+    vi.mocked(fetchDeployedVersion).mockResolvedValueOnce({
+      version: '0.25.0',
+      build: null,
+    });
+    vi.mocked(callRelease)
+      .mockImplementationOnce(async () => ({ settings }))
+      .mockRejectedValueOnce(new Error('timeout')); // the candidates
+    expect(await checkRelease(repo, { now: T0 })).toBeNull();
+    expect(calls('candidates')).toHaveLength(1);
+
+    // The url fails once the version's retry pause is over: the version it
+    // answered before must not drive a record on the next command.
+    vi.mocked(fetchDeployedVersion).mockResolvedValue(null);
+    expect(await checkRelease(repo, { now: T0 + 10 * MIN })).toBeNull();
+    expect(fetchDeployedVersion).toHaveBeenCalledTimes(2);
+    expect(await checkRelease(repo, { now: T0 + 11 * MIN })).toBeNull();
+    expect(calls('candidates')).toHaveLength(1);
+    expect(calls('record')).toHaveLength(0);
+
+    // A url that failed is asked again after ten minutes, not two.
+    expect(await checkRelease(repo, { now: T0 + 12 * MIN })).toBeNull();
+    expect(await checkRelease(repo, { now: T0 + 19 * MIN })).toBeNull();
+    expect(fetchDeployedVersion).toHaveBeenCalledTimes(2);
+    expect(await checkRelease(repo, { now: T0 + 20 * MIN })).toBeNull();
+    expect(fetchDeployedVersion).toHaveBeenCalledTimes(3);
+
+    // Once it answers again, the check goes on and the two-minute pace returns.
+    vi.mocked(fetchDeployedVersion).mockResolvedValue({
+      version: '0.25.0',
+      build: null,
+    });
+    expect(await checkRelease(repo, { now: T0 + 30 * MIN })).toContain('ZM-23');
+    expect(await checkRelease(repo, { now: T0 + 32 * MIN })).toBeNull();
+    expect(fetchDeployedVersion).toHaveBeenCalledTimes(5);
   });
 
   it('names a missing tag once per version, stays quiet on the retry, and records once the tag appears', async () => {

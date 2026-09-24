@@ -24,17 +24,26 @@ export interface ReleaseProjectState {
    */
   settings_attempt_at?: number;
   last_fetch_at?: number;
+  /**
+   * When the url last failed to answer with a version. It is asked again only
+   * after `RELEASE_RETRY_MS`, and `seen` is dropped meanwhile: a version the
+   * url answered before the failure never drives a record.
+   */
+  url_failed_at?: number;
   seen?: DeployedVersion;
   /** The version this machine last reported as production. */
   current?: string;
   handled?: Record<string, { outcome: ReleaseCheckOutcome; at: number }>;
 }
 
-/** The version url is asked at most this often per project. */
+/** The version url is asked at most this often per project while it answers. */
 export const RELEASE_FETCH_EVERY_MS = 2 * 60 * 1000;
 /** A project's setting is read again after this long. */
 export const RELEASE_SETTINGS_TTL_MS = 10 * 60 * 1000;
-/** A version that failed, or whose tag was missing, is tried again after this long. */
+/**
+ * A version that failed, or whose tag was missing, is tried again after this
+ * long; so is a version url that failed to answer.
+ */
 export const RELEASE_RETRY_MS = 10 * 60 * 1000;
 
 const MAX_VERSIONS = 50;

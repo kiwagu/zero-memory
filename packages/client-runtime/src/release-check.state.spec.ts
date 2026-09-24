@@ -38,6 +38,9 @@ describe('the release check state', () => {
     writeReleaseState(path, 'proj.b', {
       seen: { version: '2.0.0', build: 'x' },
     });
+    writeReleaseState(path, 'proj.c', { last_fetch_at: T, url_failed_at: T });
+    expect(readReleaseState(path, 'proj.c').url_failed_at).toBe(T);
+    expect(readReleaseState(path, 'proj.a').url_failed_at).toBeUndefined();
     expect(readReleaseState(path, 'proj.a').seen?.version).toBe('1.0.0');
     expect(readReleaseState(path, 'proj.a').current).toBe('1.0.0');
     expect(readReleaseState(path, 'proj.a').settings_attempt_at).toBe(T);
@@ -45,7 +48,7 @@ describe('the release check state', () => {
       readReleaseState(path, 'proj.b').settings_attempt_at
     ).toBeUndefined();
     expect(readReleaseState(path, 'proj.b').seen?.build).toBe('x');
-    expect(readReleaseState(path, 'proj.c')).toEqual({});
+    expect(readReleaseState(path, 'proj.d')).toEqual({});
   });
 
   it('asks again only for a new version, or after the pause for one that did not finish', () => {
