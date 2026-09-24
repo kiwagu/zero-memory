@@ -402,6 +402,82 @@ test.describe('Project board in the dashboard', () => {
     await expect(tiles).toHaveCount(2);
   });
 
+  test('a card shows the production version that carries it, and the board shows where production lives', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let cardId: string;
+    try {
+      scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web release marker ${Date.now()}: ship the feed pages`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-board-web-release-${Date.now()}`,
+        })
+      ).scope;
+      const configured = await mcp.callTool('release', {
+        action: 'configure',
+        scope,
+        version_url: 'https://api.example.com/healthz',
+      });
+      expect(configured.isError ?? false).toBe(false);
+      cardId = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'Ship the feed pages',
+          state: 'active',
+          branch: { repo: 'acme/memory-service', name: 'feature/feed-ship' },
+        })
+      ).card.id;
+      await mcp.callTool('card', {
+        action: 'land',
+        card_id: cardId,
+        branch: { repo: 'acme/memory-service', name: 'feature/feed-ship' },
+        squash_sha: '5e22b66',
+        target: 'main',
+        reason: 'gate green; waits for the release',
+      });
+      const recorded = await mcp.callTool('release', {
+        action: 'record',
+        scope,
+        version: '1.4.0',
+        build: 'abc1234',
+        release_commit: '6f33c77',
+        source: 'url',
+        card_ids: [cardId],
+      });
+      expect(recorded.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    await expect(page.getByTestId('board-release-settings')).toContainText(
+      'https://api.example.com/healthz'
+    );
+    const tile = page
+      .getByTestId('board-column-waiting')
+      .getByTestId('board-card')
+      .filter({ hasText: 'Ship the feed pages' });
+    await expect(tile).toContainText('in production v1.4.0');
+
+    await page.goto(`/board?scope=all`);
+    await expect(page.getByTestId('board-release-settings')).toHaveCount(0);
+
+    await page.goto(`/board/${cardId}`);
+    await expect(page.getByTestId('card-detail')).toContainText(
+      'in production v1.4.0'
+    );
+    await expect(page.getByTestId('card-history')).toContainText('released');
+    await expect(page.getByTestId('card-history')).toContainText('v1.4.0');
+  });
+
   test('a card body renders as markdown, and hostile markup stays inert', async ({
     page,
   }) => {
