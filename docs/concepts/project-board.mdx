@@ -191,6 +191,59 @@ branch the board still holds open has already landed in the local repository,
 the briefing says so and names the call. A client connected only over MCP has
 no hooks and no git; the tool's own rule is what keeps its cards honest.
 
+## A release reaches the cards it carries
+
+A project names its production state once, with the `release` tool's
+`configure` action (a project admin only): a `version_url` — https, or http
+for localhost only, never with credentials, since every member of the
+project reads it — and the JSON field that holds the version (`version_field`,
+default `version`). A project that never deploys names no url; its state is
+then its newest release tag instead, matched by `tag_pattern` (default `v*`).
+`tag_template` (default `v{version}`) maps a version to the tag that names
+it. `on_release` chooses what a release does to the cards it carries:
+`record` (the default) only records it, `record_and_move_done` also moves
+them. `configure` changes only the fields it is given, and `version_url:
+null` clears a url that was set.
+
+Each member's client watcher checks for a change after every shell command —
+in the same pass as the landing check — and again at the start of a session.
+The url is asked at most once every two minutes per project, the setting at
+most once every ten; nothing runs as a daemon, nothing is asked for a
+project that names no production state, and a folder the user ignored is
+left alone.
+
+The watcher resolves the current version to a commit through its tag in the
+local checkout. A card is carried when its latest landing in that repository
+is an ancestor of that commit and nothing was released since the landing —
+so a card released once and then landed again waits for the release that
+actually ships the new work. The watcher records the release on each card it
+carries, as a `released` event, and says one line in the session. A tag it
+cannot find is named once, with the fix — `git fetch --tags`, or tagging the
+release commit by hand. A version lower than the one already seen is a
+rollback: it is recorded and said, and no card changes, since nothing before
+it shipped anything new. A server or a url that cannot answer costs one
+pause before the next try, never every command. Running
+`zero-memory-watcher release` by hand checks now and prints what it found —
+the tool for recording a release right after a missing tag is fetched or
+made.
+
+Cards move on their own only when the project set `record_and_move_done`:
+then a carried card waiting on release moves to `done`, with the version
+named in the reason. With the default `record`, a release only records
+itself on the cards it carries — nothing on the board moves by itself.
+
+A session's briefing names the project's production state — "Production: vX
+… as of …" — and, for the cards it lists, the release that reached them. A
+card a release reached also shows "in production vX" on its dashboard tile
+and in its detail, with the release itself as a `released` line in its
+history; a board's own setting — where its production state comes from, and
+what a release does to its cards — shows read-only above the columns, set
+only through `configure`, never from the dashboard.
+
+The url is read by each member's own watcher, never by the server, and a
+redirect from it is never followed. Every member of the project can read the
+url once it is set.
+
 ## Visibility
 
 A card belongs to its scope and is readable by every accepted member of it,

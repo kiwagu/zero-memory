@@ -138,6 +138,12 @@ drains one memory per message, in the server's rank order, with no server call
 — so it also reaches a session whose server is unreachable. A compaction drops
 the queue with the window.
 
+`release` runs in the same pass as `landing`, after every shell command and
+at session start: it checks whether the project's production state changed —
+a version url or, without one, the newest release tag — and records it on
+the board cards it carries. See
+[A release reaches the cards it carries](../../docs/concepts/project-board.mdx#a-release-reaches-the-cards-it-carries).
+
 `landing` runs after every shell command and nearly always ends after one git
 read. It looks at the newest commits on every local branch of the repository
 the command ran in — a release commit made by the same command may sit on top

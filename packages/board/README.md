@@ -81,3 +81,8 @@ without recording a recall. Detaching the conversation is the whole undo.
 Schemas, limits and the state vocabulary itself live in
 `@workspace/contracts` (`card.schema.ts`), so storage checks and the tool
 surface mirror one source.
+
+A separate `release` port (`@workspace/contracts` `release.schema.ts`) names
+where a project's production state lives and records it on the cards it
+carries; it shares the card store but is not part of this package's own
+invariants.
