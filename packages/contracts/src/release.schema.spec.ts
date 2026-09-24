@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { releaseInputSchema, releaseOutputSchema } from './release.schema.js';
+import {
+  releaseInputSchema,
+  releaseOutputSchema,
+  releaseVersionSchema,
+} from './release.schema.js';
 import {
   boardCardSchema,
   briefingWorkSchema,
@@ -92,6 +96,12 @@ describe('the release tool contract', () => {
       moved: [],
     });
     expect(out.release?.first_observed).toBe(true);
+  });
+
+  it('refuses a version with a leading v', () => {
+    expect(releaseVersionSchema.safeParse('v0.25.0').success).toBe(false);
+    expect(releaseVersionSchema.safeParse('0.25.0').success).toBe(true);
+    expect(releaseVersionSchema.safeParse('1.2.0-rc.1').success).toBe(true);
   });
 
   it('parses "released" as a card event type', () => {

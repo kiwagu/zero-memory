@@ -18,7 +18,7 @@ import {
   type ReadCardParams,
 } from '@workspace/board';
 import { injectContext, type IContext } from '@workspace/context';
-import { cardSchema, type Card } from '@workspace/contracts';
+import { cardReleaseSchema, cardSchema, type Card } from '@workspace/contracts';
 import { singleton } from '@workspace/di';
 import type { Database } from '@workspace/db';
 import { Err, Ok, type Result } from 'oxide.ts';
@@ -81,6 +81,9 @@ const eventViewSchema = z.object({
   branch_note: z.string().nullable().default(null),
   squash_sha: z.string().nullable().default(null),
   target_branch: z.string().nullable().default(null),
+  release_version: z.string().nullable().default(null),
+  release_build: z.string().nullable().default(null),
+  release_commit: z.string().nullable().default(null),
   created_at: z.string(),
 });
 
@@ -138,6 +141,7 @@ const readViewSchema = z.object({
   card: z.unknown().optional(),
   refs: z.array(refViewSchema).default([]),
   branches: z.array(branchViewSchema).default([]),
+  releases: z.array(cardReleaseSchema).default([]),
   events: z.array(eventViewSchema).default([]),
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
@@ -162,6 +166,7 @@ const boardViewSchema = z.object({
             created_at: z.string(),
           })
           .nullable(),
+        released_in: z.string().nullable().default(null),
       })
     )
     .default([]),
@@ -356,6 +361,7 @@ export class SupabaseCardRepository implements ICardRepository {
       card: cardSchema.parse(parsed.card),
       refs: parsed.refs,
       branches: parsed.branches,
+      releases: parsed.releases,
       events: parsed.events as CardReadView['events'],
       has_more: parsed.has_more,
       next_after_seq: parsed.next_after_seq,

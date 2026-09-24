@@ -500,7 +500,7 @@ export const boardCardSchema = z.object({
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
 /** Who is writing, and in which conversation. Every write tool takes these. */
-const authorshipFields = {
+export const authorshipFields = {
   thread: z
     .string()
     .optional()

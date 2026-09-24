@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  authorshipFields,
   cardIdSchema,
   cardStateSchema,
   gitCommitShaSchema,
@@ -12,6 +13,9 @@ export const releaseVersionSchema = z
   .trim()
   .regex(/^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/u, {
     message: 'A version is letters, digits, dots, dashes and underscores',
+  })
+  .refine((value) => !/^[vV][0-9]/u.test(value), {
+    message: 'Give the version without a leading v (0.25.0, not v0.25.0)',
   });
 
 /** Where a project's production state lives, and what a release does. */
@@ -32,7 +36,12 @@ export const releaseLandingSchema = z.object({
   squash_sha: z.string(),
 });
 
-/** A card a production state could carry: it landed, and has no record of this state yet. */
+/**
+ * A card a production state could carry: it landed, and nothing has been
+ * released since its latest landing. `landings` lists only the landings
+ * since the card's last release — an earlier one is in every later release,
+ * so it proves nothing about this one.
+ */
 export const releaseCandidateSchema = z.object({
   id: cardIdSchema,
   number: z.number().int().positive(),
@@ -62,8 +71,9 @@ export const releaseInputSchema = z.object({
     .enum(['settings', 'configure', 'candidates', 'record'])
     .describe(
       'settings: read where the production state lives. configure: set it ' +
-        '(project admin). candidates: the landed cards with no record of a ' +
-        'version. record: write a production state and the cards it carries.'
+        '(project admin). candidates: the landed cards with nothing ' +
+        'released since their latest landing. record: write a production ' +
+        'state and the cards it carries.'
     ),
   scope: z.string().min(1).describe('Which project board.'),
   version_url: z
@@ -100,7 +110,10 @@ export const releaseInputSchema = z.object({
     ),
   version: releaseVersionSchema
     .optional()
-    .describe('For candidates and record: the version, without a leading v.'),
+    .describe(
+      'For record: the version, without a leading v. For candidates it is ' +
+        'accepted but does not filter.'
+    ),
   build: z
     .string()
     .nullable()
@@ -120,8 +133,8 @@ export const releaseInputSchema = z.object({
     .max(500)
     .optional()
     .describe('For record: the cards the state carries.'),
-  thread: z.string().optional(),
-  agent_label: z.string().max(80).optional(),
+  thread: authorshipFields.thread,
+  agent_label: authorshipFields.agent_label,
 });
 export type ReleaseInput = z.infer<typeof releaseInputSchema>;
 
