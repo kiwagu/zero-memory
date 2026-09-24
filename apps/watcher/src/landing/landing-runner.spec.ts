@@ -258,6 +258,30 @@ describe('runLanding', () => {
     expect(said).toEqual([]);
   });
 
+  it('shares one budget across its lookups, and leaves the rest for the next command', async () => {
+    const keys = [31, 32, 33, 34].map(
+      (number) =>
+        `${commit(
+          repo,
+          `w${number}`,
+          `feat: work ${number}`,
+          `Squashed-from: feature/x${number} (abcdef1) ZM-${number}`
+        )}#${number}`
+    );
+    vi.mocked(callCardBranches).mockImplementation(() => new Promise(() => {}));
+    const started = Date.now();
+    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450 });
+    expect(Date.now() - started).toBeLessThan(1500);
+    const asked = vi.mocked(callCardBranches).mock.calls.length;
+    expect(asked).toBeGreaterThan(0);
+    expect(asked).toBeLessThan(keys.length);
+    // What it had no time for was never marked, so the next command asks it.
+    const stillDue = keys.filter((key) =>
+      landingCheckDue(landingCheckStatePath(), key)
+    );
+    expect(stillDue).toHaveLength(keys.length - asked);
+  });
+
   it('names the branch the squash landed on, not the one checked out after it', async () => {
     commit(
       repo,

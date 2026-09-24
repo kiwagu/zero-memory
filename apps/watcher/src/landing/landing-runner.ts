@@ -38,6 +38,12 @@ const DRIFT_BRANCHES = 10;
  * not use it up — let alone on every command after it.
  */
 const LANDING_LOOKUP_TIMEOUT_MS = 5000;
+/**
+ * All of this hook's lookups together. The release check that follows in the
+ * same process has 8 s of its own, so the whole post-command hook stays inside
+ * the slowest host's 20 s (Hermes) however many squashes are fresh.
+ */
+const LANDING_BUDGET_MS = 8000;
 
 /** Reject when `promise` has not settled in `ms`. */
 const within = <T>(promise: Promise<T>, ms: number): Promise<T> =>
@@ -65,8 +71,10 @@ const within = <T>(promise: Promise<T>, ms: number): Promise<T> =>
  */
 const landingReminders = async (
   cwd: string,
-  lookupTimeoutMs: number
+  lookupTimeoutMs: number,
+  budgetMs: number
 ): Promise<string[]> => {
+  const deadline = Date.now() + budgetMs;
   // One git read decides almost every run: no fresh squash, nothing to do.
   const statePath = landingCheckStatePath();
   const due = recentSquashes(cwd, LOOKBACK_COMMITS, FRESH_HOURS)
@@ -97,15 +105,27 @@ const landingReminders = async (
   }
 
   const reminders: string[] = [];
-  for (const item of due) {
+  for (const [index, item] of due.entries()) {
+    // Out of time: what is left stays unmarked, so the next command asks it.
+    const left = deadline - Date.now();
+    if (left <= 0) {
+      logger.info(
+        'landing check out of time; the rest waits for the next command',
+        {
+          left: due.length - index,
+        }
+      );
+      break;
+    }
+    const timeoutMs = Math.min(lookupTimeoutMs, left);
     // Recorded as a failed attempt BEFORE asking: a process the host kills
     // mid-request then leaves the pause behind instead of nothing, and the
     // next command does not stall on the same squash.
     recordLandingCheck(statePath, item.key, 'error');
     try {
       const found = await within(
-        callCardBranches(scope, item.number, lookupTimeoutMs),
-        lookupTimeoutMs
+        callCardBranches(scope, item.number, timeoutMs),
+        timeoutMs
       );
       if (!found.card) {
         recordLandingCheck(statePath, item.key, 'no-card');
@@ -162,12 +182,13 @@ const landingReminders = async (
  */
 export const runLanding = async (
   adapter: HookClient = hookClient(),
-  options: { lookupTimeoutMs?: number } = {}
+  options: { lookupTimeoutMs?: number; budgetMs?: number } = {}
 ): Promise<void> => {
   const lookupTimeoutMs = options.lookupTimeoutMs ?? LANDING_LOOKUP_TIMEOUT_MS;
+  const budgetMs = options.budgetMs ?? LANDING_BUDGET_MS;
   try {
     const input = await adapter.readInput();
-    const lines = await landingReminders(input.cwd, lookupTimeoutMs);
+    const lines = await landingReminders(input.cwd, lookupTimeoutMs, budgetMs);
     // The release check rides in the same process: the same moments, one
     // process per command, no new hook entry in any client.
     const release = await checkRelease(input.cwd).catch(() => null);
