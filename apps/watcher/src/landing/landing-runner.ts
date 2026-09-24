@@ -8,6 +8,7 @@ import {
   landingCheckDue,
   landingCheckedAt,
   landingCheckStatePath,
+  projectIgnored,
   projectScopeStatePath,
   readProjectScope,
   recordLandingCheck,
@@ -184,6 +185,7 @@ const landingReminders = async (
  * script is caught and a command that merely mentions a trailer is not.
  * Then it asks whether production took changes since this machine last
  * looked (`checkRelease`), and that line joins the reminders in one turn.
+ * A folder the user ignored (`.zero-memory-ignore`) is left alone entirely.
  * Never throws: a hook must not break the session it observes.
  */
 export const runLanding = async (
@@ -194,6 +196,8 @@ export const runLanding = async (
   const budgetMs = options.budgetMs ?? LANDING_BUDGET_MS;
   try {
     const input = await adapter.readInput();
+    // Nothing about an ignored project leaves the machine, not even a lookup.
+    if (projectIgnored(input.cwd)) return;
     const lines = await landingReminders(input.cwd, lookupTimeoutMs, budgetMs);
     // The release check rides in the same process: the same moments, one
     // process per command, no new hook entry in any client.
