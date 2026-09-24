@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { Alert, AlertDescription } from '@workspace/ui/components/alert';
+import { InfoHint } from '@workspace/ui/components/common/info-hint';
 import {
   BoardColumns,
   type BoardColumn,
@@ -152,7 +153,27 @@ export default async function BoardPage({
             filter beside it narrows the cards by label or title and lives in
             the address with the board; nothing matching shows as nothing. */}
         <div className="flex items-center justify-between gap-4">
-          <h1 className="text-2xl font-semibold">{t('board.title')}</h1>
+          {/* What the board is, and where its production state comes from, are
+              read once rather than on every visit: they sit in a hint beside
+              the title instead of taking rows above the columns. */}
+          <div className="flex items-center gap-1">
+            <h1 className="text-2xl font-semibold">{t('board.title')}</h1>
+            <InfoHint label={t('board.about')} testId="board-hint">
+              <p>{t('board.description')}</p>
+              {release ? (
+                <p data-testid="board-release-settings">
+                  {t('board.release.settings', {
+                    source:
+                      release.version_url ??
+                      t('board.release.tagsOnly', {
+                        template: release.tag_template,
+                      }),
+                    policy: releasePolicyLabel(release.on_release, t),
+                  })}
+                </p>
+              ) : null}
+            </InfoHint>
+          </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <BoardSearch
               value={query}
@@ -195,24 +216,6 @@ export default async function BoardPage({
             />
           </div>
         </div>
-        <p className="text-muted-foreground text-sm">
-          {t('board.description')}
-        </p>
-        {release ? (
-          <p
-            className="text-muted-foreground text-sm"
-            data-testid="board-release-settings"
-          >
-            {t('board.release.settings', {
-              source:
-                release.version_url ??
-                t('board.release.tagsOnly', {
-                  template: release.tag_template,
-                }),
-              policy: releasePolicyLabel(release.on_release, t),
-            })}
-          </p>
-        ) : null}
       </div>
 
       {error ? (

@@ -504,6 +504,7 @@
   "activity.pager.prev": "Newer",
   "activity.pager.next": "Older",
   "board.title": "Project board",
+  "board.about": "About this board",
   "board.description": "What the agents are working on, as cards. Every move carries the reason its author gave. The board is a window, not a control panel: cards move through the tools, never from here.",
   "board.empty": "No cards yet. Agents open them through the tools.",
   "board.loadError": "The board could not be loaded.",
