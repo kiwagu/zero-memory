@@ -437,4 +437,100 @@ test.describe('Release commands in the store', () => {
     });
     expect(work.lead.find((c) => c.id === card.id)?.released_in).toBe('4.1.0');
   });
+
+  test('a production state that returns is current again, and its first observation stands', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `release-return-${Date.now()}`);
+    const db = asUser(token);
+    const record = (version: string, commit: string) =>
+      rpc<{
+        release: {
+          version: string;
+          release_commit: string;
+          observed_at: string;
+          first_observed: boolean;
+        };
+      }>(db, 'release_record', {
+        p_scope: scope,
+        p_version: version,
+        p_build: null,
+        p_release_commit: commit,
+        p_source: 'url',
+        p_card_ids: [],
+      });
+
+    const first = await record('0.24.3', 'aaaaaaa');
+    await record('0.25.0', 'bbbbbbb');
+    // Rolled back: the earlier state is what production runs again.
+    const back = await record('0.24.3', 'ccccccc');
+    expect(first.release.first_observed).toBe(true);
+    expect(back.release.first_observed).toBe(false);
+    expect(back.release).toMatchObject({
+      release_commit: 'aaaaaaa',
+      observed_at: first.release.observed_at,
+    });
+
+    const work = await rpc<{ production: { version: string } | null }>(
+      db,
+      'briefing_work',
+      { p_scope: scope }
+    );
+    expect(work.production?.version).toBe('0.24.3');
+
+    // Only the last sighting moves: the first observation is not writable.
+    const rewrite = await db
+      .from('scope_releases')
+      .update({ release_commit: 'ddddddd' })
+      .eq('scope', scope)
+      .eq('version', '0.24.3');
+    expect(rewrite.error).not.toBeNull();
+  });
+
+  test('a release marks what landed since the last one, and a card that lands again is a candidate again', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `release-since-${Date.now()}`);
+    const db = asUser(token);
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Landed twice',
+    });
+    await rpc(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'waiting',
+      p_reason: 'set by hand',
+    });
+    const land = (sha: string) =>
+      rpc(db, 'card_land', {
+        p_card_id: card.id,
+        p_repo: REPO,
+        p_branch: 'feature/twice',
+        p_squash_sha: sha,
+        p_target: 'main',
+        p_reason: 'landed',
+      });
+    const candidates = async (version: string) =>
+      (
+        await rpc<{ cards: Array<{ id: string }> }>(db, 'release_candidates', {
+          p_scope: scope,
+          p_version: version,
+        })
+      ).cards.map((c) => c.id);
+
+    await land('aaaaaaa');
+    await rpc(db, 'release_record', {
+      p_scope: scope,
+      p_version: '1.0.0',
+      p_build: null,
+      p_release_commit: 'aaaaaaa',
+      p_source: 'tag',
+      p_card_ids: [card.id],
+    });
+    expect(await candidates('1.1.0')).toEqual([]);
+
+    // A fix lands in the same branch: the next release carries it.
+    await land('bbbbbbb');
+    expect(await candidates('1.1.0')).toEqual([card.id]);
+  });
 });

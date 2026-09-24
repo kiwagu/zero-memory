@@ -1680,6 +1680,7 @@ export type Database = {
       scope_releases: {
         Row: {
           build: string | null;
+          last_observed_at: string;
           observed_at: string;
           observed_by: string | null;
           release_commit: string;
@@ -1689,6 +1690,7 @@ export type Database = {
         };
         Insert: {
           build?: string | null;
+          last_observed_at?: string;
           observed_at?: string;
           observed_by?: string | null;
           release_commit: string;
@@ -1698,6 +1700,7 @@ export type Database = {
         };
         Update: {
           build?: string | null;
+          last_observed_at?: string;
           observed_at?: string;
           observed_by?: string | null;
           release_commit?: string;

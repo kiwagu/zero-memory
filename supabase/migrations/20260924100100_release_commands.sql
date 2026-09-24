@@ -16,9 +16,9 @@
 --   - function public.card_get: `releases`, newest first; every event carries
 --     release_version, release_build and release_commit
 --   - function public.board_list: each card carries `released_in`
---   - function public.briefing_work: `production`, and `released_in` on the
---     bound card and the lead; a project with a production state but no work
---     in flight still briefs
+--   - function public.briefing_work: `production`, the state seen most
+--     recently, and `released_in` on the bound card and the lead; a project
+--     with a production state but no work in flight still briefs
 --
 -- Special considerations:
 --   - Every command is SECURITY INVOKER: the table policies decide. The
@@ -27,10 +27,14 @@
 --     before the first write.
 --   - Which cards a state carries is decided by git ancestry in the
 --     observer's checkout, never here: release_candidates hands out the
---     landings, and release_record keeps only the live cards of the named
---     scope among the ids it is given.
---   - A card is recorded once per version however many observers report it,
---     and the first observer's row of the state is kept.
+--     landings of the cards with nothing released since they last landed (a
+--     release marks what landed after the previous one, and a card that
+--     lands again is a candidate again), and release_record keeps only the
+--     live cards of the named scope among the ids it is given.
+--   - A card is recorded once per version however many observers report it.
+--     The first observer's row of the state is kept as it was; seeing the
+--     state again moves only its last sighting, so a version production
+--     returns to is current again.
 --   - A carried card moves to done only under the project's
 --     `record_and_move_done` policy, and only from waiting.
 --   - card_get, board_list and briefing_work keep their signatures, so
@@ -171,9 +175,14 @@ begin
        and c.archived_at is null
        and exists (select 1 from public.card_events e
                     where e.card_id = c.id and e.type = 'landed')
-       and not exists (select 1 from public.card_events e
-                        where e.card_id = c.id and e.type = 'released'
-                          and e.release_version = p_version)
+       -- Nothing released since the card last landed: a release marks what
+       -- landed after the previous one, and a card that lands again is a
+       -- candidate again.
+       and not exists (
+             select 1 from public.card_events r
+              where r.card_id = c.id and r.type = 'released'
+                and r.seq > (select max(l.seq) from public.card_events l
+                              where l.card_id = c.id and l.type = 'landed'))
   ), '[]'::jsonb));
 end;
 $$;
@@ -234,8 +243,10 @@ begin
     (scope, version, build, release_commit, source, observed_by)
   values
     (v_scope, p_version, p_build, v_commit, p_source, private.current_user_entity_id())
-  on conflict (scope, version) do nothing;
-  v_first := found;
+  -- Seen before: the first observation stays as it was, and only the last
+  -- sighting moves. A freshly inserted row has no xmax.
+  on conflict (scope, version) do update set last_observed_at = now()
+  returning (xmax = 0) into v_first;
   select * into v_release from public.scope_releases
    where scope operator(extensions.=) v_scope and version = p_version;
 
@@ -677,13 +688,14 @@ begin
     'waiting', v_waiting,
     'lead', v_lead,
     'attached_loop_ids', v_loops,
-    -- The production state last observed for the project.
+    -- The production state seen most recently: after a rollback that is
+    -- the earlier version again.
     'production', (
       select jsonb_build_object('version', r.version, 'build', r.build,
-                                'observed_at', r.observed_at)
+                                'observed_at', r.last_observed_at)
         from public.scope_releases r
        where r.scope operator(extensions.=) p_scope::extensions.ltree
-       order by r.observed_at desc limit 1),
+       order by r.last_observed_at desc limit 1),
     'open_branches', v_open
   );
 end;

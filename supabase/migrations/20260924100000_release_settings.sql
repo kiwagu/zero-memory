@@ -22,7 +22,11 @@
 --     makes no request to an address a user gave it. The check below keeps
 --     the url free of credentials all the same, since every member of the
 --     project can read it.
---   - Both new tables are written only through the release commands.
+--   - The release commands are the way in, but the policies are the fence:
+--     a project's admin may write its setting directly, and any writer of
+--     the project may report a state directly. A state's first observation
+--     is never rewritten; seeing it again moves only its last sighting, so a
+--     state production returns to is current again.
 
 set search_path = public, extensions;
 
@@ -124,6 +128,9 @@ create table public.scope_releases (
   release_commit text not null check (release_commit ~ '^[0-9a-f]{7,64}$'),
   source text not null check (source in ('url', 'tag')),
   observed_at timestamptz not null default now(),
+  -- Moves each time the state is seen again: a rollback to an earlier
+  -- version makes that version current again.
+  last_observed_at timestamptz not null default now(),
   observed_by text default private.current_user_entity_id()
     references public.profiles (id)
     check (observed_by is null or public.is_entity_id_with_prefix(observed_by, 'usr')),
@@ -132,13 +139,17 @@ create table public.scope_releases (
 
 comment on table public.scope_releases is
   'Every production state a project was seen in, first observer first. The '
-  'release commit is what the state resolved to in the observer''s checkout.';
+  'release commit is what the state resolved to in the observer''s checkout; '
+  'last_observed_at is when the state was last seen, so the latest sighting '
+  'names what production runs now.';
 
 create index scope_releases_latest_idx
-  on public.scope_releases (scope, observed_at desc);
+  on public.scope_releases (scope, last_observed_at desc);
 
 revoke all on public.scope_releases from anon, authenticated;
 grant select, insert on public.scope_releases to authenticated;
+-- The last sighting is the one column a writer may move.
+grant update (last_observed_at) on public.scope_releases to authenticated;
 grant select, insert, update, delete on public.scope_releases to service_role;
 
 alter table public.scope_releases enable row level security;
@@ -149,7 +160,8 @@ for select
 to authenticated
 using (scope = any (((select private.visible_scopes()))::extensions.ltree[]));
 
--- A state, once seen, is never rewritten: no update and no delete policy.
+-- A state's first observation is never rewritten: the column grant above
+-- lets an update move only last_observed_at, and there is no delete policy.
 create policy "project writers report the production state they saw"
 on public.scope_releases
 for insert
@@ -158,6 +170,13 @@ with check (
   private.can_write(scope)
   and observed_by = (select private.current_user_entity_id())
 );
+
+create policy "project writers report a production state seen again"
+on public.scope_releases
+for update
+to authenticated
+using (private.can_write(scope))
+with check (private.can_write(scope));
 
 -- 4. a card learns its releases ----------------------------------------------------
 
