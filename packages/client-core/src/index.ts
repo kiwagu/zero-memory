@@ -108,3 +108,16 @@ export {
   type RecallGapTally,
   type RecallGapTrigger,
 } from './recall-gap.logic.js';
+export {
+  compareVersions,
+  isReleaseUrl,
+  parseDeployedVersion,
+  renderMissingTag,
+  renderReleaseKnown,
+  renderReleaseNotice,
+  renderRollback,
+  tagForVersion,
+  versionFromTag,
+  type CarriedCard,
+  type DeployedVersion,
+} from './release.logic.js';

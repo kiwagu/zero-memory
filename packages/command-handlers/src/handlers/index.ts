@@ -10,6 +10,7 @@ import { IngestConversationCommandHandler } from './ingest-conversation.command-
 import { LinkCommandHandler } from './link.command-handler.js';
 import { RememberCommandHandler } from './remember.command-handler.js';
 import { MoveMemoriesCommandHandler } from './move-memories.command-handler.js';
+import { ReleaseCommandHandler } from './release.command-handler.js';
 import { ShareMemoryCommandHandler } from './share-memory.command-handler.js';
 
 export const commandHandlers = [
@@ -25,6 +26,7 @@ export const commandHandlers = [
   LinkCommandHandler,
   RememberCommandHandler,
   MoveMemoriesCommandHandler,
+  ReleaseCommandHandler,
   ShareMemoryCommandHandler,
 ];
 
@@ -40,4 +42,5 @@ export * from './ingest-conversation.command-handler.js';
 export * from './link.command-handler.js';
 export * from './remember.command-handler.js';
 export * from './move-memories.command-handler.js';
+export * from './release.command-handler.js';
 export * from './share-memory.command-handler.js';

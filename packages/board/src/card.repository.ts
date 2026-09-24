@@ -3,6 +3,7 @@ import type {
   CardBranch,
   CardNoteRelation,
   CardRef,
+  CardRelease,
   CardState,
 } from '@workspace/contracts';
 import type { Result } from 'oxide.ts';
@@ -183,6 +184,8 @@ export interface CardReadView {
   refs: CardRefView[];
   /** Where the card's work ran, and where it landed. */
   branches: CardBranchView[];
+  /** The production states this card was carried by, newest first. */
+  releases: CardRelease[];
   events: CardEventView[];
   has_more: boolean;
   next_after_seq: number;
@@ -206,6 +209,8 @@ export interface BoardCardView {
     reason: string | null;
     created_at: string;
   } | null;
+  /** The version this card was last carried by, or null if none yet. */
+  released_in: string | null;
 }
 
 export interface BoardView {

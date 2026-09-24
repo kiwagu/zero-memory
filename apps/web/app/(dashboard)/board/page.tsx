@@ -18,6 +18,8 @@ import {
   cardLabel,
   cardStateLabel,
   cardStateVariant,
+  releasePolicyLabel,
+  releaseSettingsSchema,
   resolveBoardScope,
   type BoardCard,
 } from '@/lib/board';
@@ -67,11 +69,28 @@ export default async function BoardPage({
     (aliasRows ?? []).map((row) => [String(row.scope), row.alias])
   );
 
-  const { data, error } = await supabase.rpc('board_list', {
-    p_scope: selected ?? undefined,
-    p_query: query || undefined,
-    p_limit: BOARD_LIMIT,
-  });
+  // The release setting is read-only here: it is edited through the MCP
+  // `release` tool's `configure` action, never from the dashboard. It only
+  // applies to one selected board — "all boards" has no single setting to
+  // show. Started alongside board_list (Promise.all) so a single-board page
+  // load does not wait one more round trip for it.
+  const releaseQuery =
+    selected && selected !== ALL_BOARDS
+      ? supabase.rpc('release_settings', { p_scope: selected })
+      : Promise.resolve({ data: null });
+
+  const [{ data: releaseData }, { data, error }] = await Promise.all([
+    releaseQuery,
+    supabase.rpc('board_list', {
+      p_scope: selected ?? undefined,
+      p_query: query || undefined,
+      p_limit: BOARD_LIMIT,
+    }),
+  ]);
+  const releaseParsed = releaseSettingsSchema.safeParse(
+    (releaseData as { settings?: unknown } | null)?.settings
+  );
+  const release = releaseParsed.success ? releaseParsed.data : null;
 
   const parsed = data ? boardListSchema.safeParse(data) : null;
   const board = parsed?.success ? parsed.data : { cards: [], totals: {} };
@@ -94,6 +113,14 @@ export default async function BoardPage({
       title: card.title,
       badges: [
         { label: scopeLabel(card.scope), variant: 'outline' as const },
+        ...(card.released_in
+          ? [
+              {
+                label: t('board.releasedIn', { version: card.released_in }),
+                variant: 'green' as const,
+              },
+            ]
+          : []),
         ...(card.refs > 0
           ? [
               {
@@ -171,6 +198,21 @@ export default async function BoardPage({
         <p className="text-muted-foreground text-sm">
           {t('board.description')}
         </p>
+        {release ? (
+          <p
+            className="text-muted-foreground text-sm"
+            data-testid="board-release-settings"
+          >
+            {t('board.release.settings', {
+              source:
+                release.version_url ??
+                t('board.release.tagsOnly', {
+                  template: release.tag_template,
+                }),
+              policy: releasePolicyLabel(release.on_release, t),
+            })}
+          </p>
+        ) : null}
       </div>
 
       {error ? (

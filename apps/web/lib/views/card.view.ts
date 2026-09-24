@@ -57,7 +57,14 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     // does not exist, and that is the intended answer.
     return null;
   }
-  const { card, refs, branches, events, has_more: hasMore } = parsed.data;
+  const {
+    card,
+    refs,
+    branches,
+    releases,
+    events,
+    has_more: hasMore,
+  } = parsed.data;
 
   // The feed is read under the same session, so a memory this reader may not
   // open never arrives — there is nothing to hide, unlike an attachment.
@@ -78,6 +85,10 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
   }));
   const feedHasMore = feed.success && feed.data.has_more;
 
+  // Newest first: the latest production state that carried the card, when
+  // one does.
+  const [latestRelease] = releases;
+
   const badges: BadgeListItem[] = [
     {
       label: cardStateLabel(card.state, t),
@@ -88,6 +99,14 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
       ? [{ label: t('board.archived'), variant: 'secondary' as const }]
       : []),
     { label: scopeLabel(card.scope), variant: 'outline' as const },
+    ...(latestRelease
+      ? [
+          {
+            label: t('board.releasedIn', { version: latestRelease.version }),
+            variant: 'green' as const,
+          },
+        ]
+      : []),
   ];
 
   // An attachment whose target this reader may not open keeps its place in the
@@ -141,9 +160,13 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
         ? `${event.ref_target} → ${event.target_branch ?? ''} (${(
             event.squash_sha ?? ''
           ).slice(0, 7)})`
-        : event.ref_kind && event.ref_target
-          ? `${event.ref_kind}: ${event.ref_target}`
-          : undefined,
+        : event.type === 'released' && event.release_version
+          ? `v${event.release_version}${
+              event.release_build ? ` (build ${event.release_build})` : ''
+            }`
+          : event.ref_kind && event.ref_target
+            ? `${event.ref_kind}: ${event.ref_target}`
+            : undefined,
   }));
 
   return {

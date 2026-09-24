@@ -41,3 +41,14 @@ export type {
   ReadCardParams,
 } from './card.repository.js';
 export { CardService } from './card.service.js';
+export type {
+  ConfigureReleaseParams,
+  IReleaseRepository,
+  RecordedRelease,
+  RecordReleaseParams,
+} from './release.repository.js';
+export {
+  RELEASE_REPOSITORY,
+  injectReleaseRepository,
+} from './release.repository.provider.js';
+export { ReleaseService } from './release.service.js';

@@ -82,6 +82,7 @@ export const cardEventTypeSchema = z.enum([
   'detached',
   'noted',
   'landed',
+  'released',
 ]);
 export type CardEventType = z.infer<typeof cardEventTypeSchema>;
 
@@ -270,6 +271,18 @@ export const cardBranchViewSchema = z.object({
 export type CardBranchView = z.infer<typeof cardBranchViewSchema>;
 
 /**
+ * One production state a card was carried by, as a card reads it back.
+ * Newest first — a card can be carried again once it lands again.
+ */
+export const cardReleaseSchema = z.object({
+  version: z.string(),
+  build: z.string().nullable(),
+  release_commit: z.string(),
+  released_at: z.string(),
+});
+export type CardRelease = z.infer<typeof cardReleaseSchema>;
+
+/**
  * A typed reference attached to a card.
  *
  * Attaching NEVER changes the target: not its scope, not its visibility, not
@@ -361,6 +374,10 @@ export const cardEventSchema = z.object({
   /** For a landing: the commit the branch landed as, and where. */
   squash_sha: z.string().nullable().default(null),
   target_branch: z.string().nullable().default(null),
+  /** For a `released` event: the production state that carried the card. */
+  release_version: z.string().nullable().default(null),
+  release_build: z.string().nullable().default(null),
+  release_commit: z.string().nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
@@ -403,6 +420,8 @@ export const briefingWorkCardSchema = z.object({
   number: z.number().int().positive(),
   title: z.string(),
   state: cardStateSchema,
+  /** The version this card was last carried by, when it has one. */
+  released_in: z.string().nullable().optional(),
 });
 export type BriefingWorkCard = z.infer<typeof briefingWorkCardSchema>;
 
@@ -438,6 +457,20 @@ export const briefingWorkSchema = z.object({
    * server that predates branches sends none, and that stays valid.
    */
   open_branches: z.array(briefingWorkBranchSchema).optional(),
+  /**
+   * The project's current production state, when it has one. `observed_at`
+   * is when this state was LAST seen — a rollback to an earlier version
+   * makes it current again. Optional: a server that predates releases sends
+   * none, and a project with no production state sends null.
+   */
+  production: z
+    .object({
+      version: z.string(),
+      build: z.string().nullable(),
+      observed_at: z.string(),
+    })
+    .nullable()
+    .optional(),
 });
 export type BriefingWork = z.infer<typeof briefingWorkSchema>;
 
@@ -460,11 +493,14 @@ export const boardCardSchema = z.object({
       created_at: z.string(),
     })
     .nullable(),
+  /** The version this card was last carried by. A server that predates
+   * releases, or a card no release has carried yet, reads as null. */
+  released_in: z.string().nullable().default(null),
 });
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
 /** Who is writing, and in which conversation. Every write tool takes these. */
-const authorshipFields = {
+export const authorshipFields = {
   thread: z
     .string()
     .optional()
@@ -554,6 +590,8 @@ export const boardOutputSchema = z.object({
   feed_next_before: z.string().nullable().default(null),
   /** For get: where the card's work ran, and where it landed. */
   branches: z.array(cardBranchViewSchema).default([]),
+  /** For get: the production states this card was carried by, newest first. */
+  releases: z.array(cardReleaseSchema).default([]),
 });
 export type BoardOutput = z.infer<typeof boardOutputSchema>;
 

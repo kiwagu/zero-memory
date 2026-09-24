@@ -98,7 +98,24 @@ export {
 export {
   LANDING_RETRY_MS,
   landingCheckDue,
+  landingCheckedAt,
   landingCheckStatePath,
   recordLandingCheck,
   type LandingCheckOutcome,
 } from './landing-check.state.js';
+
+// Release checks: what this machine knows about each project's production
+// state, so a release is recorded and told once.
+export {
+  RELEASE_FETCH_EVERY_MS,
+  RELEASE_RETRY_MS,
+  RELEASE_SETTINGS_TTL_MS,
+  readReleaseState,
+  releaseCheckStatePath,
+  releaseHandledDue,
+  writeReleaseState,
+  type ReleaseCheckOutcome,
+  type ReleaseCheckoutState,
+  type ReleaseProjectState,
+} from './release-check.state.js';
+export { callRelease, fetchDeployedVersion } from './release-client.js';

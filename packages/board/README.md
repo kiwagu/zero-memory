@@ -77,7 +77,13 @@ without recording a recall. Detaching the conversation is the whole undo.
   reference vocabulary (memory, entity, thread, card, url, branch — written
   `<repo>:<branch>`), the identity that makes attaching idempotent, and the
   flat pair the store keeps.
+- `ReleaseService` (`release.service.ts`) — `settings`, `configure`,
+  `candidates`, `record`: where a project's production state lives, and
+  what it carries.
+- `IReleaseRepository`, `RELEASE_REPOSITORY`, `injectReleaseRepository`
+  (`release.repository.ts`, `release.repository.provider.ts`) — the release
+  port and its DI token, one method per release command.
 
 Schemas, limits and the state vocabulary itself live in
-`@workspace/contracts` (`card.schema.ts`), so storage checks and the tool
-surface mirror one source.
+`@workspace/contracts` (`card.schema.ts`, `release.schema.ts`), so storage
+checks and the tool surface mirror one source.

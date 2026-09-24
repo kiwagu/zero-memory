@@ -41,6 +41,7 @@ import { runStopIngest } from './ingest-hook/ingest-hook-runner.js';
 import { runCapture } from './capture/capture-runner.js';
 import { runLogs } from './logs/logs-runner.js';
 import { runReceipt } from './receipt/receipt-runner.js';
+import { runRelease } from './release/release-runner.js';
 import { runStatus, runStatusJson } from './status/status-runner.js';
 import { runWatcherLogin } from './login/login-runner.js';
 import { IngestClient } from '@workspace/client-runtime';
@@ -169,6 +170,15 @@ const main = async (): Promise<void> => {
     // frame; logs to stderr.
     process.env.LOG_STDERR = '1';
     await runLanding(hookClient(clientKindFromArgs(process.argv.slice(3))));
+    return;
+  }
+
+  if (command === 'release') {
+    // A manual run of the check the landing hook makes after every command:
+    // this folder's project, the throttles lifted, the line printed on
+    // stdout, so logs go to stderr.
+    process.env.LOG_STDERR = '1';
+    await runRelease();
     return;
   }
 

@@ -59,6 +59,16 @@ export const landingCheckDue = (
   );
 };
 
+/**
+ * When this squash/card pair was last asked about, or undefined if never. A
+ * caller with less time than work asks the never-asked first, then the
+ * longest-waiting, so a stalled server cannot starve the same pairs forever.
+ */
+export const landingCheckedAt = (
+  path: string,
+  key: string
+): number | undefined => load(path)[key]?.checked_at;
+
 /** Record what a check found. Best-effort. */
 export const recordLandingCheck = (
   path: string,

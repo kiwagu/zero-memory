@@ -106,4 +106,49 @@ describe('renderBoardSummary', () => {
       renderBoardSummary({ bound_card: null, active: 0, waiting: 0, lead: [] })
     ).toBeNull();
   });
+
+  it('names the production state and which named cards it released', () => {
+    const block = renderBoardSummary({
+      bound_card: null,
+      active: 1,
+      waiting: 0,
+      lead: [{ ...card(21, 'Memory floor', 'active'), released_in: '0.25.0' }],
+      production: {
+        version: '0.25.0',
+        build: '849d7cac',
+        observed_at: '2026-09-24T08:00:00Z',
+      },
+    })!;
+    expect(block).toContain(
+      '- Production: v0.25.0 (build 849d7cac) as of 2026-09-24T08:00:00Z'
+    );
+    expect(block).toContain('ZM-21 "Memory floor" [active] released v0.25.0');
+  });
+
+  it('stays byte-for-byte the same when there is no production state and no released card', () => {
+    const before = renderBoardSummary({
+      bound_card: {
+        ...card(3, 'Wire the importer', 'active'),
+        state_reason: null,
+        refs: 0,
+        updated_at: '2026-09-21T10:00:00Z',
+      },
+      active: 1,
+      waiting: 0,
+      lead: [],
+    });
+    const after = renderBoardSummary({
+      bound_card: {
+        ...card(3, 'Wire the importer', 'active'),
+        state_reason: null,
+        refs: 0,
+        updated_at: '2026-09-21T10:00:00Z',
+      },
+      active: 1,
+      waiting: 0,
+      lead: [],
+      production: null,
+    });
+    expect(after).toBe(before);
+  });
 });

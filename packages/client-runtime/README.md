@@ -61,6 +61,12 @@ per-client differences (event map, output frame, transcript source) live in the
 - `offset-state.ts` — `OffsetState`: persisted per-file byte offsets
   (`watcher.json`) so a restarted transcript watcher resumes where it left off
   instead of re-ingesting whole transcripts.
+- `release-check.state.ts` — per-project release-check state
+  (`release-checks.json`): the last setting fetched and when, the last
+  version seen and when (or when the url last failed to answer), and which
+  versions each checkout of the project already handled — what lets the
+  check ask the setting and the url no more than once every ten and two
+  minutes.
 
 ### Ingest consent (shared policy)
 
@@ -93,6 +99,9 @@ touch the wire. Authentication is delegated to `@workspace/mcp-oauth-client`
 - `receipt-client.ts` — `callSessionReceipt` (the `session_receipt` tool).
 - `capture-client.ts` — `callRemember` (the `remember` tool).
 - `import-client.ts` — `ImportClient` (the `import_memory` tool).
+- `release-client.ts` — `fetchDeployedVersion` (reads a project's version
+  url — https, http only on localhost, no credentials, no redirects) and
+  `callRelease` (the `release` tool), both within a deadline.
 
 ## Consumers
 

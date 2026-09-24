@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   LANDING_RETRY_MS,
   landingCheckDue,
+  landingCheckedAt,
   recordLandingCheck,
 } from './landing-check.state.js';
 
@@ -26,6 +27,12 @@ describe('landing checks', () => {
     expect(landingCheckDue(path, 'abc#19', 10_000_000)).toBe(false);
     recordLandingCheck(path, 'def#20', 'recorded', 1000);
     expect(landingCheckDue(path, 'def#20', 10_000_000)).toBe(false);
+  });
+
+  it('says when a pair was last asked about, and nothing for one never asked', () => {
+    expect(landingCheckedAt(path, 'abc#19')).toBeUndefined();
+    recordLandingCheck(path, 'abc#19', 'error', 1234);
+    expect(landingCheckedAt(path, 'abc#19')).toBe(1234);
   });
 
   it('retries a check the server could not answer, but not at once', () => {
