@@ -2379,6 +2379,35 @@ export type Database = {
           provider: string;
         }[];
       };
+      release_candidates: {
+        Args: { p_scope: string; p_version: string };
+        Returns: Json;
+      };
+      release_configure: {
+        Args: {
+          p_on_release?: string;
+          p_scope: string;
+          p_tag_pattern?: string;
+          p_tag_template?: string;
+          p_version_field?: string;
+          p_version_url?: string;
+        };
+        Returns: Json;
+      };
+      release_record: {
+        Args: {
+          p_agent_label?: string;
+          p_build: string;
+          p_card_ids?: string[];
+          p_release_commit: string;
+          p_scope: string;
+          p_source: string;
+          p_thread?: string;
+          p_version: string;
+        };
+        Returns: Json;
+      };
+      release_settings: { Args: { p_scope: string }; Returns: Json };
       rename_scope: {
         Args: { p_new_slug: string; p_scope: unknown };
         Returns: string;
