@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  releaseCandidateSchema,
   releaseInputSchema,
   releaseOutputSchema,
   releaseVersionSchema,
@@ -96,6 +97,35 @@ describe('the release tool contract', () => {
       moved: [],
     });
     expect(out.release?.first_observed).toBe(true);
+  });
+
+  it('names the landing each candidate was checked at, and a record gives it back', () => {
+    const card = {
+      id: 'crd_0000000000000023.0000000000',
+      number: 23,
+      title: 't',
+      state: 'waiting',
+      landings: [],
+    };
+    expect(releaseCandidateSchema.safeParse(card).success).toBe(false);
+    expect(
+      releaseCandidateSchema.parse({ ...card, landing_seq: 7 }).landing_seq
+    ).toBe(7);
+    expect(
+      releaseInputSchema.parse({
+        action: 'record',
+        scope: 'proj.x',
+        card_ids: [card.id],
+        landing_seqs: [7],
+      }).landing_seqs
+    ).toEqual([7]);
+    expect(
+      releaseInputSchema.safeParse({
+        action: 'record',
+        scope: 'proj.x',
+        landing_seqs: Array.from({ length: 501 }, () => 1),
+      }).success
+    ).toBe(false);
   });
 
   it('refuses a version with a leading v', () => {

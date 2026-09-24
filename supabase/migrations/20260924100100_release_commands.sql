@@ -29,9 +29,12 @@
 --     observer's checkout, never here: release_candidates hands out the
 --     cards with nothing released since they last landed (a release marks
 --     what landed after the previous one, and a card that lands again is a
---     candidate again), each with only the landings since its last release,
---     and release_record keeps only the live cards of the named scope among
---     the ids it is given.
+--     candidate again), each with only the landings since its last release
+--     and the seq of its latest landing; release_record keeps only the live
+--     cards of the named scope among the ids it is given, and, given the
+--     landing seqs the observer checked, only the cards that have not landed
+--     again since — a card that lands while the observer looks keeps its
+--     candidacy for the release that actually ships the new landing.
 --   - A card is recorded once per version however many observers report it.
 --     The first observer's row of the state is kept as it was; seeing the
 --     state again moves only its last sighting, so a version production
@@ -164,6 +167,10 @@ begin
   return jsonb_build_object('cards', coalesce((
     select jsonb_agg(jsonb_build_object(
              'id', c.id, 'number', c.number, 'title', c.title, 'state', c.state,
+             -- Which landing the observer checks: release_record skips the
+             -- card when it has landed again since.
+             'landing_seq', (select max(l.seq) from public.card_events l
+                              where l.card_id = c.id and l.type = 'landed'),
              -- Only the landings since the card's last release: an earlier
              -- one is in every later release, so it proves nothing about
              -- this one.
@@ -204,6 +211,10 @@ create or replace function public.release_record(
   p_release_commit text,
   p_source text,
   p_card_ids text[] default '{}',
+  -- Parallel to p_card_ids: the seq of each card's latest landing as the
+  -- observer checked it (release_candidates' landing_seq). Omitted, every
+  -- card is taken as it is.
+  p_landing_seqs bigint[] default null,
   p_thread text default null,
   p_agent_label text default null
 )
@@ -222,6 +233,7 @@ declare
   v_recorded text[] := '{}';
   v_moved text[] := '{}';
   v_id text;
+  v_count integer := coalesce(cardinality(p_card_ids), 0);
 begin
   -- Every refusal before the first write.
   begin
@@ -242,6 +254,10 @@ begin
     return jsonb_build_object('error', 'invalid', 'message',
       'A release names its version, the commit it resolved to (7 to 64 hex), and its source (url or tag).');
   end if;
+  if p_landing_seqs is not null and cardinality(p_landing_seqs) <> v_count then
+    return jsonb_build_object('error', 'invalid', 'message',
+      'landing_seqs names one landing per card in card_ids, in the same order.');
+  end if;
 
   select on_release into v_policy
     from public.scope_release_settings where scope operator(extensions.=) v_scope;
@@ -258,11 +274,18 @@ begin
   select * into v_release from public.scope_releases
    where scope operator(extensions.=) v_scope and version = p_version;
 
-  foreach v_id in array coalesce(p_card_ids, '{}') loop
+  for i in 1 .. v_count loop
+    v_id := p_card_ids[i];
     select * into v_card from public.cards
      where id = v_id and scope operator(extensions.=) v_scope and archived_at is null
      for update;
     continue when not found;
+    -- Landed again since the observer checked (card_land takes the same row
+    -- lock): this release does not carry that landing, so the card stays a
+    -- candidate for the one that does, and is neither recorded nor moved.
+    continue when p_landing_seqs is not null
+      and (select max(seq) from public.card_events
+            where card_id = v_id and type = 'landed') is distinct from p_landing_seqs[i];
     continue when exists (select 1 from public.card_events
                            where card_id = v_id and type = 'released'
                              and release_version = p_version);
@@ -301,11 +324,11 @@ $$;
 revoke all on function public.release_settings(text) from public, anon;
 revoke all on function public.release_configure(text, text, text, text, text, text) from public, anon;
 revoke all on function public.release_candidates(text, text) from public, anon;
-revoke all on function public.release_record(text, text, text, text, text, text[], text, text) from public, anon;
+revoke all on function public.release_record(text, text, text, text, text, text[], bigint[], text, text) from public, anon;
 grant execute on function public.release_settings(text) to authenticated, service_role;
 grant execute on function public.release_configure(text, text, text, text, text, text) to authenticated, service_role;
 grant execute on function public.release_candidates(text, text) to authenticated, service_role;
-grant execute on function public.release_record(text, text, text, text, text, text[], text, text) to authenticated, service_role;
+grant execute on function public.release_record(text, text, text, text, text, text[], bigint[], text, text) to authenticated, service_role;
 
 -- 4. a card reads its releases back ------------------------------------------
 

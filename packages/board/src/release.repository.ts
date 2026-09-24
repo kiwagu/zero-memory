@@ -23,6 +23,11 @@ export interface RecordReleaseParams {
   releaseCommit: string;
   source: 'url' | 'tag';
   cardIds: string[];
+  /**
+   * Parallel to `cardIds`: the seq of each card's latest landing as the
+   * caller checked it. A card that landed again since is skipped.
+   */
+  landingSeqs?: number[];
   thread?: string;
   agentLabel?: string;
 }

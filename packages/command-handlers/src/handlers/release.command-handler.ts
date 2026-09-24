@@ -78,6 +78,18 @@ export class ReleaseCommandHandler implements ICommandHandler<
           ),
         };
       case 'record': {
+        const cardIds = command.card_ids ?? [];
+        if (
+          command.landing_seqs !== undefined &&
+          command.landing_seqs.length !== cardIds.length
+        ) {
+          throw new FailureError(
+            failure(
+              'validation_failed',
+              '`landing_seqs` names one landing per card in `card_ids`, in the same order.'
+            )
+          );
+        }
         const written = unwrap(
           await this.service.record({
             scope: command.scope,
@@ -87,7 +99,8 @@ export class ReleaseCommandHandler implements ICommandHandler<
               command.release_commit ??
               missing('release_commit', 'record a release'),
             source: command.source ?? missing('source', 'record a release'),
-            cardIds: command.card_ids ?? [],
+            cardIds,
+            landingSeqs: command.landing_seqs,
             thread: command.thread,
             agentLabel: command.agent_label,
           })

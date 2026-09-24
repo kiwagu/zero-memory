@@ -305,6 +305,9 @@ const inspectRelease = async (
         release_commit: commit,
         source,
         card_ids: carried.map((c) => c.id),
+        // The landing each card was checked at: one that lands again before
+        // this record is skipped and waits for the release that ships it.
+        landing_seqs: carried.map((c) => c.landing_seq),
       },
       left()
     );

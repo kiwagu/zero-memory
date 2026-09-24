@@ -2402,6 +2402,7 @@ export type Database = {
           p_agent_label?: string;
           p_build: string;
           p_card_ids?: string[];
+          p_landing_seqs?: number[];
           p_release_commit: string;
           p_scope: string;
           p_source: string;

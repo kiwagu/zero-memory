@@ -19,6 +19,7 @@ export class ReleaseCommand extends Command implements ReleaseInput {
   public readonly release_commit?: string;
   public readonly source?: ReleaseInput['source'];
   public readonly card_ids?: ReleaseInput['card_ids'];
+  public readonly landing_seqs?: number[];
   public readonly thread?: string;
   public readonly agent_label?: string;
 
@@ -36,6 +37,7 @@ export class ReleaseCommand extends Command implements ReleaseInput {
     this.release_commit = props.release_commit;
     this.source = props.source;
     this.card_ids = props.card_ids;
+    this.landing_seqs = props.landing_seqs;
     this.thread = props.thread;
     this.agent_label = props.agent_label;
   }

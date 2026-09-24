@@ -541,4 +541,91 @@ test.describe('Release commands in the store', () => {
       { repo: REPO, branch: 'feature/twice', squash_sha: 'bbbbbbb' },
     ]);
   });
+
+  test('a card that lands again while an observer looks keeps its candidacy', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `release-race-${Date.now()}`);
+    const db = asUser(token);
+    await rpc(db, 'release_configure', {
+      p_scope: scope,
+      p_on_release: 'record_and_move_done',
+    });
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Landed while looked at',
+    });
+    await rpc(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'waiting',
+      p_reason: 'set by hand',
+    });
+    const land = (sha: string) =>
+      rpc(db, 'card_land', {
+        p_card_id: card.id,
+        p_repo: REPO,
+        p_branch: 'feature/raced',
+        p_squash_sha: sha,
+        p_target: 'main',
+        p_reason: 'landed',
+      });
+    const candidates = async () =>
+      (
+        await rpc<{ cards: Array<{ id: string; landing_seq: number }> }>(
+          db,
+          'release_candidates',
+          { p_scope: scope, p_version: '5.0.0' }
+        )
+      ).cards;
+    const record = (version: string, cardIds: string[], seqs: number[]) =>
+      rpc<{ error?: string; recorded: string[]; moved: string[] }>(
+        db,
+        'release_record',
+        {
+          p_scope: scope,
+          p_version: version,
+          p_build: null,
+          p_release_commit: 'aaaaaaa',
+          p_source: 'tag',
+          p_card_ids: cardIds,
+          p_landing_seqs: seqs,
+        }
+      );
+
+    await land('aaaaaaa');
+    const looked = (await candidates())[0]?.landing_seq ?? -1;
+    expect(looked).toBeGreaterThan(0);
+
+    // Another session lands the card again before the observer records what
+    // it checked: the release it records does not carry the new landing.
+    await land('bbbbbbb');
+    const stale = await record('5.0.0', [card.id], [looked]);
+    expect(stale.recorded).toEqual([]);
+    expect(stale.moved).toEqual([]);
+    const still = await candidates();
+    expect(still.map((c) => c.id)).toEqual([card.id]);
+    expect(still[0]?.landing_seq).toBeGreaterThan(looked);
+    const kept = await rpc<{ card: { state: string } }>(db, 'card_get', {
+      p_card_id: card.id,
+    });
+    expect(kept.card.state).toBe('waiting');
+
+    // The landing the observer checked is still the latest: recorded, moved.
+    const fresh = await record(
+      '5.0.1',
+      [card.id],
+      [still[0]?.landing_seq ?? -1]
+    );
+    expect(fresh.recorded).toEqual([card.id]);
+    expect(fresh.moved).toEqual([card.id]);
+
+    // One landing per card, or nothing is written.
+    const uneven = await record('5.0.2', [card.id], [1, 2]);
+    expect(uneven.error).toBe('invalid');
+    expect(
+      psql(
+        `select count(*) from public.scope_releases where scope = '${scope}' and version = '5.0.2'`
+      )
+    ).toBe('0');
+  });
 });

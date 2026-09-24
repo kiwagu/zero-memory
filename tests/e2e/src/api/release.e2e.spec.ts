@@ -126,6 +126,82 @@ test.describe('Releases over MCP', () => {
     }
   });
 
+  test('a record gives back the landing it checked, and a card that landed again since is skipped', async () => {
+    const seed = await readSeedState();
+    const agent = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await agent.callTool('remember', {
+          content: `e2e release race marker ${Date.now()}: the cache warms on deploy`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-release-race-${Date.now()}`,
+        })
+      ).scope;
+      const branch = { repo: 'acme/memory-service', name: 'feature/warmup' };
+      const card = firstJson<{ card: { id: string } }>(
+        await agent.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'Warm the cache on deploy',
+          state: 'active',
+          branch,
+        })
+      ).card;
+      const land = (squash: string) =>
+        agent.callTool('card', {
+          action: 'land',
+          card_id: card.id,
+          branch,
+          squash_sha: squash,
+          target: 'main',
+          reason: 'gate green',
+        });
+      const candidates = async () =>
+        firstJson<{ cards: Array<{ id: string; landing_seq: number }> }>(
+          await agent.callTool('release', {
+            action: 'candidates',
+            scope,
+            version: '2.0.0',
+          })
+        ).cards;
+      const record = (version: string, landingSeqs: number[]) =>
+        agent.callTool('release', {
+          action: 'record',
+          scope,
+          version,
+          release_commit: 'aaaaaaa',
+          source: 'tag',
+          card_ids: [card.id],
+          landing_seqs: landingSeqs,
+        });
+
+      await land('aaaaaaa');
+      const looked = (await candidates())[0]?.landing_seq ?? -1;
+      expect(looked).toBeGreaterThan(0);
+
+      const uneven = await record('2.0.0', []);
+      expect(uneven.isError ?? false).toBe(true);
+      expect(contentText(uneven)).toMatch(/landing_seqs/u);
+
+      // Landed again after the observer looked: the record skips the card.
+      await land('bbbbbbb');
+      const stale = await record('2.0.0', [looked]);
+      expect(stale.isError ?? false).toBe(false);
+      expect(firstJson<{ recorded: string[] }>(stale).recorded).toEqual([]);
+
+      const again = await candidates();
+      expect(again.map((c) => c.id)).toEqual([card.id]);
+      const fresh = await record('2.0.1', [again[0]?.landing_seq ?? -1]);
+      expect(firstJson<{ recorded: string[] }>(fresh).recorded).toEqual([
+        card.id,
+      ]);
+    } finally {
+      await agent.close();
+    }
+  });
+
   test('configure changes only the fields it is given', async () => {
     const seed = await readSeedState();
     const agent = await McpTestClient.connect(

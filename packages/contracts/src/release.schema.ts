@@ -40,13 +40,16 @@ export const releaseLandingSchema = z.object({
  * A card a production state could carry: it landed, and nothing has been
  * released since its latest landing. `landings` lists only the landings
  * since the card's last release — an earlier one is in every later release,
- * so it proves nothing about this one.
+ * so it proves nothing about this one. `landing_seq` names the latest
+ * landing: a record that passes it back skips the card if it landed again
+ * in between.
  */
 export const releaseCandidateSchema = z.object({
   id: cardIdSchema,
   number: z.number().int().positive(),
   title: z.string(),
   state: cardStateSchema,
+  landing_seq: z.number().int(),
   landings: z.array(releaseLandingSchema).default([]),
 });
 export type ReleaseCandidate = z.infer<typeof releaseCandidateSchema>;
@@ -133,6 +136,14 @@ export const releaseInputSchema = z.object({
     .max(500)
     .optional()
     .describe('For record: the cards the state carries.'),
+  landing_seqs: z
+    .array(z.number().int())
+    .max(500)
+    .optional()
+    .describe(
+      "For record: each card's `landing_seq` from candidates, in the same " +
+        'order as card_ids. A card that landed again since is skipped.'
+    ),
   thread: authorshipFields.thread,
   agent_label: authorshipFields.agent_label,
 });

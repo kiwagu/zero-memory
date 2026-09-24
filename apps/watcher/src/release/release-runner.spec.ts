@@ -55,6 +55,7 @@ const candidate = (n: number, squash: string): ReleaseCandidate => ({
   number: n,
   title: `card ${n}`,
   state: 'waiting',
+  landing_seq: 100 + n,
   landings: [{ repo: REPO, branch: `feature/${n}`, squash_sha: squash }],
 });
 
@@ -164,6 +165,8 @@ describe('checkRelease', () => {
       release_commit: release,
       source: 'url',
       card_ids: [cardId(23)],
+      // The landing it checked: a card that lands again meanwhile is skipped.
+      landing_seqs: [123],
     });
 
     expect(await checkRelease(repo, { now: T0 + 1000 })).toBeNull(); // url not asked again yet

@@ -114,6 +114,7 @@ export class SupabaseReleaseRepository implements IReleaseRepository {
       p_release_commit: params.releaseCommit,
       p_source: params.source,
       p_card_ids: params.cardIds,
+      p_landing_seqs: params.landingSeqs,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
     };
