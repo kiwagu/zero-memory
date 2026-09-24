@@ -388,10 +388,40 @@ def register(ctx) -> None:  # noqa: ANN001 - host-provided PluginContext
         if line:
             logger.info("zero-memory: %s", line)
 
+    # ── notice: a squash the board has not heard of ───────────────────────
+    def transform_tool_result(
+        tool_name: str = "",
+        args: object = None,
+        result: object = None,
+        session_id: str = "",
+        **_: object,
+    ) -> str | None:
+        """Append the landing reminder to a terminal command's result.
+
+        The one hook that reaches the model right after a command: Hermes
+        hands the returned string to the model in place of the result. Which
+        commits count and whether the board already knows is the watcher's
+        decision, exactly as on the other clients; this only carries the line.
+        """
+        if tool_name != "terminal" or not isinstance(result, str):
+            return None
+        workdir = args.get("workdir") if isinstance(args, dict) else None
+        cwd = workdir if isinstance(workdir, str) and workdir else _cwd(session_id)
+        reminder = watcher_mod.extract_context(
+            watcher_mod.run_hook(
+                binary,
+                ["landing"],
+                _hook_payload(session_id, cwd, "PostToolUse", tool_name=tool_name),
+                timeout,
+            )
+        )
+        return f"{result}\n\n{reminder}" if reminder else None
+
     ctx.register_hook("on_session_start", on_session_start)
     ctx.register_hook("pre_llm_call", pre_llm_call)
     ctx.register_hook("post_llm_call", post_llm_call)
     ctx.register_hook("post_tool_call", post_tool_call)
+    ctx.register_hook("transform_tool_result", transform_tool_result)
     ctx.register_hook("on_session_end", on_session_end)
 
     # ── /zm — the in-session command surface ──────────────────────────────

@@ -35,6 +35,13 @@ per-client differences (event map, output frame, transcript source) live in the
   open at once, so a token kept per repository is overwritten by whichever
   session briefed last and the others begin quoting a conversation that is not
   theirs. A session with no token of its own renders the project line alone.
+  It also holds the current window's briefing TAIL (`recordBriefTail` /
+  `readBriefTail` / `clearBriefTail`): the `BriefTail` queue
+  (`@workspace/client-core`) of memories the first briefing of the epoch could
+  not fit, drained one per later message. Like `rules_epoch`, the tail is
+  per-window — `stampSessionStart` drops it on the same epoch boundary that
+  un-delivers the rules, so a window that lost its context gets a fresh
+  briefing rather than the previous window's leftovers.
 - `project-scope.state.ts` — the resolved project scope per repo root
   (`project-scopes.json`): the client half of the project handshake, so a later
   session (and the offline briefing) opens with the trusted project identity
@@ -54,6 +61,12 @@ per-client differences (event map, output frame, transcript source) live in the
 - `offset-state.ts` — `OffsetState`: persisted per-file byte offsets
   (`watcher.json`) so a restarted transcript watcher resumes where it left off
   instead of re-ingesting whole transcripts.
+- `release-check.state.ts` — per-project release-check state
+  (`release-checks.json`): the last setting fetched and when, the last
+  version seen and when (or when the url last failed to answer), and which
+  versions each checkout of the project already handled — what lets the
+  check ask the setting and the url no more than once every ten and two
+  minutes.
 
 ### Ingest consent (shared policy)
 
@@ -86,6 +99,9 @@ touch the wire. Authentication is delegated to `@workspace/mcp-oauth-client`
 - `receipt-client.ts` — `callSessionReceipt` (the `session_receipt` tool).
 - `capture-client.ts` — `callRemember` (the `remember` tool).
 - `import-client.ts` — `ImportClient` (the `import_memory` tool).
+- `release-client.ts` — `fetchDeployedVersion` (reads a project's version
+  url — https, http only on localhost, no credentials, no redirects) and
+  `callRelease` (the `release` tool), both within a deadline.
 
 ## Consumers
 

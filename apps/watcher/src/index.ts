@@ -30,6 +30,7 @@ import {
 import { runBrief } from './brief/brief-runner.js';
 import { runGuide } from './guide/guide-runner.js';
 import { runNudge } from './guide/nudge-runner.js';
+import { runLanding } from './landing/landing-runner.js';
 import { parseHooksArgs, runHooks } from './hooks/hooks-runner.js';
 import { parseImportArgs, runImport } from './import/import-runner.js';
 import {
@@ -40,6 +41,7 @@ import { runStopIngest } from './ingest-hook/ingest-hook-runner.js';
 import { runCapture } from './capture/capture-runner.js';
 import { runLogs } from './logs/logs-runner.js';
 import { runReceipt } from './receipt/receipt-runner.js';
+import { runRelease } from './release/release-runner.js';
 import { runStatus, runStatusJson } from './status/status-runner.js';
 import { runWatcherLogin } from './login/login-runner.js';
 import { IngestClient } from '@workspace/client-runtime';
@@ -159,6 +161,24 @@ const main = async (): Promise<void> => {
     // search (grep/glob). Keeps stdout for the frame; logs to stderr.
     process.env.LOG_STDERR = '1';
     await runNudge(hookClient(clientKindFromArgs(process.argv.slice(3))));
+    return;
+  }
+
+  if (command === 'landing') {
+    // PostToolUse companion on shell commands: a fresh squash whose card has
+    // no record of it gets one line in the same turn. Keeps stdout for the
+    // frame; logs to stderr.
+    process.env.LOG_STDERR = '1';
+    await runLanding(hookClient(clientKindFromArgs(process.argv.slice(3))));
+    return;
+  }
+
+  if (command === 'release') {
+    // A manual run of the check the landing hook makes after every command:
+    // this folder's project, the throttles lifted, the line printed on
+    // stdout, so logs go to stderr.
+    process.env.LOG_STDERR = '1';
+    await runRelease();
     return;
   }
 

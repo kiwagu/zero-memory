@@ -1,10 +1,13 @@
 export {
   briefStatePath,
+  clearBriefTail,
   loadBriefState,
   markRulesDelivered,
   markTaskBriefed,
   MAX_TRACKED_SESSIONS,
+  readBriefTail,
   readSessionThread,
+  recordBriefTail,
   recordSessionBriefing,
   recordSessionThread,
   stampSessionStart,
@@ -68,6 +71,7 @@ export {
   type ServerProbe,
 } from './server-probe.js';
 export { callSessionReceipt } from './receipt-client.js';
+export { callCardBranches, type CardBranches } from './board-client.js';
 export { callRemember } from './capture-client.js';
 export { ImportClient } from './import-client.js';
 
@@ -88,3 +92,30 @@ export {
   readProjectScope,
   recordProjectScope,
 } from './project-scope.state.js';
+
+// Landing checks: which squash commits this machine already asked the board
+// about, so a landing is reminded about once.
+export {
+  LANDING_RETRY_MS,
+  landingCheckDue,
+  landingCheckedAt,
+  landingCheckStatePath,
+  recordLandingCheck,
+  type LandingCheckOutcome,
+} from './landing-check.state.js';
+
+// Release checks: what this machine knows about each project's production
+// state, so a release is recorded and told once.
+export {
+  RELEASE_FETCH_EVERY_MS,
+  RELEASE_RETRY_MS,
+  RELEASE_SETTINGS_TTL_MS,
+  readReleaseState,
+  releaseCheckStatePath,
+  releaseHandledDue,
+  writeReleaseState,
+  type ReleaseCheckOutcome,
+  type ReleaseCheckoutState,
+  type ReleaseProjectState,
+} from './release-check.state.js';
+export { callRelease, fetchDeployedVersion } from './release-client.js';

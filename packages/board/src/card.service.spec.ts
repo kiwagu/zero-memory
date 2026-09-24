@@ -80,6 +80,10 @@ class RecordingRepository implements ICardRepository {
   resolve = async (): Promise<never> => {
     throw new Error('not used');
   };
+  land = async (): Promise<Result<CardWrite, CardFailure>> => {
+    this.calls.push('land');
+    return this.#ok();
+  };
 }
 
 describe('CardService', () => {
@@ -173,6 +177,97 @@ describe('CardService', () => {
       true
     );
     expect(repository.calls).toEqual([]);
+  });
+
+  const branch = { repo: 'kiwagu/zero-memory', name: 'feature/x' };
+
+  it('refuses a branch and a no-code declaration together', async () => {
+    const result = await service.moveCard({
+      cardId,
+      to: 'active',
+      reason: 'start',
+      branch,
+      noBranch: 'research',
+    });
+    expect(result.unwrapErr().message).toMatch(/not both/u);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a blank declaration', async () => {
+    expect(
+      (
+        await service.moveCard({
+          cardId,
+          to: 'active',
+          reason: 'start',
+          noBranch: '  ',
+        })
+      ).isErr()
+    ).toBe(true);
+    expect(
+      (
+        await service.moveCard({
+          cardId,
+          to: 'waiting',
+          reason: 'hold',
+          notLanded: '',
+        })
+      ).isErr()
+    ).toBe(true);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a branch on a move that is not into active', async () => {
+    const result = await service.moveCard({
+      cardId,
+      to: 'waiting',
+      reason: 'hold',
+      branch,
+    });
+    expect(result.unwrapErr().message).toMatch(/entering active/u);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a branch on a card opened outside active', async () => {
+    const result = await service.createCard({
+      scope: 'proj.x',
+      title: 'Idea',
+      branch,
+    });
+    expect(result.isErr()).toBe(true);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('leaves the open-branch question to the store', async () => {
+    // Whether the card already holds an open branch is known only under its
+    // lock.
+    await service.moveCard({ cardId, to: 'active', reason: 'resume' });
+    expect(repository.calls).toEqual(['move']);
+  });
+
+  it('refuses a landing without its commit, target or reason before a round trip', async () => {
+    for (const bad of [
+      { squashSha: 'nope', target: 'main', reason: 'ok' },
+      { squashSha: 'abcdef1', target: 'has space', reason: 'ok' },
+      { squashSha: 'abcdef1', target: 'main', reason: '  ' },
+    ]) {
+      expect((await service.landCard({ cardId, branch, ...bad })).isErr()).toBe(
+        true
+      );
+    }
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('passes a landing through with a normalized sha', async () => {
+    const result = await service.landCard({
+      cardId,
+      branch,
+      squashSha: 'ABCDEF1',
+      target: 'main',
+      reason: 'gate green',
+    });
+    expect(result.isOk()).toBe(true);
+    expect(repository.calls).toEqual(['land']);
   });
 
   it('refuses a card address that is not a positive number', async () => {

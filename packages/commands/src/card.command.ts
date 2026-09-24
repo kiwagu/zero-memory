@@ -1,13 +1,19 @@
-import type { CardInput, CardState, MemoryId } from '@workspace/contracts';
+import type {
+  CardBranch,
+  CardInput,
+  CardState,
+  MemoryId,
+} from '@workspace/contracts';
 import { Command, type CommandProps } from '@workspace/domain';
 
 /**
  * Open a card, promote a loop into one, rewrite its text, declare where the
- * work stands, or take it off the board. Props mirror `cardInputSchema`.
+ * work stands, take it off the board, or record that its branch landed. Props
+ * mirror `cardInputSchema`.
  *
- * One command for five verbs because they share a subject and a guard: each
- * writes the card and its stream in the same breath, and a move or an archive
- * is refused without a reason.
+ * One command for six verbs because they share a subject and a guard: each
+ * writes the card and its stream in the same breath, and a move, an archive
+ * or a landing is refused without a reason.
  */
 export class CardCommand extends Command implements CardInput {
   public readonly action: CardInput['action'];
@@ -20,6 +26,11 @@ export class CardCommand extends Command implements CardInput {
   public readonly to?: CardState;
   public readonly reason?: string;
   public readonly expected_revision?: number;
+  public readonly branch?: CardBranch;
+  public readonly no_branch?: string;
+  public readonly not_landed?: string;
+  public readonly squash_sha?: string;
+  public readonly target?: string;
   public readonly thread?: string;
   public readonly agent_label?: string;
   public readonly idempotency_key?: string;
@@ -36,6 +47,11 @@ export class CardCommand extends Command implements CardInput {
     this.to = props.to;
     this.reason = props.reason;
     this.expected_revision = props.expected_revision;
+    this.branch = props.branch;
+    this.no_branch = props.no_branch;
+    this.not_landed = props.not_landed;
+    this.squash_sha = props.squash_sha;
+    this.target = props.target;
     this.thread = props.thread;
     this.agent_label = props.agent_label;
     this.idempotency_key = props.idempotency_key;

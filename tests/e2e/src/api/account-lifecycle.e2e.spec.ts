@@ -98,6 +98,22 @@ const insertOrThrow = async (
   }
 };
 
+/**
+ * For an anonymized table keyed by something the fixture reuses: its row
+ * outlives the erasure, so a retried attempt meets it again and must take it
+ * over rather than collide with it.
+ */
+const upsertOrThrow = async (
+  db: SupabaseClient,
+  table: string,
+  row: Record<string, unknown>
+): Promise<void> => {
+  const { error } = await db.from(table).upsert(row);
+  if (error) {
+    throw new Error(`seed ${table}: ${error.message}`);
+  }
+};
+
 const updateOrThrow = async (
   db: SupabaseClient,
   table: string,
@@ -301,6 +317,26 @@ test.describe('account lifecycle: hard_delete_user', () => {
       kind: 'memory',
       target: m1,
       attached_by: userId,
+    });
+    await insertOrThrow(db, 'card_branches', {
+      card_id: cardId,
+      scope: sharedScope,
+      repo: 'acme/erasure',
+      branch: 'feature/erasure',
+      attached_by: userId,
+    });
+    // The project's release setting and one production state it was seen in:
+    // the project's rows, which erasure keeps while severing their author.
+    await upsertOrThrow(db, 'scope_release_settings', {
+      scope: sharedScope,
+      updated_by: userId,
+    });
+    await upsertOrThrow(db, 'scope_releases', {
+      scope: sharedScope,
+      version: '0.0.1',
+      release_commit: 'abcdef1',
+      source: 'tag',
+      observed_by: userId,
     });
     await insertOrThrow(db, 'usage_daily', {
       day: '2026-07-20',
@@ -684,6 +720,22 @@ test.describe('account lifecycle: hard_delete_user', () => {
         row![probe.column],
         `${probe.table}.${probe.column} still points at the erased user`
       ).toBeNull();
+    }
+
+    // Anonymized, not deleted: the project's release rows are still there,
+    // with nobody named as their author.
+    for (const [table, column] of [
+      ['scope_release_settings', 'updated_by'],
+      ['scope_releases', 'observed_by'],
+    ] as const) {
+      const { data, error } = await db
+        .from(table)
+        .select(column)
+        .eq('scope', sharedScope);
+      expect(error, `${table} after erasure`).toBeNull();
+      expect(data, `${table} rows went with the account`).toEqual([
+        { [column]: null },
+      ]);
     }
 
     // Excluded tables are not user data: erasure leaves them as it found them.

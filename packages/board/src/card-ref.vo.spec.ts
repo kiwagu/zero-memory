@@ -70,3 +70,15 @@ describe('flattenCardRef', () => {
     ).toEqual({ kind: 'url', target: 'https://example.invalid/a' });
   });
 });
+
+describe('a branch reference', () => {
+  it('keys and flattens a branch as <repo>:<branch>', () => {
+    const ref = { kind: 'branch' as const, repo: 'o/n', name: 'feature/x' };
+    expect(cardRefKey(ref)).toBe('branch:o/n:feature/x');
+    expect(flattenCardRef(ref)).toEqual({
+      kind: 'branch',
+      target: 'o/n:feature/x',
+    });
+    expect(parseCardRef(ref).isOk()).toBe(true);
+  });
+});

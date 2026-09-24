@@ -11,6 +11,13 @@ import type { WebTranslator } from '@workspace/i18n-catalogs/web';
  * authority either way — this file only has to describe what it sends.
  */
 
+/**
+ * A card's one label: the dashboard, a briefing and the squash trailer all
+ * call it ZM-N, so a search for one finds the others. Declared here rather
+ * than imported for the same bundler reason as the schemas below.
+ */
+export const cardLabel = (number: number): string => `ZM-${number}`;
+
 export const CARD_STATES = [
   'idea',
   'active',
@@ -45,6 +52,9 @@ export const boardCardSchema = z.object({
    * only the latest touch would hide exactly the thing the board exists for.
    */
   state_reason: z.string().nullable().default(null),
+  /** The version this card was last carried by. A server that predates
+   * releases, or a card no release has carried yet, reads as null. */
+  released_in: z.string().nullable().default(null),
 });
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
@@ -136,18 +146,72 @@ export const cardEventSchema = z.object({
   relation: z.string().nullable(),
   ref_kind: z.string().nullable(),
   ref_target: z.string().nullable(),
+  branch_note: z.string().nullable().default(null),
+  squash_sha: z.string().nullable().default(null),
+  target_branch: z.string().nullable().default(null),
+  /** For a `released` event: the production state that carried the card. */
+  release_version: z.string().nullable().default(null),
+  release_build: z.string().nullable().default(null),
+  release_commit: z.string().nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
 
+/**
+ * A git branch the card's work ran on, open or landed. `squash_sha` is its
+ * latest landing; `landings` is every landing, oldest first.
+ */
+export const cardBranchSchema = z.object({
+  repo: z.string(),
+  branch: z.string(),
+  state: z.enum(['open', 'landed']),
+  squash_sha: z.string().nullable(),
+  target: z.string().nullable(),
+  landed_at: z.string().nullable(),
+  attached_at: z.string(),
+  landings: z
+    .array(
+      z.object({
+        squash_sha: z.string(),
+        target: z.string().nullable(),
+        landed_at: z.string(),
+      })
+    )
+    .default([]),
+});
+export type CardBranch = z.infer<typeof cardBranchSchema>;
+
+/**
+ * One production state a card was carried by, as a card reads it back.
+ * Newest first — a card can be carried again once it lands again.
+ */
+export const cardReleaseSchema = z.object({
+  version: z.string(),
+  build: z.string().nullable(),
+  release_commit: z.string(),
+  released_at: z.string(),
+});
+export type CardRelease = z.infer<typeof cardReleaseSchema>;
+
 export const cardViewSchema = z.object({
   card: cardSchema,
   refs: z.array(cardRefSchema).default([]),
+  branches: z.array(cardBranchSchema).default([]),
+  releases: z.array(cardReleaseSchema).default([]),
   events: z.array(cardEventSchema).default([]),
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
 });
 export type CardView = z.infer<typeof cardViewSchema>;
+
+/** A board scope's production setting, as the dashboard reads it: read-only
+ * here — it is edited through the MCP `release` tool's `configure` action. */
+export const releaseSettingsSchema = z.object({
+  version_url: z.string().nullable(),
+  tag_template: z.string(),
+  on_release: z.enum(['record', 'record_and_move_done']),
+});
+export type ReleaseSettingsView = z.infer<typeof releaseSettingsSchema>;
 
 /**
  * A page of the card's feed: memories born in the conversations bound to it,
@@ -205,9 +269,66 @@ export function cardEventLabel(type: string, t: WebTranslator): string {
       return t('board.event.detached');
     case 'noted':
       return t('board.event.noted');
+    case 'landed':
+      return t('board.event.landed');
+    case 'released':
+      return t('board.event.released');
     default:
       return type;
   }
+}
+
+/**
+ * A board's release policy, in words. Literal keys only (lint-enforced): the
+ * setting is one of two enum values, so a switch maps each value to its
+ * literal key.
+ */
+export function releasePolicyLabel(
+  policy: 'record' | 'record_and_move_done',
+  t: WebTranslator
+): string {
+  switch (policy) {
+    case 'record':
+      return t('board.release.policy.record');
+    case 'record_and_move_done':
+      return t('board.release.policy.record_and_move_done');
+  }
+}
+
+/** Where a branch stands, in words: open, or where it landed. */
+export function cardBranchStateLabel(
+  branch: CardBranch,
+  t: WebTranslator
+): string {
+  if (branch.state === 'landed' && branch.squash_sha && branch.target) {
+    return t('board.branch.landed', {
+      sha: branch.squash_sha.slice(0, 7),
+      target: branch.target,
+    });
+  }
+  return t('board.branch.open');
+}
+
+/**
+ * The landings before the latest, in words, or null when the branch landed
+ * at most once. A branch lands again when a fix is made in the branch that
+ * brought the bug; the badge names the latest landing, this the rest.
+ */
+export function cardBranchEarlierLabel(
+  branch: CardBranch,
+  t: WebTranslator
+): string | null {
+  const latest = branch.squash_sha;
+  const earlier = branch.landings
+    .map((landing) => landing.squash_sha)
+    .filter(
+      (sha) =>
+        latest === null || !(sha.startsWith(latest) || latest.startsWith(sha))
+    )
+    .map((sha) => sha.slice(0, 7));
+  return earlier.length > 0
+    ? t('board.branch.earlier', { shas: earlier.join(', ') })
+    : null;
 }
 
 export function cardRelationLabel(relation: string, t: WebTranslator): string {

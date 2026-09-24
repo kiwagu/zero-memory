@@ -110,10 +110,65 @@ export type Database = {
           },
         ];
       };
+      card_branches: {
+        Row: {
+          attached_at: string;
+          attached_by: string;
+          branch: string;
+          card_id: string;
+          landed_at: string | null;
+          repo: string;
+          scope: unknown;
+          squash_sha: string | null;
+          state: string;
+          target_branch: string | null;
+        };
+        Insert: {
+          attached_at?: string;
+          attached_by?: string;
+          branch: string;
+          card_id: string;
+          landed_at?: string | null;
+          repo: string;
+          scope: unknown;
+          squash_sha?: string | null;
+          state?: string;
+          target_branch?: string | null;
+        };
+        Update: {
+          attached_at?: string;
+          attached_by?: string;
+          branch?: string;
+          card_id?: string;
+          landed_at?: string | null;
+          repo?: string;
+          scope?: unknown;
+          squash_sha?: string | null;
+          state?: string;
+          target_branch?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'card_branches_attached_by_fkey';
+            columns: ['attached_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_branches_card_id_fkey';
+            columns: ['card_id'];
+            isOneToOne: false;
+            referencedRelation: 'cards';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       card_events: {
         Row: {
           actor_id: string;
           agent_label: string | null;
+          branch_note: string | null;
           card_id: string;
           created_at: string;
           from_state: string | null;
@@ -124,10 +179,15 @@ export type Database = {
           ref_kind: string | null;
           ref_target: string | null;
           relation: string | null;
+          release_build: string | null;
+          release_commit: string | null;
+          release_version: string | null;
           reply_to: string | null;
           revision: number | null;
           scope: unknown;
           seq: number;
+          squash_sha: string | null;
+          target_branch: string | null;
           thread: string | null;
           to_state: string | null;
           type: string;
@@ -135,6 +195,7 @@ export type Database = {
         Insert: {
           actor_id?: string;
           agent_label?: string | null;
+          branch_note?: string | null;
           card_id: string;
           created_at?: string;
           from_state?: string | null;
@@ -145,10 +206,15 @@ export type Database = {
           ref_kind?: string | null;
           ref_target?: string | null;
           relation?: string | null;
+          release_build?: string | null;
+          release_commit?: string | null;
+          release_version?: string | null;
           reply_to?: string | null;
           revision?: number | null;
           scope: unknown;
           seq: number;
+          squash_sha?: string | null;
+          target_branch?: string | null;
           thread?: string | null;
           to_state?: string | null;
           type: string;
@@ -156,6 +222,7 @@ export type Database = {
         Update: {
           actor_id?: string;
           agent_label?: string | null;
+          branch_note?: string | null;
           card_id?: string;
           created_at?: string;
           from_state?: string | null;
@@ -166,10 +233,15 @@ export type Database = {
           ref_kind?: string | null;
           ref_target?: string | null;
           relation?: string | null;
+          release_build?: string | null;
+          release_commit?: string | null;
+          release_version?: string | null;
           reply_to?: string | null;
           revision?: number | null;
           scope?: unknown;
           seq?: number;
+          squash_sha?: string | null;
+          target_branch?: string | null;
           thread?: string | null;
           to_state?: string | null;
           type?: string;
@@ -1564,6 +1636,88 @@ export type Database = {
           },
         ];
       };
+      scope_release_settings: {
+        Row: {
+          on_release: string;
+          scope: unknown;
+          tag_pattern: string;
+          tag_template: string;
+          updated_at: string;
+          updated_by: string | null;
+          version_field: string;
+          version_url: string | null;
+        };
+        Insert: {
+          on_release?: string;
+          scope: unknown;
+          tag_pattern?: string;
+          tag_template?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version_field?: string;
+          version_url?: string | null;
+        };
+        Update: {
+          on_release?: string;
+          scope?: unknown;
+          tag_pattern?: string;
+          tag_template?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version_field?: string;
+          version_url?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'scope_release_settings_updated_by_fkey';
+            columns: ['updated_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      scope_releases: {
+        Row: {
+          build: string | null;
+          last_observed_at: string;
+          observed_at: string;
+          observed_by: string | null;
+          release_commit: string;
+          scope: unknown;
+          source: string;
+          version: string;
+        };
+        Insert: {
+          build?: string | null;
+          last_observed_at?: string;
+          observed_at?: string;
+          observed_by?: string | null;
+          release_commit: string;
+          scope: unknown;
+          source: string;
+          version: string;
+        };
+        Update: {
+          build?: string | null;
+          last_observed_at?: string;
+          observed_at?: string;
+          observed_by?: string | null;
+          release_commit?: string;
+          scope?: unknown;
+          source?: string;
+          version?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'scope_releases_observed_by_fkey';
+            columns: ['observed_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       scopes: {
         Row: {
           alias: string | null;
@@ -1801,7 +1955,10 @@ export type Database = {
         Args: {
           p_agent_label?: string;
           p_body?: string;
+          p_branch_name?: string;
+          p_branch_repo?: string;
           p_idempotency_key?: string;
+          p_no_branch?: string;
           p_origin_loop_id?: string;
           p_scope: string;
           p_state?: string;
@@ -1839,11 +1996,31 @@ export type Database = {
         Args: { p_after_seq?: number; p_card_id: string; p_limit?: number };
         Returns: Json;
       };
+      card_land: {
+        Args: {
+          p_agent_label?: string;
+          p_branch: string;
+          p_card_id: string;
+          p_idempotency_key?: string;
+          p_not_landed?: string;
+          p_reason: string;
+          p_repo: string;
+          p_squash_sha: string;
+          p_target: string;
+          p_thread?: string;
+          p_to_state?: string;
+        };
+        Returns: Json;
+      };
       card_move: {
         Args: {
           p_agent_label?: string;
+          p_branch_name?: string;
+          p_branch_repo?: string;
           p_card_id: string;
           p_idempotency_key?: string;
+          p_no_branch?: string;
+          p_not_landed?: string;
           p_reason: string;
           p_thread?: string;
           p_to_state: string;
@@ -1866,8 +2043,11 @@ export type Database = {
         Args: {
           p_agent_label?: string;
           p_body?: string;
+          p_branch_name?: string;
+          p_branch_repo?: string;
           p_idempotency_key?: string;
           p_loop_id: string;
+          p_no_branch?: string;
           p_state?: string;
           p_thread?: string;
           p_title: string;
@@ -2202,6 +2382,36 @@ export type Database = {
           provider: string;
         }[];
       };
+      release_candidates: {
+        Args: { p_scope: string; p_version: string };
+        Returns: Json;
+      };
+      release_configure: {
+        Args: {
+          p_on_release?: string;
+          p_scope: string;
+          p_tag_pattern?: string;
+          p_tag_template?: string;
+          p_version_field?: string;
+          p_version_url?: string;
+        };
+        Returns: Json;
+      };
+      release_record: {
+        Args: {
+          p_agent_label?: string;
+          p_build: string;
+          p_card_ids?: string[];
+          p_landing_seqs?: number[];
+          p_release_commit: string;
+          p_scope: string;
+          p_source: string;
+          p_thread?: string;
+          p_version: string;
+        };
+        Returns: Json;
+      };
+      release_settings: { Args: { p_scope: string }; Returns: Json };
       rename_scope: {
         Args: { p_new_slug: string; p_scope: unknown };
         Returns: string;

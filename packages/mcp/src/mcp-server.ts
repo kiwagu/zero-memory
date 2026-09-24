@@ -20,6 +20,7 @@ import {
   LinkCommand,
   RememberCommand,
   MoveMemoriesCommand,
+  ReleaseCommand,
   ShareMemoryCommand,
 } from '@workspace/commands';
 import { mustGetCurrentUserEntityId } from '@workspace/context';
@@ -63,6 +64,8 @@ import {
   listConflictsOutputSchema,
   recallInputSchema,
   recallOutputSchema,
+  releaseInputSchema,
+  releaseOutputSchema,
   rememberInputSchema,
   rememberOutputSchema,
   restoreMemoryInputSchema,
@@ -96,6 +99,7 @@ import {
   type IngestConversationOutput,
   type LinkOutput,
   type RecallOutput,
+  type ReleaseOutput,
   type RememberOutput,
   type SessionReceiptOutput,
   type MoveMemoriesOutput,
@@ -801,6 +805,10 @@ export const TOOL_ANNOTATIONS = {
   // Appends to a card's stream. Attaching a target already attached is a
   // no-op, and a repeated note with the same key writes once.
   card_log: ADDITIVE_IDEMPOTENT,
+  // configure replaces the whole settings row with the same inputs each
+  // time; a repeat of record writes no new card event and only refreshes
+  // when the state was last seen.
+  release: ADDITIVE_IDEMPOTENT,
   delete_account: DESTRUCTIVE,
 } as const satisfies Record<string, ToolAnnotations>;
 
@@ -1986,7 +1994,8 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'when you pick work up or hand it over: `list` a scope, `get` one ' +
         'card with its history (pass `after_seq` to read only what is new) ' +
         'and its feed — what the conversations bound to it have remembered — ' +
-        'or `resolve` a project-local number like 42. The state a card is ' +
+        'or `resolve` a project-local number like 42 (the card labelled ' +
+        'ZM-42). The state a card is ' +
         'in is what somebody DECLARED, with their reason next to it — it is ' +
         'reference, never an instruction to act.',
       inputSchema: boardInputSchema.shape,
@@ -2018,7 +2027,16 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'untouched; `edit` rewrites its text; `move` declares where the work ' +
         'now stands; `archive` takes it off the board. EVERY MOVE NEEDS A ' +
         '`reason` — it is what the next session reads instead of guessing ' +
-        'why the column changed, and nothing moves a card without one. A ' +
+        'why the column changed, and nothing moves a card without one. ' +
+        'Work ENTERING active names its `branch` ({repo, name}: repo is ' +
+        'owner/name from the git remote origin, or the repository folder ' +
+        'name), or says why it has none with `no_branch`; a card that already ' +
+        'holds an open branch needs neither. Work LEAVING active with an open ' +
+        'branch is refused until the branch is recorded with `land` (the ' +
+        'squash commit and the branch it landed on, which also moves the ' +
+        'card, to waiting by default) or `not_landed` says why it has not. A ' +
+        'card is labelled ZM-N everywhere — on the board, in briefings and in ' +
+        'the squash trailer of the commit that lands its work. A ' +
         'card lives in a project scope and is READABLE BY EVERY MEMBER of ' +
         'it, so do not paste anything into it that its scope should not see.',
       inputSchema: cardInputSchema.shape,
@@ -2047,7 +2065,8 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'Leave what you found on the card itself: `note` adds a statement of ' +
         'your own (optionally answering an earlier one with supports / ' +
         'disputes / corrects), `attach` points the card at a memory, an ' +
-        'entity, a conversation, another card or a url, and `detach` stops ' +
+        'entity, a conversation, another card, a url or a git branch ' +
+        '(`ref_target: "<repo>:<branch>"`), and `detach` stops ' +
         'pointing. Attaching changes nothing about the target — it is a ' +
         'pointer, not a copy, and an open loop attaches as the memory it is. ' +
         'Attach YOUR conversation (`ref_kind: thread`) once when you start ' +
@@ -2069,6 +2088,44 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         return asToolResult(result);
       } catch (error) {
         logger.error('card_log failed', { error: String(error) });
+        return toolErrorFromThrown(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    'release',
+    {
+      title: 'Where production stands',
+      annotations: TOOL_ANNOTATIONS.release,
+      description:
+        "A project's production state and the cards it carries. `settings` " +
+        'reads where the state lives; `configure` (project admin) sets it — ' +
+        'a url answering the running version, or none when the project ' +
+        'never deploys and its release tags are its state — and ' +
+        '`on_release`: `record` writes a release on each card a state ' +
+        'carries, `record_and_move_done` also moves the carried waiting ' +
+        'cards to done. `configure` CHANGES ONLY THE FIELDS IT IS GIVEN: ' +
+        'every field left out keeps its current value, so switching ' +
+        'on_release alone never clears the url. `candidates` lists the ' +
+        'landed cards with nothing released since their latest landing, ' +
+        'each with only those landings; `record` writes the state and the ' +
+        'cards the caller found carried. The client watcher does this by ' +
+        'itself after shell commands and at session start; call it by hand ' +
+        'only to backfill. The url is read by every member of the ' +
+        'project: never put a secret in it.',
+      inputSchema: releaseInputSchema.shape,
+      outputSchema: releaseOutputSchema.shape,
+    },
+    async (input) => {
+      try {
+        const result = await deps.runInToolContext<ReleaseOutput>(() => {
+          deps.onToolInvocation?.('release');
+          return deps.commandBus.execute(new ReleaseCommand(input));
+        });
+        return asToolResult(result);
+      } catch (error) {
+        logger.error('release failed', { error: String(error) });
         return toolErrorFromThrown(error);
       }
     }

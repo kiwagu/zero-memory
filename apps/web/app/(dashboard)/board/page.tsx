@@ -7,6 +7,7 @@ import {
 } from '@workspace/ui/components/board/board-columns';
 
 import { BoardFilter } from '@/components/board-filter.client';
+import { BoardSearch } from '@/components/board-search.client';
 import { BoardLive } from '@/components/board-live.client';
 import {
   ALL_BOARDS,
@@ -14,8 +15,11 @@ import {
   boardListSchema,
   boardScopesSchema,
   cardEventLabel,
+  cardLabel,
   cardStateLabel,
   cardStateVariant,
+  releasePolicyLabel,
+  releaseSettingsSchema,
   resolveBoardScope,
   type BoardCard,
 } from '@/lib/board';
@@ -34,9 +38,11 @@ const REASON_CHARS = 120;
 export default async function BoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ scope?: string }>;
+  searchParams: Promise<{ scope?: string; q?: string }>;
 }) {
-  const { scope } = await searchParams;
+  const { scope, q } = await searchParams;
+  // A label (ZM-42, #42, 42) or a piece of a title; the store decides which.
+  const query = q?.trim() ?? '';
   const { t } = await getRequestMessages();
 
   const supabase = await createServerSupabaseClient();
@@ -63,10 +69,28 @@ export default async function BoardPage({
     (aliasRows ?? []).map((row) => [String(row.scope), row.alias])
   );
 
-  const { data, error } = await supabase.rpc('board_list', {
-    p_scope: selected ?? undefined,
-    p_limit: BOARD_LIMIT,
-  });
+  // The release setting is read-only here: it is edited through the MCP
+  // `release` tool's `configure` action, never from the dashboard. It only
+  // applies to one selected board — "all boards" has no single setting to
+  // show. Started alongside board_list (Promise.all) so a single-board page
+  // load does not wait one more round trip for it.
+  const releaseQuery =
+    selected && selected !== ALL_BOARDS
+      ? supabase.rpc('release_settings', { p_scope: selected })
+      : Promise.resolve({ data: null });
+
+  const [{ data: releaseData }, { data, error }] = await Promise.all([
+    releaseQuery,
+    supabase.rpc('board_list', {
+      p_scope: selected ?? undefined,
+      p_query: query || undefined,
+      p_limit: BOARD_LIMIT,
+    }),
+  ]);
+  const releaseParsed = releaseSettingsSchema.safeParse(
+    (releaseData as { settings?: unknown } | null)?.settings
+  );
+  const release = releaseParsed.success ? releaseParsed.data : null;
 
   const parsed = data ? boardListSchema.safeParse(data) : null;
   const board = parsed?.success ? parsed.data : { cards: [], totals: {} };
@@ -85,10 +109,18 @@ export default async function BoardPage({
     cards: (byState.get(state) ?? []).map((card) => ({
       id: card.id,
       href: `/board/${card.id}`,
-      numberLabel: `#${card.number}`,
+      numberLabel: cardLabel(card.number),
       title: card.title,
       badges: [
         { label: scopeLabel(card.scope), variant: 'outline' as const },
+        ...(card.released_in
+          ? [
+              {
+                label: t('board.releasedIn', { version: card.released_in }),
+                variant: 'green' as const,
+              },
+            ]
+          : []),
         ...(card.refs > 0
           ? [
               {
@@ -116,47 +148,71 @@ export default async function BoardPage({
             for what is on screen rather than a form, so it costs a row of its
             own for nothing. Always present — hiding it with one board, or
             with an empty one, would leave the reader unable to see which
-            board they are looking at. An empty board filters to empty. */}
+            board they are looking at. An empty board filters to empty. The
+            filter beside it narrows the cards by label or title and lives in
+            the address with the board; nothing matching shows as nothing. */}
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold">{t('board.title')}</h1>
-          <BoardFilter
-            testId="board-scope-filter"
-            placeholder={
-              // The default row names the board it resolves to, so "opened on
-              // the latest activity" is visible rather than merely true.
-              value === '' && selected
-                ? t('board.scope.latestNamed', {
-                    scope: scopeOptionLabel(
-                      selected,
-                      aliasByScope.get(selected)
-                    ),
-                  })
-                : t('board.scope.latest')
-            }
-            value={value}
-            options={[
-              { value: ALL_BOARDS, label: t('board.scope.all') },
-              ...boards.map((board) => ({
-                value: board.scope,
-                label: scopeOptionLabel(
-                  board.scope,
-                  aliasByScope.get(board.scope)
-                ),
-                count: board.cards,
-              })),
-              // A board named in the address but holding nothing is still the
-              // board on screen, so the control says so instead of going blank.
-              ...(value !== '' &&
-              value !== ALL_BOARDS &&
-              !boards.some((board) => board.scope === value)
-                ? [{ value, label: scopeOptionLabel(value), count: 0 }]
-                : []),
-            ]}
-          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <BoardSearch
+              value={query}
+              placeholder={t('board.search.placeholder')}
+              submitLabel={t('board.search.submit')}
+            />
+            <BoardFilter
+              testId="board-scope-filter"
+              placeholder={
+                // The default row names the board it resolves to, so "opened on
+                // the latest activity" is visible rather than merely true.
+                value === '' && selected
+                  ? t('board.scope.latestNamed', {
+                      scope: scopeOptionLabel(
+                        selected,
+                        aliasByScope.get(selected)
+                      ),
+                    })
+                  : t('board.scope.latest')
+              }
+              value={value}
+              options={[
+                { value: ALL_BOARDS, label: t('board.scope.all') },
+                ...boards.map((board) => ({
+                  value: board.scope,
+                  label: scopeOptionLabel(
+                    board.scope,
+                    aliasByScope.get(board.scope)
+                  ),
+                  count: board.cards,
+                })),
+                // A board named in the address but holding nothing is still the
+                // board on screen, so the control says so instead of going blank.
+                ...(value !== '' &&
+                value !== ALL_BOARDS &&
+                !boards.some((board) => board.scope === value)
+                  ? [{ value, label: scopeOptionLabel(value), count: 0 }]
+                  : []),
+              ]}
+            />
+          </div>
         </div>
         <p className="text-muted-foreground text-sm">
           {t('board.description')}
         </p>
+        {release ? (
+          <p
+            className="text-muted-foreground text-sm"
+            data-testid="board-release-settings"
+          >
+            {t('board.release.settings', {
+              source:
+                release.version_url ??
+                t('board.release.tagsOnly', {
+                  template: release.tag_template,
+                }),
+              policy: releasePolicyLabel(release.on_release, t),
+            })}
+          </p>
+        ) : null}
       </div>
 
       {error ? (

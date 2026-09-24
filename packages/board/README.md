@@ -34,6 +34,15 @@ Two invariants shape everything else:
   blocks editing, attaching or noting. The board reports work; it never
   schedules it, claims it or hands it out.
 
+One more thing a move accounts for: **the branch**. Work entering `active`
+names the git branch it runs on, or says why it has none (`no_branch`), unless
+the card already holds an open branch; work leaving `active` with a branch
+still open either records the landing (`landCard`: the squash commit and the
+branch it landed on) or says why it has not landed (`not_landed`). The service
+refuses what it can see without the card — both at once, a blank declaration,
+a branch on a move that is not into `active` — and the store decides the rest
+under the card's lock, answering `branch_required` or `branch_open`.
+
 Archiving is the single terminal act: it takes a card off the board and
 freezes it. Reversible shelving is the `parked` state, which stays on the
 board and moves back like any other.
@@ -47,8 +56,9 @@ without recording a recall. Detaching the conversation is the whole undo.
 ## Key exports
 
 - `CardService` — the application service: `createCard`, `promoteLoop`,
-  `editCard`, `moveCard`, `archiveCard`, `attachRef`, `detachRef`,
-  `noteCard`, `readCard` (history and feed, each on its own cursor),
+  `editCard`, `moveCard`, `archiveCard`, `landCard`, `attachRef`,
+  `detachRef`, `noteCard`, `readCard` (branches, history and feed, the last
+  two each on its own cursor),
   `listBoard`, `resolveCard`. Every call returns a
   `Result`; a no-op (re-attaching the same target, an edit that changes
   nothing) is a success that reports `changed: false`.
@@ -56,11 +66,24 @@ without recording a recall. Detaching the conversation is the whole undo.
   its DI token. One method per atomic store command.
 - `CardFailure`, `toCardFailure`, `cardFailureToErrorCode` — why a call did
   not happen, and how that maps onto the transport's error vocabulary. Every
-  state refusal is a `conflict`; the message keeps the specific reason.
+  state refusal is a `conflict` (`branch_open` included); `branch_required`
+  is a missing input, so it is `validation_failed`. The message keeps the
+  specific reason.
+- `LandCardParams`, `CardBranchView`, `CardBranchLanding` — a landing as the
+  service takes it, and a branch as a card reads it back: its latest squash
+  commit, and every landing it had (a branch lands again when a fix is made in
+  the branch that brought the bug).
 - `parseCardRef`, `cardRefKey`, `sameCardRef`, `flattenCardRef` — the closed
-  reference vocabulary (memory, entity, thread, card, url), the identity that
-  makes attaching idempotent, and the flat pair the store keeps.
+  reference vocabulary (memory, entity, thread, card, url, branch — written
+  `<repo>:<branch>`), the identity that makes attaching idempotent, and the
+  flat pair the store keeps.
+- `ReleaseService` (`release.service.ts`) — `settings`, `configure`,
+  `candidates`, `record`: where a project's production state lives, and
+  what it carries.
+- `IReleaseRepository`, `RELEASE_REPOSITORY`, `injectReleaseRepository`
+  (`release.repository.ts`, `release.repository.provider.ts`) — the release
+  port and its DI token, one method per release command.
 
 Schemas, limits and the state vocabulary itself live in
-`@workspace/contracts` (`card.schema.ts`), so storage checks and the tool
-surface mirror one source.
+`@workspace/contracts` (`card.schema.ts`, `release.schema.ts`), so storage
+checks and the tool surface mirror one source.

@@ -2,8 +2,12 @@ export {
   composeWithinBudget,
   DEFAULT_HOOK_BUDGET_CHARS,
   LOOPS_BUDGET_SHARE,
+  MEMORY_FLOOR_STUBS,
+  MEMORY_STUB_CHARS,
+  memoryFloorChars,
   planSectionBudgets,
   renderMemoryStub,
+  renderStarvedPackNotice,
   resolveHookBudgetChars,
   renderPackWithinBudget,
   type BudgetedSection,
@@ -18,6 +22,17 @@ export {
   type OpenLoopsSplit,
 } from './open-loops.logic.js';
 export { renderBoardSummary } from './work-section.logic.js';
+export {
+  escapeGitRegex,
+  isLandingRecorded,
+  parseSquashTrailers,
+  renderLandingDrift,
+  renderLandingReminder,
+  repoIdentityFromRemote,
+  type LandingDrift,
+  type LandingFacts,
+  type SquashTrailer,
+} from './landing.logic.js';
 export {
   DEFAULT_ANCHOR_BUDGET_CHARS,
   renderCompactionAnchor,
@@ -75,6 +90,12 @@ export {
   startsNewEpoch,
 } from './context-epoch.logic.js';
 export {
+  mergeBriefTail,
+  planTailChunk,
+  type BriefTail,
+  type TailChunk,
+} from './brief-tail.logic.js';
+export {
   decideRecallGap,
   recallGapTally,
   recallGapTrigger,
@@ -87,3 +108,16 @@ export {
   type RecallGapTally,
   type RecallGapTrigger,
 } from './recall-gap.logic.js';
+export {
+  compareVersions,
+  isReleaseUrl,
+  parseDeployedVersion,
+  renderMissingTag,
+  renderReleaseKnown,
+  renderReleaseNotice,
+  renderRollback,
+  tagForVersion,
+  versionFromTag,
+  type CarriedCard,
+  type DeployedVersion,
+} from './release.logic.js';

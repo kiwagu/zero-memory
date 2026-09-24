@@ -56,6 +56,22 @@ consume the same core (see the R3 client-adapters direction).
   `renderPackWithinBudget` (whole memories while they fit, then one-line
   stubs) and `composeWithinBudget` (strict priority order, naming whatever
   had to go).
+- `brief-tail.logic.ts` — the queue for what the first briefing of an epoch
+  could not fit: `planTailChunk(tail, budgetChars)` sends the head of the
+  queue, framed as a continuation of the same briefing with a count of what
+  is left and the moment the pack was taken, and falls back to a one-line
+  stub when even that one memory does not fit the message's budget — so a
+  single oversized memory cannot stall the rest of the queue behind it. The
+  chunk never exceeds its budget: when not even the stub fits, it sends
+  nothing and the queue waits whole. Returns null once the queue is empty.
+  The queue drains in the server's own rank, never by relevance to the
+  current message — the prompt never leaves the machine, so there is no
+  such signal to rank by. `mergeBriefTail(queued, deliveredIds, leftovers)`
+  settles the queue against a briefing that rendered a pack of its own: what
+  it delivered whole leaves, what it left over joins after what was already
+  queued, each memory once. Pure planning only; the queue lives in the
+  session state (`@workspace/client-runtime`) and the watcher's per-message
+  hook drains it.
 - `context-epoch.logic.ts` — what "the session has already been told this"
   means once a conversation outlives its context window. A briefing writes
   into the transcript, and compaction is exactly what discards the transcript,
@@ -98,6 +114,10 @@ total})`: the text a client emits just BEFORE its context is compacted, or
   `renderOfflineBriefing(entry)` (the explicit OFFLINE staleness header ahead
   of a cached briefing). The file-backed cache IO that produces these entries
   lives in `@workspace/client-runtime`.
+- `release.logic.ts` — pure decisions for a project's production state:
+  comparing versions, mapping a version to its tag and back, and the lines a
+  release, a missing tag, or a rollback says in the session; the IO that
+  reads the version url and the local git tags lives elsewhere.
 
 ## Consumers
 

@@ -7,6 +7,11 @@ A **card** is one piece of work: what is being done, where it stands, and the
 artifacts it is made of. Cards live on a per-scope **board**, and every agent
 with write access to that scope reads and writes the same board.
 
+A card is labelled `ZM-N` everywhere — on the board, in briefings, in server
+messages and in the squash trailer of the commit that lands its work — one
+label, so a search for it finds all of them. `N` is the card's number within
+its project.
+
 ## The gap a card fills
 
 Memory has two shapes of record and a hole between them. An
@@ -27,9 +32,10 @@ archives it, and its number is not reused.
 ## A reference, not an engine
 
 The board answers "what is going on here", and nothing more. A card's state is
-a **declaration** by whoever moved it — never a precondition the server
-checks. Nothing is dispatched, claimed, leased or blocked by a card, and no
-column is a queue. Reading one tells you what somebody decided and why; acting
+a **declaration** by whoever moved it. The server asks a move to account for
+itself — a reason, and for work entering or leaving `active`, its branch — but
+it never makes a move, and nothing is dispatched, claimed, leased or blocked by
+a card. No column is a queue. Reading one tells you what somebody decided and why; acting
 on it remains your judgement.
 
 The same holds for what agents write on a card. A note is its author's
@@ -109,6 +115,143 @@ A loop promotes into exactly one card. Asking again, or two agents asking at
 the same moment, gets a refusal that names the card that already carries the
 work.
 
+## A card knows its branches
+
+A card records the git branches its work ran on: the repository, the branch,
+and — once the work lands — the squash commit and the branch it landed on. The
+branch outlives its landing and keeps the step-by-step history the squash
+collapses, so the card is where you find it again. A repository is named
+`owner/name` from its `origin` remote, or by its folder name when it has none.
+
+Work **entering** `active` — a `move`, or a `create` or `promote_loop` straight
+into it — names its `branch` as `{repo, name}`, or says why it has no code with
+`no_branch`: research, an operation on a running system, documents kept outside
+git. A card that already holds an open branch needs neither, so work coming
+back from review on the same branch simply moves. A branch that already landed
+does not count: follow-up work goes on a new branch.
+
+Work **leaving** `active` while its branch is still open is refused until the
+branch is accounted for. If it landed, record the landing:
+
+```json
+{
+  "action": "land",
+  "card_id": "crd_...",
+  "branch": { "repo": "acme/memory-service", "name": "feature/feed-pages" },
+  "squash_sha": "4f11a55",
+  "target": "main",
+  "reason": "Full test suite green; waits for the release."
+}
+```
+
+`land` marks the branch landed and moves the card in the same step — to
+`waiting` unless `to` says otherwise, `done` when no acceptance is pending.
+Recording the same landing again, by a short or a full sha, changes nothing.
+It works from any state but the archive, so a landing that was forgotten can be
+recorded later. If the branch has not landed, pass `not_landed` with the
+reason instead; the branch stays open and can land later. Archiving a card is
+not a move and asks for neither.
+
+A branch can land more than once: a bug found after the squash is fixed in the
+branch that brought it, and the branch is squashed again. Record each landing
+with its own `land`. The branch then names its latest squash commit, and
+`board` `get` lists every landing under `landings`, oldest first; the dashboard
+shows the earlier ones beside the latest. Recording an earlier landing again is
+recording the same landing: it changes nothing, and the branch keeps its latest.
+
+`card_log` attaches or detaches a branch at any time, with `ref_kind: "branch"`
+and `ref_target: "<repo>:<branch>"`, for example
+`"acme/memory-service:feature/feed-pages"`.
+
+The commit that lands a card's work names the card in its trailer:
+
+```
+Squashed-from: feature/feed-pages (a1b2c3d) ZM-42
+```
+
+`ZM-42` rather than `#42`, because a forge turns `#42` in a commit message into
+a link to its own issue 42. Several cards are listed side by side
+(`ZM-17 ZM-16`), and older trailers written with `#N` are still understood.
+
+The client plugins watch for that trailer. Right after a shell command, each
+checks the repository's newest commits for a squash whose card has no record of
+the landing, and says so to the agent in the same turn, with the exact `land`
+call filled in:
+
+| Client      | When the check runs                                                         |
+| ----------- | --------------------------------------------------------------------------- |
+| Claude Code | `PostToolUse` on `Bash`                                                     |
+| Codex       | `PostToolUse` on `Bash` (a new hook runs once it is trusted in `/hooks`)    |
+| Cursor      | `postToolUse` on `Shell`                                                    |
+| Hermes      | `transform_tool_result` on `terminal` — the line follows the command output |
+
+Each squash is checked once per machine. A session briefing adds what the hook
+could not see — a landing made in another session or on another client: when a
+branch the board still holds open has already landed in the local repository,
+the briefing says so and names the call. A client connected only over MCP has
+no hooks and no git; the tool's own rule is what keeps its cards honest.
+
+## A release reaches the cards it carries
+
+A project names its production state once, with the `release` tool's
+`configure` action (a project admin only): a `version_url` — https, or http
+for localhost only, never with credentials, since every member of the
+project reads it — and the JSON field that holds the version (`version_field`,
+default `version`). A project that never deploys names no url; its state is
+then its highest release instead: among the tags matching `tag_pattern`
+(default `v*`), the highest version `tag_template` (default `v{version}`)
+reads from them, a final release above its pre-releases — a matching tag it
+reads no version from is not a release. `tag_template` also maps a version
+to the tag that names it; it holds `{version}` once and otherwise only
+characters a git ref may hold. `on_release` chooses what a release does to the cards it carries:
+`record` (the default) only records it, `record_and_move_done` also moves
+the carried cards in `waiting` to `done`. `configure` changes only the
+fields it is given, and `version_url: null` clears a url that was set.
+
+Each member's client watcher checks for a change after every shell command —
+in the same pass as the landing check — and again at the start of a session.
+The url is asked at most once every two minutes per project — ten after it
+failed to answer, and a version it answered before is not acted on meanwhile —
+the setting at most once every ten; nothing runs as a daemon; a project that names no
+production state costs only that ten-minute look at its setting; a folder
+the user ignored is left alone.
+
+The watcher resolves the current version to a commit through its tag in the
+local checkout; two checkouts of one project on a machine each mark the cards
+whose landings they hold. A card is carried when its latest landing in that repository
+is an ancestor of that commit and nothing was released since the landing —
+so a card released once and then landed again waits for the release that
+actually ships the new work. The watcher records the release on each card it
+carries, as a `released` event, and says one line in the session. A tag it
+cannot find is named once, with the fix — `git fetch --tags`, or tagging the
+release commit by hand. A version lower than the one already seen is a
+rollback: it is recorded and said, but carries no cards — the release that
+would have carried them is the higher version already recorded, not this
+older one. A server or a url that cannot answer costs one pause before the
+next try, never every command. Running `zero-memory-watcher release` by hand
+checks now and prints what it found — the tool for recording a release
+right after a missing tag is fetched or made. It records a state again even
+when it was recorded before, which marks a card whose landing was recorded
+only after the release was; a card with a release since its latest landing
+is never marked twice.
+
+Cards move on their own only when the project set `record_and_move_done`:
+then a carried card in `waiting` moves to `done`, with the version named in
+the reason. With the default `record`, a release only records itself on the
+cards it carries — nothing on the board moves by itself.
+
+A session's briefing names the project's production state — "Production: vX
+… as of …" — and, for the cards it lists, the release that reached them. A
+card a release reached also shows "shipped in vX" — the latest release that
+carried it, which stays true after a rollback — on its dashboard tile and in
+its detail, with the release itself as a `released` line in its history; a board's own setting — where its production state comes from, and
+what a release does to its cards — shows read-only above the columns, set
+only through `configure`, never from the dashboard.
+
+The url is read by each member's own watcher, never by the server, and a
+redirect from it is never followed. Every member of the project can read the
+url once it is set.
+
 ## Visibility
 
 A card belongs to its scope and is readable by every accepted member of it,
@@ -147,12 +290,16 @@ reason:
   "action": "move",
   "card_id": "crd_...",
   "to": "active",
-  "reason": "The feed loaded the whole corpus on every visit."
+  "reason": "The feed loaded the whole corpus on every visit.",
+  "branch": { "repo": "acme/memory-service", "name": "feature/feed-pages" }
 }
 ```
 
+Work entering `active` names its branch, as above — see
+[A card knows its branches](#a-card-knows-its-branches).
+
 `promote_loop` takes a `loop_id` in place of a scope and opens the card as
-`active`. `edit` rewrites the title or the body; pass `expected_revision` and
+`active`, so it takes `branch` or `no_branch` like any work entering it. `edit` rewrites the title or the body; pass `expected_revision` and
 it refuses to overwrite a change someone made since you read the card.
 `archive` takes the card off the board and, like a move, needs a reason.
 
@@ -177,13 +324,14 @@ The `thread` field every write accepts only records which conversation wrote
 that entry; it does not bind anything.
 
 `board` is the read side: `list` a scope's cards, narrowed to one column with
-`state` or to matching titles with `query`; `get` one card with its
+`state` or with `query` to titles that match — or to a card by its label, since
+`ZM-42`, `#42` and `42` also find card 42; `get` one card with its
 attachments, a page of its history — where `after_seq` reads only what
 happened since you last looked — and a page of its feed, newest first,
 continued with the `feed_before` cursor each page returns; or `resolve` a
-project-local number such as `#42` into its card.
+project-local number — 42 for `ZM-42` — into its card.
 
-`create`, `promote_loop`, `move`, `note` and `attach` accept an
+`create`, `promote_loop`, `move`, `land`, `note` and `attach` accept an
 `idempotency_key`: a retry with the same key after a timeout returns the first
 result instead of writing a second row.
 
@@ -193,7 +341,9 @@ A session that opens on a project hears about its board before anything else
 it reads. A budgeted briefing — what the client hooks request — carries a few
 lines of it: the card this conversation is bound to, with its state and the
 reason it is there, how many cards are active and waiting, and the first three
-of them. The lines name the work; `board` reads it. They take the place of one
+of them, each with the branches it holds open. At session start the briefing
+also names a branch the board holds open whose squash is already in the local
+repository — a landing nobody recorded. The lines name the work; `board` reads it. They take the place of one
 row of memories the briefing would otherwise carry, so the briefing does not
 grow, and a loop attached to one of the named cards is left out of the loop
 list, since the card already points at it. A `build_context` call that names
@@ -221,13 +371,24 @@ with no cards stays selected and shows as empty — it is never swapped for a
 different one. The board refreshes itself while agents work on it, so it does
 not show a state that has already moved on.
 
+A filter beside the picker narrows the cards on screen by label or by title:
+`ZM-42`, `#42` or `42` finds card 42, and any other text finds the cards whose
+title contains it. Press Enter or **Filter** to apply it. The filter lands in
+the address next to the board, so a narrowed board can be linked and survives a
+reload; with **All boards** a label finds that number on every board, since a
+card's number belongs to its project. When nothing matches, the columns stay
+empty; clearing the field shows the whole board again.
+
 Opening a card lifts it over the board in a dialog, so the columns stay in
 view, and the address bar still names the card: the step is navigable,
 shareable and reloadable, and closing it goes back to the board. A pasted link
 or a reload lands on the same card as a page of its own. Either way it shows
-the document, what the card points at, what its bound conversations have
-remembered, and its whole history: who moved it, between which states, and
-why.
+the document, the branches its work ran on and where each landed, what the
+card points at, what its bound conversations have remembered, and its whole
+history: who moved it, between which states, and why — with what the mover
+declared when a move went ahead without a branch. The card's `ZM-N` label beside
+its title is its link: a click copies the card's address, ready to paste into a
+chat or a note, and a click with Ctrl or Cmd opens it in a new tab.
 
 A link inside the card — an attachment, a memory in its feed, the loop it came
 from — opens its target as a panel to the right of the card, with the same

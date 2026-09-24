@@ -42,6 +42,8 @@ export class BoardQueryHandler implements IQueryHandler<
         return boardOutputSchema.parse({
           card: view.card,
           refs: view.refs,
+          branches: view.branches,
+          releases: view.releases,
           events: view.events,
           has_more: view.has_more,
           next_after_seq: view.next_after_seq,

@@ -92,6 +92,16 @@ zero-memory-watcher guide           # emit the memory-first mandate as a hook's
                                     #   additionalContext (wire on SessionStart)
 zero-memory-watcher nudge           # PreToolUse: once-per-session "recall first"
                                     #   reminder on code search (grep/glob)
+zero-memory-watcher landing         # PostToolUse on shell commands: a fresh
+                                    #   squash (`Squashed-from: … ZM-N`) whose
+                                    #   board card has no record of its landing
+                                    #   gets one line with the exact `card land`
+                                    #   call; each squash checked once per machine
+zero-memory-watcher release         # run the release check by hand and print
+                                    #   what it found — the tool for recording
+                                    #   a release right after a missing tag is
+                                    #   fetched or made, or again for a landing
+                                    #   recorded after the release was
 zero-memory-watcher status          # UserPromptSubmit trailer: warn when the
                                     #   server is unreachable — naming WHICH
                                     #   server (cached per endpoint) AND run
@@ -122,9 +132,45 @@ hooks can never trip a long-running watcher.
 
 The `brief` and `ingest` subcommands are the plugin's hook entrypoints: they
 read the Claude Code hook JSON on stdin and (for `brief`) print a
-`hookSpecificOutput` frame on stdout, keeping all logging on stderr. See
+`hookSpecificOutput` frame on stdout, keeping all logging on stderr.
+
+`brief task` runs on every prompt, but builds a task briefing — one server call —
+at most once per context window, and only for a substantive prompt. Every other
+prompt still carries something: the next memory of the briefing's remainder,
+the part the window's first briefing could not fit. That remainder is queued in
+the local session state (`$XDG_STATE_HOME/zero-memory/session-briefs.json`) and
+drains one memory per message, in the server's rank order, with no server call
+— so it also reaches a session whose server is unreachable. A compaction drops
+the queue with the window.
+
+`landing` runs after every shell command and nearly always ends after one git
+read. It looks at the newest commits on every local branch of the repository
+the command ran in — a release commit made by the same command may sit on top
+of the squash, and a squash made from another worktree lands on a branch this
+one has not checked out — and asks the board only about a squash that names a
+card and was not checked yet. The reminder names the branch the squash landed
+on (the remote's default branch or the usual trunk names first), not whatever
+is checked out afterwards. What each check found is kept in
+`$XDG_STATE_HOME/zero-memory/landing-checks.json`, so a landing is reminded
+about once. A lookup is bounded to five seconds and recorded as a failed
+attempt before it starts, so a server that is down or stalls is retried only
+after ten minutes, never on every command.
+It needs the project this repository was briefed as, so a repository no
+session has briefed yet stays silent. `brief session-start` adds the other
+half: when a branch the board still holds open has already landed in the local
+repository, the work section says so and names the call. See
 [`plugins/zero-memory-claude/`](../../plugins/zero-memory-claude/) and
 [`docs/getting-started/claude-code.mdx`](../../docs/getting-started/claude-code.mdx).
+
+The release check runs the same way: inside the `landing` hook, after every
+shell command, and inside the session-start briefing — it checks whether the
+project's production state changed (a version url or, without one, the
+highest release among its tags) and records it on the board cards it carries.
+`zero-memory-watcher release` is the manual run of that same check: it checks
+now and prints what it found, the tool for recording a release right after a
+missing tag is fetched or made, or again for a card whose landing was recorded
+after the release was. See
+[A release reaches the cards it carries](../../docs/concepts/project-board.mdx#a-release-reaches-the-cards-it-carries).
 
 ### Checkpoint — the compaction boundary
 

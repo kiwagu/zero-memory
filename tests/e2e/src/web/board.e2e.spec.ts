@@ -33,12 +33,16 @@ test.describe('Project board in the dashboard', () => {
     let cardId: string;
     let cardNumber: number;
     let cardScope: string;
+    // A board of its own per attempt. A retry on a shared one would meet the
+    // loop the failed attempt already promoted (the same text deduplicates to
+    // the same memory, which cannot be promoted twice) and that attempt's card.
+    const hint = `/tmp/zm-e2e-board-web-${Date.now()}`;
     try {
       const loop = await mcp.callTool('remember', {
         content:
           'board-web marker: migrate the ingest worker off the legacy queue',
         kind: 'task',
-        project_hint: '/tmp/zm-e2e-board-web',
+        project_hint: hint,
       });
       expect(loop.isError ?? false).toBe(false);
       const { memory_id: loopId } = firstJson<{ memory_id: string }>(loop);
@@ -48,6 +52,7 @@ test.describe('Project board in the dashboard', () => {
         loop_id: loopId,
         title: 'Migrate the ingest worker',
         body: 'Goal: no traffic on the legacy queue.',
+        no_branch: 'an e2e fixture card with no code',
       });
       expect(promoted.isError ?? false).toBe(false);
       const card = firstJson<CardResult>(promoted).card;
@@ -96,7 +101,7 @@ test.describe('Project board in the dashboard', () => {
     // The reason the card is in THIS column rides on the tile, and survives
     // the note and the attachment that happened after the move.
     await expect(tile).toContainText(REASON);
-    await expect(tile).toContainText(`#${cardNumber}`);
+    await expect(tile).toContainText(`ZM-${cardNumber}`);
 
     // Narrower than its five columns, the board scrolls inside its own row.
     // The page itself never widens, so the header and the picker stay whole.
@@ -117,7 +122,11 @@ test.describe('Project board in the dashboard', () => {
     // Opening a card is a DIALOG over the board — and the address bar still
     // names the card, so the step is navigable, shareable and reloadable.
     await tile.click();
-    await expect(page.getByTestId('card-modal')).toBeVisible();
+    // The first card a run opens compiles the dialog's route on the dev
+    // server, which on a shared runner can take longer than a default wait.
+    await expect(page.getByTestId('card-modal')).toBeVisible({
+      timeout: 20_000,
+    });
     // One shared, thin scrollbar across the dashboard, and a scrollbar that
     // appears never shifts the layout.
     expect(
@@ -221,6 +230,7 @@ test.describe('Project board in the dashboard', () => {
         card_id: busyId,
         to: 'active',
         reason: 'starting here, which makes this the board that moved last',
+        no_branch: 'an e2e fixture card with no code',
       });
     } finally {
       await mcp.close();
@@ -321,6 +331,151 @@ test.describe('Project board in the dashboard', () => {
     await expect(page.getByTestId('card-refs')).not.toContainText(
       'report build now waits'
     );
+  });
+
+  test('the filter beside the picker narrows the board by label or title, and the address keeps it', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let certs: CardResult['card'];
+    let feed: CardResult['card'];
+    try {
+      scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web filter marker ${Date.now()}: the edge proxy drops long polls`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-board-web-filter-${Date.now()}`,
+        })
+      ).scope;
+      const create = async (title: string) =>
+        firstJson<CardResult>(
+          await mcp.callTool('card', { action: 'create', scope, title })
+        ).card;
+      certs = await create('Rotate the edge certificates');
+      feed = await create('Page the memory feed');
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const tiles = page.getByTestId('board-card');
+    await expect(tiles).toHaveCount(2);
+    const search = page.getByTestId('board-search').getByRole('searchbox');
+
+    // The label a commit or a briefing names the card by.
+    await search.fill(`ZM-${feed.number}`);
+    await search.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`[?&]q=ZM-${feed.number}(&|$)`));
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText('Page the memory feed');
+    // The scope stays chosen, and a reload keeps the filter.
+    await expect(page).toHaveURL(/[?&]scope=/);
+    await page.reload();
+    await expect(tiles).toHaveCount(1);
+    await expect(search).toHaveValue(`ZM-${feed.number}`);
+
+    // A bare number and a title fragment find their cards too.
+    await search.fill(String(certs.number));
+    await search.press('Enter');
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText('Rotate the edge certificates');
+    await search.fill('memory feed');
+    await search.press('Enter');
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText('Page the memory feed');
+
+    // Nothing matches: the columns are empty — no other card stands in.
+    await search.fill('ZM-999');
+    await search.press('Enter');
+    await expect(page).toHaveURL(/[?&]q=ZM-999(&|$)/);
+    await expect(tiles).toHaveCount(0);
+
+    // An empty filter clears the query and shows the whole board again.
+    await search.fill('');
+    await search.press('Enter');
+    await expect(page).not.toHaveURL(/[?&]q=/);
+    await expect(tiles).toHaveCount(2);
+  });
+
+  test('a card shows the production version that carries it, and the board shows where production lives', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let cardId: string;
+    try {
+      scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web release marker ${Date.now()}: ship the feed pages`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-board-web-release-${Date.now()}`,
+        })
+      ).scope;
+      const configured = await mcp.callTool('release', {
+        action: 'configure',
+        scope,
+        version_url: 'https://api.example.com/healthz',
+      });
+      expect(configured.isError ?? false).toBe(false);
+      cardId = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'Ship the feed pages',
+          state: 'active',
+          branch: { repo: 'acme/memory-service', name: 'feature/feed-ship' },
+        })
+      ).card.id;
+      await mcp.callTool('card', {
+        action: 'land',
+        card_id: cardId,
+        branch: { repo: 'acme/memory-service', name: 'feature/feed-ship' },
+        squash_sha: '5e22b66',
+        target: 'main',
+        reason: 'gate green; waits for the release',
+      });
+      const recorded = await mcp.callTool('release', {
+        action: 'record',
+        scope,
+        version: '1.4.0',
+        build: 'abc1234',
+        release_commit: '6f33c77',
+        source: 'url',
+        card_ids: [cardId],
+      });
+      expect(recorded.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    await expect(page.getByTestId('board-release-settings')).toContainText(
+      'https://api.example.com/healthz'
+    );
+    const tile = page
+      .getByTestId('board-column-waiting')
+      .getByTestId('board-card')
+      .filter({ hasText: 'Ship the feed pages' });
+    await expect(tile).toContainText('shipped in v1.4.0');
+
+    await page.goto(`/board?scope=all`);
+    await expect(page.getByTestId('board-release-settings')).toHaveCount(0);
+
+    await page.goto(`/board/${cardId}`);
+    await expect(page.getByTestId('card-detail')).toContainText(
+      'shipped in v1.4.0'
+    );
+    await expect(page.getByTestId('card-history')).toContainText('released');
+    await expect(page.getByTestId('card-history')).toContainText('v1.4.0');
   });
 
   test('a card body renders as markdown, and hostile markup stays inert', async ({
@@ -488,7 +643,7 @@ test.describe('Panel chain in the card dialog', () => {
     await expect.poll(order).toEqual([cardKey, aKey]);
     await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
     await expect(panel(aKey).getByTestId('panel-from')).toContainText(
-      `#${cardNumber}`
+      `ZM-${cardNumber}`
     );
 
     // 2. A memory id in A's text opens B right after A.
@@ -590,5 +745,254 @@ test.describe('Panel chain in the card dialog', () => {
     await page.getByTestId('panel-strip').click({ position: { x: 8, y: 8 } });
     await expect(page.getByTestId('card-modal')).toBeHidden();
     await expect(page).toHaveURL(/\/board(\?[^/]*)?$/);
+  });
+  test('a card shows the branch its work ran on and where it landed', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    let cardNumber: number;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web branch marker ${Date.now()}: page the memory feed`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-branch',
+        })
+      ).scope;
+      const created = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'Page the memory feed',
+          state: 'active',
+          branch: { repo: 'acme/memory-service', name: 'feature/feed-pages' },
+        })
+      ).card;
+      cardId = created.id;
+      cardNumber = created.number;
+      const landed = await mcp.callTool('card', {
+        action: 'land',
+        card_id: cardId,
+        branch: { repo: 'acme/memory-service', name: 'feature/feed-pages' },
+        squash_sha: '4f11a55',
+        target: 'main',
+        reason: 'full e2e green; waits for the release',
+      });
+      expect(landed.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    // One label everywhere: the card is ZM-N here, as in its squash trailer.
+    await expect(page.getByTestId('card-detail')).toContainText(
+      `ZM-${cardNumber}`
+    );
+    await expect(page.getByTestId('card-detail')).not.toContainText(
+      `#${cardNumber}`
+    );
+    const branch = page.getByTestId('card-branch');
+    await expect(branch).toHaveCount(1);
+    await expect(branch).toContainText('feature/feed-pages');
+    await expect(branch).toContainText('acme/memory-service');
+    await expect(page.getByTestId('card-branch-state')).toContainText(
+      '4f11a55'
+    );
+    await expect(page.getByTestId('card-branch-state')).toContainText('main');
+    await expect(page.getByTestId('card-history')).toContainText('landed');
+    // Landed once: nothing earlier to show.
+    await expect(page.getByTestId('card-branch-earlier')).toHaveCount(0);
+  });
+  test('a branch that landed again shows its earlier landing beside the latest', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web re-landing marker ${Date.now()}: a fix in its own branch`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-reland',
+        })
+      ).scope;
+      cardId = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'Fixed where it began',
+          state: 'active',
+          branch: { repo: 'acme/memory-service', name: 'feature/relanded' },
+        })
+      ).card.id;
+      for (const [sha, reason] of [
+        ['aaaaaaa', 'the feature landed'],
+        ['bbbbbbb', 'a bug fixed in the same branch'],
+      ]) {
+        const landed = await mcp.callTool('card', {
+          action: 'land',
+          card_id: cardId,
+          branch: { repo: 'acme/memory-service', name: 'feature/relanded' },
+          squash_sha: sha,
+          target: 'main',
+          reason,
+        });
+        expect(landed.isError ?? false).toBe(false);
+      }
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    await expect(page.getByTestId('card-branch')).toHaveCount(1);
+    await expect(page.getByTestId('card-branch-state')).toContainText(
+      'bbbbbbb'
+    );
+    const earlier = page.getByTestId('card-branch-earlier');
+    await expect(earlier).toContainText('aaaaaaa');
+    await expect(earlier).not.toContainText('bbbbbbb');
+  });
+  test('a card label stays on one line beside a long title', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let cardNumber: number;
+    try {
+      scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web label marker ${Date.now()}: a card with a long title`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-label',
+        })
+      ).scope;
+      cardNumber = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title:
+            'Translate imported memories into the canonical language before ' +
+            'they reach the index',
+        })
+      ).card.number;
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const label = page
+      .getByTestId('board-column-idea')
+      .getByTestId('board-card-number');
+    await expect(label).toHaveText(`ZM-${cardNumber}`);
+    // A label broken after its hyphen ("ZM-" over "3") is taller than one line.
+    expect(
+      await label.evaluate(
+        (node) =>
+          node.getBoundingClientRect().height <
+          parseFloat(getComputedStyle(node).lineHeight) * 1.5
+      )
+    ).toBe(true);
+  });
+  test('a long card title wraps in its own column beside the label', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web header marker ${Date.now()}: a card with a long title`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-header',
+        })
+      ).scope;
+      cardId = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title:
+            'Styled scrollbars that do not break the layout under long ' +
+            'content, even when the card title runs well past one line',
+        })
+      ).card.id;
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.goto(`/board/${cardId}`);
+    const label = await page.getByTestId('card-number').boundingBox();
+    const title = await page.getByTestId('card-title').boundingBox();
+    expect(label).not.toBeNull();
+    expect(title).not.toBeNull();
+    // The title wraps (the case under test) ...
+    expect(title!.height).toBeGreaterThan(label!.height * 1.5);
+    // ... inside its own column, starting on the label's line: no line holds
+    // the label alone, and every wrapped line keeps the label's indent.
+    expect(title!.y).toBeLessThan(label!.y + label!.height);
+    expect(title!.x).toBeGreaterThanOrEqual(label!.x + label!.width);
+  });
+  test("a card's label is its link, and a click copies it", async ({
+    page,
+    context,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    let cardNumber: number;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web link marker ${Date.now()}: a card whose label is copied`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-link',
+        })
+      ).scope;
+      const created = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title: 'A card to link to',
+        })
+      ).card;
+      cardId = created.id;
+      cardNumber = created.number;
+    } finally {
+      await mcp.close();
+    }
+
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    const label = page.getByTestId('card-number');
+    await expect(label).toHaveText(`ZM-${cardNumber}`);
+    await expect(label).toHaveAttribute('href', `/board/${cardId}`);
+
+    await label.click();
+    // A plain click copies the card's full address and stays on the page.
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(new URL(`/board/${cardId}`, page.url()).toString());
+    await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
+    await expect(label).toHaveText(`ZM-${cardNumber}`);
   });
 });

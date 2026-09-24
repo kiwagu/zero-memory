@@ -1,7 +1,9 @@
 import type {
   Card,
+  CardBranch,
   CardNoteRelation,
   CardRef,
+  CardRelease,
   CardState,
 } from '@workspace/contracts';
 import type { Result } from 'oxide.ts';
@@ -16,24 +18,49 @@ export interface CardAuthorship {
   idempotencyKey?: string | null;
 }
 
-export interface CreateCardParams extends CardAuthorship {
+/**
+ * The branch rule's inputs for work entering active: the branch it runs on,
+ * or why it has none. Whether the card already holds an open branch is the
+ * store's to know.
+ */
+export interface EnterActiveParams {
+  branch?: CardBranch;
+  noBranch?: string;
+}
+
+export interface CreateCardParams extends CardAuthorship, EnterActiveParams {
   scope: string;
   title: string;
   body?: string;
   state?: CardState;
 }
 
-export interface PromoteLoopParams extends CardAuthorship {
+export interface PromoteLoopParams extends CardAuthorship, EnterActiveParams {
   loopId: string;
   title: string;
   body?: string;
   state?: CardState;
 }
 
-export interface MoveCardParams extends CardAuthorship {
+export interface MoveCardParams extends CardAuthorship, EnterActiveParams {
   cardId: string;
   to: CardState;
   reason: string;
+  /** Leaving active with an open branch that has not landed: why. */
+  notLanded?: string;
+}
+
+/** A branch that landed as a squash commit on its target. */
+export interface LandCardParams extends CardAuthorship {
+  cardId: string;
+  branch: CardBranch;
+  squashSha: string;
+  target: string;
+  reason: string;
+  /** Where the card goes; the store defaults to waiting. */
+  to?: CardState;
+  /** Why ANOTHER branch still open on the card has not landed. */
+  notLanded?: string;
 }
 
 export interface EditCardParams extends CardAuthorship {
@@ -109,7 +136,35 @@ export interface CardEventView {
   relation: CardNoteRelation | null;
   ref_kind: CardRef['kind'] | null;
   ref_target: string | null;
+  /** What the mover declared in place of the branch rule. */
+  branch_note: string | null;
+  /** For a landing: the commit and the branch it landed on. */
+  squash_sha: string | null;
+  target_branch: string | null;
   created_at: string;
+}
+
+/** One landing of a branch: the squash commit, where it went, and when. */
+export interface CardBranchLanding {
+  squash_sha: string;
+  target: string | null;
+  landed_at: string;
+}
+
+/**
+ * A branch as a reader sees it on its card. `squash_sha` is its latest
+ * landing; `landings` is every landing, oldest first — a branch lands again
+ * when a fix is made in the branch that brought the bug.
+ */
+export interface CardBranchView {
+  repo: string;
+  branch: string;
+  state: 'open' | 'landed';
+  squash_sha: string | null;
+  target: string | null;
+  landed_at: string | null;
+  attached_at: string;
+  landings: CardBranchLanding[];
 }
 
 /**
@@ -127,6 +182,10 @@ export interface CardFeedItemView {
 export interface CardReadView {
   card: Card;
   refs: CardRefView[];
+  /** Where the card's work ran, and where it landed. */
+  branches: CardBranchView[];
+  /** The production states this card was carried by, newest first. */
+  releases: CardRelease[];
   events: CardEventView[];
   has_more: boolean;
   next_after_seq: number;
@@ -150,6 +209,8 @@ export interface BoardCardView {
     reason: string | null;
     created_at: string;
   } | null;
+  /** The version this card was last carried by, or null if none yet. */
+  released_in: string | null;
 }
 
 export interface BoardView {
@@ -184,4 +245,5 @@ export interface ICardRepository {
   read(params: ReadCardParams): Promise<Result<CardReadView, CardFailure>>;
   list(params: ListBoardParams): Promise<Result<BoardView, CardFailure>>;
   resolve(scope: string, number: number): Promise<Result<Card, CardFailure>>;
+  land(params: LandCardParams): Promise<Result<CardWrite, CardFailure>>;
 }
