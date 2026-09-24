@@ -523,17 +523,39 @@ describe('runRelease', () => {
 
   it('says so when this folder is not a git checkout', async () => {
     const bare = mkdtempSync(join(tmpdir(), 'zm-release-run-nogit-'));
-    recordProjectScope(
-      projectScopeStatePath(),
-      resolveProjectHint(bare),
-      'proj.usr_x.demo'
-    );
-    printed = [];
-    await runRelease(bare);
-    expect(printed.join('')).toBe(
-      'release: this folder is not a git checkout\n'
-    );
-    rmSync(bare, { recursive: true, force: true });
+    try {
+      recordProjectScope(
+        projectScopeStatePath(),
+        resolveProjectHint(bare),
+        'proj.usr_x.demo'
+      );
+      printed = [];
+      await runRelease(bare);
+      expect(printed.join('')).toBe(
+        'release: this folder is not a git checkout\n'
+      );
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it('says so when a tag-mode project is not a git checkout', async () => {
+    answer({ ...settings, version_url: null });
+    const bare = mkdtempSync(join(tmpdir(), 'zm-release-run-nogit-tag-'));
+    try {
+      recordProjectScope(
+        projectScopeStatePath(),
+        resolveProjectHint(bare),
+        'proj.usr_x.demo'
+      );
+      printed = [];
+      await runRelease(bare);
+      expect(printed.join('')).toBe(
+        'release: this folder is not a git checkout\n'
+      );
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
   });
 
   it('says so when the user ignored this folder', async () => {

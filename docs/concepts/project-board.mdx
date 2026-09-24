@@ -202,15 +202,15 @@ then its newest release tag instead, matched by `tag_pattern` (default `v*`).
 `tag_template` (default `v{version}`) maps a version to the tag that names
 it. `on_release` chooses what a release does to the cards it carries:
 `record` (the default) only records it, `record_and_move_done` also moves
-them. `configure` changes only the fields it is given, and `version_url:
-null` clears a url that was set.
+the carried cards in `waiting` to `done`. `configure` changes only the
+fields it is given, and `version_url: null` clears a url that was set.
 
 Each member's client watcher checks for a change after every shell command —
 in the same pass as the landing check — and again at the start of a session.
 The url is asked at most once every two minutes per project, the setting at
-most once every ten; nothing runs as a daemon, nothing is asked for a
-project that names no production state, and a folder the user ignored is
-left alone.
+most once every ten; nothing runs as a daemon; a project that names no
+production state costs only that ten-minute look at its setting; a folder
+the user ignored is left alone.
 
 The watcher resolves the current version to a commit through its tag in the
 local checkout. A card is carried when its latest landing in that repository
@@ -220,17 +220,17 @@ actually ships the new work. The watcher records the release on each card it
 carries, as a `released` event, and says one line in the session. A tag it
 cannot find is named once, with the fix — `git fetch --tags`, or tagging the
 release commit by hand. A version lower than the one already seen is a
-rollback: it is recorded and said, and no card changes, since nothing before
-it shipped anything new. A server or a url that cannot answer costs one
-pause before the next try, never every command. Running
-`zero-memory-watcher release` by hand checks now and prints what it found —
-the tool for recording a release right after a missing tag is fetched or
-made.
+rollback: it is recorded and said, but carries no cards — the release that
+would have carried them is the higher version already recorded, not this
+older one. A server or a url that cannot answer costs one pause before the
+next try, never every command. Running `zero-memory-watcher release` by hand
+checks now and prints what it found — the tool for recording a release
+right after a missing tag is fetched or made.
 
 Cards move on their own only when the project set `record_and_move_done`:
-then a carried card waiting on release moves to `done`, with the version
-named in the reason. With the default `record`, a release only records
-itself on the cards it carries — nothing on the board moves by itself.
+then a carried card in `waiting` moves to `done`, with the version named in
+the reason. With the default `record`, a release only records itself on the
+cards it carries — nothing on the board moves by itself.
 
 A session's briefing names the project's production state — "Production: vX
 … as of …" — and, for the cards it lists, the release that reached them. A

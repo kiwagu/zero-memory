@@ -174,6 +174,10 @@ const inspectRelease = async (
     }
   } else {
     source = 'tag';
+    // Without a url, the tag search runs straight on `cwd`: outside a git
+    // checkout it silently finds nothing, which reads as "no tag yet" rather
+    // than the actual reason — say so before it does.
+    if (!readGitFacts(cwd)) return quiet('not-a-checkout');
     const tag = latestTag(cwd, settings.tag_pattern);
     const version = tag ? versionFromTag(settings.tag_template, tag) : null;
     seen = version ? { version, build: null } : null;

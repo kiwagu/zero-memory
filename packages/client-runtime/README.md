@@ -98,6 +98,9 @@ touch the wire. Authentication is delegated to `@workspace/mcp-oauth-client`
 - `receipt-client.ts` — `callSessionReceipt` (the `session_receipt` tool).
 - `capture-client.ts` — `callRemember` (the `remember` tool).
 - `import-client.ts` — `ImportClient` (the `import_memory` tool).
+- `release-client.ts` — `fetchDeployedVersion` (reads a project's version
+  url — https, http only on localhost, no credentials, no redirects) and
+  `callRelease` (the `release` tool), both within a deadline.
 
 ## Consumers
 
