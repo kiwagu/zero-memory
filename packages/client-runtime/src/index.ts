@@ -98,6 +98,7 @@ export {
 export {
   LANDING_RETRY_MS,
   landingCheckDue,
+  landingCheckedAt,
   landingCheckStatePath,
   recordLandingCheck,
   type LandingCheckOutcome,

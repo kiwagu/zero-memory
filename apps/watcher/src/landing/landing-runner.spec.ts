@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -280,6 +280,36 @@ describe('runLanding', () => {
       landingCheckDue(landingCheckStatePath(), key)
     );
     expect(stillDue).toHaveLength(keys.length - asked);
+
+    // Ten minutes on, the attempted ones are due again too — and the ones
+    // never asked go first, so a stalled server cannot starve them.
+    const firstAsked = vi
+      .mocked(callCardBranches)
+      .mock.calls.map(([, number]) => number);
+    const neverAsked = [31, 32, 33, 34].filter(
+      (number) => !firstAsked.includes(number)
+    );
+    const path = landingCheckStatePath();
+    const aged = Object.fromEntries(
+      Object.entries(
+        JSON.parse(readFileSync(path, 'utf8')) as Record<
+          string,
+          { outcome: string; checked_at: number }
+        >
+      ).map(([key, entry]) => [
+        key,
+        { ...entry, checked_at: entry.checked_at - 11 * 60 * 1000 },
+      ])
+    );
+    writeFileSync(path, JSON.stringify(aged));
+    vi.mocked(callCardBranches).mockClear();
+    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450 });
+    const secondAsked = vi
+      .mocked(callCardBranches)
+      .mock.calls.map(([, number]) => number);
+    expect(secondAsked.slice(0, neverAsked.length).sort()).toEqual(
+      [...neverAsked].sort()
+    );
   });
 
   it('names the branch the squash landed on, not the one checked out after it', async () => {

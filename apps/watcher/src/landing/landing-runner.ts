@@ -6,6 +6,7 @@ import {
 import {
   callCardBranches,
   landingCheckDue,
+  landingCheckedAt,
   landingCheckStatePath,
   projectScopeStatePath,
   readProjectScope,
@@ -88,7 +89,12 @@ const landingReminders = async (
         }))
       )
     )
-    .filter((item) => landingCheckDue(statePath, item.key));
+    .filter((item) => landingCheckDue(statePath, item.key))
+    // The never-asked first, then the longest-waiting: with less time than
+    // work, a stalled server cannot starve the same squashes every time.
+    .map((item) => ({ item, at: landingCheckedAt(statePath, item.key) ?? -1 }))
+    .sort((a, b) => a.at - b.at)
+    .map(({ item }) => item);
   if (due.length === 0) return [];
   const facts = readGitFacts(cwd);
   if (!facts) return [];
