@@ -15,12 +15,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HookClient, HookInput } from '../hook-client.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
+import { checkRelease } from '../release/release-runner.js';
 import { landingDriftFor, runLanding } from './landing-runner.js';
 
 vi.mock('@workspace/client-runtime', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@workspace/client-runtime')>()),
   callCardBranches: vi.fn(),
 }));
+vi.mock('../release/release-runner.js', () => ({ checkRelease: vi.fn() }));
 
 const env = {
   GIT_AUTHOR_NAME: 't',
@@ -102,6 +104,7 @@ describe('runLanding', () => {
     );
     said = [];
     vi.mocked(callCardBranches).mockReset();
+    vi.mocked(checkRelease).mockReset().mockResolvedValue(null);
   });
   afterEach(() => {
     process.env.XDG_STATE_HOME = previous;
@@ -290,6 +293,15 @@ describe('runLanding', () => {
     } finally {
       git(repo, 'worktree', 'remove', '--force', worktree);
     }
+  });
+
+  it('says what production took even when no squash is fresh', async () => {
+    const line =
+      'PRODUCTION TOOK THE CHANGES: v1.0.0 carries ZM-7; the release is recorded on each.';
+    vi.mocked(checkRelease).mockResolvedValue(line);
+    await runLanding(adapter());
+    expect(said).toEqual([line]);
+    expect(callCardBranches).not.toHaveBeenCalled();
   });
 
   it('says nothing about a project it has never briefed', async () => {
