@@ -63,9 +63,10 @@ per-client differences (event map, output frame, transcript source) live in the
   instead of re-ingesting whole transcripts.
 - `release-check.state.ts` — per-project release-check state
   (`release-checks.json`): the last setting fetched and when, the last
-  version seen and when, and which versions this machine already handled —
-  what lets the check ask the setting and the url no more than once every
-  ten and two minutes.
+  version seen and when (or when the url last failed to answer), and which
+  versions each checkout of the project already handled — what lets the
+  check ask the setting and the url no more than once every ten and two
+  minutes.
 
 ### Ingest consent (shared policy)
 

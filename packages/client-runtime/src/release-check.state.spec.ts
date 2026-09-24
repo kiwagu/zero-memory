@@ -32,7 +32,6 @@ describe('the release check state', () => {
   it('keeps each project apart', () => {
     writeReleaseState(path, 'proj.a', {
       seen: { version: '1.0.0', build: null },
-      current: '1.0.0',
       settings_attempt_at: T,
     });
     writeReleaseState(path, 'proj.b', {
@@ -42,7 +41,6 @@ describe('the release check state', () => {
     expect(readReleaseState(path, 'proj.c').url_failed_at).toBe(T);
     expect(readReleaseState(path, 'proj.a').url_failed_at).toBeUndefined();
     expect(readReleaseState(path, 'proj.a').seen?.version).toBe('1.0.0');
-    expect(readReleaseState(path, 'proj.a').current).toBe('1.0.0');
     expect(readReleaseState(path, 'proj.a').settings_attempt_at).toBe(T);
     expect(
       readReleaseState(path, 'proj.b').settings_attempt_at
@@ -74,18 +72,59 @@ describe('the release check state', () => {
     expect(releaseHandledDue(state, '1.2.0', T + RELEASE_RETRY_MS)).toBe(true);
   });
 
-  it('keeps the fifty newest versions of a project', () => {
+  it('keeps each checkout of a project apart, and a write leaves the checkouts it does not name', () => {
+    writeReleaseState(path, 'proj.a', {
+      seen: { version: '1.0.0', build: null },
+      checkouts: {
+        '/work/a': {
+          current: '1.0.0',
+          handled: { '1.0.0': { outcome: 'recorded', at: T } },
+        },
+      },
+    });
+    writeReleaseState(path, 'proj.a', {
+      seen: { version: '1.0.0', build: null },
+      checkouts: {
+        '/work/b': { handled: { '1.0.0': { outcome: 'error', at: T + 1 } } },
+      },
+    });
+    const both = readReleaseState(path, 'proj.a').checkouts ?? {};
+    expect(both['/work/a']?.current).toBe('1.0.0');
+    expect(both['/work/a']?.handled?.['1.0.0']?.outcome).toBe('recorded');
+    expect(both['/work/b']?.current).toBeUndefined();
+    expect(both['/work/b']?.handled?.['1.0.0']?.outcome).toBe('error');
+  });
+
+  it('keeps the fifty newest versions of a checkout, and the twenty newest checkouts', () => {
     const handled = Object.fromEntries(
       Array.from({ length: 60 }, (_, i) => [
         `1.0.${i}`,
         { outcome: 'recorded' as const, at: T + i },
       ])
     );
-    writeReleaseState(path, 'proj.a', { handled });
-    const kept = Object.keys(readReleaseState(path, 'proj.a').handled ?? {});
+    writeReleaseState(path, 'proj.a', {
+      checkouts: { '/work/a': { handled } },
+    });
+    const kept = Object.keys(
+      readReleaseState(path, 'proj.a').checkouts?.['/work/a']?.handled ?? {}
+    );
     expect(kept).toHaveLength(50);
     expect(kept).toContain('1.0.59');
     expect(kept).not.toContain('1.0.0');
+
+    const checkouts = Object.fromEntries(
+      Array.from({ length: 25 }, (_, i) => [
+        `/work/${i}`,
+        { handled: { '1.0.0': { outcome: 'recorded' as const, at: T + i } } },
+      ])
+    );
+    writeReleaseState(path, 'proj.b', { checkouts });
+    const places = Object.keys(
+      readReleaseState(path, 'proj.b').checkouts ?? {}
+    );
+    expect(places).toHaveLength(20);
+    expect(places).toContain('/work/24');
+    expect(places).not.toContain('/work/4');
   });
 
   it('reads a damaged file as empty and never throws on a write it cannot make', () => {

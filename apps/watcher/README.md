@@ -100,7 +100,8 @@ zero-memory-watcher landing         # PostToolUse on shell commands: a fresh
 zero-memory-watcher release         # run the release check by hand and print
                                     #   what it found — the tool for recording
                                     #   a release right after a missing tag is
-                                    #   fetched or made
+                                    #   fetched or made, or again for a landing
+                                    #   recorded after the release was
 zero-memory-watcher status          # UserPromptSubmit trailer: warn when the
                                     #   server is unreachable — naming WHICH
                                     #   server (cached per endpoint) AND run
@@ -167,7 +168,8 @@ project's production state changed (a version url or, without one, the
 newest release tag) and records it on the board cards it carries.
 `zero-memory-watcher release` is the manual run of that same check: it checks
 now and prints what it found, the tool for recording a release right after a
-missing tag is fetched or made. See
+missing tag is fetched or made, or again for a card whose landing was recorded
+after the release was. See
 [A release reaches the cards it carries](../../docs/concepts/project-board.mdx#a-release-reaches-the-cards-it-carries).
 
 ### Checkpoint — the compaction boundary

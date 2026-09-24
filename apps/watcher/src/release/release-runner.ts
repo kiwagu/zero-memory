@@ -21,6 +21,7 @@ import {
   releaseCheckStatePath,
   releaseHandledDue,
   writeReleaseState,
+  type ReleaseCheckoutState,
 } from '@workspace/client-runtime';
 import { createLogger } from '@workspace/logger';
 
@@ -68,9 +69,10 @@ interface ReleaseCheckOptions {
   lookupTimeoutMs?: number;
   budgetMs?: number;
   /**
-   * A manual run: the setting and the url are asked now, a version that has
-   * not been recorded yet is tried again inside its pause, and a missing tag
-   * is named every time.
+   * A manual run: the setting and the url are asked now, the state is tried
+   * again whatever this checkout did with it before — so a card whose landing
+   * was recorded after the release was is marked then — and a missing tag is
+   * named every time.
    */
   force?: boolean;
 }
@@ -86,7 +88,8 @@ interface ReleaseCheckOptions {
  * project's setting names where production lives (a version url, else its newest
  * release tag); the state resolves to a commit through its tag in this
  * checkout; a card is carried when its latest landing here is an ancestor of
- * that commit; the release is recorded through the server and told once.
+ * that commit; the release is recorded through the server and told once in
+ * each checkout.
  * Never throws for a server or url that cannot answer: it stays quiet and
  * tries again later. A folder the user ignored is left alone.
  */
@@ -114,14 +117,19 @@ const inspectRelease = async (
       )
     );
 
-  const scope = readProjectScope(
-    projectScopeStatePath(),
-    resolveProjectHint(cwd)
-  );
+  const hint = resolveProjectHint(cwd);
+  const scope = readProjectScope(projectScopeStatePath(), hint);
   if (!scope) return quiet('no-project');
   const path = releaseCheckStatePath();
-  const state = readReleaseState(path, scope);
-  const save = (): void => writeReleaseState(path, scope, state);
+  // What production runs is the project's; which cards it carries is each
+  // checkout's own git, so what was handled is kept per checkout.
+  const { checkouts, ...state } = readReleaseState(path, scope);
+  const checkout: ReleaseCheckoutState = checkouts?.[hint] ?? {};
+  const save = (): void =>
+    writeReleaseState(path, scope, {
+      ...state,
+      checkouts: { [hint]: checkout },
+    });
 
   // 1. The setting: cached, refreshed every ten minutes. The attempt is saved
   //    before asking, so a server that stalls is asked again only after the
@@ -197,38 +205,36 @@ const inspectRelease = async (
     seen = version ? { version, build: null } : null;
   }
   if (!seen) return quiet('nothing-new');
-  // A state this machine handled before, but not the one it last reported, is
+  // A state this checkout handled before, but not the one it last reported, is
   // a return to it — a rollback, or forward again after one: handle it afresh.
-  if (state.current !== undefined && state.current !== seen.version) {
-    const before = state.handled?.[seen.version]?.outcome;
+  if (checkout.current !== undefined && checkout.current !== seen.version) {
+    const before = checkout.handled?.[seen.version]?.outcome;
     if (before === 'recorded' || before === 'rollback') {
-      state.handled = Object.fromEntries(
-        Object.entries(state.handled ?? {}).filter(
+      checkout.handled = Object.fromEntries(
+        Object.entries(checkout.handled ?? {}).filter(
           ([version]) => version !== seen.version
         )
       );
     }
   }
-  const previous = state.handled?.[seen.version]?.outcome;
-  // A manual run tries a version that did not finish again inside its pause;
-  // one already recorded, or reported as a rollback, stays done.
-  const due =
-    options.force && (previous === 'no-tag' || previous === 'error')
-      ? true
-      : releaseHandledDue(state, seen.version, now);
+  const previous = checkout.handled?.[seen.version]?.outcome;
+  // A manual run tries the state again whatever came of it here: the store
+  // offers only the cards with nothing released since their latest landing,
+  // so a second record marks just what landed late, and nothing twice.
+  const due = options.force || releaseHandledDue(checkout, seen.version, now);
   if (!due) return quiet('nothing-new');
   const current = seen;
   const mark = (
     outcome: 'recorded' | 'no-tag' | 'rollback' | 'error'
   ): void => {
-    state.handled = {
-      ...(state.handled ?? {}),
+    checkout.handled = {
+      ...(checkout.handled ?? {}),
       [current.version]: { outcome, at: now },
     };
-    // Only a state the session was told about becomes the one this machine
+    // Only a state the session was told about becomes the one this checkout
     // reports; a missing tag or a failure is tried again as it stands.
     if (outcome === 'recorded' || outcome === 'rollback') {
-      state.current = current.version;
+      checkout.current = current.version;
     }
     save();
   };
@@ -249,7 +255,7 @@ const inspectRelease = async (
 
   // 4. A version below the newest one recorded here is a rollback: the state is
   //    kept, no card changes.
-  const newest = Object.entries(state.handled ?? {})
+  const newest = Object.entries(checkout.handled ?? {})
     .filter(([, handled]) => handled.outcome === 'recorded')
     .map(([version]) => version)
     .sort(compareVersions)

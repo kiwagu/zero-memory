@@ -114,6 +114,7 @@ export {
   releaseHandledDue,
   writeReleaseState,
   type ReleaseCheckOutcome,
+  type ReleaseCheckoutState,
   type ReleaseProjectState,
 } from './release-check.state.js';
 export { callRelease, fetchDeployedVersion } from './release-client.js';

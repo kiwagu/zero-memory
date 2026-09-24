@@ -443,6 +443,81 @@ describe('checkRelease', () => {
     expect(calls('record')).toHaveLength(1);
   });
 
+  it('lets each checkout of a project mark the cards it carries, and a manual run records a recorded state again', async () => {
+    const other = mkdtempSync(join(tmpdir(), 'zm-release-repo-b-'));
+    try {
+      git(other, 'init', '-q', '-b', 'main');
+      git(
+        other,
+        'remote',
+        'add',
+        'origin',
+        'git@github.com:acme/edge-proxy.git'
+      );
+      commit(other, 'a', 'chore: start');
+      recordProjectScope(
+        projectScopeStatePath(),
+        resolveProjectHint(other),
+        'proj.usr_x.demo'
+      );
+      const landedHere = commit(
+        repo,
+        'b',
+        'feat: the work',
+        'Squashed-from: feature/23 (abcdef1) ZM-23'
+      );
+      git(repo, 'tag', 'v1.0.0', landedHere);
+      const landedThere = commit(
+        other,
+        'b',
+        'feat: the proxy',
+        'Squashed-from: feature/30 (abcdef4) ZM-30'
+      );
+      git(other, 'tag', 'v1.0.0', landedThere);
+      candidates = [
+        candidate(23, landedHere),
+        {
+          ...candidate(30, landedThere),
+          landings: [
+            {
+              repo: 'acme/edge-proxy',
+              branch: 'feature/30',
+              squash_sha: landedThere,
+            },
+          ],
+        },
+      ];
+      vi.mocked(fetchDeployedVersion).mockResolvedValue({
+        version: '1.0.0',
+        build: null,
+      });
+
+      expect(await checkRelease(repo, { now: T0 })).toContain('ZM-23');
+      // The same state, seen from the other checkout of the project: its own
+      // card is marked there, though this machine already handled the state.
+      const there = await checkRelease(other, { now: T0 + 1000 });
+      expect(there).toContain('ZM-30');
+      expect(there).not.toContain('ZM-23');
+      expect(calls('record')[1]?.[0]).toMatchObject({
+        version: '1.0.0',
+        card_ids: [cardId(30)],
+      });
+
+      // By hand, a recorded state is recorded again: a landing whose record
+      // came late is reconciled then. The hook still leaves it alone.
+      await checkRelease(repo, { now: T0 + 2000, force: true });
+      expect(calls('record')).toHaveLength(3);
+      expect(calls('record')[2]?.[0]).toMatchObject({
+        version: '1.0.0',
+        card_ids: [cardId(23)],
+      });
+      expect(await checkRelease(repo, { now: T0 + 3000 })).toBeNull();
+      expect(calls('record')).toHaveLength(3);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
   it('leaves a folder the user ignored alone', async () => {
     writeFileSync(join(repo, '.zero-memory-ignore'), '');
     git(repo, 'tag', 'v0.25.0', commit(repo, 'b', 'chore(release): 0.25.0'));
@@ -557,8 +632,20 @@ describe('runRelease', () => {
     );
   });
 
-  it('says there is nothing new once the state is recorded', async () => {
+  it('records a recorded state again when asked by hand', async () => {
     await run();
+    expect(await run()).toBe(
+      'PRODUCTION IS AT v0.25.0: no card on the board carries a landing in it.\n'
+    );
+    expect(
+      vi
+        .mocked(callRelease)
+        .mock.calls.filter(([input]) => input.action === 'record')
+    ).toHaveLength(2);
+  });
+
+  it('says there is nothing new when no release tag names a state', async () => {
+    answer({ ...settings, version_url: null, tag_pattern: 'release-*' });
     expect(await run()).toBe('release: nothing new for this project\n');
   });
 

@@ -214,7 +214,8 @@ production state costs only that ten-minute look at its setting; a folder
 the user ignored is left alone.
 
 The watcher resolves the current version to a commit through its tag in the
-local checkout. A card is carried when its latest landing in that repository
+local checkout; two checkouts of one project on a machine each mark the cards
+whose landings they hold. A card is carried when its latest landing in that repository
 is an ancestor of that commit and nothing was released since the landing —
 so a card released once and then landed again waits for the release that
 actually ships the new work. The watcher records the release on each card it
@@ -226,7 +227,10 @@ would have carried them is the higher version already recorded, not this
 older one. A server or a url that cannot answer costs one pause before the
 next try, never every command. Running `zero-memory-watcher release` by hand
 checks now and prints what it found — the tool for recording a release
-right after a missing tag is fetched or made.
+right after a missing tag is fetched or made. It records a state again even
+when it was recorded before, which marks a card whose landing was recorded
+only after the release was; a card with a release since its latest landing
+is never marked twice.
 
 Cards move on their own only when the project set `record_and_move_done`:
 then a carried card in `waiting` moves to `done`, with the version named in
