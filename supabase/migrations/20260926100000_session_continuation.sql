@@ -36,7 +36,11 @@ as $$
   ),
   work as (
     select e.card_id, e.seq, e.type, e.from_state, e.to_state,
-           coalesce(e.reason, e.note_text) as said, e.created_at
+           -- One line before it is clipped, so indentation and line breaks
+           -- never eat the words the excerpt is for.
+           regexp_replace(btrim(coalesce(e.reason, e.note_text)), '\s+', ' ', 'g')
+             as said,
+           e.created_at
       from public.card_events e
       join public.cards c on c.id = e.card_id
      cross join knobs k

@@ -229,6 +229,20 @@ test.describe('A new session is offered where it left off', () => {
     expect(cont.thread).toBe(now);
   });
 
+  test("an entry's text reaches the briefing as one line, whitespace and all", async () => {
+    const { create, note, work } = await board('cont-oneline');
+    const t = thread('a');
+    const card = await create('Relay keys', 'active', t);
+    await note(
+      card,
+      `Plan:\n${' '.repeat(120)}rotate the keys first\n\n- then ship`,
+      t
+    );
+
+    const cont = (await work(thread('b'))).continuation!;
+    expect(cont.last[0]!.text).toBe('Plan: rotate the keys first - then ship');
+  });
+
   test('names the last step when it finished another card, and offers the active one before it', async () => {
     const { create, note, move, work } = await board('cont-last');
     const t = thread('a');
