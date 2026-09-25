@@ -174,6 +174,9 @@ export type Database = {
           from_state: string | null;
           id: string;
           idempotency_key: string | null;
+          link_direction: string | null;
+          link_type: string | null;
+          links_note: string | null;
           note_text: string | null;
           reason: string | null;
           ref_kind: string | null;
@@ -201,6 +204,9 @@ export type Database = {
           from_state?: string | null;
           id?: string;
           idempotency_key?: string | null;
+          link_direction?: string | null;
+          link_type?: string | null;
+          links_note?: string | null;
           note_text?: string | null;
           reason?: string | null;
           ref_kind?: string | null;
@@ -228,6 +234,9 @@ export type Database = {
           from_state?: string | null;
           id?: string;
           idempotency_key?: string | null;
+          link_direction?: string | null;
+          link_type?: string | null;
+          links_note?: string | null;
           note_text?: string | null;
           reason?: string | null;
           ref_kind?: string | null;
@@ -266,6 +275,77 @@ export type Database = {
             columns: ['reply_to'];
             isOneToOne: false;
             referencedRelation: 'card_events';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      card_links: {
+        Row: {
+          created_at: string;
+          created_by: string;
+          declared: boolean;
+          dst_card_id: string;
+          dst_scope: unknown;
+          invalidated_at: string | null;
+          invalidated_by: string | null;
+          reason: string;
+          src_card_id: string;
+          src_scope: unknown;
+          type: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string;
+          declared?: boolean;
+          dst_card_id: string;
+          dst_scope: unknown;
+          invalidated_at?: string | null;
+          invalidated_by?: string | null;
+          reason: string;
+          src_card_id: string;
+          src_scope: unknown;
+          type: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string;
+          declared?: boolean;
+          dst_card_id?: string;
+          dst_scope?: unknown;
+          invalidated_at?: string | null;
+          invalidated_by?: string | null;
+          reason?: string;
+          src_card_id?: string;
+          src_scope?: unknown;
+          type?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'card_links_created_by_fkey';
+            columns: ['created_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_links_dst_card_id_fkey';
+            columns: ['dst_card_id'];
+            isOneToOne: false;
+            referencedRelation: 'cards';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_links_invalidated_by_fkey';
+            columns: ['invalidated_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_links_src_card_id_fkey';
+            columns: ['src_card_id'];
+            isOneToOne: false;
+            referencedRelation: 'cards';
             referencedColumns: ['id'];
           },
         ];
@@ -2012,6 +2092,18 @@ export type Database = {
         };
         Returns: Json;
       };
+      card_link: {
+        Args: {
+          p_agent_label?: string;
+          p_card_id: string;
+          p_idempotency_key?: string;
+          p_reason: string;
+          p_relation: string;
+          p_thread?: string;
+          p_to: string;
+        };
+        Returns: Json;
+      };
       card_move: {
         Args: {
           p_agent_label?: string;
@@ -2056,6 +2148,17 @@ export type Database = {
       };
       card_resolve: {
         Args: { p_number: number; p_scope: string };
+        Returns: Json;
+      };
+      card_unlink: {
+        Args: {
+          p_agent_label?: string;
+          p_card_id: string;
+          p_reason: string;
+          p_relation: string;
+          p_thread?: string;
+          p_to: string;
+        };
         Returns: Json;
       };
       create_scope: { Args: { p_scope: unknown }; Returns: undefined };

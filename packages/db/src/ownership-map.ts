@@ -95,6 +95,7 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   card_events: { kind: 'owned', ownerColumn: 'actor_id' },
   card_refs: { kind: 'owned', ownerColumn: 'attached_by' },
   card_branches: { kind: 'owned', ownerColumn: 'attached_by' },
+  card_links: { kind: 'owned', ownerColumn: 'created_by' },
 
   // Transitively owned through the memory (no owner column of their own).
   memory_entities: {
@@ -224,6 +225,9 @@ export const USER_BACK_REFERENCES: readonly UserBackReference[] = [
   // the memory it is about — so the row outlives the departing adjudicator.
   { table: 'portability_candidates', column: 'resolved_by', refersTo: 'user' },
   { table: 'scope_members', column: 'granted_by', refersTo: 'user' },
+  // Who RETIRED a relation between two cards, which need not be whoever stated
+  // it — so the retired row outlives the departing user.
+  { table: 'card_links', column: 'invalidated_by', refersTo: 'user' },
 ] as const;
 
 const entries = (): ReadonlyArray<
