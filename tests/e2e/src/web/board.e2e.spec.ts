@@ -49,6 +49,7 @@ test.describe('Project board in the dashboard', () => {
 
       const promoted = await mcp.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loopId,
         title: 'Migrate the ingest worker',
         body: 'Goal: no traffic on the legacy queue.',
@@ -205,6 +206,7 @@ test.describe('Project board in the dashboard', () => {
       quietTitle = `Quiet board card ${Date.now()}`;
       const quietCard = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope: quietScope,
         title: quietTitle,
       });
@@ -219,6 +221,7 @@ test.describe('Project board in the dashboard', () => {
       busyTitle = `Busy board card ${Date.now()}`;
       const busyCard = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope: busyScope,
         title: busyTitle,
       });
@@ -305,6 +308,7 @@ test.describe('Project board in the dashboard', () => {
 
       const created = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope,
         title: 'Order the nightly jobs',
       });
@@ -353,7 +357,12 @@ test.describe('Project board in the dashboard', () => {
       ).scope;
       const create = async (title: string) =>
         firstJson<CardResult>(
-          await mcp.callTool('card', { action: 'create', scope, title })
+          await mcp.callTool('card', {
+            action: 'create',
+            scope,
+            title,
+            no_links: 'e2e fixture',
+          })
         ).card;
       certs = await create('Rotate the edge certificates');
       feed = await create('Page the memory feed');
@@ -428,6 +437,7 @@ test.describe('Project board in the dashboard', () => {
       cardId = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Ship the feed pages',
           state: 'active',
@@ -510,6 +520,7 @@ test.describe('Project board in the dashboard', () => {
 
       const created = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope,
         title: 'Markdown card',
         body: [
@@ -586,6 +597,7 @@ test.describe('Panel chain in the card dialog', () => {
       const create = async (scope: string, title: string, body = '') => {
         const created = await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title,
           body,
@@ -727,6 +739,7 @@ test.describe('Panel chain in the card dialog', () => {
 
       const created = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope: b.scope,
         title: cardTitle,
         body: 'panel-chain card body',
@@ -903,6 +916,7 @@ test.describe('Panel chain in the card dialog', () => {
       const created = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Page the memory feed',
           state: 'active',
@@ -964,6 +978,7 @@ test.describe('Panel chain in the card dialog', () => {
       cardId = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Fixed where it began',
           state: 'active',
@@ -1018,6 +1033,7 @@ test.describe('Panel chain in the card dialog', () => {
       cardNumber = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title:
             'Translate imported memories into the canonical language before ' +
@@ -1062,6 +1078,7 @@ test.describe('Panel chain in the card dialog', () => {
       cardId = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title:
             'Styled scrollbars that do not break the layout under long ' +
@@ -1107,6 +1124,7 @@ test.describe('Panel chain in the card dialog', () => {
       const created = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'A card to link to',
         })

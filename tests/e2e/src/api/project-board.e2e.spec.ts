@@ -85,6 +85,7 @@ test.describe('Project board over MCP', () => {
       // 1. Promoting the loop opens a card and records where it came from.
       const promoted = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Migrate the ingest worker off the legacy queue',
         no_branch: 'an e2e fixture card with no code',
@@ -99,6 +100,7 @@ test.describe('Project board over MCP', () => {
       // A loop promotes into exactly one card, however often it is asked.
       const twice = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Second attempt at the same work',
         no_branch: 'an e2e fixture card with no code',
@@ -310,6 +312,7 @@ test.describe('Project board over MCP', () => {
 
       const created = await owner.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope,
         title: 'Private work nobody else should see',
         body: 'Contains the cutover checklist.',
@@ -408,6 +411,7 @@ test.describe('Project board over MCP', () => {
 
       const created = await agent.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope: early.scope,
         title: 'Keep the nightly jobs from colliding',
       });
@@ -605,6 +609,7 @@ test.describe('Project board over MCP', () => {
 
       const created = await agent.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope,
         title: 'Keep the nightly jobs from colliding',
       });
@@ -736,6 +741,7 @@ test.describe('Project board over MCP', () => {
 
       const promoted = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Move the billing export to parquet',
         no_branch: 'an e2e fixture card with no code',
@@ -747,6 +753,7 @@ test.describe('Project board over MCP', () => {
       // the work, so the caller can go to it instead of guessing.
       const twice = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'The same work again',
         no_branch: 'an e2e fixture card with no code',
@@ -816,6 +823,7 @@ test.describe('Project board over MCP', () => {
         [agent, other].map((client) =>
           client.callTool('card', {
             action: 'promote_loop',
+            no_links: 'e2e fixture',
             loop_id: control.memory_id,
             title: 'Rotate the edge certificates',
             no_branch: 'an e2e fixture card with no code',
@@ -899,6 +907,7 @@ test.describe('Project board over MCP', () => {
       card = firstJson<CardResult>(
         await agent.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope: other,
           title: 'A card in the other project',
         })
@@ -972,7 +981,12 @@ test.describe('Finding a card on the board', () => {
         ).scope;
       const create = async (scope: string, title: string): Promise<CardRow> =>
         firstJson<CardResult>(
-          await agent.callTool('card', { action: 'create', scope, title })
+          await agent.callTool('card', {
+            action: 'create',
+            scope,
+            title,
+            no_links: 'e2e fixture',
+          })
         ).card;
 
       const scope = await scopeOf('one');
