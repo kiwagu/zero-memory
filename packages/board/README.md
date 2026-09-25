@@ -43,6 +43,18 @@ refuses what it can see without the card — both at once, a blank declaration,
 a branch on a move that is not into `active` — and the store decides the rest
 under the card's lock, answering `branch_required` or `branch_open`.
 
+A card also accounts for **its relations** to other cards. A new card
+(`createCard`, `promoteLoop`) passes `links` — `{card, relation, reason}`, by
+id or `ZM-N` label — or says why it relates to nothing (`noLinks`), and a card
+that never did either is asked again when it enters `active`. The service
+refuses both at once, a blank statement and either one on a move that is not
+into `active`; a missing statement is the store's call, because only the store
+knows whether the card was ever assessed and can offer candidates, which the
+refusal carries (`links_required`, with `withLinkCandidates` putting them in
+its sentence). `linkCard` and `unlinkCard` relate cards after the fact, each
+with a reason; a relation that would put a card above itself, or give it a
+second parent, is refused.
+
 Archiving is the single terminal act: it takes a card off the board and
 freezes it. Reversible shelving is the `parked` state, which stays on the
 board and moves back like any other.
@@ -56,9 +68,9 @@ without recording a recall. Detaching the conversation is the whole undo.
 ## Key exports
 
 - `CardService` — the application service: `createCard`, `promoteLoop`,
-  `editCard`, `moveCard`, `archiveCard`, `landCard`, `attachRef`,
-  `detachRef`, `noteCard`, `readCard` (branches, history and feed, the last
-  two each on its own cursor),
+  `editCard`, `moveCard`, `archiveCard`, `landCard`, `linkCard`,
+  `unlinkCard`, `attachRef`, `detachRef`, `noteCard`, `readCard` (branches,
+  relations, history and feed, the last two each on its own cursor),
   `listBoard`, `resolveCard`. Every call returns a
   `Result`; a no-op (re-attaching the same target, an edit that changes
   nothing) is a success that reports `changed: false`.
@@ -66,9 +78,13 @@ without recording a recall. Detaching the conversation is the whole undo.
   its DI token. One method per atomic store command.
 - `CardFailure`, `toCardFailure`, `cardFailureToErrorCode` — why a call did
   not happen, and how that maps onto the transport's error vocabulary. Every
-  state refusal is a `conflict` (`branch_open` included); `branch_required`
-  is a missing input, so it is `validation_failed`. The message keeps the
-  specific reason.
+  state refusal is a `conflict` (`branch_open` and `not_linked` included);
+  `branch_required` and `links_required` are missing inputs, so they are
+  `validation_failed`. The message keeps the specific reason.
+- `LinkCardParams`, `withLinkCandidates` — a relation as the service takes
+  it, and the refusal sentence that lists the board's candidates. A relation
+  as a card reads it back, named from the card's side, is `CardLinkView` in
+  `@workspace/contracts`.
 - `LandCardParams`, `CardBranchView`, `CardBranchLanding` — a landing as the
   service takes it, and a branch as a card reads it back: its latest squash
   commit, and every landing it had (a branch lands again when a fix is made in
