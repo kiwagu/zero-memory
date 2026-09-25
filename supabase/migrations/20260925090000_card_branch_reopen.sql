@@ -18,6 +18,9 @@
 --     squash commits of that branch the board already recorded on any card of
 --     the project. A client comparing git with the board skips those, so the
 --     old squash of a reopened branch is not reported as a missing landing.
+--   - index card_events_landings_idx (new): the landings of a branch by
+--     project, so a briefing reads them without scanning the project's history
+--     once per open branch.
 --
 -- Special considerations:
 --   - An update of card_branches used to be only a landing; it now also
@@ -278,3 +281,11 @@ begin
   );
 end;
 $$;
+
+-- 3. the landings a briefing reads --------------------------------------------
+
+-- A briefing looks up the recorded landings of every open branch by project and
+-- branch. The history only grows, so the lookup gets its own narrow index.
+create index card_events_landings_idx
+  on public.card_events (scope, ref_target, squash_sha)
+  where type = 'landed';
