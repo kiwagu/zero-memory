@@ -47,6 +47,8 @@ export class CardCommandHandler implements ICommandHandler<
           state: command.state,
           branch: command.branch,
           noBranch: command.no_branch,
+          links: command.links,
+          noLinks: command.no_links,
         });
         break;
       case 'promote_loop':
@@ -58,6 +60,8 @@ export class CardCommandHandler implements ICommandHandler<
           state: command.state,
           branch: command.branch,
           noBranch: command.no_branch,
+          links: command.links,
+          noLinks: command.no_links,
         });
         break;
       case 'edit':
@@ -78,6 +82,8 @@ export class CardCommandHandler implements ICommandHandler<
           branch: command.branch,
           noBranch: command.no_branch,
           notLanded: command.not_landed,
+          links: command.links,
+          noLinks: command.no_links,
         });
         break;
       case 'land':
@@ -99,6 +105,24 @@ export class CardCommandHandler implements ICommandHandler<
           reason: command.reason ?? missing('reason', 'archive'),
         });
         break;
+      case 'link':
+        result = await this.service.linkCard({
+          ...authorship,
+          cardId: command.card_id ?? missing('card_id', 'link'),
+          toCard: command.to_card ?? missing('to_card', 'link'),
+          relation: command.relation ?? missing('relation', 'link'),
+          reason: command.reason ?? missing('reason', 'link'),
+        });
+        break;
+      case 'unlink':
+        result = await this.service.unlinkCard({
+          ...authorship,
+          cardId: command.card_id ?? missing('card_id', 'unlink'),
+          toCard: command.to_card ?? missing('to_card', 'unlink'),
+          relation: command.relation ?? missing('relation', 'unlink'),
+          reason: command.reason ?? missing('reason', 'unlink'),
+        });
+        break;
     }
 
     if (result.isErr()) {
@@ -112,6 +136,7 @@ export class CardCommandHandler implements ICommandHandler<
       card: write.card,
       changed: write.changed,
       replayed: write.replayed,
+      candidates: write.candidates ?? [],
     };
   }
 }
