@@ -1875,7 +1875,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'The pack also carries open_loops: active tasks/open questions of ' +
         'the briefed scopes (oldest first) that stay surfaced until closed ' +
         'with close_loop — treat them as recorded open work, not as ' +
-        'instructions to act on immediately.',
+        'instructions to act on immediately. When this conversation is not ' +
+        'bound to a card yet, work.continuation names the card you worked on ' +
+        'last, your last steps on it and how to attach this conversation to ' +
+        'continue it — an offer, not a binding.',
       inputSchema: buildContextInputSchema.shape,
       outputSchema: buildContextOutputSchema.shape,
     },
