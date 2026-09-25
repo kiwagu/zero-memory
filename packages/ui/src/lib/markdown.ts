@@ -3,6 +3,9 @@
  * remark plugins and the link classifier. Typed structurally so the package
  * needs no mdast/unist type dependency.
  */
+import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
 
 export type MdNode = {
   type: string;
@@ -91,17 +94,41 @@ function cardLabelNumber(digits: string | undefined): number | null {
   return number <= MAX_CARD_NUMBER ? number : null;
 }
 
+/** The same Markdown parser the renderer uses, GitHub extensions included. */
+const markdownParser = unified().use(remarkParse).use(remarkGfm);
+
 /**
- * The card numbers a set of texts mentions, each once, in order of first
- * mention — what a view resolves before it renders the texts.
+ * The text of `node` a card label may be linked in, as the renderer sees it:
+ * never code, a link or a definition, and raw HTML as the text it is shown as.
+ */
+function linkableText(node: MdNode, into: string[]): void {
+  if (NO_AUTOLINK.has(node.type)) {
+    return;
+  }
+  if ((node.type === 'text' || node.type === 'html') && node.value) {
+    into.push(node.value);
+  }
+  node.children?.forEach((child) => linkableText(child, into));
+}
+
+/**
+ * The card numbers a set of texts mentions where the renderer would link
+ * them, each once, in order of first mention — what a view resolves before it
+ * renders the texts. A label in code or inside a link is not counted: it
+ * could never become a card link, so it must not take a place a real mention
+ * needs when the view caps how many cards it resolves.
  */
 export function cardLabelNumbers(texts: readonly string[]): number[] {
   const numbers = new Set<number>();
   for (const text of texts) {
-    for (const match of text.matchAll(CARD_LABEL_PATTERN)) {
-      const number = cardLabelNumber(match[1]);
-      if (number !== null) {
-        numbers.add(number);
+    const chunks: string[] = [];
+    linkableText(markdownParser.parse(text) as MdNode, chunks);
+    for (const chunk of chunks) {
+      for (const match of chunk.matchAll(CARD_LABEL_PATTERN)) {
+        const number = cardLabelNumber(match[1]);
+        if (number !== null) {
+          numbers.add(number);
+        }
       }
     }
   }

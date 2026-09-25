@@ -288,6 +288,23 @@ describe('runLanding', () => {
     expect(said).toEqual([]);
   });
 
+  /**
+   * A board that never answers, on a clock the test controls: each lookup
+   * spends exactly its timeout and then fails, so how many lookups fit in a
+   * budget does not depend on the machine's speed or on the git reads before
+   * them.
+   */
+  const stalledBoard = () => {
+    let clock = 0;
+    vi.mocked(callCardBranches).mockImplementation(
+      async (_scope, _number, timeoutMs) => {
+        clock += timeoutMs ?? 0;
+        throw new Error(`no answer within ${timeoutMs} ms`);
+      }
+    );
+    return () => clock;
+  };
+
   it('shares one budget across its lookups, and leaves the rest for the next command', async () => {
     const keys = [31, 32, 33, 34].map(
       (number) =>
@@ -298,24 +315,21 @@ describe('runLanding', () => {
           `Squashed-from: feature/x${number} (abcdef1) ZM-${number}`
         )}#${number}`
     );
-    vi.mocked(callCardBranches).mockImplementation(() => new Promise(() => {}));
-    const started = Date.now();
-    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450 });
-    expect(Date.now() - started).toBeLessThan(1500);
-    const asked = vi.mocked(callCardBranches).mock.calls.length;
-    expect(asked).toBeGreaterThan(0);
-    expect(asked).toBeLessThan(keys.length);
+    const now = stalledBoard();
+    // 450 ms of budget, 200 ms lookups: two fit, and the 50 ms left do not.
+    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450, now });
+    const firstAsked = vi
+      .mocked(callCardBranches)
+      .mock.calls.map(([, number]) => number);
+    expect(firstAsked).toHaveLength(2);
     // What it had no time for was never marked, so the next command asks it.
     const stillDue = keys.filter((key) =>
       landingCheckDue(landingCheckStatePath(), key)
     );
-    expect(stillDue).toHaveLength(keys.length - asked);
+    expect(stillDue).toHaveLength(2);
 
     // Ten minutes on, the attempted ones are due again too — and the ones
     // never asked go first, so a stalled server cannot starve them.
-    const firstAsked = vi
-      .mocked(callCardBranches)
-      .mock.calls.map(([, number]) => number);
     const neverAsked = [31, 32, 33, 34].filter(
       (number) => !firstAsked.includes(number)
     );
@@ -333,18 +347,15 @@ describe('runLanding', () => {
     );
     writeFileSync(path, JSON.stringify(aged));
     vi.mocked(callCardBranches).mockClear();
-    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450 });
+    await runLanding(adapter(), {
+      lookupTimeoutMs: 200,
+      budgetMs: 450,
+      now: stalledBoard(),
+    });
     const secondAsked = vi
       .mocked(callCardBranches)
       .mock.calls.map(([, number]) => number);
-    // What the second run managed to ask comes from the never-asked first;
-    // how many it managed depends on the machine's load, the order does not.
-    expect(secondAsked.length).toBeGreaterThan(0);
-    expect(
-      secondAsked
-        .slice(0, neverAsked.length)
-        .every((number) => neverAsked.includes(number))
-    ).toBe(true);
+    expect([...secondAsked].sort()).toEqual([...neverAsked].sort());
   });
 
   it('never starts a lookup with too little of the budget left to finish it', async () => {
@@ -356,14 +367,13 @@ describe('runLanding', () => {
         `Squashed-from: feature/m${number} (abcdef1) ZM-${number}`
       );
     }
-    vi.mocked(callCardBranches).mockImplementation(() => new Promise(() => {}));
+    const now = stalledBoard();
     // Two full lookups use 400 ms of the 450; the 50 left are not a lookup.
-    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450 });
+    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450, now });
     const timeouts = vi
       .mocked(callCardBranches)
       .mock.calls.map(([, , timeoutMs]) => timeoutMs);
-    expect(timeouts.length).toBeGreaterThan(0);
-    expect(timeouts.every((ms) => (ms ?? 0) >= 200)).toBe(true);
+    expect(timeouts).toEqual([200, 200]);
   });
 
   it('names the branch the squash landed on, not the one checked out after it', async () => {
