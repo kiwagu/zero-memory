@@ -24,6 +24,8 @@ import { renderLandingDrift, type LandingDrift } from './landing.logic.js';
 const TITLE_MAX_CHARS = 80;
 /** The reason on the bound card is its one sentence of context. */
 const REASON_MAX_CHARS = 200;
+/** One history entry's text in the offer to continue: one short line. */
+const ENTRY_MAX_CHARS = 120;
 /** Blockers named beside a card before the rest are counted. */
 const BLOCKERS_MAX = 3;
 /** Cards named above the bound card before the rest are counted. */
@@ -94,6 +96,55 @@ const aboveLine = (
     .join(', ')}${more}`;
 };
 
+/** `2026-09-25T17:58:12…` → `2026-09-25 17:58`. */
+const minute = (at: string): string => at.slice(0, 16).replace('T', ' ');
+
+/** What a history entry did, in a word or three. */
+const didWhat = (type: string, toState: string | null): string => {
+  if (type === 'moved') return toState ? `moved to ${toState}` : 'moved';
+  if (type === 'created') return 'opened';
+  return type;
+};
+
+/** The offer to continue, when this conversation is bound to no card. */
+const continuationLines = (work: BriefingWork): string[] => {
+  const cont = work.continuation;
+  if (!cont || work.bound_card) return [];
+  const lines: string[] = [];
+  if (cont.card) {
+    const reason = cont.card.state_reason
+      ? `: ${clip(cont.card.state_reason, REASON_MAX_CHARS)}`
+      : '';
+    lines.push(
+      `- Continue where you left off: ${named(cont.card, work)}${reason}`
+    );
+    const upper = aboveLine(cont.card.above);
+    if (upper) lines.push(upper);
+    if (cont.last.length > 0) {
+      const entries = cont.last.map((entry) => {
+        const said = entry.text
+          ? ` "${clip(entry.text, ENTRY_MAX_CHARS)}"`
+          : '';
+        return `${didWhat(entry.type, entry.to_state)} ${minute(entry.created_at)}${said}`;
+      });
+      lines.push(`  last: ${entries.join('; ')}`);
+    }
+    if (cont.thread) {
+      lines.push(
+        `  to continue it here: card_log attach {card_id: ${cont.card.id}, ` +
+          `ref_kind: thread, ref_target: ${cont.thread}}`
+      );
+    }
+  }
+  if (cont.last_session) {
+    lines.push(
+      `- Last session: ${formatCardLabel(cont.last_session.number)} ` +
+        didWhat(cont.last_session.type, cont.last_session.to_state)
+    );
+  }
+  return lines;
+};
+
 /** The board block of a briefing, or null when the summary names nothing. */
 export const renderBoardSummary = (
   work: BriefingWork,
@@ -118,6 +169,7 @@ export const renderBoardSummary = (
     const upper = aboveLine(bound.above);
     if (upper) lines.push(upper);
   }
+  lines.push(...continuationLines(work));
   if (work.active + work.waiting > 0) {
     const others =
       work.lead.length > 0
