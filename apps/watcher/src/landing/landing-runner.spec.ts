@@ -204,6 +204,36 @@ describe('runLanding', () => {
     expect(said).toEqual([]);
   });
 
+  it('stays silent about the squash of a branch its card reopened', async () => {
+    // The card lands the branch, then reopens it to fix its landed code: the
+    // row is open again, and the earlier squash is on record in landings.
+    const landed = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    vi.mocked(callCardBranches).mockResolvedValue({
+      card: CARD,
+      branches: [
+        {
+          repo: 'acme/memory-service',
+          branch: 'feature/x',
+          state: 'open',
+          squash_sha: null,
+          target: null,
+          landed_at: null,
+          attached_at: 'x',
+          landings: [
+            { squash_sha: landed.slice(0, 7), target: 'main', landed_at: 'x' },
+          ],
+        },
+      ],
+    });
+    await runLanding(adapter());
+    expect(said).toEqual([]);
+  });
+
   it('asks about every card a squash names', async () => {
     commit(
       repo,

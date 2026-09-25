@@ -109,6 +109,27 @@ describe('isLandingRecorded', () => {
     ).toBe(true);
   });
 
+  it('counts the landings of a branch reopened for more work', () => {
+    // Reopened on its card: the row is open again and holds no commit, but
+    // the squash it landed as stays on record.
+    const reopened = [
+      {
+        repo: 'o/n',
+        branch: 'feature/x',
+        state: 'open' as const,
+        squash_sha: null,
+        landings: [{ squash_sha: 'abcdef1' }],
+      },
+    ];
+    expect(
+      isLandingRecorded(reopened, 'o/n', 'feature/x', 'abcdef1234567890')
+    ).toBe(true);
+    // A new squash of the reopened branch is not on record yet.
+    expect(isLandingRecorded(reopened, 'o/n', 'feature/x', '1234567')).toBe(
+      false
+    );
+  });
+
   it('counts every landing of a branch that landed more than once', () => {
     const relanded = [
       {
