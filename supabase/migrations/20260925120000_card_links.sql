@@ -24,6 +24,10 @@
 --     side to the stored type and whether the two cards swap
 --   - function private.card_is_above (new): whether one card already sits
 --     above another
+--   - function private.card_has_parent (new): whether a card already has a
+--     parent, wherever that parent lives
+--   - trigger card_links_keep_authorship (new): who declared and who retired
+--     a relation follow the caller, never a value a direct write supplies
 --   - function private.card_link_write (new): the one place a relation is
 --     written, retired carried-over relations included
 --   - functions public.card_link, public.card_unlink (new)
@@ -36,6 +40,12 @@
 --   - Writes of ranking relations are serialized by one transaction-scoped
 --     advisory lock, so two relations that close a loop only together cannot
 --     both pass the check at the same moment.
+--   - The walk above a card follows every chain to its end, however long:
+--     the one-parent rule and the loop check hold without a depth limit.
+--   - Authorship is not writable: a relation is created and retired in the
+--     caller's own name, and a revived or newly declared one becomes the
+--     caller's. A writer of both boards cannot record a relation, or its
+--     retirement, as someone else's.
 
 set search_path = public, extensions;
 
@@ -89,8 +99,7 @@ create index card_links_invalidated_by_idx on public.card_links (invalidated_by)
 
 revoke all on public.card_links from anon, authenticated;
 grant select, insert on public.card_links to authenticated;
-grant update (reason, declared, created_by, created_at, invalidated_at,
-              invalidated_by)
+grant update (reason, declared, invalidated_at, invalidated_by)
   on public.card_links to authenticated;
 grant select, insert, update, delete on public.card_links to service_role;
 
@@ -111,6 +120,8 @@ for insert
 to authenticated
 with check (
   created_by = (select private.current_user_entity_id())
+  and invalidated_at is null
+  and invalidated_by is null
   and private.can_write(src_scope)
   and private.can_write(dst_scope)
   and exists (select 1 from public.cards c
@@ -127,6 +138,49 @@ for update
 to authenticated
 using (private.can_write(src_scope) and private.can_write(dst_scope))
 with check (private.can_write(src_scope) and private.can_write(dst_scope));
+
+-- Who declared a relation and who retired it are the caller, whatever an
+-- update names: a relation that comes back to life, or that a declaration
+-- types, becomes the caller's, and any other update keeps its author. A
+-- retirement names the caller or nobody. SECURITY DEFINER only to read the
+-- caller's identity from the request; with none, as in account erasure, the
+-- row is left as the statement wrote it.
+create or replace function private.card_links_keep_authorship()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_me text := (select private.current_user_entity_id());
+begin
+  if v_me is null then
+    return new;
+  end if;
+  if (old.invalidated_at is not null and new.invalidated_at is null)
+     or (not old.declared and new.declared) then
+    new.created_by := v_me;
+    new.created_at := now();
+  else
+    new.created_by := old.created_by;
+    new.created_at := old.created_at;
+  end if;
+  if new.invalidated_by is distinct from old.invalidated_by
+     and new.invalidated_by is not null
+     and new.invalidated_by <> v_me then
+    raise exception 'A relation is retired only in the name of whoever retires it.'
+      using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+
+revoke all on function private.card_links_keep_authorship()
+  from public, anon, authenticated;
+
+create trigger card_links_keep_authorship
+  before update on public.card_links
+  for each row execute function private.card_links_keep_authorship();
 
 -- 2. the stream records relations -----------------------------------------------
 
@@ -253,7 +307,9 @@ $$;
 -- Whether p_upper already sits above p_lower through any mix of parents,
 -- blockers and dependencies: X is above Y when X is Y's parent, X blocks Y,
 -- or Y depends on X. SECURITY DEFINER so a loop through a board the caller
--- cannot read is still found; the answer is a boolean and nothing else.
+-- cannot read is still found; the answer is a boolean and nothing else. The
+-- walk keeps each card once, so it ends on any graph and misses no chain,
+-- however long.
 create or replace function private.card_is_above(p_upper text, p_lower text)
 returns boolean
 language sql
@@ -261,20 +317,36 @@ stable
 security definer
 set search_path = ''
 as $$
-  with recursive up(id, depth) as (
-    select p_lower, 0
+  with recursive up(id) as (
+    select p_lower
     union
     select case when l.type = 'depends_on' then l.dst_card_id
-                else l.src_card_id end,
-           up.depth + 1
+                else l.src_card_id end
       from up
       join public.card_links l
         on l.invalidated_at is null
        and ((l.type in ('parent_of', 'blocks') and l.dst_card_id = up.id)
             or (l.type = 'depends_on' and l.src_card_id = up.id))
-     where up.depth < 64
   )
-  select exists (select 1 from up where up.id = p_upper and up.depth > 0)
+  select p_upper <> p_lower
+     and exists (select 1 from up where up.id = p_upper)
+$$;
+
+-- Whether a card already has a live parent other than p_except, wherever
+-- that parent lives. SECURITY DEFINER so the one-parent rule holds when the
+-- parent sits on a board the caller cannot read; the answer is a boolean and
+-- nothing else.
+create or replace function private.card_has_parent(p_child text, p_except text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (select 1 from public.card_links l
+                  where l.dst_card_id = p_child and l.type = 'parent_of'
+                    and l.invalidated_at is null
+                    and l.src_card_id <> p_except)
 $$;
 
 -- 4. writing a relation ----------------------------------------------------------
@@ -359,6 +431,14 @@ begin
                           v_dst.number,
                           coalesce('ZM-' || v_parent_number, 'another card')));
     end if;
+    -- A parent the caller cannot see still holds the place; it is named no
+    -- further than that.
+    if private.card_has_parent(v_dst.id, v_src.id) then
+      return jsonb_build_object(
+        'error', 'invalid',
+        'message', format('ZM-%s already has a parent, on a board you cannot '
+                          'read.', v_dst.number));
+    end if;
   end if;
 
   select * into v_existing
@@ -370,11 +450,10 @@ begin
        and (v_existing.declared or not p_declared) then
       return jsonb_build_object('changed', false);
     end if;
+    -- The authorship trigger makes the revived relation the caller's.
     update public.card_links
        set reason = btrim(p_reason),
            declared = p_declared,
-           created_by = v_me,
-           created_at = now(),
            invalidated_at = null,
            invalidated_by = null
      where src_card_id = v_src.id and dst_card_id = v_dst.id
@@ -649,6 +728,7 @@ revoke all on function private.card_ref_resolve(extensions.ltree, text)
   from public, anon;
 revoke all on function private.card_link_normalize(text) from public, anon;
 revoke all on function private.card_is_above(text, text) from public, anon;
+revoke all on function private.card_has_parent(text, text) from public, anon;
 revoke all on function private.card_link_write(
   public.cards, public.cards, text, text, boolean, text, text, text, text)
   from public, anon;
@@ -663,6 +743,8 @@ grant execute on function private.card_ref_resolve(extensions.ltree, text)
 grant execute on function private.card_link_normalize(text)
   to authenticated, service_role;
 grant execute on function private.card_is_above(text, text)
+  to authenticated, service_role;
+grant execute on function private.card_has_parent(text, text)
   to authenticated, service_role;
 grant execute on function private.card_link_write(
   public.cards, public.cards, text, text, boolean, text, text, text, text)

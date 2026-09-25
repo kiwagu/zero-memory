@@ -389,6 +389,107 @@ test.describe('Card links in the store', () => {
     expect(forged.error).not.toBeNull();
   });
 
+  test('a co-writer cannot rewrite who declared or retired a relation', async () => {
+    const { seed, scope, db } = await board('links-authorship');
+    const a = await newCard(db, scope, 'Relay epic');
+    const b = await newCard(db, scope, 'Relay keys');
+    expect((await link(db, a.id, b.id, 'blocks')).changed).toBe(true);
+    const { data: owner } = await admin()
+      .from('cards')
+      .select('created_by')
+      .eq('id', a.id)
+      .single();
+    const userA = (owner as { created_by: string }).created_by;
+    const userB = await makeMember(scope, seed.userB.id, 'writer');
+    const dbB = asUser(await passwordGrantToken(seed.userB));
+
+    // Rewriting the author of A's relation, or pinning a retirement on A.
+    const author = await dbB
+      .from('card_links')
+      .update({ created_by: userB })
+      .eq('src_card_id', a.id)
+      .eq('dst_card_id', b.id)
+      .eq('type', 'blocks');
+    expect(author.error).not.toBeNull();
+    const retirer = await dbB
+      .from('card_links')
+      .update({
+        invalidated_at: new Date().toISOString(),
+        invalidated_by: userA,
+      })
+      .eq('src_card_id', a.id)
+      .eq('dst_card_id', b.id)
+      .eq('type', 'blocks');
+    expect(retirer.error).not.toBeNull();
+    // A row that arrives already retired, in someone else's name.
+    const c = await newCard(db, scope, 'Relay ship');
+    const planted = await dbB.from('card_links').insert({
+      src_card_id: a.id,
+      dst_card_id: c.id,
+      type: 'blocks',
+      src_scope: scope,
+      dst_scope: scope,
+      reason: 'planted',
+      created_by: userB,
+      invalidated_at: new Date().toISOString(),
+      invalidated_by: userA,
+    });
+    expect(planted.error).not.toBeNull();
+
+    // Through the commands, B retires it as B, and A's relink makes it A's.
+    expect((await unlink(dbB, a.id, b.id, 'blocks')).changed).toBe(true);
+    const row = async () =>
+      (
+        await admin()
+          .from('card_links')
+          .select('created_by, invalidated_by')
+          .eq('src_card_id', a.id)
+          .eq('dst_card_id', b.id)
+          .eq('type', 'blocks')
+          .single()
+      ).data as { created_by: string; invalidated_by: string | null };
+    expect(await row()).toEqual({ created_by: userA, invalidated_by: userB });
+    expect((await link(dbB, a.id, b.id, 'blocks')).changed).toBe(true);
+    expect(await row()).toEqual({ created_by: userB, invalidated_by: null });
+  });
+
+  test('a cycle longer than any fixed depth is still refused', async () => {
+    const { scope, db } = await board('links-long-cycle');
+    const chain: CardJson[] = [];
+    for (let i = 0; i < 70; i += 1) {
+      chain.push(await newCard(db, scope, `Relay step ${i}`));
+    }
+    for (let i = 0; i + 1 < chain.length; i += 1) {
+      expect(
+        (await link(db, chain[i]!.id, chain[i + 1]!.id, 'blocks')).changed
+      ).toBe(true);
+    }
+    const closing = await link(db, chain[69]!.id, chain[0]!.id, 'blocks');
+    expect(closing.error).toBe('invalid');
+    expect(closing.message).toContain('above itself');
+  });
+
+  test('a parent on a board the caller cannot read is refused, not an error', async () => {
+    const { seed, token, scope, db } = await board('links-hidden-parent');
+    const hidden = await projectScope(
+      token,
+      `links-hidden-parent-a-${Date.now()}`
+    );
+    const parent = await newCard(db, hidden, 'Hidden epic');
+    const child = await newCard(db, scope, 'Shared child');
+    expect((await link(db, parent.id, child.id, 'parent_of')).changed).toBe(
+      true
+    );
+
+    await makeMember(scope, seed.userB.id, 'writer');
+    const dbB = asUser(await passwordGrantToken(seed.userB));
+    const other = await newCard(dbB, scope, 'Another epic');
+    const second = await link(dbB, child.id, other.id, 'child_of');
+    expect(second.error).toBe('invalid');
+    expect(second.message).toContain('already has a parent');
+    expect(second.message).not.toContain('Hidden epic');
+  });
+
   test('links across boards need write rights on both', async () => {
     const { seed, token, scope, db } = await board('links-cross');
     const other = await projectScope(token, `links-cross-other-${Date.now()}`);
@@ -600,6 +701,33 @@ test.describe('Relations are assessed', () => {
     expect((await enter({})).error).toBeUndefined();
   });
 
+  test('a move refused for its relations leaves no branch behind', async () => {
+    const { scope, db } = await board('assess-branch-rollback');
+    const card = await newCard(db, scope, 'Relay keys');
+    const refused = await rpc<CreateResult>(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'active',
+      p_reason: 'picked up',
+      p_branch_repo: 'acme/relay',
+      p_branch_name: 'feature/relay-keys',
+      p_links: [
+        {
+          card: 'ZM-99999',
+          relation: 'blocked_by',
+          reason: 'a card nobody has',
+        },
+      ],
+    });
+    expect(refused.error).toBe('not_found');
+    const { data: branches } = await db
+      .from('card_branches')
+      .select('branch')
+      .eq('card_id', card.id);
+    expect(branches).toEqual([]);
+    const last = await lastEvent(db, card.id);
+    expect(last.type).toBe('created');
+  });
+
   test('promoting a loop takes the same statement', async () => {
     const { token, scope, db } = await board('assess-promote');
     const agent = await McpTestClient.connect(token);
@@ -733,7 +861,15 @@ interface BoardListCard {
 const readCard = (db: SupabaseClient, id: string): Promise<CardGet> =>
   rpc<CardGet>(db, 'card_get', { p_card_id: id });
 
-const makeReader = async (scope: string, authUserId: string): Promise<void> => {
+const makeReader = (scope: string, authUserId: string): Promise<string> =>
+  makeMember(scope, authUserId, 'reader');
+
+/** Adds a user to a board with a role, and answers their profile id. */
+async function makeMember(
+  scope: string,
+  authUserId: string,
+  role: 'reader' | 'writer'
+): Promise<string> {
   const { data: profile } = await admin()
     .from('profiles')
     .select('id')
@@ -745,13 +881,14 @@ const makeReader = async (scope: string, authUserId: string): Promise<void> => {
       {
         scope,
         user_id: (profile as { id: string }).id,
-        role: 'reader',
+        role,
         accepted_at: new Date().toISOString(),
       },
       { onConflict: 'scope,user_id' }
     );
   expect(joined.error).toBeNull();
-};
+  return (profile as { id: string }).id;
+}
 
 test.describe('Relations are read', () => {
   test("a card reads its relations with the other card's label, from its own side", async () => {

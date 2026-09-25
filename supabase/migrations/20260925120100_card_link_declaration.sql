@@ -30,8 +30,10 @@
 --     again: one signature per command. Grants and comments are restated.
 --   - A card and the relations it is created with are written together: if
 --     one relation is refused (say two of them would close a loop), the card
---     is not created either. The refusal travels out of a subtransaction
---     through SQLSTATE ZM001 and is returned as an ordinary refusal.
+--     is not created either. A move into active is written the same way with
+--     the branch it opens and the relations it declares. The refusal travels
+--     out of a subtransaction through SQLSTATE ZM001 and is returned as an
+--     ordinary refusal.
 --   - card_links_assessed is SECURITY DEFINER: a card is assessed when anyone
 --     declared a relation of it, even one to a card the caller cannot read.
 --     It answers a boolean and nothing else.
@@ -659,17 +661,19 @@ begin
                  'still open.');
   end if;
 
-  if v_has_branch then
-    v_refusal := private.card_branch_open(v_card, p_branch_repo,
-                                          p_branch_name, p_thread,
-                                          p_agent_label);
-    if v_refusal is not null then
-      return v_refusal;
-    end if;
-  end if;
-
-  -- The move and the relations it declares are one write.
+  -- The branch it opens, the relations it declares and the move are one
+  -- write: a refused relation leaves no branch opened or reopened behind.
   begin
+    if v_has_branch then
+      v_refusal := private.card_branch_open(v_card, p_branch_repo,
+                                            p_branch_name, p_thread,
+                                            p_agent_label);
+      if v_refusal is not null then
+        raise exception using errcode = 'ZM001',
+                              message = 'the branch was refused';
+      end if;
+    end if;
+
     if p_links is not null then
       v_refusal := private.card_links_declare(v_card, p_links, p_thread,
                                               p_agent_label);
