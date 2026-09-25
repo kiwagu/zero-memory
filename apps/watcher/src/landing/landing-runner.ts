@@ -49,8 +49,9 @@ const LANDING_LOOKUP_TIMEOUT_MS = 5000;
 const LANDING_BUDGET_MS = 8000;
 /**
  * The least of the budget a lookup starts with. A board lookup is an MCP round
- * trip; less than this cannot finish one, so what is left waits for the next
- * command instead of a lookup doomed to time out.
+ * trip, and a smaller slice than this rarely finishes one, so what is left
+ * waits for the next command instead of a lookup likely to time out. A chosen
+ * minimum, not a hard limit: a fast server can answer in less.
  */
 const LANDING_MIN_LOOKUP_MS = 500;
 
@@ -81,9 +82,10 @@ const within = <T>(promise: Promise<T>, ms: number): Promise<T> =>
 const landingReminders = async (
   cwd: string,
   lookupTimeoutMs: number,
-  budgetMs: number
+  budgetMs: number,
+  now: () => number
 ): Promise<string[]> => {
-  const deadline = Date.now() + budgetMs;
+  const deadline = now() + budgetMs;
   const minLookupMs = Math.min(LANDING_MIN_LOOKUP_MS, lookupTimeoutMs);
   // One git read decides almost every run: no fresh squash, nothing to do.
   const statePath = landingCheckStatePath();
@@ -122,7 +124,7 @@ const landingReminders = async (
   const reminders: string[] = [];
   for (const [index, item] of due.entries()) {
     // Out of time: what is left stays unmarked, so the next command asks it.
-    const left = deadline - Date.now();
+    const left = deadline - now();
     if (left < minLookupMs) {
       logger.info(
         'landing check out of time; the rest waits for the next command',
@@ -198,15 +200,26 @@ const landingReminders = async (
  */
 export const runLanding = async (
   adapter: HookClient = hookClient(),
-  options: { lookupTimeoutMs?: number; budgetMs?: number } = {}
+  options: {
+    lookupTimeoutMs?: number;
+    budgetMs?: number;
+    /** The clock the budget is kept on; tests pass one they control. */
+    now?: () => number;
+  } = {}
 ): Promise<void> => {
   const lookupTimeoutMs = options.lookupTimeoutMs ?? LANDING_LOOKUP_TIMEOUT_MS;
   const budgetMs = options.budgetMs ?? LANDING_BUDGET_MS;
+  const now = options.now ?? Date.now;
   try {
     const input = await adapter.readInput();
     // Nothing about an ignored project leaves the machine, not even a lookup.
     if (projectIgnored(input.cwd)) return;
-    const lines = await landingReminders(input.cwd, lookupTimeoutMs, budgetMs);
+    const lines = await landingReminders(
+      input.cwd,
+      lookupTimeoutMs,
+      budgetMs,
+      now
+    );
     // The release check rides in the same process: the same moments, one
     // process per command, no new hook entry in any client.
     const release = await checkRelease(input.cwd).catch(() => null);
