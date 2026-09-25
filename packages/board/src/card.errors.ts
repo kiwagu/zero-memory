@@ -16,6 +16,8 @@ export const CARD_FAILURES = [
   'invalid',
   'branch_required',
   'branch_open',
+  'links_required',
+  'not_linked',
 ] as const;
 export type CardFailureCode = (typeof CARD_FAILURES)[number];
 
@@ -39,6 +41,11 @@ const DEFAULT_MESSAGE: Record<CardFailureCode, string> = {
   branch_open:
     'A branch is still open on this card: land it, or pass not_landed ' +
     'saying why it has not landed.',
+  links_required:
+    'Say how this card relates to the board: pass links ' +
+    '[{card, relation, reason}] or no_links saying why it relates to no ' +
+    'other card.',
+  not_linked: 'These two cards have no such live relation.',
 };
 
 /** True when the string is one of the store's failure codes. */
@@ -80,6 +87,7 @@ export const cardFailureToErrorCode = (
   switch (failure.code) {
     case 'invalid':
     case 'branch_required':
+    case 'links_required':
       return 'validation_failed';
     case 'not_found':
       return 'not_found';
@@ -89,3 +97,30 @@ export const cardFailureToErrorCode = (
       return 'conflict';
   }
 };
+
+/** A card the store offered as possibly related to one being assessed. */
+export interface LinkCandidate {
+  id: string;
+  number: number;
+  title: string;
+  state: string;
+  why: 'mentioned' | 'similar';
+}
+
+/**
+ * The refusal's sentence with the board's candidates named in it, so an
+ * agent that only reads the error text still sees what to link.
+ */
+export const withLinkCandidates = (
+  message: string,
+  candidates: readonly LinkCandidate[]
+): string =>
+  candidates.length === 0
+    ? `${message} No card on this board looks related.`
+    : `${message} Candidates: ${candidates
+        .map(
+          (candidate) =>
+            `ZM-${candidate.number} "${candidate.title}" [${candidate.state}] ` +
+            `(${candidate.why})`
+        )
+        .join('; ')}.`;

@@ -301,6 +301,7 @@ test.describe('Release commands in the store', () => {
     const scope = await projectScope(token, `release-record-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Shipped work',
     });
@@ -386,6 +387,7 @@ test.describe('Release commands in the store', () => {
     });
     const make = async (title: string, state: string) => {
       const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+        p_no_links: 'e2e fixture',
         p_scope: scope,
         p_title: title,
       });
@@ -430,6 +432,7 @@ test.describe('Release commands in the store', () => {
     const mine = await projectScope(token, `release-own-${Date.now()}`);
     const other = await projectScope(token, `release-other-${Date.now()}`);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: other,
       p_title: 'Elsewhere',
     });
@@ -466,6 +469,7 @@ test.describe('Release commands in the store', () => {
     const scope = await projectScope(token, `release-brief-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Briefed release',
     });
@@ -548,6 +552,7 @@ test.describe('Release commands in the store', () => {
     const scope = await projectScope(token, `release-since-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Landed twice',
     });
@@ -607,6 +612,7 @@ test.describe('Release commands in the store', () => {
       p_on_release: 'record_and_move_done',
     });
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Landed while looked at',
     });

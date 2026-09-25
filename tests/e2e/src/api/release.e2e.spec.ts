@@ -33,6 +33,7 @@ test.describe('Releases over MCP', () => {
       const card = firstJson<{ card: { id: string; number: number } }>(
         await agent.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Ship the proxy fix',
           state: 'active',
@@ -84,6 +85,7 @@ test.describe('Releases over MCP', () => {
       const secondCard = firstJson<{ card: { id: string } }>(
         await agent.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'A second card, tag-released with no build',
           state: 'active',
@@ -143,6 +145,7 @@ test.describe('Releases over MCP', () => {
       const card = firstJson<{ card: { id: string } }>(
         await agent.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Warm the cache on deploy',
           state: 'active',

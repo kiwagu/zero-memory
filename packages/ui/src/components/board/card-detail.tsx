@@ -6,6 +6,10 @@ import {
 } from '@workspace/ui/components/board/card-branches';
 import { CardLabelLink } from '@workspace/ui/components/board/card-label-link';
 import {
+  CardLinks,
+  type CardLinkGroup,
+} from '@workspace/ui/components/board/card-links';
+import {
   CardHistory,
   type CardHistoryEntry,
 } from '@workspace/ui/components/board/card-history';
@@ -23,9 +27,9 @@ import {
 } from '@workspace/ui/components/memory/linked-memory-list';
 
 /**
- * CardDetail — one card: its document, where its work ran, what it points
- * at, what its bound conversations remembered, and everything that happened
- * to it.
+ * CardDetail — one card: its document, where its work ran, how it stands to
+ * other cards, what it points at, what its bound conversations remembered,
+ * and everything that happened to it.
  *
  * Rendered by the card's page, by the dialog over the board and by a panel of
  * the chain, so the view knows none of them: everything arrives display-ready
@@ -48,6 +52,8 @@ interface CardDetailData {
   body: string;
   /** The git branches its work ran on, open or landed. */
   branches: { title: string; items: CardBranchItem[]; emptyLabel: string };
+  /** How the card stands to other cards, grouped by side. */
+  links: { title: string; groups: CardLinkGroup[]; emptyLabel: string };
   refs: { title: string; items: LinkedMemoryItem[]; emptyLabel: string };
   feed: {
     title: string;
@@ -86,6 +92,7 @@ function CardDetail({
   originLoop,
   body,
   branches,
+  links,
   refs,
   feed,
   history,
@@ -158,6 +165,14 @@ function CardDetail({
         ) : (
           <CardBranches items={branches.items} />
         )}
+      </DetailSection>
+
+      <DetailSection title={links.title} data-testid="card-links-section">
+        <CardLinks
+          groups={links.groups}
+          emptyLabel={links.emptyLabel}
+          linkComponent={LinkComponent}
+        />
       </DetailSection>
 
       <DetailSection title={refs.title} data-testid="card-refs">

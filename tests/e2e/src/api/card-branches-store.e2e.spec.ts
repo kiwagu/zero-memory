@@ -98,6 +98,7 @@ test.describe('Card branches in the store', () => {
     const scope = await projectScope(token, `branch-store-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Page the memory feed',
     });
@@ -185,6 +186,7 @@ test.describe('Card branches in the store', () => {
     const scope = await projectScope(ownerToken, `branch-rls-${Date.now()}`);
     const owner = asUser(ownerToken);
     const { card } = await rpc<{ card: CardJson }>(owner, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Rotate the edge certificates',
     });
@@ -234,6 +236,7 @@ test.describe('A branch belongs to its card', () => {
     const other = await projectScope(token, `branch-other-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: other,
       p_title: 'A card in the other project',
     });
@@ -307,12 +310,18 @@ test.describe('The branch rule in the store', () => {
     const bare = await rpc<{ error?: string; message?: string }>(
       db,
       'card_create',
-      { p_scope: scope, p_title: 'Starts running', p_state: 'active' }
+      {
+        p_scope: scope,
+        p_title: 'Starts running',
+        p_state: 'active',
+        p_no_links: 'e2e fixture',
+      }
     );
     expect(bare.error).toBe('branch_required');
     expect(bare.message).toMatch(/branch/u);
 
     const both = await rpc<{ error?: string }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Both at once',
       p_state: 'active',
@@ -323,6 +332,7 @@ test.describe('The branch rule in the store', () => {
     expect(both.error).toBe('invalid');
 
     const idea = await rpc<{ error?: string }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'A branch on an idea',
       p_branch_repo: REPO,
@@ -331,6 +341,7 @@ test.describe('The branch rule in the store', () => {
     expect(idea.error).toBe('invalid');
 
     const withBranch = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Page the feed',
       p_state: 'active',
@@ -350,6 +361,7 @@ test.describe('The branch rule in the store', () => {
     ]);
 
     const noCode = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Measure the recall gap',
       p_state: 'active',
@@ -366,6 +378,7 @@ test.describe('The branch rule in the store', () => {
 
     // A move into active meets the same rule.
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Idea first',
     });
@@ -418,6 +431,7 @@ test.describe('The branch rule in the store', () => {
     const scope = await projectScope(token, `branch-leave-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Swap the embedding model',
       p_state: 'active',
@@ -457,6 +471,7 @@ test.describe('The branch rule in the store', () => {
 
     // A declaration with nothing to declare is refused, not recorded.
     const { card: plain } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Plain idea',
     });
@@ -618,6 +633,7 @@ test.describe('The branch rule in the store', () => {
     const scope = await projectScope(token, `branch-late-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Shipped long ago',
     });
@@ -640,6 +656,7 @@ test.describe('The branch rule in the store', () => {
 
     // Landing in place: no move, and the reason stays on the landing itself.
     const { card: stay } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Already waiting',
     });
@@ -668,6 +685,7 @@ test.describe('The branch rule in the store', () => {
     // Archiving is not a move: an open branch does not hold a card on the
     // board.
     const { card: dropped } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Abandoned',
       p_state: 'active',
@@ -731,6 +749,7 @@ test.describe('The branch rule in the store', () => {
     const scope = await projectScope(token, `branch-reland-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Fixed in the branch that brought it',
     });
@@ -804,6 +823,7 @@ test.describe('The branch rule in the store', () => {
     const scope = await projectScope(token, `branch-compat-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Compat',
     });
@@ -841,6 +861,7 @@ test.describe('The branch rule in the store', () => {
     const scope = await projectScope(token, `branch-brief-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Named in the briefing',
       p_state: 'active',
@@ -876,6 +897,7 @@ test.describe('The branch rule in the store', () => {
     const db = asUser(token);
 
     const { card: first } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Brought the search',
       p_state: 'active',
@@ -897,6 +919,7 @@ test.describe('The branch rule in the store', () => {
       card: CardJson;
       error?: string;
     }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Search misses deleted rows',
       p_state: 'active',

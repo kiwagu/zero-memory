@@ -162,6 +162,12 @@ const BOARD: Array<{
   note?: string;
   /** Points the card at the project's first memory. */
   attachAnchor?: boolean;
+  /**
+   * How the card relates to cards above it in this list — a card states its
+   * relations when it is made, or says why it has none (`noLinks`).
+   */
+  links?: Array<{ title: string; relation: string; reason: string }>;
+  noLinks?: string;
 }> = [
   {
     title: 'Weekly decision digest per project',
@@ -170,6 +176,8 @@ const BOARD: Array<{
       'Boundaries: reads existing memories only; no new capture path.\n\n' +
       'Done when: a project owner can opt in and receives one digest a week.',
     moves: [],
+    noLinks:
+      'A summary over memories already stored; no other card here touches it.',
   },
   {
     title: 'Translate imported memories into the canonical language',
@@ -189,6 +197,15 @@ const BOARD: Array<{
     ],
     note: 'The translator already records the source language; import only needs to call it.',
     attachAnchor: true,
+    links: [
+      {
+        title: 'Weekly decision digest per project',
+        relation: 'blocks',
+        reason:
+          'A digest reads every memory in the canonical language, imports ' +
+          'included.',
+      },
+    ],
   },
   {
     title: 'Swap the embedding model without a re-index outage',
@@ -196,6 +213,15 @@ const BOARD: Array<{
       'Goal: move to a stronger embedding model while recall keeps answering.\n\n' +
       'Boundaries: old and new vectors live side by side until the switch.\n\n' +
       'Done when: every memory has a new vector and recall reads only those.',
+    links: [
+      {
+        title: 'Translate imported memories into the canonical language',
+        relation: 'relates_to',
+        reason:
+          'Both change what recall matches on; one benchmark run checks them ' +
+          'together.',
+      },
+    ],
     moves: [
       {
         to: 'active',
@@ -219,6 +245,7 @@ const BOARD: Array<{
       'Goal: the feed stays fast however large the corpus grows.\n\n' +
       'Done when: a visit loads one page, and paging is stable while new ' +
       'memories arrive.',
+    noLinks: 'A change to the feed alone; no other card waits on it.',
     moves: [
       {
         to: 'active',
@@ -238,6 +265,15 @@ const BOARD: Array<{
   {
     title: 'Browser extension that captures decisions from web chats',
     body: 'Goal: decisions made in a browser chat reach memory without copy and paste.',
+    links: [
+      {
+        title: 'Translate imported memories into the canonical language',
+        relation: 'depends_on',
+        reason:
+          'Web chats arrive in any language, so capture needs the translator ' +
+          'first.',
+      },
+    ],
     moves: [
       {
         to: 'parked',
@@ -513,17 +549,26 @@ try {
   // The project's board: a card in every column, each moved with the reason
   // its tile shows. Matched by title, so a re-run adds nothing.
   const { cards: existing } = await boardCall<{
-    cards: Array<{ title: string }>;
+    cards: Array<{ id: string; title: string }>;
   }>('board', { action: 'list', scope: anchor.scope, limit: 200 });
-  const onBoard = new Set(existing.map((card) => card.title));
+  const idByTitle = new Map(existing.map((card) => [card.title, card.id]));
   for (const spec of BOARD) {
-    if (onBoard.has(spec.title)) continue;
+    if (idByTitle.has(spec.title)) continue;
+    const links = (spec.links ?? []).map((link) => {
+      const target = idByTitle.get(link.title);
+      if (!target) {
+        throw new Error(`seed card "${spec.title}" relates to a missing card`);
+      }
+      return { card: target, relation: link.relation, reason: link.reason };
+    });
     const { card } = await boardCall<{ card: { id: string } }>('card', {
       action: 'create',
       scope: anchor.scope,
       title: spec.title,
       body: spec.body,
+      ...(links.length > 0 ? { links } : { no_links: spec.noLinks }),
     });
+    idByTitle.set(spec.title, card.id);
     if (spec.attachAnchor) {
       await boardCall('card_log', {
         action: 'attach',

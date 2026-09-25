@@ -4,6 +4,7 @@ import {
   cardBranchViewSchema,
   cardInputSchema,
   cardRefSchema,
+  formatBoardName,
   formatBranchRef,
   formatCardLabel,
   gitCommitShaSchema,
@@ -81,6 +82,12 @@ describe('git names on a card', () => {
 
   it('labels a card ZM-N, the one name it has everywhere', () => {
     expect(formatCardLabel(21)).toBe('ZM-21');
+  });
+
+  it("names a card's board by its slug, never by the owner segment", () => {
+    expect(formatBoardName('proj.usr_ab12_01k.acme')).toBe('acme');
+    expect(formatBoardName('user.usr_ab12_01k.core')).toBe('core');
+    expect(formatBoardName('usr_ab12_01k')).toBe('usr_ab12_01k');
   });
 
   it('knows a branch reference and the land action', () => {

@@ -3,8 +3,10 @@ export {
   cardFailureToErrorCode,
   isCardFailureCode,
   toCardFailure,
+  withLinkCandidates,
   type CardFailure,
   type CardFailureCode,
+  type LinkCandidate,
 } from './card.errors.js';
 export {
   cardRefKey,
@@ -34,6 +36,7 @@ export type {
   EnterActiveParams,
   ICardRepository,
   LandCardParams,
+  LinkCardParams,
   ListBoardParams,
   MoveCardParams,
   NoteCardParams,

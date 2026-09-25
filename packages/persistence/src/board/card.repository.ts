@@ -1,6 +1,7 @@
 import {
   flattenCardRef,
   toCardFailure,
+  withLinkCandidates,
   type ArchiveCardParams,
   type AttachRefParams,
   type BoardView,
@@ -11,6 +12,7 @@ import {
   type EditCardParams,
   type ICardRepository,
   type LandCardParams,
+  type LinkCardParams,
   type ListBoardParams,
   type MoveCardParams,
   type NoteCardParams,
@@ -18,7 +20,13 @@ import {
   type ReadCardParams,
 } from '@workspace/board';
 import { injectContext, type IContext } from '@workspace/context';
-import { cardReleaseSchema, cardSchema, type Card } from '@workspace/contracts';
+import {
+  cardLinkCandidateSchema,
+  cardLinkViewSchema,
+  cardReleaseSchema,
+  cardSchema,
+  type Card,
+} from '@workspace/contracts';
 import { singleton } from '@workspace/di';
 import type { Database } from '@workspace/db';
 import { Err, Ok, type Result } from 'oxide.ts';
@@ -35,7 +43,9 @@ type BoardCommand =
   | 'card_archive'
   | 'card_attach'
   | 'card_detach'
-  | 'card_land';
+  | 'card_land'
+  | 'card_link'
+  | 'card_unlink';
 
 type BoardCommandArgs<T extends BoardCommand> =
   Database['public']['Functions'][T]['Args'];
@@ -52,6 +62,9 @@ const commandResultSchema = z.object({
   changed: z.boolean().optional(),
   replayed: z.boolean().optional(),
   event_id: z.string().nullish(),
+  /** What the board offers as related: on a refusal to assess, and after
+   * a card said it relates to nothing. */
+  candidates: z.array(cardLinkCandidateSchema).optional(),
 });
 
 const refViewSchema = z.object({
@@ -60,6 +73,7 @@ const refViewSchema = z.object({
   attached_at: z.string(),
   available: z.boolean(),
   preview: z.string().nullable(),
+  memory_kind: z.string().nullable().default(null),
 });
 
 const eventViewSchema = z.object({
@@ -84,6 +98,10 @@ const eventViewSchema = z.object({
   release_version: z.string().nullable().default(null),
   release_build: z.string().nullable().default(null),
   release_commit: z.string().nullable().default(null),
+  link_type: z.string().nullable().default(null),
+  link_direction: z.enum(['out', 'in']).nullable().default(null),
+  links_note: z.string().nullable().default(null),
+  ref_number: z.number().nullable().default(null),
   created_at: z.string(),
 });
 
@@ -117,6 +135,15 @@ const branchArgs = (params: {
   p_no_branch: params.noBranch ?? undefined,
 });
 
+/** The relation rule's arguments, as every command that meets it takes them. */
+const linkArgs = (params: {
+  links?: Array<{ card: string; relation: string; reason: string }>;
+  noLinks?: string;
+}) => ({
+  p_links: params.links ?? undefined,
+  p_no_links: params.noLinks ?? undefined,
+});
+
 /** A page of the derived feed, as `card_feed` returns it. */
 const feedViewSchema = z.object({
   error: z.string().optional(),
@@ -145,9 +172,14 @@ const readViewSchema = z.object({
   events: z.array(eventViewSchema).default([]),
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
+  links: z.array(cardLinkViewSchema).default([]),
+  blocked: z.boolean().default(false),
+  links_assessed: z.boolean().default(false),
 });
 
 const boardViewSchema = z.object({
+  error: z.string().optional(),
+  message: z.string().nullish(),
   cards: z
     .array(
       z.object({
@@ -167,6 +199,8 @@ const boardViewSchema = z.object({
           })
           .nullable(),
         released_in: z.string().nullable().default(null),
+        blocked: z.boolean().default(false),
+        links: z.number().default(0),
       })
     )
     .default([]),
@@ -200,6 +234,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
       ...branchArgs(params),
+      ...linkArgs(params),
     });
   }
 
@@ -215,6 +250,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
       ...branchArgs(params),
+      ...linkArgs(params),
     });
   }
 
@@ -228,6 +264,32 @@ export class SupabaseCardRepository implements ICardRepository {
       p_idempotency_key: params.idempotencyKey ?? undefined,
       ...branchArgs(params),
       p_not_landed: params.notLanded ?? undefined,
+      ...linkArgs(params),
+    });
+  }
+
+  async link(params: LinkCardParams): Promise<Result<CardWrite, CardFailure>> {
+    return this.#write('card_link', {
+      p_card_id: params.cardId,
+      p_to: params.toCard,
+      p_relation: params.relation,
+      p_reason: params.reason,
+      p_thread: params.thread ?? undefined,
+      p_agent_label: params.agentLabel ?? undefined,
+      p_idempotency_key: params.idempotencyKey ?? undefined,
+    });
+  }
+
+  async unlink(
+    params: LinkCardParams
+  ): Promise<Result<CardWrite, CardFailure>> {
+    return this.#write('card_unlink', {
+      p_card_id: params.cardId,
+      p_to: params.toCard,
+      p_relation: params.relation,
+      p_reason: params.reason,
+      p_thread: params.thread ?? undefined,
+      p_agent_label: params.agentLabel ?? undefined,
     });
   }
 
@@ -365,6 +427,9 @@ export class SupabaseCardRepository implements ICardRepository {
       events: parsed.events as CardReadView['events'],
       has_more: parsed.has_more,
       next_after_seq: parsed.next_after_seq,
+      links: parsed.links,
+      blocked: parsed.blocked,
+      links_assessed: parsed.links_assessed,
       feed: feed.feed,
       feed_has_more: feed.has_more,
       feed_next_before: feed.next_before,
@@ -378,12 +443,17 @@ export class SupabaseCardRepository implements ICardRepository {
       p_query: params.query ?? undefined,
       p_include_archived: params.includeArchived ?? false,
       p_limit: params.limit ?? 50,
+      p_related_to: params.relatedTo ?? undefined,
+      p_relation: params.relation ?? undefined,
     });
     if (error) {
       throw new Error(`board_list failed: ${error.message}`);
     }
     const parsed = boardViewSchema.parse(data ?? {});
-    return Ok(parsed as BoardView);
+    if (parsed.error) {
+      return Err(toCardFailure(parsed.error, parsed.message));
+    }
+    return Ok({ cards: parsed.cards, totals: parsed.totals } as BoardView);
   }
 
   async resolve(
@@ -415,12 +485,23 @@ export class SupabaseCardRepository implements ICardRepository {
     }
     const parsed = commandResultSchema.parse(data ?? {});
     if (parsed.error || parsed.card === undefined) {
-      return Err(toCardFailure(parsed.error, parsed.message));
+      const refused = toCardFailure(parsed.error, parsed.message);
+      // The board's candidates travel in the sentence, so an agent that
+      // reads only the error still sees what to relate the card to.
+      return Err(
+        refused.code === 'links_required' && parsed.candidates
+          ? {
+              ...refused,
+              message: withLinkCandidates(refused.message, parsed.candidates),
+            }
+          : refused
+      );
     }
     return Ok({
       card: cardSchema.parse(parsed.card),
       changed: parsed.changed ?? true,
       replayed: parsed.replayed ?? false,
+      ...(parsed.candidates ? { candidates: parsed.candidates } : {}),
     });
   }
 

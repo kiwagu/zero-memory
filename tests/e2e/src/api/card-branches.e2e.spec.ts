@@ -57,6 +57,7 @@ test.describe('Card branches over MCP', () => {
 
       const bare = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Move the ingest worker',
       });
@@ -65,6 +66,7 @@ test.describe('Card branches over MCP', () => {
 
       const promoted = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Move the ingest worker',
         branch: { repo: REPO, name: 'feature/ingest-queue' },
@@ -136,6 +138,7 @@ test.describe('Card branches over MCP', () => {
     try {
       const created = await agent.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope: firstJson<{ scope: string }>(
           await agent.callTool('remember', {
             content: `e2e re-landing marker ${Date.now()}: fix a bug where it began`,
@@ -202,6 +205,7 @@ test.describe('Card branches over MCP', () => {
       const created = firstJson<CardResult>(
         await agent.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Measure the recall gap',
         })
@@ -290,6 +294,7 @@ test.describe('Card branches over MCP', () => {
       const card = firstJson<CardResult>(
         await owner.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Rotate the certificates',
           state: 'active',

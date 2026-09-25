@@ -163,7 +163,13 @@ The pack has several legs:
   [project board](/docs/concepts/project-board)'s work in progress — the card
   bound to this conversation, with its state and the reason for it and how
   much is attached, the active and waiting counts, and the first three other
-  cards, each with the branches it holds open (`open_branches`, each with the squashes of it the board already recorded). It takes the place of one row of the memories leg rather than adding
+  cards, each with the branches it holds open (`open_branches`, each with the squashes of it the board already recorded). Each named card carries
+  the cards that block it and are not done (`blocked_by`) and whether anyone
+  ever said how it relates to the board (`links_assessed`); the bound card
+  also carries the cards directly above it (`above`): its parent, its
+  blockers and what it depends on, each marked when it was archived. A card
+  on another board carries that board's `scope`, and the line names it
+  `ZM-3 on acme`. It takes the place of one row of the memories leg rather than adding
   to the pack. It rides budgeted briefings only because that is where giving
   up the row was measured harmless: on a copy of a real corpus, one of six
   rows cost no expected hit, while the twelfth row of an unbudgeted call

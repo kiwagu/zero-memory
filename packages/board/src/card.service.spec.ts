@@ -84,6 +84,14 @@ class RecordingRepository implements ICardRepository {
     this.calls.push('land');
     return this.#ok();
   };
+  link = async (): Promise<Result<CardWrite, CardFailure>> => {
+    this.calls.push('link');
+    return this.#ok();
+  };
+  unlink = async (): Promise<Result<CardWrite, CardFailure>> => {
+    this.calls.push('unlink');
+    return this.#ok();
+  };
 }
 
 describe('CardService', () => {
@@ -268,6 +276,85 @@ describe('CardService', () => {
     });
     expect(result.isOk()).toBe(true);
     expect(repository.calls).toEqual(['land']);
+  });
+
+  it('refuses relations and a no-relations statement together', async () => {
+    const result = await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Ship it',
+      links: [{ card: 'ZM-2', relation: 'depends_on', reason: 'needs it' }],
+      noLinks: 'standalone',
+    });
+    expect(result.unwrapErr().message).toMatch(/not both/u);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a blank no-relations statement', async () => {
+    const result = await service.promoteLoop({
+      loopId: newMemoryId(),
+      title: 'Ship it',
+      noBranch: 'research',
+      noLinks: '   ',
+    });
+    expect(result.unwrapErr().code).toBe('invalid');
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a relations statement on a move that is not into active', async () => {
+    const result = await service.moveCard({
+      cardId,
+      to: 'waiting',
+      reason: 'paused',
+      noLinks: 'standalone',
+    });
+    expect(result.unwrapErr().message).toMatch(/entering active/u);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('leaves a missing statement to the store, which knows the candidates', async () => {
+    await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Ship it',
+    });
+    expect(repository.calls).toEqual(['create']);
+  });
+
+  it('refuses a link with an unknown relation, no other card or no reason', async () => {
+    for (const params of [
+      { toCard: 'ZM-2', relation: 'causes', reason: 'why' },
+      { toCard: ' ', relation: 'blocks', reason: 'why' },
+      { toCard: 'ZM-2', relation: 'blocks', reason: '  ' },
+    ]) {
+      const result = await service.linkCard({ cardId, ...params } as never);
+      expect(result.unwrapErr().code).toBe('invalid');
+    }
+    expect(
+      (
+        await service.unlinkCard({
+          cardId,
+          toCard: 'ZM-2',
+          relation: 'blocks',
+          reason: '',
+        })
+      ).unwrapErr().code
+    ).toBe('invalid');
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('passes a link and an unlink through', async () => {
+    await service.linkCard({
+      cardId,
+      toCard: 'ZM-2',
+      relation: 'blocked_by',
+      reason: 'needs the keys',
+    });
+    await service.unlinkCard({
+      cardId,
+      toCard: 'ZM-2',
+      relation: 'blocked_by',
+      reason: 'keys rotated',
+    });
+    expect(repository.calls).toEqual(['link', 'unlink']);
   });
 
   it('refuses a card address that is not a positive number', async () => {
