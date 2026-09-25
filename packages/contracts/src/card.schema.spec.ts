@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  briefingWorkSchema,
   cardBranchViewSchema,
   cardInputSchema,
   cardRefSchema,
@@ -105,5 +106,53 @@ describe('git names on a card', () => {
         reason: 'gate green',
       }).success
     ).toBe(true);
+  });
+});
+
+describe('briefingWorkSchema continuation', () => {
+  it('reads the card a new session is offered, and a server that sends none', () => {
+    const base = { bound_card: null, active: 1, waiting: 0, lead: [] };
+    expect(briefingWorkSchema.parse(base).continuation).toBeUndefined();
+    const offered = briefingWorkSchema.parse({
+      ...base,
+      continuation: {
+        card: {
+          id: 'crd_0000000000000030.0000000000',
+          number: 30,
+          title: 'Continue',
+          state: 'active',
+          state_reason: 'picked up',
+          blocked_by: [],
+          above: [
+            {
+              number: 1,
+              title: 'North star',
+              state: 'active',
+              relation: 'child_of',
+            },
+          ],
+          links_assessed: true,
+        },
+        last: [
+          {
+            type: 'noted',
+            from_state: null,
+            to_state: null,
+            text: 'x',
+            created_at: '2026-09-25T17:58:00+00:00',
+          },
+        ],
+        last_session: {
+          number: 29,
+          title: 'Relations',
+          type: 'moved',
+          to_state: 'waiting',
+        },
+        thread: 'thr_0000000000000001.0000000000',
+      },
+    });
+    expect(offered.continuation?.card?.number).toBe(30);
+    expect(offered.continuation?.card?.above?.[0]?.relation).toBe('child_of');
+    expect(offered.continuation?.last_session?.to_state).toBe('waiting');
   });
 });

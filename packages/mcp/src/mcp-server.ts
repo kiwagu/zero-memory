@@ -542,6 +542,12 @@ export interface ToolResultMetering {
      * transport session id cannot provide).
      */
     conversationId: string | null;
+    /**
+     * The card the briefing offered a new session to continue, when it
+     * offered one. Emitted into the `session_briefing` metadata: the forward
+     * measure of whether new sessions pick up where they left off.
+     */
+    continuationCard?: string | null;
   } | null;
   /**
    * The MCP client's self-declared name from the initialize handshake
@@ -1910,6 +1916,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
                   entities: result.entities.length,
                   kind: input.briefing_kind ?? 'session',
                   conversationId: input.conversation_id ?? null,
+                  continuationCard: result.work?.continuation?.card?.id ?? null,
                 }
               : null,
           agentName: clientName(),
