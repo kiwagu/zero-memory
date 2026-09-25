@@ -34,7 +34,7 @@
 --     written, retired carried-over relations included
 --   - functions public.card_link, public.card_unlink (new)
 --   - function public.hard_delete_user: a departing user's relations leave
---     with them
+--     with them, and erasure takes the relation lock before it deletes
 --
 -- Special considerations:
 --   - card_is_above is SECURITY DEFINER so a loop through a board the caller
@@ -792,6 +792,12 @@ declare
   v_mem text[];
   v_ent text[];
 begin
+  -- Erasure deletes relations and cards, so it takes the relation lock first,
+  -- like every command that writes a relation: otherwise it could hold a
+  -- relation row while an unlink holds that relation's cards, each waiting
+  -- for the other.
+  perform private.card_links_lock();
+
   -- Resolve the auth principal. Null means the profile is already gone, which
   -- turns the rest of the body into a no-op sweep (idempotent second call).
   select user_id into v_auth from public.profiles where id = p_user_id;

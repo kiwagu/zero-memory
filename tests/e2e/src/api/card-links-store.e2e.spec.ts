@@ -5,7 +5,7 @@
  * that would put a card above itself — through parents, blockers or
  * dependencies — is refused.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 import { expect, test } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -13,7 +13,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { e2eEnv } from '../helpers/env.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
-import { passwordGrantToken } from '../helpers/users.js';
+import { passwordGrantToken, provisionE2EUser } from '../helpers/users.js';
 
 interface CardJson {
   id: string;
@@ -493,6 +493,62 @@ test.describe('Card links in the store', () => {
     expect(second.error).toBe('invalid');
     expect(second.message).toContain('already has a parent');
     expect(second.message).not.toContain('Hidden epic');
+  });
+
+  test('erasing an account waits for a relation being written instead of deadlocking with it', async () => {
+    const user = await provisionE2EUser(`e2e-links-erase-${Date.now()}@zm.e2e`);
+    const { data: profile } = await admin()
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .single();
+    const profileId = (profile as { id: string }).id;
+
+    // Another session holds the relation lock, as a relation command does
+    // while it writes; erasure must queue behind it before it touches a row.
+    const holder = spawn(
+      'docker',
+      [
+        'run',
+        '--rm',
+        '--network',
+        'host',
+        '-i',
+        'supabase/postgres:17.6.1.136',
+        'psql',
+        'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-Atc',
+        "set application_name = 'e2e-links-lock-holder'; begin; " +
+          'select private.card_links_lock(); select pg_sleep(4); commit;',
+      ],
+      { stdio: 'ignore' }
+    );
+    const held = new Promise<number | null>((resolve) =>
+      holder.on('exit', resolve)
+    );
+    await expect
+      .poll(
+        () =>
+          psql(
+            'select count(*) from pg_locks l join pg_stat_activity a ' +
+              'on a.pid = l.pid ' +
+              "where a.application_name = 'e2e-links-lock-holder' " +
+              "and l.locktype = 'advisory' and l.granted"
+          ),
+        { timeout: 15_000 }
+      )
+      .toBe('1');
+
+    const started = Date.now();
+    const { error } = await admin().rpc('hard_delete_user', {
+      p_user_id: profileId,
+    });
+    const waited = Date.now() - started;
+    expect(error).toBeNull();
+    expect(waited).toBeGreaterThan(1500);
+    expect(await held).toBe(0);
   });
 
   test('links across boards need write rights on both', async () => {
