@@ -169,7 +169,11 @@ The pack has several legs:
   also carries the cards directly above it (`above`): its parent, its
   blockers and what it depends on, each marked when it was archived. A card
   on another board carries that board's `scope`, and the line names it
-  `ZM-3 on acme`. It takes the place of one row of the memories leg rather than adding
+  `ZM-3 on acme`. When the calling conversation is bound to no card, the work
+  also carries `continuation`: the card the caller worked on last (still
+  active, within 30 days), their two newest entries on it, their last step
+  when it was on another card, and the calling thread for the attach command.
+  It takes the place of one row of the memories leg rather than adding
   to the pack. It rides budgeted briefings only because that is where giving
   up the row was measured harmless: on a copy of a real corpus, one of six
   rows cost no expected hit, while the twelfth row of an unbudgeted call
