@@ -22,9 +22,11 @@
     "react-markdown": "catalog:",
     "recharts": "3.8.0",
     "remark-gfm": "catalog:",
+    "remark-parse": "catalog:",
     "shadcn": "catalog:",
     "tailwind-merge": "^3.6.0",
-    "tw-animate-css": "catalog:"
+    "tw-animate-css": "catalog:",
+    "unified": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "catalog:",
