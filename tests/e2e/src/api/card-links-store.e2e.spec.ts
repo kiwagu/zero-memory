@@ -58,6 +58,19 @@ const admin = (): SupabaseClient =>
     auth: { persistSession: false },
   });
 
+/**
+ * The memories this file writes only to make a project scope. They are
+ * deleted when the file is done: facts of the seed user would otherwise
+ * crowd later specs that read a bounded list of that user's facts.
+ */
+const markers: string[] = [];
+
+test.afterAll(async () => {
+  if (markers.length > 0) {
+    await admin().from('memories').delete().in('id', markers);
+  }
+});
+
 /** A project scope the caller may write, made the way an agent makes one. */
 const projectScope = async (token: string, tag: string): Promise<string> => {
   const agent = await McpTestClient.connect(token);
@@ -68,7 +81,12 @@ const projectScope = async (token: string, tag: string): Promise<string> => {
       project_hint: `/tmp/zm-e2e-${tag}`,
     });
     expect(made.isError ?? false).toBe(false);
-    return firstJson<{ scope: string }>(made).scope;
+    const { scope, memory_id } = firstJson<{
+      scope: string;
+      memory_id: string;
+    }>(made);
+    markers.push(memory_id);
+    return scope;
   } finally {
     await agent.close();
   }
@@ -1260,8 +1278,9 @@ test.describe('Relations are read', () => {
     }>(db, 'briefing_work', { p_scope: scope, p_thread: thread });
 
     expect(work.bound_card.id).toBe(x.id);
+    // Same board: no scope to name.
     expect(work.bound_card.blocked_by).toEqual([
-      { number: b.number, state: 'active' },
+      { number: b.number, state: 'active', scope: null },
     ]);
     expect(work.bound_card.links_assessed).toBe(true);
     expect(work.bound_card.above).toEqual(
@@ -1271,18 +1290,24 @@ test.describe('Relations are read', () => {
           title: 'Relay epic',
           state: 'idea',
           relation: 'child_of',
+          archived: false,
+          scope: null,
         },
         {
           number: b.number,
           title: 'Relay keys',
           state: 'active',
           relation: 'blocked_by',
+          archived: false,
+          scope: null,
         },
         {
           number: d.number,
           title: 'Relay transport',
           state: 'idea',
           relation: 'depends_on',
+          archived: false,
+          scope: null,
         },
       ])
     );
