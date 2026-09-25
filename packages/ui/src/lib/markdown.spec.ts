@@ -95,6 +95,37 @@ describe('cardLabelNumbers', () => {
       ])
     ).toEqual([2147483647]);
   });
+
+  it('collects only the labels the renderer would link: none from code or links', () => {
+    const text = [
+      'Prose names ZM-1 and *emphasis* names ZM-2.',
+      '',
+      '- a list item names ZM-3',
+      '',
+      'Inline `ZM-4` code, a [ZM-5 link](https://example.com/ZM-6),',
+      'an autolink <https://example.com/ZM-7> and a bare https://example.com/ZM-8 url.',
+      '',
+      '```',
+      'ZM-9 in a fenced block',
+      '```',
+      '',
+      '    ZM-10 in an indented block',
+      '',
+      'Raw <b>ZM-11</b> html is shown as text, so it links.',
+    ].join('\n');
+    expect(cardLabelNumbers([text])).toEqual([1, 2, 3, 11]);
+  });
+
+  it('lets a real mention through however many labels a code block holds', () => {
+    const example = Array.from({ length: 150 }, (_, i) => `ZM-${i + 1}`).join(
+      ' '
+    );
+    const numbers = cardLabelNumbers([
+      `\`\`\`\n${example}\n\`\`\``,
+      'Blocked by ZM-9000.',
+    ]);
+    expect(numbers).toEqual([9000]);
+  });
 });
 
 describe('card labels agree between collection and rendering', () => {

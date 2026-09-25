@@ -33,8 +33,10 @@ const HISTORY_LIMIT = 200;
 /** The newest feed entries shown on a card; older ones stay reachable by MCP. */
 const FEED_LIMIT = 50;
 /**
- * Distinct card labels resolved per view. A text naming more cards than this
- * keeps the rest as plain labels; the request stays bounded.
+ * Distinct card labels resolved per view, counted only where the renderer
+ * could link them — a label in code or inside a link takes no place. A text
+ * naming more cards than this keeps the rest as plain labels; the request
+ * stays bounded.
  */
 const MENTION_LIMIT = 100;
 
