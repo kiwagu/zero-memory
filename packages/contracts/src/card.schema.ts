@@ -83,6 +83,8 @@ export const cardEventTypeSchema = z.enum([
   'noted',
   'landed',
   'released',
+  'linked',
+  'unlinked',
 ]);
 export type CardEventType = z.infer<typeof cardEventTypeSchema>;
 
@@ -241,6 +243,75 @@ export const cardDeclarationSchema = z
   .min(1, { message: 'A declaration must say why' })
   .max(CARD_LIMITS.reason);
 
+/** A relation between two cards as the store keeps it: one side of it. */
+export const cardLinkTypeSchema = z.enum([
+  'blocks',
+  'depends_on',
+  'parent_of',
+  'relates_to',
+  'duplicates',
+]);
+export type CardLinkType = z.infer<typeof cardLinkTypeSchema>;
+
+/**
+ * A relation named from one card's side. "A blocks B" is "B blocked_by A";
+ * parents, blockers and what a card depends on sit ABOVE it.
+ */
+export const cardLinkRelationSchema = z.enum([
+  'blocks',
+  'blocked_by',
+  'depends_on',
+  'needed_by',
+  'parent_of',
+  'child_of',
+  'relates_to',
+  'duplicates',
+  'duplicated_by',
+]);
+export type CardLinkRelation = z.infer<typeof cardLinkRelationSchema>;
+
+/** One relation a card declares: the other card, how, and why. */
+export const cardLinkInputSchema = z.object({
+  card: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .describe('The other card: its id, or its label on this board (ZM-42).'),
+  relation: cardLinkRelationSchema.describe(
+    "How this card stands to the other one, from this card's side."
+  ),
+  reason: cardDeclarationSchema.describe('Why the relation holds.'),
+});
+export type CardLinkInput = z.infer<typeof cardLinkInputSchema>;
+
+/** A live relation of a card, as a reader who can see both cards reads it. */
+export const cardLinkViewSchema = z.object({
+  card_id: cardIdSchema,
+  number: z.number().int().positive(),
+  title: z.string(),
+  state: cardStateSchema,
+  scope: z.string(),
+  archived: z.boolean(),
+  /** From the card being read. */
+  relation: cardLinkRelationSchema,
+  reason: z.string(),
+  /** False for an untyped attachment carried over, until someone types it. */
+  declared: z.boolean(),
+  created_at: z.string(),
+});
+export type CardLinkView = z.infer<typeof cardLinkViewSchema>;
+
+/** A card the board offers as possibly related, and why. Never written. */
+export const cardLinkCandidateSchema = z.object({
+  id: cardIdSchema,
+  number: z.number().int().positive(),
+  title: z.string(),
+  state: cardStateSchema,
+  why: z.enum(['mentioned', 'similar']),
+});
+export type CardLinkCandidate = z.infer<typeof cardLinkCandidateSchema>;
+
 export const cardBranchStateSchema = z.enum(['open', 'landed']);
 export type CardBranchState = z.infer<typeof cardBranchStateSchema>;
 
@@ -378,6 +449,13 @@ export const cardEventSchema = z.object({
   release_version: z.string().nullable().default(null),
   release_build: z.string().nullable().default(null),
   release_commit: z.string().nullable().default(null),
+  /** For `linked`/`unlinked`: the stored type, and this card's side of it. */
+  link_type: cardLinkTypeSchema.nullable().default(null),
+  link_direction: z.enum(['out', 'in']).nullable().default(null),
+  /** Why the card relates to no other card, where it said so. */
+  links_note: z.string().nullable().default(null),
+  /** The other card's number, for a card reference the reader may see. */
+  ref_number: z.number().int().nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
@@ -396,6 +474,8 @@ export const cardRefViewSchema = z.object({
   attached_at: z.string(),
   available: z.boolean(),
   preview: z.string().nullable(),
+  /** For a memory the reader may read: its kind, which groups attachments. */
+  memory_kind: z.string().nullable().default(null),
 });
 export type CardRefView = z.infer<typeof cardRefViewSchema>;
 
@@ -422,6 +502,15 @@ export const briefingWorkCardSchema = z.object({
   state: cardStateSchema,
   /** The version this card was last carried by, when it has one. */
   released_in: z.string().nullable().optional(),
+  /**
+   * Its live blockers that are neither done nor archived. Optional: a server
+   * that predates relations sends none.
+   */
+  blocked_by: z
+    .array(z.object({ number: z.number().int(), state: cardStateSchema }))
+    .optional(),
+  /** Whether anyone ever said how the card relates to the board. */
+  links_assessed: z.boolean().optional(),
 });
 export type BriefingWorkCard = z.infer<typeof briefingWorkCardSchema>;
 
@@ -454,6 +543,17 @@ export const briefingWorkSchema = z.object({
       state_reason: z.string().nullable(),
       refs: z.number().int().nonnegative(),
       updated_at: z.string(),
+      /** The cards directly above it: its parent, blockers, dependencies. */
+      above: z
+        .array(
+          z.object({
+            number: z.number().int(),
+            title: z.string(),
+            state: cardStateSchema,
+            relation: cardLinkRelationSchema,
+          })
+        )
+        .optional(),
     })
     .nullable(),
   active: z.number().int().nonnegative(),
@@ -503,6 +603,10 @@ export const boardCardSchema = z.object({
   /** The version this card was last carried by. A server that predates
    * releases, or a card no release has carried yet, reads as null. */
   released_in: z.string().nullable().default(null),
+  /** Whether a live blocker that is neither done nor archived holds it. */
+  blocked: z.boolean().default(false),
+  /** How many live relations it has with cards the reader can see. */
+  links: z.number().int().nonnegative().default(0),
 });
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
@@ -574,6 +678,24 @@ export const boardInputSchema = z.object({
       'For get: continue the feed past this memory — the `feed_next_before` ' +
         'a previous page returned.'
     ),
+  related_to: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe(
+      'For list: only the cards related to this card (its id, or its label ' +
+        'with `scope`).'
+    ),
+  relation_filter: z
+    .enum(['any', 'above', 'below'])
+    .optional()
+    .describe(
+      'With related_to: above = its parent, blockers and what it depends ' +
+        'on; below = its children, what it blocks and what depends on it; ' +
+        'any (default) = every relation.'
+    ),
   limit: z.number().int().positive().max(200).optional(),
 });
 export type BoardInput = z.infer<typeof boardInputSchema>;
@@ -599,20 +721,36 @@ export const boardOutputSchema = z.object({
   branches: z.array(cardBranchViewSchema).default([]),
   /** For get: the production states this card was carried by, newest first. */
   releases: z.array(cardReleaseSchema).default([]),
+  /** For get: its live relations, each named from this card's side. */
+  links: z.array(cardLinkViewSchema).default([]),
+  /** For get: whether a live blocker that is not done holds it. */
+  blocked: z.boolean().default(false),
+  /** For get: whether anyone ever said how it relates to the board. */
+  links_assessed: z.boolean().nullable().default(null),
 });
 export type BoardOutput = z.infer<typeof boardOutputSchema>;
 
 /** `card` — opening and steering one piece of work. */
 export const cardInputSchema = z.object({
   action: z
-    .enum(['create', 'promote_loop', 'edit', 'move', 'archive', 'land'])
+    .enum([
+      'create',
+      'promote_loop',
+      'edit',
+      'move',
+      'archive',
+      'land',
+      'link',
+      'unlink',
+    ])
     .describe(
       'create: open a card. promote_loop: turn an open loop into one, ' +
         'recording where it came from and leaving the loop itself alone. ' +
         'edit: rewrite its text. move: declare where the work stands, with ' +
         'the reason why. archive: take it off the board for good. land: ' +
         'record that a branch landed as a squash commit, and move the card ' +
-        '(to waiting unless `to` says otherwise).'
+        '(to waiting unless `to` says otherwise). link / unlink: state or ' +
+        'retire how this card relates to another, with a reason.'
     ),
   card_id: cardIdSchema
     .optional()
@@ -642,9 +780,9 @@ export const cardInputSchema = z.object({
   reason: cardReasonSchema
     .optional()
     .describe(
-      'Why the state changed — required for move, archive and land. This is what ' +
-        'the next reader has instead of guessing; there is no way to move a ' +
-        'card without it.'
+      'Why the state changed — required for move, archive and land — or why ' +
+        'a relation holds or ends, for link and unlink. This is what the next ' +
+        'reader has instead of guessing.'
     ),
   expected_revision: z
     .number()
@@ -679,6 +817,40 @@ export const cardInputSchema = z.object({
         'why. Without it such a move is refused; a branch that DID land is ' +
         'recorded with land.'
     ),
+  to_card: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe(
+      'For link and unlink: the other card — its id, or its label on this ' +
+        "card's board (ZM-42)."
+    ),
+  relation: cardLinkRelationSchema
+    .optional()
+    .describe(
+      'For link and unlink: how this card stands to `to_card`, from this ' +
+        "card's side — blocks / blocked_by, depends_on / needed_by, " +
+        'parent_of / child_of, relates_to, duplicates / duplicated_by.'
+    ),
+  links: z
+    .array(cardLinkInputSchema)
+    .min(1)
+    .max(20)
+    .optional()
+    .describe(
+      'The cards this one relates to, each {card, relation, reason}. A new ' +
+        'card (create, promote_loop) passes `links` or `no_links`, and so does ' +
+        'a card entering active that never said; the refusal lists candidate ' +
+        'cards from the board.'
+    ),
+  no_links: cardDeclarationSchema
+    .optional()
+    .describe(
+      'Why the card relates to no other card on the board. Stands in for ' +
+        '`links`.'
+    ),
   squash_sha: gitCommitShaSchema
     .optional()
     .describe('For land: the commit the branch landed as.'),
@@ -695,6 +867,11 @@ export const cardOutputSchema = z.object({
   changed: z.boolean().default(true),
   /** True when an idempotency key replayed an earlier call's result. */
   replayed: z.boolean().default(false),
+  /**
+   * After a card was created with `no_links`: the cards the board still
+   * offers as possibly related, so one call can reconsider.
+   */
+  candidates: z.array(cardLinkCandidateSchema).default([]),
 });
 export type CardOutput = z.infer<typeof cardOutputSchema>;
 

@@ -38,12 +38,13 @@ _Nothing is deprecated yet._
 
 ## Breaking changes
 
-| Change | Version | What a client must do |
-| ------ | ------- | --------------------- |
+| Change                                                                                                            | Version | What a client must do                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `card` `create` and `promote_loop` are refused with `links_required` unless the call states the card's relations. | 4.0.0   | Pass `links` (`[{card, relation, reason}]`, where `card` is an id or a `ZM-N` label) or `no_links` with a reason why the card relates to no other card. The refusal names candidate cards from the same board. |
 
-_None recorded. The ledger starts counting from the first public release —
-contract history from before any external client existed is not
-compatibility anyone must migrate across, so it is not carried here._
+The ledger starts counting from the first public release. Contract history
+from before any external client existed is not compatibility anyone must
+migrate across, so it is not carried here.
 
 ## Behavioural changes
 
@@ -53,8 +54,10 @@ observes. They carry no version bump, because there is nothing to migrate;
 they are listed so a client that branched on the old behaviour can find out
 why it changed.
 
-| Change                                                                                                                                                                                                     | What a client should know                                                                                                                |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `card` `move` into `active` — and `create` / `promote_loop` straight into it — is refused with `branch_required` unless the call passes `branch` or `no_branch`, or the card already holds an open branch. | Pass the work's branch (`{repo, name}`) or `no_branch` with a reason. `promote_loop` opens in `active` by default, so it is covered too. |
-| `card` `move` out of `active` is refused with `branch_open` while the card holds an open branch.                                                                                                           | Record the landing with the new `land` action, or pass `not_landed` saying why the branch has not landed.                                |
-| Cards are labelled `ZM-N` instead of `#N` in briefing text, server messages and the dashboard.                                                                                                             | The number itself is unchanged and `board resolve` still takes it; only text that quoted `#N` reads differently.                         |
+| Change                                                                                                                                                                                                     | What a client should know                                                                                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `card` `move` into `active` — and `create` / `promote_loop` straight into it — is refused with `branch_required` unless the call passes `branch` or `no_branch`, or the card already holds an open branch. | Pass the work's branch (`{repo, name}`) or `no_branch` with a reason. `promote_loop` opens in `active` by default, so it is covered too.              |
+| `card` `move` out of `active` is refused with `branch_open` while the card holds an open branch.                                                                                                           | Record the landing with the new `land` action, or pass `not_landed` saying why the branch has not landed.                                             |
+| Cards are labelled `ZM-N` instead of `#N` in briefing text, server messages and the dashboard.                                                                                                             | The number itself is unchanged and `board resolve` still takes it; only text that quoted `#N` reads differently.                                      |
+| `card` `move` into `active` is refused with `links_required` when the card's relations were never assessed: no statement at creation or on an earlier move, and no declared relation.                      | Pass `links` or `no_links` on that move, or relate the card with `link` beforehand. A card that stated its relations once is not asked again.         |
+| `card` `attach` with `ref_kind: card` records an undeclared `relates_to` relation between the two cards, and `detach` retires it.                                                                          | The attachment still works as before. The relation shows up in `board get` as undeclared, and a declared relation between the same cards replaces it. |
