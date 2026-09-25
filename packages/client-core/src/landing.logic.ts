@@ -70,9 +70,20 @@ const sameCommit = (left: string, right: string): boolean => {
 };
 
 /**
+ * Whether a squash is one of the landings the board already holds for a
+ * branch — a short sha and a full one are the same commit either way round.
+ */
+export const isRecordedSquash = (
+  landings: ReadonlyArray<{ squash_sha: string }> | undefined,
+  sha: string
+): boolean =>
+  (landings ?? []).some((landing) => sameCommit(landing.squash_sha, sha));
+
+/**
  * Whether the board already holds this landing: the branch landed, in this
  * repository, as this commit — a short sha and a full one are the same
- * commit either way round.
+ * commit either way round. A branch reopened for more work is open again,
+ * yet the squashes it landed as stay on record.
  */
 export const isLandingRecorded = (
   branches: ReadonlyArray<{
@@ -95,11 +106,10 @@ export const isLandingRecorded = (
     (item) =>
       item.repo === repo &&
       item.branch === branch &&
-      item.state === 'landed' &&
-      ((item.squash_sha !== null && sameCommit(item.squash_sha, sha)) ||
-        (item.landings ?? []).some((landing) =>
-          sameCommit(landing.squash_sha, sha)
-        ))
+      ((item.state === 'landed' &&
+        item.squash_sha !== null &&
+        sameCommit(item.squash_sha, sha)) ||
+        isRecordedSquash(item.landings, sha))
   );
 
 /** A landing git shows: which card, which branch, which commit, where. */
