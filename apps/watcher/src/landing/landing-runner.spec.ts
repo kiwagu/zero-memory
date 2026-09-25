@@ -455,4 +455,45 @@ describe('landingDriftFor', () => {
       },
     ]);
   });
+
+  it('leaves a reopened branch alone while its squash here is one the board recorded', () => {
+    const recorded = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    const work = (landings: Array<{ squash_sha: string }>) => ({
+      bound_card: null,
+      active: 1,
+      waiting: 0,
+      lead: [],
+      open_branches: [
+        {
+          card_id: CARD.id,
+          number: 27,
+          state: 'active' as const,
+          repo: 'acme/memory-service',
+          branch: 'feature/x',
+          landings,
+        },
+      ],
+    });
+    // The branch landed before (on this card or another) and was named again
+    // for more work: its old squash is on record, so nothing is missing.
+    expect(
+      landingDriftFor(repo, work([{ squash_sha: recorded.slice(0, 7) }]))
+    ).toEqual([]);
+
+    // A new squash of the same branch that nobody recorded is still named.
+    const fresh = commit(
+      repo,
+      'c',
+      'fix: the follow-up',
+      'Squashed-from: feature/x (1234567) ZM-27'
+    );
+    expect(
+      landingDriftFor(repo, work([{ squash_sha: recorded.slice(0, 7) }]))
+    ).toEqual([expect.objectContaining({ cardNumber: 27, squashSha: fresh })]);
+  });
 });

@@ -102,6 +102,16 @@ export const isLandingRecorded = (
         ))
   );
 
+/**
+ * Whether a squash is one of the landings the board already holds for a
+ * branch — a short sha and a full one are the same commit either way round.
+ */
+export const isRecordedSquash = (
+  landings: ReadonlyArray<{ squash_sha: string }> | undefined,
+  sha: string
+): boolean =>
+  (landings ?? []).some((landing) => sameCommit(landing.squash_sha, sha));
+
 /** A landing git shows: which card, which branch, which commit, where. */
 export interface LandingFacts {
   cardId: string;

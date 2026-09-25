@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   escapeGitRegex,
   isLandingRecorded,
+  isRecordedSquash,
   parseSquashTrailers,
   renderLandingDrift,
   renderLandingReminder,
@@ -65,6 +66,22 @@ describe('escapeGitRegex', () => {
     const pattern = new RegExp(`^${escapeGitRegex('release/1.2+fix')}$`, 'u');
     expect(pattern.test('release/1.2+fix')).toBe(true);
     expect(pattern.test('release/1x2+fix')).toBe(false);
+  });
+});
+
+describe('isRecordedSquash', () => {
+  it('matches a recorded squash by a short or a full sha, either way round', () => {
+    const full = 'abcdef1234567890abcdef1234567890abcdef12';
+    expect(isRecordedSquash([{ squash_sha: 'abcdef1' }], full)).toBe(true);
+    expect(isRecordedSquash([{ squash_sha: full }], 'ABCDEF1')).toBe(true);
+    expect(isRecordedSquash([{ squash_sha: 'abcdef1' }], '1234567')).toBe(
+      false
+    );
+  });
+
+  it('knows no squash when the server sent no landings', () => {
+    expect(isRecordedSquash(undefined, 'abcdef1')).toBe(false);
+    expect(isRecordedSquash([], 'abcdef1')).toBe(false);
   });
 });
 

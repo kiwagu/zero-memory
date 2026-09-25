@@ -25,6 +25,7 @@ export { renderBoardSummary } from './work-section.logic.js';
 export {
   escapeGitRegex,
   isLandingRecorded,
+  isRecordedSquash,
   parseSquashTrailers,
   renderLandingDrift,
   renderLandingReminder,
