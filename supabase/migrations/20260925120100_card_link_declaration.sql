@@ -364,6 +364,12 @@ begin
     end if;
   end if;
 
+  -- Relations first, like every command that writes one: see
+  -- private.card_links_lock.
+  if p_links is not null then
+    perform private.card_links_lock();
+  end if;
+
   -- Serialize creation within the scope: two concurrent creates must not read
   -- the same max number, and two concurrent promotions of one loop must not
   -- both pass the "already promoted" check below. The lock is transaction-
@@ -606,6 +612,11 @@ begin
   if not exists (select 1 from public.cards where id = p_card_id) then
     return jsonb_build_object('error', 'not_found');
   end if;
+  -- Relations first, like every command that writes one: see
+  -- private.card_links_lock.
+  if p_links is not null then
+    perform private.card_links_lock();
+  end if;
   select * into v_card from public.cards where id = p_card_id for update;
   if not found then
     return jsonb_build_object('error', 'forbidden');
@@ -745,6 +756,11 @@ begin
   -- would report a reader's lack of rights as a missing card.
   if not exists (select 1 from public.cards where id = p_card_id) then
     return jsonb_build_object('error', 'not_found');
+  end if;
+  -- A card attachment is a relation: its lock comes first, like every
+  -- command that writes one (see private.card_links_lock).
+  if p_kind = 'card' then
+    perform private.card_links_lock();
   end if;
   select * into v_card from public.cards where id = p_card_id for update;
   if not found then

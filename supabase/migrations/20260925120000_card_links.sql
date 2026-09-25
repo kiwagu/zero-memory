@@ -26,6 +26,8 @@
 --     above another
 --   - function private.card_has_parent (new): whether a card already has a
 --     parent, wherever that parent lives
+--   - function private.card_links_lock (new): the one lock every command
+--     that writes a relation takes before it locks a card
 --   - trigger card_links_keep_authorship (new): who declared and who retired
 --     a relation follow the caller, never a value a direct write supplies
 --   - function private.card_link_write (new): the one place a relation is
@@ -37,9 +39,11 @@
 -- Special considerations:
 --   - card_is_above is SECURITY DEFINER so a loop through a board the caller
 --     cannot read is still found. It answers a boolean and nothing else.
---   - Writes of ranking relations are serialized by one transaction-scoped
---     advisory lock, so two relations that close a loop only together cannot
---     both pass the check at the same moment.
+--   - Every command that writes a relation takes one transaction-scoped
+--     advisory lock BEFORE it locks any card. Two relations that close a
+--     loop only together cannot both pass the check, and two commands that
+--     relate the same cards from both sides wait in turn instead of each
+--     holding one card while waiting for the other.
 --   - The walk above a card follows every chain to its end, however long:
 --     the one-parent rule and the loop check hold without a depth limit.
 --   - Authorship is not writable: a relation is created and retired in the
@@ -349,6 +353,20 @@ as $$
                     and l.src_card_id <> p_except)
 $$;
 
+-- The lock every command that writes a relation takes, first: before any card
+-- row is locked. One order for all of them, so two commands that relate the
+-- same cards from both sides queue here instead of each holding one card and
+-- waiting for the other. It also serializes the loop check. Transaction-scoped
+-- and re-entrant, so a command that already holds it may take it again.
+create or replace function private.card_links_lock()
+returns void
+language sql
+volatile
+set search_path = ''
+as $$
+  select pg_advisory_xact_lock(hashtext('card_links:above'))
+$$;
+
 -- 4. writing a relation ----------------------------------------------------------
 
 -- The one place a relation is written. Both cards are already locked and
@@ -402,7 +420,7 @@ begin
   end if;
 
   if p_type in ('parent_of', 'blocks', 'depends_on') then
-    perform pg_advisory_xact_lock(hashtext('card_links:above'));
+    perform private.card_links_lock();
     if p_type = 'depends_on' then
       v_upper := v_dst;
       v_lower := v_src;
@@ -591,6 +609,7 @@ begin
       'changed', false, 'replayed', true);
   end if;
 
+  perform private.card_links_lock();
   select p.refusal, p.other_id into v_refusal, v_other_id
     from private.card_link_pair(p_card_id, p_to) p;
   if v_refusal is not null then
@@ -661,6 +680,7 @@ begin
       'message', 'Unlinking needs a reason of 1 to 500 characters.');
   end if;
 
+  perform private.card_links_lock();
   select p.refusal, p.other_id into v_refusal, v_other_id
     from private.card_link_pair(p_card_id, p_to) p;
   if v_refusal is not null then
@@ -729,6 +749,7 @@ revoke all on function private.card_ref_resolve(extensions.ltree, text)
 revoke all on function private.card_link_normalize(text) from public, anon;
 revoke all on function private.card_is_above(text, text) from public, anon;
 revoke all on function private.card_has_parent(text, text) from public, anon;
+revoke all on function private.card_links_lock() from public, anon;
 revoke all on function private.card_link_write(
   public.cards, public.cards, text, text, boolean, text, text, text, text)
   from public, anon;
@@ -745,6 +766,8 @@ grant execute on function private.card_link_normalize(text)
 grant execute on function private.card_is_above(text, text)
   to authenticated, service_role;
 grant execute on function private.card_has_parent(text, text)
+  to authenticated, service_role;
+grant execute on function private.card_links_lock()
   to authenticated, service_role;
 grant execute on function private.card_link_write(
   public.cards, public.cards, text, text, boolean, text, text, text, text)

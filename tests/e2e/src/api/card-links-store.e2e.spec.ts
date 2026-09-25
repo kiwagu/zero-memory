@@ -706,6 +706,54 @@ test.describe('Relations are assessed', () => {
     expect((await enter({})).error).toBeUndefined();
   });
 
+  test('reciprocal relations declared at the same moment never deadlock', async () => {
+    const { scope, db } = await board('assess-deadlock');
+    for (let round = 0; round < 4; round += 1) {
+      const a = await newCard(db, scope, `Relay a ${round}`);
+      const b = await newCard(db, scope, `Relay b ${round}`);
+      const enter = (card: CardJson, other: CardJson) =>
+        rpc<CreateResult>(db, 'card_move', {
+          p_card_id: card.id,
+          p_to_state: 'active',
+          p_reason: 'picked up',
+          p_no_branch: 'e2e fixture',
+          p_links: [
+            {
+              card: `ZM-${other.number}`,
+              relation: 'blocks',
+              reason: 'e2e race',
+            },
+          ],
+        });
+      // Each move locks its own card first; without one lock order they
+      // wait on each other and the database aborts one of them.
+      const moved = await Promise.all([enter(a, b), enter(b, a)]);
+      expect(moved.filter((result) => result.error === undefined)).toHaveLength(
+        1
+      );
+      expect(moved.filter((result) => result.error === 'invalid')).toHaveLength(
+        1
+      );
+
+      // An attachment of a card takes the same path.
+      const c = await newCard(db, scope, `Relay c ${round}`);
+      const d = await newCard(db, scope, `Relay d ${round}`);
+      await Promise.all([
+        rpc(db, 'card_attach', {
+          p_card_id: c.id,
+          p_kind: 'card',
+          p_target: d.id,
+        }),
+        rpc(db, 'card_attach', {
+          p_card_id: d.id,
+          p_kind: 'card',
+          p_target: c.id,
+        }),
+      ]);
+      expect(await rowsBetween(db, c.id, d.id)).toHaveLength(1);
+    }
+  });
+
   test('a move refused for its relations leaves no branch behind', async () => {
     const { scope, db } = await board('assess-branch-rollback');
     const card = await newCard(db, scope, 'Relay keys');
