@@ -3,6 +3,7 @@ import type { CardHistoryEntry } from '@workspace/ui/components/board/card-histo
 import type { CardDetailData } from '@workspace/ui/components/board/card-detail';
 import type { BadgeListItem } from '@workspace/ui/components/common/badge-list';
 import type { LinkedMemoryItem } from '@workspace/ui/components/memory/linked-memory-list';
+import { cardLabelNumbers } from '@workspace/ui/lib/markdown';
 
 import {
   cardBranchEarlierLabel,
@@ -31,6 +32,11 @@ import { rowsOf } from '@/lib/views/query';
 const HISTORY_LIMIT = 200;
 /** The newest feed entries shown on a card; older ones stay reachable by MCP. */
 const FEED_LIMIT = 50;
+/**
+ * Distinct card labels resolved per view. A text naming more cards than this
+ * keeps the rest as plain labels; the request stays bounded.
+ */
+const MENTION_LIMIT = 100;
 
 export interface CardViewData {
   id: string;
@@ -66,14 +72,38 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     has_more: hasMore,
   } = parsed.data;
 
+  // A `ZM-N` label in the card's text means card N of THIS card's board. It
+  // is resolved under the reader's session, so a card the reader may not see
+  // never arrives and its label stays text, like a label naming no card. The
+  // card's own label is left as text: it would only open the card again.
+  const mentioned = cardLabelNumbers([
+    card.body,
+    ...events.flatMap((event) => [event.reason ?? '', event.text ?? '']),
+  ])
+    .filter((number) => number !== card.number)
+    .slice(0, MENTION_LIMIT);
+
   // The feed is read under the same session, so a memory this reader may not
   // open never arrives — there is nothing to hide, unlike an attachment.
-  const feedData = rowsOf(
-    await supabase.rpc('card_feed', {
+  const [feedResult, mentionResult] = await Promise.all([
+    supabase.rpc('card_feed', {
       p_card_id: id,
       p_limit: FEED_LIMIT,
     }),
-    'card feed'
+    mentioned.length > 0
+      ? supabase
+          .from('cards')
+          .select('id, number')
+          .eq('scope', card.scope)
+          .in('number', mentioned)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  const feedData = rowsOf(feedResult, 'card feed');
+  const cardLinks: Record<string, string> = Object.fromEntries(
+    (rowsOf(mentionResult, 'card mentions') ?? []).map((row) => [
+      String(row.number),
+      `/board/${row.id}`,
+    ])
   );
   const feed = cardFeedSchema.safeParse(feedData ?? {});
   const feedItems: LinkedMemoryItem[] = (
@@ -214,6 +244,7 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
       },
       hiddenLabel: t('board.refHidden'),
       imageLabel: t('markdown.image'),
+      cardLinks,
     },
   };
 }

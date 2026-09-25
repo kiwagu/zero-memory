@@ -35,11 +35,14 @@ function CardHistory({
   entries,
   emptyLabel,
   linkComponent = 'a',
+  cardLinks,
 }: {
   entries: CardHistoryEntry[];
   emptyLabel: string;
   /** Client-router link injected by the app (e.g. next/link); plain <a> by default. */
   linkComponent?: React.ElementType;
+  /** The cards a `ZM-N` label in a reason or a note links to. */
+  cardLinks?: Readonly<Record<string, string>>;
 }) {
   if (entries.length === 0) {
     return <EmptyState compact>{emptyLabel}</EmptyState>;
@@ -66,7 +69,11 @@ function CardHistory({
               className="text-foreground/90 italic"
               data-testid="card-reason"
             >
-              <Markdown density="inline" linkComponent={linkComponent}>
+              <Markdown
+                density="inline"
+                linkComponent={linkComponent}
+                cardLinks={cardLinks}
+              >
                 {entry.reason}
               </Markdown>
             </div>
@@ -88,7 +95,7 @@ function CardHistory({
                   {entry.note.relationLabel}
                 </Badge>
               ) : null}
-              <Markdown linkComponent={linkComponent}>
+              <Markdown linkComponent={linkComponent} cardLinks={cardLinks}>
                 {entry.note.text}
               </Markdown>
             </div>
