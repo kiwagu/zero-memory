@@ -5,6 +5,8 @@
  * that would put a card above itself — through parents, blockers or
  * dependencies — is refused.
  */
+import { spawnSync } from 'node:child_process';
+
 import { expect, test } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
@@ -93,6 +95,7 @@ const newCard = async (
     await rpc<{ card: CardJson }>(db, 'card_create', {
       p_scope: scope,
       p_title: title,
+      p_no_links: 'e2e fixture',
     })
   ).card;
 
@@ -153,6 +156,47 @@ const lastEvent = async (
   expect(error).toBeNull();
   return data as EventRow;
 };
+
+/** SQL as the database owner, for fixtures no role may write through the API. */
+const psql = (query: string): string => {
+  const result = spawnSync(
+    'docker',
+    [
+      'run',
+      '--rm',
+      '--network',
+      'host',
+      '-i',
+      'supabase/postgres:17.6.1.136',
+      'psql',
+      'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-Atc',
+      query,
+    ],
+    { encoding: 'utf8' }
+  );
+  if (result.status !== 0) {
+    throw new Error(`psql: ${result.stderr}`);
+  }
+  return result.stdout.trim();
+};
+
+interface Candidate {
+  id: string;
+  number: number;
+  title: string;
+  state: string;
+  why: 'mentioned' | 'similar';
+}
+
+interface CreateResult {
+  error?: string;
+  message?: string;
+  card?: CardJson;
+  candidates?: Candidate[];
+}
 
 const board = async (tag: string) => {
   const seed = await readSeedState();
@@ -377,5 +421,279 @@ test.describe('Card links in the store', () => {
     expect((await link(dbB, mine.id, a.id, 'relates_to')).error).toBe(
       'forbidden'
     );
+  });
+});
+
+test.describe('Relations are assessed', () => {
+  test('a card is created with its relations, or with a stated reason for none', async () => {
+    const { scope, db } = await board('assess-create');
+    const base = await newCard(db, scope, 'Relay keys');
+
+    const bare = await rpc<CreateResult>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Relay rollout',
+    });
+    expect(bare.error).toBe('links_required');
+    expect(Array.isArray(bare.candidates)).toBe(true);
+
+    const none = await rpc<CreateResult>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Relay rollout',
+      p_no_links: 'a standalone rollout',
+    });
+    expect(none.error).toBeUndefined();
+    const { data: created } = await db
+      .from('card_events')
+      .select('type, links_note')
+      .eq('card_id', none.card!.id)
+      .eq('type', 'created')
+      .single();
+    expect(created).toEqual({
+      type: 'created',
+      links_note: 'a standalone rollout',
+    });
+
+    const linked = await rpc<CreateResult>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Relay second rollout',
+      p_links: [
+        {
+          card: `ZM-${base.number}`,
+          relation: 'depends_on',
+          reason: 'needs keys',
+        },
+      ],
+    });
+    expect(linked.error).toBeUndefined();
+    expect(await rowsBetween(db, linked.card!.id, base.id)).toEqual([
+      expect.objectContaining({
+        src_card_id: linked.card!.id,
+        dst_card_id: base.id,
+        type: 'depends_on',
+        declared: true,
+      }),
+    ]);
+    expect(await lastEvent(db, base.id)).toMatchObject({
+      type: 'linked',
+      link_direction: 'in',
+    });
+
+    const both = await rpc<CreateResult>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Relay third rollout',
+      p_links: [
+        { card: base.id, relation: 'relates_to', reason: 'same relay' },
+      ],
+      p_no_links: 'none',
+    });
+    expect(both.error).toBe('invalid');
+    const blank = await rpc<CreateResult>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Relay third rollout',
+      p_no_links: '   ',
+    });
+    expect(blank.error).toBe('invalid');
+    const unknown = await rpc<CreateResult>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Relay third rollout',
+      p_links: [{ card: 'ZM-9999', relation: 'relates_to', reason: 'why' }],
+    });
+    expect(unknown.error).toBe('not_found');
+    const { count } = await db
+      .from('cards')
+      .select('id', { count: 'exact', head: true })
+      .eq('scope', scope)
+      .eq('title', 'Relay third rollout');
+    expect(count).toBe(0);
+  });
+
+  test('a card whose relations close a loop is not created at all', async () => {
+    const { scope, db } = await board('assess-atomic');
+    const a = await newCard(db, scope, 'Relay keys');
+    const refused = await rpc<CreateResult>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Relay loop',
+      p_links: [
+        { card: a.id, relation: 'blocks', reason: 'first' },
+        { card: a.id, relation: 'depends_on', reason: 'second' },
+      ],
+    });
+    expect(refused.error).toBe('invalid');
+    const { count } = await db
+      .from('cards')
+      .select('id', { count: 'exact', head: true })
+      .eq('scope', scope)
+      .eq('title', 'Relay loop');
+    expect(count).toBe(0);
+  });
+
+  test('candidates name the cards a text mentions and the ones it resembles', async () => {
+    const { scope, db } = await board('assess-candidates');
+    const certs = await newCard(db, scope, 'Rotate the edge certificates');
+    const index = await newCard(db, scope, 'Search index rebuild');
+    const archived = await newCard(db, scope, 'Certificates archive sweep');
+    await rpc(db, 'card_archive', {
+      p_card_id: archived.id,
+      p_reason: 'dropped',
+    });
+
+    const refused = await rpc<CreateResult>(db, 'card_create', {
+      p_scope: scope,
+      p_title: 'Certificates expire early',
+      p_body: `Found while doing ZM-${index.number}: the edge certificates expire.`,
+    });
+    expect(refused.error).toBe('links_required');
+    const candidates = refused.candidates ?? [];
+    expect(candidates.length).toBeLessThanOrEqual(5);
+    expect(candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: index.id, why: 'mentioned' }),
+        expect.objectContaining({ id: certs.id, why: 'similar' }),
+      ])
+    );
+    expect(candidates.map((candidate) => candidate.id)).not.toContain(
+      archived.id
+    );
+  });
+
+  test('an unassessed card entering active must assess its relations once', async () => {
+    const { scope, db } = await board('assess-move');
+    // A card from before the rule: created with no statement about relations.
+    const { data: profile } = await admin()
+      .from('profiles')
+      .select('id')
+      .eq('user_id', (await readSeedState()).userA.id)
+      .single();
+    const { data: old } = await admin()
+      .from('cards')
+      .insert({
+        scope,
+        number: 90,
+        title: 'Card from before the rule',
+        state: 'idea',
+        created_by: (profile as { id: string }).id,
+      })
+      .select('id')
+      .single();
+    const oldId = (old as { id: string }).id;
+
+    const enter = (extra: Record<string, unknown>) =>
+      rpc<CreateResult>(db, 'card_move', {
+        p_card_id: oldId,
+        p_to_state: 'active',
+        p_reason: 'picked up',
+        p_no_branch: 'e2e fixture',
+        ...extra,
+      });
+    const refused = await enter({});
+    expect(refused.error).toBe('links_required');
+    expect(Array.isArray(refused.candidates)).toBe(true);
+    expect((await enter({ p_no_links: 'nothing on this board' })).error).toBe(
+      undefined
+    );
+    await rpc(db, 'card_move', {
+      p_card_id: oldId,
+      p_to_state: 'waiting',
+      p_reason: 'paused',
+    });
+    // Assessed once, it enters active again without a new statement.
+    expect((await enter({})).error).toBeUndefined();
+  });
+
+  test('promoting a loop takes the same statement', async () => {
+    const { token, scope, db } = await board('assess-promote');
+    const agent = await McpTestClient.connect(token);
+    let loopId: string;
+    try {
+      const loop = await agent.callTool('remember', {
+        content: `assess-promote loop ${Date.now()}: migrate the relay queue`,
+        kind: 'task',
+        scope,
+      });
+      expect(loop.isError ?? false).toBe(false);
+      loopId = firstJson<{ memory_id: string }>(loop).memory_id;
+    } finally {
+      await agent.close();
+    }
+    const promote = (extra: Record<string, unknown>) =>
+      rpc<CreateResult>(db, 'card_promote_loop', {
+        p_loop_id: loopId,
+        p_title: 'Migrate the relay queue',
+        p_no_branch: 'e2e fixture',
+        ...extra,
+      });
+    expect((await promote({})).error).toBe('links_required');
+    expect(
+      (await promote({ p_no_links: 'first card of its kind' })).error
+    ).toBe(undefined);
+  });
+
+  test('attaching a card states an untyped relation, which a typed one replaces', async () => {
+    const { scope, db } = await board('assess-attach');
+    const a = await newCard(db, scope, 'Relay keys');
+    const b = await newCard(db, scope, 'Relay rollout');
+    const attach = () =>
+      rpc<{ changed: boolean }>(db, 'card_attach', {
+        p_card_id: a.id,
+        p_kind: 'card',
+        p_target: b.id,
+      });
+
+    expect((await attach()).changed).toBe(true);
+    expect(await rowsBetween(db, a.id, b.id)).toEqual([
+      expect.objectContaining({ type: 'relates_to', declared: false }),
+    ]);
+    expect(await lastEvent(db, a.id)).toMatchObject({ type: 'linked' });
+    expect((await attach()).changed).toBe(false);
+
+    // A typed relation of the pair retires the untyped one…
+    await link(db, a.id, b.id, 'blocks', 'keys first');
+    const rows = await rowsBetween(db, a.id, b.id);
+    expect(
+      rows.find((row) => row.type === 'relates_to')?.invalidated_at
+    ).not.toBeNull();
+    // …and attaching again never stands an untyped relation over it.
+    expect((await attach()).changed).toBe(false);
+
+    const c = await newCard(db, scope, 'Relay docs');
+    await rpc(db, 'card_attach', {
+      p_card_id: a.id,
+      p_kind: 'card',
+      p_target: c.id,
+    });
+    await rpc(db, 'card_detach', {
+      p_card_id: a.id,
+      p_kind: 'card',
+      p_target: c.id,
+    });
+    expect(
+      (await rowsBetween(db, a.id, c.id))[0]?.invalidated_at
+    ).not.toBeNull();
+  });
+
+  test('old untyped card attachments are carried over as untyped relations', async () => {
+    const { scope, db } = await board('assess-carry');
+    const a = await newCard(db, scope, 'Relay keys');
+    const b = await newCard(db, scope, 'Relay rollout');
+    // The shape the store held before relations had types.
+    psql(
+      `insert into public.card_refs (card_id, scope, kind, target, attached_by) ` +
+        `select '${b.id}', scope, 'card', '${a.id}', created_by ` +
+        `from public.cards where id = '${b.id}'`
+    );
+    expect(psql('select private.card_links_carry_refs()')).toBe('1');
+
+    expect(await rowsBetween(db, a.id, b.id)).toEqual([
+      expect.objectContaining({
+        type: 'relates_to',
+        declared: false,
+        reason: 'carried over from an untyped attachment',
+      }),
+    ]);
+    expect(
+      psql(
+        `select count(*) from public.card_refs where kind = 'card' and card_id = '${b.id}'`
+      )
+    ).toBe('0');
   });
 });

@@ -859,6 +859,7 @@ test.describe('Project board over MCP', () => {
         }
       );
       const { data: claimed } = await stranger.rpc('card_create', {
+        p_no_links: 'e2e fixture',
         p_scope: strangerScope,
         p_title: 'Not mine to claim',
         p_origin_loop_id: foreign.memory_id,

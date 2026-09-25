@@ -2038,7 +2038,9 @@ export type Database = {
           p_branch_name?: string;
           p_branch_repo?: string;
           p_idempotency_key?: string;
+          p_links?: Json;
           p_no_branch?: string;
+          p_no_links?: string;
           p_origin_loop_id?: string;
           p_scope: string;
           p_state?: string;
@@ -2111,7 +2113,9 @@ export type Database = {
           p_branch_repo?: string;
           p_card_id: string;
           p_idempotency_key?: string;
+          p_links?: Json;
           p_no_branch?: string;
+          p_no_links?: string;
           p_not_landed?: string;
           p_reason: string;
           p_thread?: string;
@@ -2138,8 +2142,10 @@ export type Database = {
           p_branch_name?: string;
           p_branch_repo?: string;
           p_idempotency_key?: string;
+          p_links?: Json;
           p_loop_id: string;
           p_no_branch?: string;
+          p_no_links?: string;
           p_state?: string;
           p_thread?: string;
           p_title: string;
