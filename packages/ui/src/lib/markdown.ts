@@ -1,5 +1,5 @@
 /**
- * The pieces of the dashboard's Markdown rendering that are pure logic: two
+ * The pieces of the dashboard's Markdown rendering that are pure logic: the
  * remark plugins and the link classifier. Typed structurally so the package
  * needs no mdast/unist type dependency.
  */
@@ -72,22 +72,90 @@ export function splitMemoryIds(text: string): MdNode[] {
   return parts;
 }
 
-function linkifyChildren(node: MdNode): void {
+/**
+ * A card's label, `ZM-42`: not inside a word, and not running on into more
+ * digits, letters or another dash-number.
+ */
+const CARD_LABEL_PATTERN = /(?<![0-9A-Za-z])ZM-(\d+)(?![0-9A-Za-z]|-\d)/g;
+
+/**
+ * The card numbers a set of texts mentions, each once, in order of first
+ * mention — what a view resolves before it renders the texts.
+ */
+export function cardLabelNumbers(texts: readonly string[]): number[] {
+  const numbers = new Set<number>();
+  for (const text of texts) {
+    for (const match of text.matchAll(CARD_LABEL_PATTERN)) {
+      numbers.add(Number(match[1]));
+    }
+  }
+  return [...numbers];
+}
+
+/**
+ * Card labels in `text` become links to the cards `links` names, keyed by
+ * number. A label of a card it was not given stays text: a card that does not
+ * exist, or one the reader may not see, looks exactly like prose.
+ */
+export function splitCardLabels(
+  text: string,
+  links: Readonly<Record<string, string>>
+): MdNode[] {
+  const parts: MdNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(CARD_LABEL_PATTERN)) {
+    const url = links[match[1] ?? ''];
+    if (url === undefined) {
+      continue;
+    }
+    const start = match.index;
+    if (start > last) {
+      parts.push({ type: 'text', value: text.slice(last, start) });
+    }
+    parts.push({
+      type: 'link',
+      url,
+      children: [{ type: 'text', value: match[0] }],
+    });
+    last = start + match[0].length;
+  }
+  if (parts.length === 0) {
+    return [{ type: 'text', value: text }];
+  }
+  if (last < text.length) {
+    parts.push({ type: 'text', value: text.slice(last) });
+  }
+  return parts;
+}
+
+function linkifyChildren(
+  node: MdNode,
+  split: (text: string) => MdNode[]
+): void {
   if (!node.children || NO_AUTOLINK.has(node.type)) {
     return;
   }
   node.children = node.children.flatMap((child) => {
     if (child.type === 'text' && child.value) {
-      return splitMemoryIds(child.value);
+      return split(child.value);
     }
-    linkifyChildren(child);
+    linkifyChildren(child, split);
     return [child];
   });
 }
 
 /** A bare memory id in prose becomes a link to that memory. */
 export function remarkMemoryIdLinks() {
-  return (tree: MdNode): void => linkifyChildren(tree);
+  return (tree: MdNode): void => linkifyChildren(tree, splitMemoryIds);
+}
+
+/**
+ * A card label in prose becomes a link to that card — only for the cards the
+ * caller resolved, since a label means a card only on its own board.
+ */
+export function remarkCardLabelLinks(links: Readonly<Record<string, string>>) {
+  return (tree: MdNode): void =>
+    linkifyChildren(tree, (text) => splitCardLabels(text, links));
 }
 
 /** A placeholder origin no real link can have (the `.invalid` TLD is reserved). */
