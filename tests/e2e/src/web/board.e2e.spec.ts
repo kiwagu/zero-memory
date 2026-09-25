@@ -623,6 +623,8 @@ test.describe('Panel chain in the card dialog', () => {
           `As code: \`ZM-${targetNumber}\``,
           '',
           `Unknown: ZM-999999. Another board's: ZM-${foreignNumber}.`,
+          '',
+          'No card can have ZM-99999999999.',
         ].join('\n'),
       });
       expect(edited.isError ?? false).toBe(false);
@@ -651,6 +653,8 @@ test.describe('Panel chain in the card dialog', () => {
     await expect(body.getByRole('link', { name: label })).toHaveCount(1);
     await expect(body.locator('code')).toHaveText(label);
     await expect(body.getByRole('link', { name: 'ZM-999999' })).toHaveCount(0);
+    // A number past what a card can have is text, and the card still opens.
+    await expect(body).toContainText('ZM-99999999999');
     await expect(
       body.getByRole('link', { name: `ZM-${foreignNumber}` })
     ).toHaveCount(0);

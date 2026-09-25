@@ -74,9 +74,22 @@ export function splitMemoryIds(text: string): MdNode[] {
 
 /**
  * A card's label, `ZM-42`: not inside a word, and not running on into more
- * digits, letters or another dash-number.
+ * digits, letters or another dash-number. A card number is written without
+ * leading zeros, so `ZM-007` and `ZM-0` are not labels.
  */
-const CARD_LABEL_PATTERN = /(?<![0-9A-Za-z])ZM-(\d+)(?![0-9A-Za-z]|-\d)/g;
+const CARD_LABEL_PATTERN = /(?<![0-9A-Za-z])ZM-([1-9]\d*)(?![0-9A-Za-z]|-\d)/g;
+
+/** The largest card number: the store keeps it in a 32-bit integer. */
+const MAX_CARD_NUMBER = 2_147_483_647;
+
+/** The card number a label's digits name, or null when no card can have it. */
+function cardLabelNumber(digits: string | undefined): number | null {
+  if (digits === undefined || digits.length > 10) {
+    return null;
+  }
+  const number = Number(digits);
+  return number <= MAX_CARD_NUMBER ? number : null;
+}
 
 /**
  * The card numbers a set of texts mentions, each once, in order of first
@@ -86,7 +99,10 @@ export function cardLabelNumbers(texts: readonly string[]): number[] {
   const numbers = new Set<number>();
   for (const text of texts) {
     for (const match of text.matchAll(CARD_LABEL_PATTERN)) {
-      numbers.add(Number(match[1]));
+      const number = cardLabelNumber(match[1]);
+      if (number !== null) {
+        numbers.add(number);
+      }
     }
   }
   return [...numbers];
@@ -104,7 +120,8 @@ export function splitCardLabels(
   const parts: MdNode[] = [];
   let last = 0;
   for (const match of text.matchAll(CARD_LABEL_PATTERN)) {
-    const url = links[match[1] ?? ''];
+    const number = cardLabelNumber(match[1]);
+    const url = number === null ? undefined : links[String(number)];
     if (url === undefined) {
       continue;
     }

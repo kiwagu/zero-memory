@@ -83,6 +83,37 @@ describe('cardLabelNumbers', () => {
   it('finds nothing in text without a label', () => {
     expect(cardLabelNumbers(['plain', ''])).toEqual([]);
   });
+
+  it('never collects a number no card can have', () => {
+    // A card number is a positive 32-bit integer written without leading
+    // zeros; anything else must not reach the query, where an out-of-range
+    // integer would fail the whole card view.
+    expect(
+      cardLabelNumbers([
+        'ZM-2147483647 ZM-2147483648 ZM-99999999999999999999',
+        'ZM-0 ZM-007',
+      ])
+    ).toEqual([2147483647]);
+  });
+});
+
+describe('card labels agree between collection and rendering', () => {
+  it('treats a label no card can have as text in both', () => {
+    const links = { '7': '/board/crd_seven', '2147483647': '/board/crd_max' };
+    for (const text of ['ZM-007', 'ZM-0', 'ZM-2147483648']) {
+      expect(cardLabelNumbers([text])).toEqual([]);
+      expect(splitCardLabels(text, links)).toEqual([
+        { type: 'text', value: text },
+      ]);
+    }
+    expect(splitCardLabels('ZM-2147483647', links)).toEqual([
+      {
+        type: 'link',
+        url: '/board/crd_max',
+        children: [{ type: 'text', value: 'ZM-2147483647' }],
+      },
+    ]);
+  });
 });
 
 describe('splitMemoryIds', () => {
