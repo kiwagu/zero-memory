@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   escapeGitRegex,
   isLandingRecorded,
+  isRecordedSquash,
   parseSquashTrailers,
   renderLandingDrift,
   renderLandingReminder,
@@ -68,6 +69,22 @@ describe('escapeGitRegex', () => {
   });
 });
 
+describe('isRecordedSquash', () => {
+  it('matches a recorded squash by a short or a full sha, either way round', () => {
+    const full = 'abcdef1234567890abcdef1234567890abcdef12';
+    expect(isRecordedSquash([{ squash_sha: 'abcdef1' }], full)).toBe(true);
+    expect(isRecordedSquash([{ squash_sha: full }], 'ABCDEF1')).toBe(true);
+    expect(isRecordedSquash([{ squash_sha: 'abcdef1' }], '1234567')).toBe(
+      false
+    );
+  });
+
+  it('knows no squash when the server sent no landings', () => {
+    expect(isRecordedSquash(undefined, 'abcdef1')).toBe(false);
+    expect(isRecordedSquash([], 'abcdef1')).toBe(false);
+  });
+});
+
 describe('isLandingRecorded', () => {
   const landed = [
     {
@@ -90,6 +107,27 @@ describe('isLandingRecorded', () => {
         'ABCDEF1'
       )
     ).toBe(true);
+  });
+
+  it('counts the landings of a branch reopened for more work', () => {
+    // Reopened on its card: the row is open again and holds no commit, but
+    // the squash it landed as stays on record.
+    const reopened = [
+      {
+        repo: 'o/n',
+        branch: 'feature/x',
+        state: 'open' as const,
+        squash_sha: null,
+        landings: [{ squash_sha: 'abcdef1' }],
+      },
+    ];
+    expect(
+      isLandingRecorded(reopened, 'o/n', 'feature/x', 'abcdef1234567890')
+    ).toBe(true);
+    // A new squash of the reopened branch is not on record yet.
+    expect(isLandingRecorded(reopened, 'o/n', 'feature/x', '1234567')).toBe(
+      false
+    );
   });
 
   it('counts every landing of a branch that landed more than once', () => {

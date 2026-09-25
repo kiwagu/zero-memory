@@ -128,7 +128,11 @@ into it — names its `branch` as `{repo, name}`, or says why it has no code wit
 `no_branch`: research, an operation on a running system, documents kept outside
 git. A card that already holds an open branch needs neither, so work coming
 back from review on the same branch simply moves. A branch that already landed
-does not count: follow-up work goes on a new branch.
+can be named again: a bug found on the trunk is fixed in the branch that
+brought it, so naming a landed branch — on this card or another — reopens it
+for the card. Its earlier landings stay on record, and the next `land` adds
+one more. Keeping what the branch already shipped working is the job of
+whoever reopened it.
 
 Work **leaving** `active` while its branch is still open is refused until the
 branch is accounted for. If it landed, record the landing:
@@ -188,7 +192,9 @@ call filled in:
 Each squash is checked once per machine. A session briefing adds what the hook
 could not see — a landing made in another session or on another client: when a
 branch the board still holds open has already landed in the local repository,
-the briefing says so and names the call. A client connected only over MCP has
+the briefing says so and names the call. A squash the board already recorded,
+on any card, is not reported, so a reopened branch is named only for a new
+squash of it. A client connected only over MCP has
 no hooks and no git; the tool's own rule is what keeps its cards honest.
 
 ## A release reaches the cards it carries
@@ -245,8 +251,8 @@ A session's briefing names the project's production state — "Production: vX
 card a release reached also shows "shipped in vX" — the latest release that
 carried it, which stays true after a rollback — on its dashboard tile and in
 its detail, with the release itself as a `released` line in its history; a board's own setting — where its production state comes from, and
-what a release does to its cards — shows read-only above the columns, set
-only through `configure`, never from the dashboard.
+what a release does to its cards — shows read-only in the hint beside the
+board's title, set only through `configure`, never from the dashboard.
 
 The url is read by each member's own watcher, never by the server, and a
 redirect from it is never followed. Every member of the project can read the
@@ -354,7 +360,10 @@ no budget carries no summary and briefs exactly as it did before.
 The dashboard shows the board as one row of columns, which scrolls sideways
 when the window is too narrow for all five. Each tile carries the reason the
 card is in the column it is in — not merely what touched it last, since a note
-or an attachment says nothing about where the work stands.
+or an attachment says nothing about where the work stands. The icon beside
+the title says what the board is and, for a single board, where its
+production state comes from; it opens on hover or keyboard focus, so the page
+itself holds only the cards.
 
 <Screenshot path="/board">
 
@@ -405,6 +414,9 @@ Cmd still opens its own page in a new tab.
 Text written to be read — a card's description, its notes and the reasons on
 its moves, and a memory itself — is shown as Markdown: lists, emphasis, code
 and tables render, and a memory id in the text becomes a link to that memory.
+In a card's own text, the label of another card on the same board (`ZM-42`)
+becomes a link too and opens that card as the next panel; a label in code, a
+number no card on the board has, and a card you may not see stay plain text.
 Because that text may come from someone else, anything that looks like HTML is
 shown as the text it is, images are not loaded, and a link to another site
 opens in a new tab with its domain shown.

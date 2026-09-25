@@ -458,6 +458,13 @@ test.describe('Project board in the dashboard', () => {
 
     await signInThroughForm(page, seed.userA);
     await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    // What the board is and where production lives are read once, not on
+    // every visit: they sit in the hint beside the title, off the page itself.
+    await expect(page.getByTestId('board-hint-content')).toHaveCount(0);
+    await page.getByTestId('board-hint').hover();
+    await expect(page.getByTestId('board-hint-content')).toContainText(
+      'The board is a window'
+    );
     await expect(page.getByTestId('board-release-settings')).toContainText(
       'https://api.example.com/healthz'
     );
@@ -468,6 +475,10 @@ test.describe('Project board in the dashboard', () => {
     await expect(tile).toContainText('shipped in v1.4.0');
 
     await page.goto(`/board?scope=all`);
+    await page.getByTestId('board-hint').hover();
+    await expect(page.getByTestId('board-hint-content')).toContainText(
+      'The board is a window'
+    );
     await expect(page.getByTestId('board-release-settings')).toHaveCount(0);
 
     await page.goto(`/board/${cardId}`);
@@ -544,6 +555,132 @@ test.describe('Project board in the dashboard', () => {
  * it closes the dialog. The address stays the card's throughout.
  */
 test.describe('Panel chain in the card dialog', () => {
+  test('a card label in a card text opens that card as the next panel', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const stamp = Date.now();
+    const sourceTitle = `mention source ${stamp}`;
+    const targetTitle = `mention target ${stamp}`;
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+
+    let boardScope: string;
+    let sourceId: string;
+    let targetId: string;
+    let targetNumber: number;
+    let foreignNumber: number;
+    try {
+      // Two fresh boards, so card numbers on each start from scratch: a label
+      // means a card only on its own board.
+      const boardOf = async (hint: string) => {
+        const anchor = await mcp.callTool('remember', {
+          content: `card-mentions anchor ${stamp} for ${hint}`,
+          kind: 'fact',
+          project_hint: hint,
+        });
+        expect(anchor.isError ?? false).toBe(false);
+        return firstJson<{ scope: string }>(anchor).scope;
+      };
+      const create = async (scope: string, title: string, body = '') => {
+        const created = await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title,
+          body,
+        });
+        expect(created.isError ?? false).toBe(false);
+        return firstJson<CardResult>(created).card;
+      };
+
+      boardScope = await boardOf(`/tmp/zm-e2e-card-mentions-${stamp}`);
+      const otherScope = await boardOf(
+        `/tmp/zm-e2e-card-mentions-other-${stamp}`
+      );
+
+      const target = await create(boardScope, targetTitle);
+      targetId = target.id;
+      targetNumber = target.number;
+      const others = [];
+      for (const n of [1, 2, 3]) {
+        others.push(await create(otherScope, `mention other ${n} ${stamp}`));
+      }
+
+      const placeholder = await create(boardScope, sourceTitle);
+      sourceId = placeholder.id;
+      const taken = new Set([targetNumber, placeholder.number]);
+      foreignNumber =
+        others.map((card) => card.number).find((n) => !taken.has(n)) ?? -1;
+      expect(foreignNumber).toBeGreaterThan(0);
+
+      const edited = await mcp.callTool('card', {
+        action: 'edit',
+        card_id: sourceId,
+        body: [
+          `Blocked by ZM-${targetNumber}.`,
+          '',
+          `As code: \`ZM-${targetNumber}\``,
+          '',
+          `Unknown: ZM-999999. Another board's: ZM-${foreignNumber}.`,
+          '',
+          'No card can have ZM-99999999999.',
+        ].join('\n'),
+      });
+      expect(edited.isError ?? false).toBe(false);
+      const noted = await mcp.callTool('card_log', {
+        action: 'note',
+        card_id: sourceId,
+        text: `Waits on ZM-${targetNumber} before it starts.`,
+      });
+      expect(noted.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(boardScope)}`);
+    await page
+      .getByTestId('board-card')
+      .filter({ hasText: sourceTitle })
+      .click();
+    await expect(page.getByTestId('card-modal')).toBeVisible();
+
+    const body = page.getByTestId('card-body').first();
+    const label = `ZM-${targetNumber}`;
+    // The label of a card on this board is a link; the same label in code,
+    // a number no card has, and a card of another board stay text.
+    await expect(body.getByRole('link', { name: label })).toHaveCount(1);
+    await expect(body.locator('code')).toHaveText(label);
+    await expect(body.getByRole('link', { name: 'ZM-999999' })).toHaveCount(0);
+    // A number past what a card can have is text, and the card still opens.
+    await expect(body).toContainText('ZM-99999999999');
+    await expect(
+      body.getByRole('link', { name: `ZM-${foreignNumber}` })
+    ).toHaveCount(0);
+    // A note in the history links the same way.
+    await expect(
+      page.getByTestId('card-note').first().getByRole('link', { name: label })
+    ).toHaveCount(1);
+
+    // A click opens the mentioned card as the next panel; the card the reader
+    // came from stays on screen and keeps the address.
+    await body.getByRole('link', { name: label }).click();
+    await expect
+      .poll(() =>
+        page
+          .getByTestId('panel')
+          .evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute('data-panel-key'))
+          )
+      )
+      .toEqual([`card:${sourceId}`, `card:${targetId}`]);
+    await expect(
+      page.locator(`[data-panel-key="card:${targetId}"]`)
+    ).toContainText(targetTitle);
+    await expect(page).toHaveURL(new RegExp(`/board/${sourceId}$`));
+  });
+
   test('links in a card build a canvas of panels to its right', async ({
     page,
   }) => {

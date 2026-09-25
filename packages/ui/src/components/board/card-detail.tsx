@@ -63,6 +63,11 @@ interface CardDetailData {
   };
   hiddenLabel: string;
   imageLabel: string;
+  /**
+   * The cards a `ZM-N` label in the body, a reason or a note links to:
+   * number → the card's page. A label missing here stays text.
+   */
+  cardLinks: Record<string, string>;
 }
 
 interface CardDetailProps extends CardDetailData {
@@ -86,6 +91,7 @@ function CardDetail({
   history,
   hiddenLabel,
   imageLabel,
+  cardLinks,
   linkComponent: LinkComponent = 'a',
   header,
   footer,
@@ -138,6 +144,7 @@ function CardDetail({
               data-testid="card-body"
               linkComponent={LinkComponent}
               imageLabel={imageLabel}
+              cardLinks={cardLinks}
             >
               {body}
             </Markdown>
@@ -185,6 +192,7 @@ function CardDetail({
           entries={history.entries}
           emptyLabel={history.emptyLabel}
           linkComponent={LinkComponent}
+          cardLinks={cardLinks}
         />
         {history.moreLabel ? (
           <p className="text-muted-foreground mt-3 text-xs">
