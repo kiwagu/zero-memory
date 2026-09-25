@@ -454,7 +454,12 @@ test.describe('Card links in the store', () => {
   });
 
   test('a cycle longer than any fixed depth is still refused', async () => {
-    const { scope, db } = await board('links-long-cycle');
+    // On the second user's board: seventy cards on the first user's "All
+    // boards" would only slow down the dashboard specs that open it.
+    const seed = await readSeedState();
+    const tokenB = await passwordGrantToken(seed.userB);
+    const scope = await projectScope(tokenB, `links-long-cycle-${Date.now()}`);
+    const db = asUser(tokenB);
     const chain: CardJson[] = [];
     for (let i = 0; i < 70; i += 1) {
       chain.push(await newCard(db, scope, `Relay step ${i}`));

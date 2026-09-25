@@ -8,7 +8,7 @@
  * a card's state, because a drag has nowhere to put a justification. That
  * absence is the feature, so it is asserted rather than assumed.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
@@ -20,6 +20,21 @@ const REASON = 'blocked on the owner picking a cutover window';
 interface CardResult {
   card: { id: string; number: number; scope: string };
 }
+
+/**
+ * Opens the board's hint. The hint opens on a pointer move, and a hover that
+ * lands before a heavy board is interactive is lost — the pointer then sits
+ * still over the icon and nothing opens it. So each try moves away first.
+ */
+const openBoardHint = async (page: Page): Promise<void> => {
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await page.getByTestId('board-hint').hover();
+    await expect(page.getByTestId('board-hint-content')).toBeVisible({
+      timeout: 1000,
+    });
+  }).toPass({ timeout: 20_000 });
+};
 
 test.describe('Project board in the dashboard', () => {
   test('shows a card in its column with the reason it was moved, and offers no way to move it', async ({
@@ -471,7 +486,7 @@ test.describe('Project board in the dashboard', () => {
     // What the board is and where production lives are read once, not on
     // every visit: they sit in the hint beside the title, off the page itself.
     await expect(page.getByTestId('board-hint-content')).toHaveCount(0);
-    await page.getByTestId('board-hint').hover();
+    await openBoardHint(page);
     await expect(page.getByTestId('board-hint-content')).toContainText(
       'The board is a window'
     );
@@ -485,7 +500,7 @@ test.describe('Project board in the dashboard', () => {
     await expect(tile).toContainText('shipped in v1.4.0');
 
     await page.goto(`/board?scope=all`);
-    await page.getByTestId('board-hint').hover();
+    await openBoardHint(page);
     await expect(page.getByTestId('board-hint-content')).toContainText(
       'The board is a window'
     );
