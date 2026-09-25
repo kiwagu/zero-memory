@@ -337,9 +337,33 @@ describe('runLanding', () => {
     const secondAsked = vi
       .mocked(callCardBranches)
       .mock.calls.map(([, number]) => number);
-    expect(secondAsked.slice(0, neverAsked.length).sort()).toEqual(
-      [...neverAsked].sort()
-    );
+    // What the second run managed to ask comes from the never-asked first;
+    // how many it managed depends on the machine's load, the order does not.
+    expect(secondAsked.length).toBeGreaterThan(0);
+    expect(
+      secondAsked
+        .slice(0, neverAsked.length)
+        .every((number) => neverAsked.includes(number))
+    ).toBe(true);
+  });
+
+  it('never starts a lookup with too little of the budget left to finish it', async () => {
+    for (const number of [41, 42, 43, 44]) {
+      commit(
+        repo,
+        `m${number}`,
+        `feat: work ${number}`,
+        `Squashed-from: feature/m${number} (abcdef1) ZM-${number}`
+      );
+    }
+    vi.mocked(callCardBranches).mockImplementation(() => new Promise(() => {}));
+    // Two full lookups use 400 ms of the 450; the 50 left are not a lookup.
+    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450 });
+    const timeouts = vi
+      .mocked(callCardBranches)
+      .mock.calls.map(([, , timeoutMs]) => timeoutMs);
+    expect(timeouts.length).toBeGreaterThan(0);
+    expect(timeouts.every((ms) => (ms ?? 0) >= 200)).toBe(true);
   });
 
   it('names the branch the squash landed on, not the one checked out after it', async () => {

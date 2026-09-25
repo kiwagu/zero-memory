@@ -47,6 +47,12 @@ const LANDING_LOOKUP_TIMEOUT_MS = 5000;
  * the slowest host's 20 s (Hermes) however many squashes are fresh.
  */
 const LANDING_BUDGET_MS = 8000;
+/**
+ * The least of the budget a lookup starts with. A board lookup is an MCP round
+ * trip; less than this cannot finish one, so what is left waits for the next
+ * command instead of a lookup doomed to time out.
+ */
+const LANDING_MIN_LOOKUP_MS = 500;
 
 /** Reject when `promise` has not settled in `ms`. */
 const within = <T>(promise: Promise<T>, ms: number): Promise<T> =>
@@ -78,6 +84,7 @@ const landingReminders = async (
   budgetMs: number
 ): Promise<string[]> => {
   const deadline = Date.now() + budgetMs;
+  const minLookupMs = Math.min(LANDING_MIN_LOOKUP_MS, lookupTimeoutMs);
   // One git read decides almost every run: no fresh squash, nothing to do.
   const statePath = landingCheckStatePath();
   const due = recentSquashes(cwd, LOOKBACK_COMMITS, FRESH_HOURS)
@@ -116,7 +123,7 @@ const landingReminders = async (
   for (const [index, item] of due.entries()) {
     // Out of time: what is left stays unmarked, so the next command asks it.
     const left = deadline - Date.now();
-    if (left <= 0) {
+    if (left < minLookupMs) {
       logger.info(
         'landing check out of time; the rest waits for the next command',
         {
