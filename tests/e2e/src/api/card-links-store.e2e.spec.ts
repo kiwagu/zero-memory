@@ -697,3 +697,298 @@ test.describe('Relations are assessed', () => {
     ).toBe('0');
   });
 });
+
+interface LinkView {
+  card_id: string;
+  number: number;
+  title: string;
+  state: string;
+  scope: string;
+  archived: boolean;
+  relation: string;
+  reason: string;
+  declared: boolean;
+}
+
+interface CardGet {
+  links: LinkView[];
+  blocked: boolean;
+  links_assessed: boolean;
+  events: Array<{
+    type: string;
+    ref_target: string | null;
+    link_type: string | null;
+    link_direction: string | null;
+    ref_number: number | null;
+  }>;
+}
+
+interface BoardListCard {
+  id: string;
+  number: number;
+  blocked: boolean;
+  links: number;
+}
+
+const readCard = (db: SupabaseClient, id: string): Promise<CardGet> =>
+  rpc<CardGet>(db, 'card_get', { p_card_id: id });
+
+const makeReader = async (scope: string, authUserId: string): Promise<void> => {
+  const { data: profile } = await admin()
+    .from('profiles')
+    .select('id')
+    .eq('user_id', authUserId)
+    .single();
+  const joined = await admin()
+    .from('scope_members')
+    .upsert(
+      {
+        scope,
+        user_id: (profile as { id: string }).id,
+        role: 'reader',
+        accepted_at: new Date().toISOString(),
+      },
+      { onConflict: 'scope,user_id' }
+    );
+  expect(joined.error).toBeNull();
+};
+
+test.describe('Relations are read', () => {
+  test("a card reads its relations with the other card's label, from its own side", async () => {
+    const { scope, db } = await board('read-sides');
+    const a = await newCard(db, scope, 'Relay keys');
+    const b = await newCard(db, scope, 'Relay rollout');
+    const c = await newCard(db, scope, 'Relay docs');
+    const d = await newCard(db, scope, 'Relay notes');
+    const e = await newCard(db, scope, 'Relay retired');
+    await link(db, a.id, b.id, 'blocks', 'keys first');
+    await link(db, c.id, a.id, 'relates_to', 'same relay');
+    await rpc(db, 'card_attach', {
+      p_card_id: d.id,
+      p_kind: 'card',
+      p_target: a.id,
+    });
+    await link(db, a.id, e.id, 'duplicates', 'same work');
+    await unlink(db, a.id, e.id, 'duplicates', 'not the same after all');
+
+    const readA = await readCard(db, a.id);
+    expect(readA.links).toHaveLength(3);
+    expect(readA.links).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          card_id: b.id,
+          number: b.number,
+          title: 'Relay rollout',
+          state: 'idea',
+          archived: false,
+          relation: 'blocks',
+          reason: 'keys first',
+          declared: true,
+        }),
+        expect.objectContaining({
+          card_id: c.id,
+          relation: 'relates_to',
+          declared: true,
+        }),
+        expect.objectContaining({
+          card_id: d.id,
+          relation: 'relates_to',
+          declared: false,
+        }),
+      ])
+    );
+    expect((await readCard(db, b.id)).links).toEqual([
+      expect.objectContaining({ card_id: a.id, relation: 'blocked_by' }),
+    ]);
+    expect(
+      readA.events.find(
+        (event) => event.type === 'linked' && event.ref_target === b.id
+      )
+    ).toMatchObject({
+      link_type: 'blocks',
+      link_direction: 'out',
+      ref_number: b.number,
+    });
+  });
+
+  test('a card is blocked while a live blocker is neither done nor archived', async () => {
+    const { scope, db } = await board('read-blocked');
+    const a = await newCard(db, scope, 'Relay keys');
+    const b = await newCard(db, scope, 'Relay rollout');
+    const c = await newCard(db, scope, 'Relay audit');
+    await link(db, a.id, b.id, 'blocks', 'keys first');
+    expect((await readCard(db, b.id)).blocked).toBe(true);
+    expect((await readCard(db, a.id)).blocked).toBe(false);
+
+    await rpc(db, 'card_move', {
+      p_card_id: a.id,
+      p_to_state: 'done',
+      p_reason: 'rotated',
+    });
+    expect((await readCard(db, b.id)).blocked).toBe(false);
+
+    await link(db, c.id, b.id, 'blocks', 'audit first');
+    expect((await readCard(db, b.id)).blocked).toBe(true);
+    await rpc(db, 'card_archive', { p_card_id: c.id, p_reason: 'dropped' });
+    expect((await readCard(db, b.id)).blocked).toBe(false);
+  });
+
+  test('a relation to a card the reader cannot see is not shown and does not block', async () => {
+    const { seed, token, scope, db } = await board('read-hidden');
+    const hidden = await projectScope(token, `read-hidden-other-${Date.now()}`);
+    const blocked = await newCard(db, scope, 'Visible to the reader');
+    const blocker = await newCard(db, hidden, 'Not visible to the reader');
+    await link(db, blocker.id, blocked.id, 'blocks', 'hidden blocker');
+    expect((await readCard(db, blocked.id)).blocked).toBe(true);
+
+    await makeReader(scope, seed.userB.id);
+    const dbB = asUser(await passwordGrantToken(seed.userB));
+    const seen = await readCard(dbB, blocked.id);
+    expect(seen.links).toEqual([]);
+    expect(seen.blocked).toBe(false);
+    const event = seen.events.find((item) => item.type === 'linked');
+    expect(event?.ref_number).toBeNull();
+    const listed = await rpc<{ cards: BoardListCard[] }>(dbB, 'board_list', {
+      p_scope: scope,
+    });
+    expect(listed.cards.find((card) => card.id === blocked.id)).toMatchObject({
+      blocked: false,
+      links: 0,
+    });
+  });
+
+  test('the board lists what is above or below a card', async () => {
+    const { scope, db } = await board('read-list');
+    const p = await newCard(db, scope, 'Relay epic');
+    const x = await newCard(db, scope, 'Relay rollout');
+    const b = await newCard(db, scope, 'Relay keys');
+    const d = await newCard(db, scope, 'Relay transport');
+    const r = await newCard(db, scope, 'Relay docs');
+    await link(db, p.id, x.id, 'parent_of', 'part of the epic');
+    await link(db, b.id, x.id, 'blocks', 'keys first');
+    await link(db, x.id, d.id, 'depends_on', 'needs transport');
+    await link(db, r.id, x.id, 'relates_to', 'documents it');
+
+    const ids = async (related: string, relation: string) =>
+      (
+        await rpc<{ cards: BoardListCard[] }>(db, 'board_list', {
+          p_scope: scope,
+          p_related_to: related,
+          p_relation: relation,
+        })
+      ).cards
+        .map((card) => card.id)
+        .sort();
+    expect(await ids(x.id, 'above')).toEqual([p.id, b.id, d.id].sort());
+    expect(await ids(p.id, 'below')).toEqual([x.id]);
+    expect(await ids(d.id, 'below')).toEqual([x.id]);
+    expect(await ids(`ZM-${x.number}`, 'any')).toEqual(
+      [p.id, b.id, d.id, r.id].sort()
+    );
+
+    const listed = await rpc<{ cards: BoardListCard[] }>(db, 'board_list', {
+      p_scope: scope,
+    });
+    expect(listed.cards.find((card) => card.id === x.id)).toMatchObject({
+      blocked: true,
+      links: 4,
+    });
+  });
+
+  test('a briefing names what blocks a card, what is above the bound card, and whether relations were assessed', async () => {
+    const { seed, scope, db } = await board('read-brief');
+    const p = await newCard(db, scope, 'Relay epic');
+    const d = await newCard(db, scope, 'Relay transport');
+    const active = (title: string) =>
+      rpc<{ card: CardJson }>(db, 'card_create', {
+        p_scope: scope,
+        p_title: title,
+        p_state: 'active',
+        p_no_branch: 'e2e fixture',
+        p_no_links: 'e2e fixture',
+      }).then((result) => result.card);
+    const x = await active('Relay rollout');
+    const b = await active('Relay keys');
+    await link(db, p.id, x.id, 'parent_of', 'part of the epic');
+    await link(db, b.id, x.id, 'blocks', 'keys first');
+    await link(db, x.id, d.id, 'depends_on', 'needs transport');
+    const thread = `thr_e2elinks${String(Date.now()).slice(-8)}.0000000000`;
+    await rpc(db, 'card_attach', {
+      p_card_id: x.id,
+      p_kind: 'thread',
+      p_target: thread,
+    });
+
+    // A card from before the rule, never assessed.
+    const { data: profile } = await admin()
+      .from('profiles')
+      .select('id')
+      .eq('user_id', seed.userA.id)
+      .single();
+    const { data: old } = await admin()
+      .from('cards')
+      .insert({
+        scope,
+        number: 90,
+        title: 'Card from before the rule',
+        state: 'active',
+        created_by: (profile as { id: string }).id,
+      })
+      .select('id')
+      .single();
+
+    const work = await rpc<{
+      bound_card: {
+        id: string;
+        blocked_by: Array<{ number: number; state: string }>;
+        links_assessed: boolean;
+        above: Array<{
+          number: number;
+          title: string;
+          state: string;
+          relation: string;
+        }>;
+      };
+      lead: Array<{
+        id: string;
+        blocked_by: unknown[];
+        links_assessed: boolean;
+      }>;
+    }>(db, 'briefing_work', { p_scope: scope, p_thread: thread });
+
+    expect(work.bound_card.id).toBe(x.id);
+    expect(work.bound_card.blocked_by).toEqual([
+      { number: b.number, state: 'active' },
+    ]);
+    expect(work.bound_card.links_assessed).toBe(true);
+    expect(work.bound_card.above).toEqual(
+      expect.arrayContaining([
+        {
+          number: p.number,
+          title: 'Relay epic',
+          state: 'idea',
+          relation: 'child_of',
+        },
+        {
+          number: b.number,
+          title: 'Relay keys',
+          state: 'active',
+          relation: 'blocked_by',
+        },
+        {
+          number: d.number,
+          title: 'Relay transport',
+          state: 'idea',
+          relation: 'depends_on',
+        },
+      ])
+    );
+    expect(work.bound_card.above).toHaveLength(3);
+    expect(
+      work.lead.find((card) => card.id === (old as { id: string }).id)
+    ).toMatchObject({
+      links_assessed: false,
+      blocked_by: [],
+    });
+  });
+});

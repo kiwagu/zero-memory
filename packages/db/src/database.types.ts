@@ -1989,6 +1989,8 @@ export type Database = {
           p_include_archived?: boolean;
           p_limit?: number;
           p_query?: string;
+          p_related_to?: string;
+          p_relation?: string;
           p_scope?: string;
           p_state?: string;
         };
