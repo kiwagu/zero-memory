@@ -182,6 +182,45 @@ describe('renderBoardSummary', () => {
     );
   });
 
+  it('names the board of a blocker or a card above that lives on another one, and marks an archived one', () => {
+    const block = renderBoardSummary({
+      bound_card: {
+        ...card(3, 'Wire the importer', 'active'),
+        state_reason: null,
+        refs: 0,
+        updated_at: '2026-09-21T10:00:00Z',
+        blocked_by: [
+          { number: 3, state: 'active', scope: 'proj.usr_ab12_01k.acme' },
+        ],
+        above: [
+          {
+            number: 12,
+            title: 'Epic',
+            state: 'done',
+            relation: 'child_of',
+            archived: true,
+            scope: null,
+          },
+          {
+            number: 3,
+            title: 'Gate',
+            state: 'active',
+            relation: 'blocked_by',
+            archived: false,
+            scope: 'proj.usr_ab12_01k.acme',
+          },
+        ],
+      },
+      active: 1,
+      waiting: 0,
+      lead: [],
+    })!;
+    expect(block).toContain('(blocked by ZM-3 [active] on acme)');
+    expect(block).toContain(
+      '  above: ZM-12 parent [done, archived], ZM-3 blocks it [active] on acme'
+    );
+  });
+
   it('says when nobody assessed how a card relates to the board', () => {
     const block = renderBoardSummary({
       bound_card: {

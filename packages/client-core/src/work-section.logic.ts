@@ -1,4 +1,5 @@
 import {
+  formatBoardName,
   formatCardLabel,
   type BriefingWork,
   type BriefingWorkCard,
@@ -35,6 +36,10 @@ const ABOVE_PHRASE: Record<string, string> = {
   depends_on: 'a dependency',
 };
 
+/** ` on acme` for a card on another board, nothing for one on this board. */
+const onBoard = (scope: string | null | undefined): string =>
+  scope ? ` on ${formatBoardName(scope)}` : '';
+
 /** The first `max` items, and how many were left out. */
 const firstOf = <T>(items: readonly T[], max: number): [T[], string] => [
   items.slice(0, max),
@@ -60,7 +65,8 @@ const named = (card: BriefingWorkCard, work: BriefingWork): string => {
     notes.push(
       `blocked by ${shown
         .map(
-          (blocker) => `${formatCardLabel(blocker.number)} [${blocker.state}]`
+          (blocker) =>
+            `${formatCardLabel(blocker.number)} [${blocker.state}]${onBoard(blocker.scope)}`
         )
         .join(', ')}${more}`
     );
@@ -82,7 +88,8 @@ const aboveLine = (
   return `  above: ${shown
     .map(
       (card) =>
-        `${formatCardLabel(card.number)} ${ABOVE_PHRASE[card.relation] ?? card.relation} [${card.state}]`
+        `${formatCardLabel(card.number)} ${ABOVE_PHRASE[card.relation] ?? card.relation} ` +
+        `[${card.state}${card.archived ? ', archived' : ''}]${onBoard(card.scope)}`
     )
     .join(', ')}${more}`;
 };

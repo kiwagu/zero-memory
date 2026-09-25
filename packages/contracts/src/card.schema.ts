@@ -37,6 +37,20 @@ export const newCardId = (): CardId => entityIdSchemas.card.create();
  */
 export const formatCardLabel = (number: number): string => `ZM-${number}`;
 
+/**
+ * A board as a line of text names it: its scope's slug, the last label that
+ * is not the per-owner `usr_…` segment (`proj.usr_ab12.acme` is `acme`).
+ * A card on another board is named `ZM-3 on acme`, because a number alone
+ * names a card of the reader's own board. The dashboard's `scopeSlug` is the
+ * same rule, declared there because the Next bundler cannot resolve this
+ * package.
+ */
+export const formatBoardName = (scope: string): string =>
+  scope
+    .split('.')
+    .filter((label) => label !== '' && !label.startsWith('usr_'))
+    .at(-1) ?? scope;
+
 /** A card-event id: a branded `cev_` entity id. */
 export const cardEventIdSchema = entityIdSchemas.card_event.schema;
 export type CardEventId = z.infer<typeof cardEventIdSchema>;
@@ -507,7 +521,14 @@ export const briefingWorkCardSchema = z.object({
    * that predates relations sends none.
    */
   blocked_by: z
-    .array(z.object({ number: z.number().int(), state: cardStateSchema }))
+    .array(
+      z.object({
+        number: z.number().int(),
+        state: cardStateSchema,
+        /** Set only for a blocker on another board. */
+        scope: z.string().nullable().optional(),
+      })
+    )
     .optional(),
   /** Whether anyone ever said how the card relates to the board. */
   links_assessed: z.boolean().optional(),
@@ -551,6 +572,9 @@ export const briefingWorkSchema = z.object({
             title: z.string(),
             state: cardStateSchema,
             relation: cardLinkRelationSchema,
+            archived: z.boolean().optional(),
+            /** Set only for a card on another board. */
+            scope: z.string().nullable().optional(),
           })
         )
         .optional(),

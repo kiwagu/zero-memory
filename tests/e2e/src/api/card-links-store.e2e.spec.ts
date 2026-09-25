@@ -944,6 +944,63 @@ async function makeMember(
 }
 
 test.describe('Relations are read', () => {
+  test('a briefing names the board of a card on another one, and marks an archived card above', async () => {
+    const { token, scope, db } = await board('read-brief-boards');
+    const other = await projectScope(token, `read-brief-other-${Date.now()}`);
+    const x = (
+      await rpc<{ card: CardJson }>(db, 'card_create', {
+        p_scope: scope,
+        p_title: 'Relay rollout',
+        p_state: 'active',
+        p_no_branch: 'e2e fixture',
+        p_no_links: 'e2e fixture',
+      })
+    ).card;
+    const blocker = await newCard(db, other, 'Transport keys');
+    const parent = await newCard(db, scope, 'Relay epic');
+    await link(db, blocker.id, x.id, 'blocks', 'keys first');
+    await link(db, parent.id, x.id, 'parent_of', 'part of the epic');
+    await rpc(db, 'card_archive', {
+      p_card_id: parent.id,
+      p_reason: 'the epic was split up',
+    });
+    const thread = `thr_e2eboard${String(Date.now()).slice(-8)}.0000000000`;
+    await rpc(db, 'card_attach', {
+      p_card_id: x.id,
+      p_kind: 'thread',
+      p_target: thread,
+    });
+
+    const work = await rpc<{
+      bound_card: {
+        blocked_by: Array<{ number: number; scope?: string | null }>;
+        above: Array<{
+          number: number;
+          relation: string;
+          scope?: string | null;
+          archived?: boolean;
+        }>;
+      };
+    }>(db, 'briefing_work', { p_scope: scope, p_thread: thread });
+
+    expect(work.bound_card.blocked_by).toEqual([
+      { number: blocker.number, state: 'idea', scope: other },
+    ]);
+    const above = Object.fromEntries(
+      work.bound_card.above.map((card) => [card.relation, card])
+    );
+    expect(above['blocked_by']).toMatchObject({
+      number: blocker.number,
+      scope: other,
+      archived: false,
+    });
+    expect(above['child_of']).toMatchObject({
+      number: parent.number,
+      scope: null,
+      archived: true,
+    });
+  });
+
   test("a card reads its relations with the other card's label, from its own side", async () => {
     const { scope, db } = await board('read-sides');
     const a = await newCard(db, scope, 'Relay keys');

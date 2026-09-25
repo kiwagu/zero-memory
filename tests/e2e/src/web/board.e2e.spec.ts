@@ -1179,6 +1179,7 @@ test.describe('Panel chain in the card dialog', () => {
     let blocker: CardResult['card'];
     let blocked: CardResult['card'];
     let neighbour: CardResult['card'];
+    let elsewhereScope: string;
     try {
       const anchor = firstJson<{ scope: string; memory_id: string }>(
         await mcp.callTool('remember', {
@@ -1240,6 +1241,36 @@ test.describe('Panel chain in the card dialog', () => {
         ref_target: anchor.memory_id,
       });
       expect(memory.isError ?? false).toBe(false);
+      // A card on another board, and a related card that was archived since.
+      elsewhereScope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `card-links web other board ${stamp}: the same rollout elsewhere`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-card-links-web-other-${stamp}`,
+        })
+      ).scope;
+      const elsewhere = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope: elsewhereScope,
+          title: `relations elsewhere ${stamp}`,
+          no_links: 'e2e fixture',
+        })
+      ).card;
+      const across = await mcp.callTool('card', {
+        action: 'link',
+        card_id: blocked.id,
+        to_card: elsewhere.id,
+        relation: 'relates_to',
+        reason: 'the same rollout on the other board',
+      });
+      expect(across.isError ?? false).toBe(false);
+      const shelved = await mcp.callTool('card', {
+        action: 'archive',
+        card_id: neighbour.id,
+        reason: 'folded into the blocked card',
+      });
+      expect(shelved.isError ?? false).toBe(false);
     } finally {
       await mcp.close();
     }
@@ -1271,6 +1302,26 @@ test.describe('Panel chain in the card dialog', () => {
     const related = section.getByTestId('card-links-group-related');
     await expect(related).toContainText(`relates to ZM-${neighbour.number}`);
     await expect(related).toContainText('type not declared');
+    // A number alone names a card of this board: one on another board says
+    // which, and an archived card says it was archived.
+    await expect(
+      related
+        .getByTestId('card-link')
+        .filter({ hasText: `relations elsewhere ${stamp}` })
+        .getByTestId('card-link-board')
+    ).toHaveText(elsewhereScope.split('.').at(-1) ?? '');
+    await expect(
+      related
+        .getByTestId('card-link')
+        .filter({ hasText: `relations neighbour ${stamp}` })
+        .getByTestId('card-link-archived')
+    ).toHaveText('archived');
+    await expect(
+      related
+        .getByTestId('card-link')
+        .filter({ hasText: `relations neighbour ${stamp}` })
+        .getByTestId('card-link-board')
+    ).toHaveCount(0);
 
     // An attached memory is named by its kind, not as "memory".
     const refs = modal.getByTestId('card-refs').first();

@@ -71,7 +71,9 @@ as $$
     join public.cards o on o.id = v.other
 $$;
 
--- The live blockers of a card that are neither done nor archived.
+-- The live blockers of a card that are neither done nor archived. A blocker
+-- on another board carries that board's scope, since its number alone names
+-- a card of this one.
 create or replace function private.card_blocked_by(p_card_id text)
 returns jsonb
 language sql
@@ -79,17 +81,21 @@ stable
 set search_path = ''
 as $$
   select coalesce(jsonb_agg(jsonb_build_object(
-           'number', o.number, 'state', o.state) order by o.number),
+           'number', o.number, 'state', o.state,
+           'scope', case when o.scope::text <> c.scope::text
+                         then o.scope::text end) order by o.number),
          '[]'::jsonb)
-    from public.card_links l
+    from public.cards c
+    join public.card_links l on l.dst_card_id = c.id
     join public.cards o on o.id = l.src_card_id
-   where l.dst_card_id = p_card_id and l.type = 'blocks'
+   where c.id = p_card_id and l.type = 'blocks'
      and l.invalidated_at is null
      and o.state <> 'done' and o.archived_at is null
 $$;
 
 -- The cards directly above a card: its parent, its blockers, and what it
--- depends on, each with the relation from the card's side.
+-- depends on, each with the relation from the card's side, whether it was
+-- archived, and the scope of a card on another board.
 create or replace function private.card_above(p_card_id text)
 returns jsonb
 language sql
@@ -98,7 +104,10 @@ set search_path = ''
 as $$
   select coalesce(jsonb_agg(jsonb_build_object(
            'number', o.number, 'title', o.title, 'state', o.state,
-           'relation', a.relation) order by o.number),
+           'relation', a.relation,
+           'archived', o.archived_at is not null,
+           'scope', case when o.scope::text <> c.scope::text
+                         then o.scope::text end) order by o.number),
          '[]'::jsonb)
     from (
       select l.src_card_id as other,
@@ -114,6 +123,7 @@ as $$
          and l.invalidated_at is null
     ) a
     join public.cards o on o.id = a.other
+    join public.cards c on c.id = p_card_id
 $$;
 
 -- The cards related to a card on one side: above it, below it, or any.

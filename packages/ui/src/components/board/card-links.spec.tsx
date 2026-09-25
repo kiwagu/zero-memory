@@ -54,6 +54,30 @@ describe('CardLinks', () => {
     expect(out).not.toContain('Not related to any other card.');
   });
 
+  it('names the board of a card on another one, and marks an archived card', () => {
+    const out = renderToStaticMarkup(
+      <CardLinks
+        groups={[
+          {
+            key: 'above',
+            label: 'Above',
+            items: [
+              { ...item(3, 'blocked by'), boardLabel: 'acme' },
+              { ...item(12, 'child of'), archivedLabel: 'archived' },
+            ],
+          },
+        ]}
+        emptyLabel="Not related to any other card."
+      />
+    );
+    expect(out).toContain('data-testid="card-link-board"');
+    expect(out).toContain('acme');
+    expect(out).toContain('data-testid="card-link-archived"');
+    expect(out).toContain('archived');
+    expect(out.match(/card-link-board/g)).toHaveLength(1);
+    expect(out.match(/card-link-archived/g)).toHaveLength(1);
+  });
+
   it('says so when the card relates to nothing, and offers no control', () => {
     const out = renderToStaticMarkup(
       <CardLinks

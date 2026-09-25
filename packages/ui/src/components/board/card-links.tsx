@@ -29,6 +29,11 @@ interface CardLinkItem {
   /** Set when nobody typed the relation: it was carried over from an
    * attachment. */
   undeclaredLabel?: string;
+  /** Set for a card on another board: that board's name, since a number
+   * alone names a card of this one. */
+  boardLabel?: string;
+  /** Set when the other card was archived. */
+  archivedLabel?: string;
 }
 
 interface CardLinkGroup {
@@ -81,8 +86,30 @@ function CardLinks({
                   >
                     {item.numberLabel}
                   </LinkComponent>{' '}
+                  {item.boardLabel ? (
+                    <>
+                      <Badge
+                        variant="outline"
+                        className="font-mono"
+                        data-testid="card-link-board"
+                      >
+                        {item.boardLabel}
+                      </Badge>{' '}
+                    </>
+                  ) : null}
                   <span className="min-w-0">{item.title}</span>{' '}
                   <Badge variant={item.stateVariant}>{item.stateLabel}</Badge>
+                  {item.archivedLabel ? (
+                    <>
+                      {' '}
+                      <Badge
+                        variant="secondary"
+                        data-testid="card-link-archived"
+                      >
+                        {item.archivedLabel}
+                      </Badge>
+                    </>
+                  ) : null}
                   {item.undeclaredLabel ? (
                     <>
                       {' '}

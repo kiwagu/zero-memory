@@ -5,6 +5,7 @@ import type { CardDetailData } from '@workspace/ui/components/board/card-detail'
 import type { BadgeListItem } from '@workspace/ui/components/common/badge-list';
 import type { LinkedMemoryItem } from '@workspace/ui/components/memory/linked-memory-list';
 import { cardLabelNumbers } from '@workspace/ui/lib/markdown';
+import { scopeSlug } from '@workspace/ui/lib/scope-format';
 
 import {
   cardBranchEarlierLabel,
@@ -192,6 +193,10 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     stateVariant: cardStateVariant(link.state),
     reason: link.reason,
     ...(link.declared ? {} : { undeclaredLabel: t('board.linkUndeclared') }),
+    // A number alone names a card of this board; one on another board says
+    // which.
+    ...(link.scope === card.scope ? {} : { boardLabel: scopeSlug(link.scope) }),
+    ...(link.archived ? { archivedLabel: t('board.archived') } : {}),
   });
   // Within a side, relations keep the side's order (a parent before what
   // blocks the card), then the order the store sends.
