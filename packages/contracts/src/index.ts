@@ -10,6 +10,7 @@ export * from './instance-metrics.schema.js';
 export * from './memory.schema.js';
 export * from './project-origin.js';
 export * from './provenance.js';
+export * from './release.schema.js';
 export * from './resources.schema.js';
 export * from './scope-target.schema.js';
 export * from './request-id.schema.js';

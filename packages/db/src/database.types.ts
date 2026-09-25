@@ -179,6 +179,9 @@ export type Database = {
           ref_kind: string | null;
           ref_target: string | null;
           relation: string | null;
+          release_build: string | null;
+          release_commit: string | null;
+          release_version: string | null;
           reply_to: string | null;
           revision: number | null;
           scope: unknown;
@@ -203,6 +206,9 @@ export type Database = {
           ref_kind?: string | null;
           ref_target?: string | null;
           relation?: string | null;
+          release_build?: string | null;
+          release_commit?: string | null;
+          release_version?: string | null;
           reply_to?: string | null;
           revision?: number | null;
           scope: unknown;
@@ -227,6 +233,9 @@ export type Database = {
           ref_kind?: string | null;
           ref_target?: string | null;
           relation?: string | null;
+          release_build?: string | null;
+          release_commit?: string | null;
+          release_version?: string | null;
           reply_to?: string | null;
           revision?: number | null;
           scope?: unknown;
@@ -1627,6 +1636,88 @@ export type Database = {
           },
         ];
       };
+      scope_release_settings: {
+        Row: {
+          on_release: string;
+          scope: unknown;
+          tag_pattern: string;
+          tag_template: string;
+          updated_at: string;
+          updated_by: string | null;
+          version_field: string;
+          version_url: string | null;
+        };
+        Insert: {
+          on_release?: string;
+          scope: unknown;
+          tag_pattern?: string;
+          tag_template?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version_field?: string;
+          version_url?: string | null;
+        };
+        Update: {
+          on_release?: string;
+          scope?: unknown;
+          tag_pattern?: string;
+          tag_template?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version_field?: string;
+          version_url?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'scope_release_settings_updated_by_fkey';
+            columns: ['updated_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      scope_releases: {
+        Row: {
+          build: string | null;
+          last_observed_at: string;
+          observed_at: string;
+          observed_by: string | null;
+          release_commit: string;
+          scope: unknown;
+          source: string;
+          version: string;
+        };
+        Insert: {
+          build?: string | null;
+          last_observed_at?: string;
+          observed_at?: string;
+          observed_by?: string | null;
+          release_commit: string;
+          scope: unknown;
+          source: string;
+          version: string;
+        };
+        Update: {
+          build?: string | null;
+          last_observed_at?: string;
+          observed_at?: string;
+          observed_by?: string | null;
+          release_commit?: string;
+          scope?: unknown;
+          source?: string;
+          version?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'scope_releases_observed_by_fkey';
+            columns: ['observed_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       scopes: {
         Row: {
           alias: string | null;
@@ -2291,6 +2382,36 @@ export type Database = {
           provider: string;
         }[];
       };
+      release_candidates: {
+        Args: { p_scope: string; p_version: string };
+        Returns: Json;
+      };
+      release_configure: {
+        Args: {
+          p_on_release?: string;
+          p_scope: string;
+          p_tag_pattern?: string;
+          p_tag_template?: string;
+          p_version_field?: string;
+          p_version_url?: string;
+        };
+        Returns: Json;
+      };
+      release_record: {
+        Args: {
+          p_agent_label?: string;
+          p_build: string;
+          p_card_ids?: string[];
+          p_landing_seqs?: number[];
+          p_release_commit: string;
+          p_scope: string;
+          p_source: string;
+          p_thread?: string;
+          p_version: string;
+        };
+        Returns: Json;
+      };
+      release_settings: { Args: { p_scope: string }; Returns: Json };
       rename_scope: {
         Args: { p_new_slug: string; p_scope: unknown };
         Returns: string;

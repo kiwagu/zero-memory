@@ -114,6 +114,10 @@ total})`: the text a client emits just BEFORE its context is compacted, or
   `renderOfflineBriefing(entry)` (the explicit OFFLINE staleness header ahead
   of a cached briefing). The file-backed cache IO that produces these entries
   lives in `@workspace/client-runtime`.
+- `release.logic.ts` — pure decisions for a project's production state:
+  comparing versions, mapping a version to its tag and back, and the lines a
+  release, a missing tag, or a rollback says in the session; the IO that
+  reads the version url and the local git tags lives elsewhere.
 
 ## Consumers
 

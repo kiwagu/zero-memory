@@ -20,6 +20,7 @@ import {
   LinkCommand,
   RememberCommand,
   MoveMemoriesCommand,
+  ReleaseCommand,
   ShareMemoryCommand,
 } from '@workspace/commands';
 import { mustGetCurrentUserEntityId } from '@workspace/context';
@@ -63,6 +64,8 @@ import {
   listConflictsOutputSchema,
   recallInputSchema,
   recallOutputSchema,
+  releaseInputSchema,
+  releaseOutputSchema,
   rememberInputSchema,
   rememberOutputSchema,
   restoreMemoryInputSchema,
@@ -96,6 +99,7 @@ import {
   type IngestConversationOutput,
   type LinkOutput,
   type RecallOutput,
+  type ReleaseOutput,
   type RememberOutput,
   type SessionReceiptOutput,
   type MoveMemoriesOutput,
@@ -801,6 +805,10 @@ export const TOOL_ANNOTATIONS = {
   // Appends to a card's stream. Attaching a target already attached is a
   // no-op, and a repeated note with the same key writes once.
   card_log: ADDITIVE_IDEMPOTENT,
+  // configure replaces the whole settings row with the same inputs each
+  // time; a repeat of record writes no new card event and only refreshes
+  // when the state was last seen.
+  release: ADDITIVE_IDEMPOTENT,
   delete_account: DESTRUCTIVE,
 } as const satisfies Record<string, ToolAnnotations>;
 
@@ -2080,6 +2088,44 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         return asToolResult(result);
       } catch (error) {
         logger.error('card_log failed', { error: String(error) });
+        return toolErrorFromThrown(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    'release',
+    {
+      title: 'Where production stands',
+      annotations: TOOL_ANNOTATIONS.release,
+      description:
+        "A project's production state and the cards it carries. `settings` " +
+        'reads where the state lives; `configure` (project admin) sets it — ' +
+        'a url answering the running version, or none when the project ' +
+        'never deploys and its release tags are its state — and ' +
+        '`on_release`: `record` writes a release on each card a state ' +
+        'carries, `record_and_move_done` also moves the carried waiting ' +
+        'cards to done. `configure` CHANGES ONLY THE FIELDS IT IS GIVEN: ' +
+        'every field left out keeps its current value, so switching ' +
+        'on_release alone never clears the url. `candidates` lists the ' +
+        'landed cards with nothing released since their latest landing, ' +
+        'each with only those landings; `record` writes the state and the ' +
+        'cards the caller found carried. The client watcher does this by ' +
+        'itself after shell commands and at session start; call it by hand ' +
+        'only to backfill. The url is read by every member of the ' +
+        'project: never put a secret in it.',
+      inputSchema: releaseInputSchema.shape,
+      outputSchema: releaseOutputSchema.shape,
+    },
+    async (input) => {
+      try {
+        const result = await deps.runInToolContext<ReleaseOutput>(() => {
+          deps.onToolInvocation?.('release');
+          return deps.commandBus.execute(new ReleaseCommand(input));
+        });
+        return asToolResult(result);
+      } catch (error) {
+        logger.error('release failed', { error: String(error) });
         return toolErrorFromThrown(error);
       }
     }

@@ -53,8 +53,9 @@ The MCP server exposes one schema-first surface around the memory lifecycle:
 - Graph, sharing, and routing: `link`, `share`, and `move_memories`
   (batch-move mis-routed memories into the project they belong to).
 - Lifecycle: `forget`, `restore_memory`, and `close_loop`.
-- Work: `board`, `card`, and `card_log` — cards on a project's
-  [board](/docs/concepts/project-board), each move made with a reason.
+- Work: `board`, `card`, `card_log`, and `release` — cards on a project's
+  [board](/docs/concepts/project-board), each move made with a reason, and
+  the production state that reaches them.
 - Hygiene and conflicts: `scan_hygiene`, `challenge` (dispute one memory
   as wrong or stale), `list_conflicts`, `get_conflict`, `resolve_conflict`,
   and `resolve_conflicts`.
