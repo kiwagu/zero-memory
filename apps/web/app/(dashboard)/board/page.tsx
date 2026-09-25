@@ -122,6 +122,15 @@ export default async function BoardPage({
               },
             ]
           : []),
+        ...(card.blocked
+          ? [
+              {
+                label: t('board.blocked'),
+                variant: 'destructive' as const,
+                testId: 'board-card-blocked',
+              },
+            ]
+          : []),
         ...(card.refs > 0
           ? [
               {

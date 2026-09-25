@@ -55,6 +55,10 @@ export const boardCardSchema = z.object({
   /** The version this card was last carried by. A server that predates
    * releases, or a card no release has carried yet, reads as null. */
   released_in: z.string().nullable().default(null),
+  /** A live blocker that is neither done nor archived holds this card. */
+  blocked: z.boolean().default(false),
+  /** How many live relations the card has. */
+  links: z.number().default(0),
 });
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
@@ -127,6 +131,8 @@ export const cardRefSchema = z.object({
   /** False when the target is gone, or when this reader may not open it. */
   available: z.boolean(),
   preview: z.string().nullable(),
+  /** For an attached memory the reader may open: its kind. */
+  memory_kind: z.string().nullable().default(null),
 });
 export type CardRef = z.infer<typeof cardRefSchema>;
 
@@ -153,6 +159,14 @@ export const cardEventSchema = z.object({
   release_version: z.string().nullable().default(null),
   release_build: z.string().nullable().default(null),
   release_commit: z.string().nullable().default(null),
+  /** For a `linked` or `unlinked` event: the stored type, and which side
+   * of it this card is on. */
+  link_type: z.string().nullable().default(null),
+  link_direction: z.enum(['out', 'in']).nullable().default(null),
+  /** The statement a card made when it said it relates to no other card. */
+  links_note: z.string().nullable().default(null),
+  /** For an event naming another card: that card's number. */
+  ref_number: z.number().nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
@@ -193,6 +207,36 @@ export const cardReleaseSchema = z.object({
 });
 export type CardRelease = z.infer<typeof cardReleaseSchema>;
 
+/** How one card stands to another, named from the reading card's side. */
+export const CARD_LINK_RELATIONS = [
+  'blocks',
+  'blocked_by',
+  'depends_on',
+  'needed_by',
+  'parent_of',
+  'child_of',
+  'relates_to',
+  'duplicates',
+  'duplicated_by',
+] as const;
+export type CardLinkRelation = (typeof CARD_LINK_RELATIONS)[number];
+
+/** A live relation of the card, as `card_get` names it from the card's side. */
+export const cardLinkSchema = z.object({
+  card_id: z.string(),
+  number: z.number(),
+  title: z.string(),
+  state: cardStateSchema,
+  scope: z.string(),
+  archived: z.boolean(),
+  relation: z.enum(CARD_LINK_RELATIONS),
+  reason: z.string(),
+  /** False for a relation carried over from a card attachment. */
+  declared: z.boolean(),
+  created_at: z.string(),
+});
+export type CardLink = z.infer<typeof cardLinkSchema>;
+
 export const cardViewSchema = z.object({
   card: cardSchema,
   refs: z.array(cardRefSchema).default([]),
@@ -201,6 +245,9 @@ export const cardViewSchema = z.object({
   events: z.array(cardEventSchema).default([]),
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
+  links: z.array(cardLinkSchema).default([]),
+  blocked: z.boolean().default(false),
+  links_assessed: z.boolean().default(false),
 });
 export type CardView = z.infer<typeof cardViewSchema>;
 
@@ -273,9 +320,69 @@ export function cardEventLabel(type: string, t: WebTranslator): string {
       return t('board.event.landed');
     case 'released':
       return t('board.event.released');
+    case 'linked':
+      return t('board.event.linked');
+    case 'unlinked':
+      return t('board.event.unlinked');
     default:
       return type;
   }
+}
+
+/** How a card stands to another, in words, from the reading card's side. */
+export function cardLinkRelationLabel(
+  relation: CardLinkRelation,
+  t: WebTranslator
+): string {
+  switch (relation) {
+    case 'blocks':
+      return t('board.link.blocks');
+    case 'blocked_by':
+      return t('board.link.blocked_by');
+    case 'depends_on':
+      return t('board.link.depends_on');
+    case 'needed_by':
+      return t('board.link.needed_by');
+    case 'parent_of':
+      return t('board.link.parent_of');
+    case 'child_of':
+      return t('board.link.child_of');
+    case 'relates_to':
+      return t('board.link.relates_to');
+    case 'duplicates':
+      return t('board.link.duplicates');
+    case 'duplicated_by':
+      return t('board.link.duplicated_by');
+  }
+}
+
+/** The stored type of a relation seen from its other end. */
+const INVERSE_LINK: Record<string, CardLinkRelation> = {
+  blocks: 'blocked_by',
+  depends_on: 'needed_by',
+  parent_of: 'child_of',
+  relates_to: 'relates_to',
+  duplicates: 'duplicated_by',
+};
+
+/**
+ * The relation a `linked` or `unlinked` event records, named from the side
+ * of the card whose history it is in: the stored type on the card that holds
+ * the relation's source end, its inverse on the other.
+ */
+export function cardEventLinkRelation(
+  event: Pick<CardEvent, 'link_type' | 'link_direction'>
+): CardLinkRelation | null {
+  if (!event.link_type || !event.link_direction) return null;
+  const stored = (CARD_LINK_RELATIONS as readonly string[]).includes(
+    event.link_type
+  )
+    ? (event.link_type as CardLinkRelation)
+    : null;
+  if (!stored) return null;
+  return event.link_direction === 'out'
+    ? stored
+    : (INVERSE_LINK[stored] ?? null);
 }
 
 /**

@@ -1,5 +1,6 @@
 import type { CardBranchItem } from '@workspace/ui/components/board/card-branches';
 import type { CardHistoryEntry } from '@workspace/ui/components/board/card-history';
+import type { CardLinkGroup } from '@workspace/ui/components/board/card-links';
 import type { CardDetailData } from '@workspace/ui/components/board/card-detail';
 import type { BadgeListItem } from '@workspace/ui/components/common/badge-list';
 import type { LinkedMemoryItem } from '@workspace/ui/components/memory/linked-memory-list';
@@ -9,13 +10,17 @@ import {
   cardBranchEarlierLabel,
   cardBranchStateLabel,
   cardEventLabel,
+  cardEventLinkRelation,
   cardLabel,
+  cardLinkRelationLabel,
   cardRefHref,
   cardRelationLabel,
   cardStateLabel,
   cardFeedSchema,
   cardStateVariant,
   cardViewSchema,
+  type CardLink,
+  type CardLinkRelation,
 } from '@/lib/board';
 import { getRequestMessages } from '@/lib/i18n';
 import { formatTimestamp, kindLabel, scopeLabel } from '@/lib/memory';
@@ -37,6 +42,21 @@ const FEED_LIMIT = 50;
  * keeps the rest as plain labels; the request stays bounded.
  */
 const MENTION_LIMIT = 100;
+
+/**
+ * The sides a relation can sit on, in reading order, each with the relations
+ * it holds as the card names them. Above is the parent and the secondary
+ * parents — what blocks the card and what it depends on.
+ */
+const LINK_SIDES: ReadonlyArray<{
+  key: 'above' | 'below' | 'related' | 'duplicates';
+  relations: readonly CardLinkRelation[];
+}> = [
+  { key: 'above', relations: ['child_of', 'blocked_by', 'depends_on'] },
+  { key: 'below', relations: ['parent_of', 'blocks', 'needed_by'] },
+  { key: 'related', relations: ['relates_to'] },
+  { key: 'duplicates', relations: ['duplicates', 'duplicated_by'] },
+];
 
 export interface CardViewData {
   id: string;
@@ -70,6 +90,8 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     releases,
     events,
     has_more: hasMore,
+    links,
+    blocked,
   } = parsed.data;
 
   // A `ZM-N` label in the card's text means card N of THIS card's board. It
@@ -137,19 +159,68 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
           },
         ]
       : []),
+    ...(blocked
+      ? [
+          {
+            label: t('board.blocked'),
+            variant: 'destructive' as const,
+            testId: 'card-blocked',
+          },
+        ]
+      : []),
   ];
+
+  const sideLabel = (key: (typeof LINK_SIDES)[number]['key']): string => {
+    switch (key) {
+      case 'above':
+        return t('board.links.above');
+      case 'below':
+        return t('board.links.below');
+      case 'related':
+        return t('board.links.related');
+      case 'duplicates':
+        return t('board.links.duplicates');
+    }
+  };
+  const linkItem = (link: CardLink) => ({
+    key: `${link.relation}:${link.card_id}`,
+    href: `/board/${link.card_id}`,
+    relationLabel: cardLinkRelationLabel(link.relation, t),
+    numberLabel: cardLabel(link.number),
+    title: link.title,
+    stateLabel: cardStateLabel(link.state, t),
+    stateVariant: cardStateVariant(link.state),
+    reason: link.reason,
+    ...(link.declared ? {} : { undeclaredLabel: t('board.linkUndeclared') }),
+  });
+  // Within a side, relations keep the side's order (a parent before what
+  // blocks the card), then the order the store sends.
+  const linkGroups: CardLinkGroup[] = LINK_SIDES.map((side) => ({
+    key: side.key,
+    label: sideLabel(side.key),
+    items: side.relations.flatMap((relation) =>
+      links.filter((link) => link.relation === relation).map(linkItem)
+    ),
+  }));
 
   // An attachment whose target this reader may not open keeps its place in the
   // list and loses its content — the same treatment a hidden memory link gets.
-  const refItems: LinkedMemoryItem[] = refs.map((ref) => {
-    const href = cardRefHref(ref);
-    return {
-      type: ref.kind,
-      ...(href !== undefined && ref.available
-        ? { href, preview: ref.preview ?? ref.target }
-        : {}),
-    };
-  });
+  // An attached memory is named by its kind — a decision reads as one — and
+  // attachments of one kind sit together.
+  const refItems: LinkedMemoryItem[] = refs
+    .map((ref) => {
+      const href = cardRefHref(ref);
+      return {
+        type:
+          ref.kind === 'memory' && ref.memory_kind
+            ? kindLabel(ref.memory_kind, t)
+            : ref.kind,
+        ...(href !== undefined && ref.available
+          ? { href, preview: ref.preview ?? ref.target }
+          : {}),
+      };
+    })
+    .sort((a, b) => a.type.localeCompare(b.type));
 
   const branchItems: CardBranchItem[] = branches.map((branch) => ({
     key: `${branch.repo}:${branch.branch}`,
@@ -160,44 +231,58 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
     landed: branch.state === 'landed',
   }));
 
-  const entries: CardHistoryEntry[] = events.map((event) => ({
-    id: event.id,
-    seqLabel: String(event.seq),
-    typeLabel: cardEventLabel(event.type, t),
-    transitionLabel:
-      event.from_state && event.to_state
-        ? `${cardStateLabel(event.from_state, t)} → ${cardStateLabel(
-            event.to_state,
-            t
-          )}`
+  const entries: CardHistoryEntry[] = events.map((event) => {
+    const linkRelation = cardEventLinkRelation(event);
+    return {
+      id: event.id,
+      seqLabel: String(event.seq),
+      typeLabel: cardEventLabel(event.type, t),
+      transitionLabel:
+        event.from_state && event.to_state
+          ? `${cardStateLabel(event.from_state, t)} → ${cardStateLabel(
+              event.to_state,
+              t
+            )}`
+          : undefined,
+      actorLabel: event.agent_label ?? event.actor_id,
+      timeLabel: formatTimestamp(event.created_at),
+      reason: event.reason ?? undefined,
+      declarations: [
+        ...(event.branch_note
+          ? [{ label: t('board.declaration'), text: event.branch_note }]
+          : []),
+        ...(event.links_note
+          ? [{ label: t('board.linksDeclaration'), text: event.links_note }]
+          : []),
+      ],
+      note: event.text
+        ? {
+            text: event.text,
+            relationLabel: event.relation
+              ? cardRelationLabel(event.relation, t)
+              : undefined,
+          }
         : undefined,
-    actorLabel: event.agent_label ?? event.actor_id,
-    timeLabel: formatTimestamp(event.created_at),
-    reason: event.reason ?? undefined,
-    declaration: event.branch_note
-      ? { label: t('board.declaration'), text: event.branch_note }
-      : undefined,
-    note: event.text
-      ? {
-          text: event.text,
-          relationLabel: event.relation
-            ? cardRelationLabel(event.relation, t)
-            : undefined,
-        }
-      : undefined,
-    refLabel:
-      event.type === 'landed' && event.ref_target
-        ? `${event.ref_target} → ${event.target_branch ?? ''} (${(
-            event.squash_sha ?? ''
-          ).slice(0, 7)})`
-        : event.type === 'released' && event.release_version
-          ? `v${event.release_version}${
-              event.release_build ? ` (build ${event.release_build})` : ''
+      refLabel:
+        (event.type === 'linked' || event.type === 'unlinked') && linkRelation
+          ? `${cardLinkRelationLabel(linkRelation, t)} ${
+              event.ref_number !== null
+                ? cardLabel(event.ref_number)
+                : (event.ref_target ?? '')
             }`
-          : event.ref_kind && event.ref_target
-            ? `${event.ref_kind}: ${event.ref_target}`
-            : undefined,
-  }));
+          : event.type === 'landed' && event.ref_target
+            ? `${event.ref_target} → ${event.target_branch ?? ''} (${(
+                event.squash_sha ?? ''
+              ).slice(0, 7)})`
+            : event.type === 'released' && event.release_version
+              ? `v${event.release_version}${
+                  event.release_build ? ` (build ${event.release_build})` : ''
+                }`
+              : event.ref_kind && event.ref_target
+                ? `${event.ref_kind}: ${event.ref_target}`
+                : undefined,
+    };
+  });
 
   return {
     id: card.id,
@@ -224,6 +309,11 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
         title: t('board.branches'),
         items: branchItems,
         emptyLabel: t('board.noBranches'),
+      },
+      links: {
+        title: t('board.links'),
+        groups: linkGroups,
+        emptyLabel: t('board.noLinks'),
       },
       refs: {
         title: t('board.refs'),

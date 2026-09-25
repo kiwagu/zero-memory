@@ -28,6 +28,9 @@ Components live under `src/components`, global styles under
   - `memory/memory-detail`, `board/card-detail`, `entity/entity-detail` — the
     full views of a memory, a card and an entity. Each takes serializable data
     plus slots, so a page and a panel render the same view.
+  - `board/card-links` — how a card stands to other cards, grouped by side
+    (above, below, related, duplicates), each relation named from the card's
+    side with its reason; display-only, the other card's label opens it.
   - `panels/panel-strip` — the controlled strip of panels a dialog opens:
     equal-width panels in one snapping row, paged by arrows at the screen
     edges, each with its source and its ×.

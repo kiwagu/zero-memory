@@ -1150,4 +1150,141 @@ test.describe('Panel chain in the card dialog', () => {
     await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
     await expect(label).toHaveText(`ZM-${cardNumber}`);
   });
+
+  test('a card shows its relations, and a relation opens the other card beside it', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const stamp = Date.now();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let parent: CardResult['card'];
+    let blocker: CardResult['card'];
+    let blocked: CardResult['card'];
+    let neighbour: CardResult['card'];
+    try {
+      const anchor = firstJson<{ scope: string; memory_id: string }>(
+        await mcp.callTool('remember', {
+          content: `card-links web anchor ${stamp}: relations shown on a card`,
+          kind: 'decision',
+          project_hint: `/tmp/zm-e2e-card-links-web-${stamp}`,
+        })
+      );
+      scope = anchor.scope;
+      const create = async (
+        title: string,
+        declaration: Record<string, unknown>
+      ) => {
+        const created = await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title,
+          ...declaration,
+        });
+        expect(created.isError ?? false).toBe(false);
+        return firstJson<CardResult>(created).card;
+      };
+      parent = await create(`relations parent ${stamp}`, {
+        no_links: 'e2e fixture',
+      });
+      blocker = await create(`relations blocker ${stamp}`, {
+        no_links: 'e2e fixture',
+      });
+      blocked = await create(`relations blocked ${stamp}`, {
+        links: [
+          {
+            card: `ZM-${blocker.number}`,
+            relation: 'blocked_by',
+            reason: 'the blocker ships first',
+          },
+          {
+            card: parent.id,
+            relation: 'child_of',
+            reason: 'one part of the parent',
+          },
+        ],
+      });
+      neighbour = await create(`relations neighbour ${stamp}`, {
+        no_links: 'e2e fixture',
+      });
+      // The old way to point at a card still works, and reads as a relation
+      // nobody typed.
+      const attached = await mcp.callTool('card_log', {
+        action: 'attach',
+        card_id: neighbour.id,
+        ref_kind: 'card',
+        ref_target: blocked.id,
+      });
+      expect(attached.isError ?? false).toBe(false);
+      const memory = await mcp.callTool('card_log', {
+        action: 'attach',
+        card_id: blocked.id,
+        ref_kind: 'memory',
+        ref_target: anchor.memory_id,
+      });
+      expect(memory.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const tileOf = (title: string) =>
+      page.getByTestId('board-card').filter({ hasText: title });
+    // A blocked card says so on its tile; the card that blocks it does not.
+    await expect(
+      tileOf(`relations blocked ${stamp}`).getByTestId('board-card-blocked')
+    ).toHaveText('blocked');
+    await expect(
+      tileOf(`relations blocker ${stamp}`).getByTestId('board-card-blocked')
+    ).toHaveCount(0);
+
+    await tileOf(`relations blocked ${stamp}`).click();
+    const modal = page.getByTestId('card-modal');
+    await expect(modal).toBeVisible();
+
+    // Relations are grouped by side: what is above the card, and what merely
+    // relates to it — with the reason each was declared with.
+    const section = modal.getByTestId('card-links-section').first();
+    const above = section.getByTestId('card-links-group-above');
+    await expect(above.getByTestId('card-link')).toHaveCount(2);
+    await expect(above).toContainText(`child of ZM-${parent.number}`);
+    await expect(above).toContainText(`blocked by ZM-${blocker.number}`);
+    await expect(above).toContainText('the blocker ships first');
+    const related = section.getByTestId('card-links-group-related');
+    await expect(related).toContainText(`relates to ZM-${neighbour.number}`);
+    await expect(related).toContainText('type not declared');
+
+    // An attached memory is named by its kind, not as "memory".
+    const refs = modal.getByTestId('card-refs').first();
+    await expect(refs).toContainText('decision');
+    await expect(refs).not.toContainText('memory');
+
+    // The history records each relation from this card's side.
+    await expect(modal.getByTestId('card-history').first()).toContainText(
+      `blocked by ZM-${blocker.number}`
+    );
+
+    // Still a window: nothing here changes a card or a relation.
+    const detail = modal.getByTestId('card-detail').first();
+    await expect(detail.getByRole('button')).toHaveCount(0);
+    await expect(detail.locator('form')).toHaveCount(0);
+
+    // A relation opens the other card as the next panel.
+    await above.getByRole('link', { name: `ZM-${blocker.number}` }).click();
+    await expect
+      .poll(() =>
+        page
+          .getByTestId('panel')
+          .evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute('data-panel-key'))
+          )
+      )
+      .toEqual([`card:${blocked.id}`, `card:${blocker.id}`]);
+    await expect(
+      page.locator(`[data-panel-key="card:${blocker.id}"]`)
+    ).toContainText(`relations blocker ${stamp}`);
+  });
 });
