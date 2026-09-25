@@ -432,6 +432,13 @@ export const briefingWorkBranchSchema = z.object({
   state: cardStateSchema,
   repo: z.string(),
   branch: z.string(),
+  /**
+   * The squashes of this branch the board already recorded, on any card of
+   * the project. A branch reopened for more work has its old squash on the
+   * trunk; that one is not a landing nobody recorded. Absent from servers
+   * that predate reopening.
+   */
+  landings: z.array(z.object({ squash_sha: z.string() })).optional(),
 });
 export type BriefingWorkBranch = z.infer<typeof briefingWorkBranchSchema>;
 
@@ -655,7 +662,9 @@ export const cardInputSchema = z.object({
         'remote origin (or the repository folder name without one), `name` ' +
         'the branch. Work entering active (move, or create/promote_loop ' +
         'straight into active) passes it unless the card already has an ' +
-        'open branch; land names the branch that landed.'
+        'open branch. A branch that already landed, on this card or another, ' +
+        'is reopened for work on its landed code — keep what it shipped ' +
+        'working. land names the branch that landed.'
     ),
   no_branch: cardDeclarationSchema
     .optional()

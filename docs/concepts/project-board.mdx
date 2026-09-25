@@ -128,7 +128,11 @@ into it — names its `branch` as `{repo, name}`, or says why it has no code wit
 `no_branch`: research, an operation on a running system, documents kept outside
 git. A card that already holds an open branch needs neither, so work coming
 back from review on the same branch simply moves. A branch that already landed
-does not count: follow-up work goes on a new branch.
+can be named again: a bug found on the trunk is fixed in the branch that
+brought it, so naming a landed branch — on this card or another — reopens it
+for the card. Its earlier landings stay on record, and the next `land` adds
+one more. Keeping what the branch already shipped working is the job of
+whoever reopened it.
 
 Work **leaving** `active` while its branch is still open is refused until the
 branch is accounted for. If it landed, record the landing:
@@ -188,7 +192,9 @@ call filled in:
 Each squash is checked once per machine. A session briefing adds what the hook
 could not see — a landing made in another session or on another client: when a
 branch the board still holds open has already landed in the local repository,
-the briefing says so and names the call. A client connected only over MCP has
+the briefing says so and names the call. A squash the board already recorded,
+on any card, is not reported, so a reopened branch is named only for a new
+squash of it. A client connected only over MCP has
 no hooks and no git; the tool's own rule is what keeps its cards honest.
 
 ## A release reaches the cards it carries

@@ -1,5 +1,6 @@
 import {
   isLandingRecorded,
+  isRecordedSquash,
   renderLandingReminder,
   type LandingDrift,
 } from '@workspace/client-core';
@@ -237,7 +238,9 @@ export const landingDriftFor = (
     .filter((item) => item.repo === facts.identity)
     .slice(0, DRIFT_BRANCHES)) {
     const landing = findLanding(facts.root, branch.branch);
-    if (landing) {
+    // A branch reopened for more work has its earlier squash here, and the
+    // board already holds that one: only a squash it does not know is drift.
+    if (landing && !isRecordedSquash(branch.landings, landing.sha)) {
       drift.push({
         cardId: branch.card_id,
         cardNumber: branch.number,
