@@ -17,4 +17,4 @@
  * major/minor removal in `docs/DEPRECATIONS.md` — after the public release the
  * contract is held open by clients we do not control.
  */
-export const CONTRACT_VERSION = '4.0.0';
+export const CONTRACT_VERSION = '4.1.0';

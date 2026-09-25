@@ -210,6 +210,10 @@ export const recordBriefing = (
       ...(briefing.conversationId !== null && {
         conversation_id: briefing.conversationId,
       }),
+      // Which card the briefing offered to continue, when it offered one.
+      ...(briefing.continuationCard != null && {
+        continuation_card: briefing.continuationCard,
+      }),
     },
   });
 };

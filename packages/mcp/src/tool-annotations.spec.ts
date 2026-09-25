@@ -121,6 +121,15 @@ describe('tool annotations', () => {
     }
   });
 
+  it('tells a new session how to ask for the card it can continue', () => {
+    // The work section, and the continuation in it, rides budgeted briefings
+    // only: a caller that follows the description must know to name a budget.
+    const description =
+      listed.find((tool) => tool.name === 'build_context')?.description ?? '';
+    expect(description).toContain('work.continuation');
+    expect(description).toMatch(/max_tokens/u);
+  });
+
   it('keeps every description inside the client-visible budget', () => {
     // Claude Code silently truncates each tool description at 2KB, cutting
     // the tail mid-sentence — and descriptions accrete a clause per feature

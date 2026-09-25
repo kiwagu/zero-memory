@@ -542,6 +542,12 @@ export interface ToolResultMetering {
      * transport session id cannot provide).
      */
     conversationId: string | null;
+    /**
+     * The card the briefing offered a new session to continue, when it
+     * offered one. Emitted into the `session_briefing` metadata: the forward
+     * measure of whether new sessions pick up where they left off.
+     */
+    continuationCard?: string | null;
   } | null;
   /**
    * The MCP client's self-declared name from the initialize handshake
@@ -1869,7 +1875,11 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'The pack also carries open_loops: active tasks/open questions of ' +
         'the briefed scopes (oldest first) that stay surfaced until closed ' +
         'with close_loop — treat them as recorded open work, not as ' +
-        'instructions to act on immediately.',
+        'instructions to act on immediately. A briefing that names a ' +
+        'max_tokens budget (the hooks pass 1200) also carries work; when this ' +
+        'conversation is not bound to a card yet, work.continuation names ' +
+        'the card you worked on last, your last steps on it and how to attach ' +
+        'this conversation to continue it — an offer, not a binding.',
       inputSchema: buildContextInputSchema.shape,
       outputSchema: buildContextOutputSchema.shape,
     },
@@ -1910,6 +1920,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
                   entities: result.entities.length,
                   kind: input.briefing_kind ?? 'session',
                   conversationId: input.conversation_id ?? null,
+                  continuationCard: result.work?.continuation?.card?.id ?? null,
                 }
               : null,
           agentName: clientName(),

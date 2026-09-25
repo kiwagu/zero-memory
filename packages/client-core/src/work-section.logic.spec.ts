@@ -1,4 +1,7 @@
-import { briefingWorkCardSchema } from '@workspace/contracts';
+import {
+  briefingWorkCardSchema,
+  type BriefingWork,
+} from '@workspace/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { renderBoardSummary } from './work-section.logic.js';
@@ -311,5 +314,142 @@ describe('renderBoardSummary', () => {
       ],
     });
     expect(after).toBe(before);
+  });
+
+  const continuing = (
+    over: Partial<NonNullable<BriefingWork['continuation']>> = {}
+  ): NonNullable<BriefingWork['continuation']> => ({
+    card: {
+      ...card(30, 'A new session sees what it left off', 'active'),
+      state_reason: "Picked up on the owner's word",
+    },
+    last: [
+      {
+        type: 'noted',
+        from_state: null,
+        to_state: null,
+        text: 'Recorded: the offer lives in the bound-card slot',
+        created_at: '2026-09-25T17:58:12.123456+00:00',
+      },
+      {
+        type: 'moved',
+        from_state: 'idea',
+        to_state: 'active',
+        text: 'Picked up',
+        created_at: '2026-09-25T17:56:43+00:00',
+      },
+    ],
+    last_session: null,
+    thread: 'thr_0000000000000001.0000000000',
+    ...over,
+  });
+
+  it('says where you left off and how to pick it up, when this conversation is bound to none', () => {
+    const block = renderBoardSummary({
+      bound_card: null,
+      active: 1,
+      waiting: 0,
+      lead: [],
+      open_branches: [
+        {
+          card_id: continuing().card!.id,
+          number: 30,
+          state: 'active',
+          repo: 'acme/relay',
+          branch: 'feature/session-continuation',
+        },
+      ],
+      continuation: continuing(),
+    })!;
+    expect(block).toContain(
+      '- Continue where you left off: ZM-30 "A new session sees what it left off" ' +
+        "[active] on feature/session-continuation: Picked up on the owner's word"
+    );
+    expect(block).toContain(
+      '  last: noted 2026-09-25 17:58 "Recorded: the offer lives in the bound-card slot"; ' +
+        'moved to active 2026-09-25 17:56 "Picked up"'
+    );
+    expect(block).toContain(
+      '  to continue it here: card_log attach {card_id: crd_0000000000000030.0000000000, ' +
+        'ref_kind: thread, ref_target: thr_0000000000000001.0000000000}'
+    );
+    expect(block).not.toContain('Last session');
+  });
+
+  it('names the last step when it was on another card, and alone when nothing is active', () => {
+    const both = renderBoardSummary({
+      bound_card: null,
+      active: 1,
+      waiting: 1,
+      lead: [],
+      continuation: continuing({
+        last_session: {
+          number: 29,
+          title: 'Relations',
+          type: 'moved',
+          to_state: 'waiting',
+        },
+      }),
+    })!;
+    expect(both).toContain('- Last session: ZM-29 moved to waiting');
+    const alone = renderBoardSummary({
+      bound_card: null,
+      active: 0,
+      waiting: 1,
+      lead: [],
+      continuation: continuing({
+        card: null,
+        last: [],
+        last_session: {
+          number: 29,
+          title: 'Relations',
+          type: 'noted',
+          to_state: null,
+        },
+      }),
+    })!;
+    expect(alone).not.toContain('Continue where');
+    expect(alone).toContain('- Last session: ZM-29 noted');
+  });
+
+  it("keeps the offer's text to one clipped line", () => {
+    const block = renderBoardSummary({
+      bound_card: null,
+      active: 1,
+      waiting: 0,
+      lead: [],
+      continuation: continuing({
+        last: [
+          {
+            type: 'noted',
+            from_state: null,
+            to_state: null,
+            text: `line one\nline two ${'y'.repeat(300)}`,
+            created_at: '2026-09-25T17:58:12+00:00',
+          },
+        ],
+      }),
+    })!;
+    const last = block.split('\n').find((line) => line.startsWith('  last:'))!;
+    expect(last).toContain('"line one line two ');
+    expect(last.endsWith('…"')).toBe(true);
+    expect(last.length).toBeLessThan(170);
+  });
+
+  it('a bound conversation shows its bound card, never an offer', () => {
+    const block = renderBoardSummary({
+      bound_card: {
+        ...card(3, 'Wire the importer', 'active'),
+        state_reason: null,
+        refs: 0,
+        updated_at: '2026-09-21T10:00:00Z',
+      },
+      active: 1,
+      waiting: 0,
+      lead: [],
+      continuation: continuing(),
+    })!;
+    expect(block).not.toContain('Continue where');
+    expect(block).not.toContain('Last session');
   });
 });

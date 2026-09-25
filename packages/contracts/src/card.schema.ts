@@ -552,6 +552,55 @@ export const briefingWorkBranchSchema = z.object({
 });
 export type BriefingWorkBranch = z.infer<typeof briefingWorkBranchSchema>;
 
+/** A card directly above another in a briefing: its parent, a blocker, a
+ * dependency. */
+export const briefingAboveSchema = z.object({
+  number: z.number().int(),
+  title: z.string(),
+  state: cardStateSchema,
+  relation: cardLinkRelationSchema,
+  archived: z.boolean().optional(),
+  /** Set only for a card on another board. */
+  scope: z.string().nullable().optional(),
+});
+
+/**
+ * Where a new session left off: the card its caller worked on last (still
+ * active, within the horizon), the caller's two newest entries on it, and
+ * the caller's last step when it was on another card. Sent only when the
+ * calling conversation is bound to no card. The briefing offers; binding
+ * stays the agent's step.
+ */
+export const briefingContinuationSchema = z.object({
+  card: briefingWorkCardSchema
+    .extend({
+      state_reason: z.string().nullable(),
+      above: z.array(briefingAboveSchema).optional(),
+    })
+    .nullable(),
+  last: z.array(
+    z.object({
+      type: cardEventTypeSchema,
+      from_state: cardStateSchema.nullable(),
+      to_state: cardStateSchema.nullable(),
+      /** The reason or note, clipped to one short line by the server. */
+      text: z.string().nullable(),
+      created_at: z.string(),
+    })
+  ),
+  last_session: z
+    .object({
+      number: z.number().int().positive(),
+      title: z.string(),
+      type: cardEventTypeSchema,
+      to_state: cardStateSchema.nullable(),
+    })
+    .nullable(),
+  /** The calling conversation, so the attach command is exact. */
+  thread: z.string().nullable(),
+});
+export type BriefingContinuation = z.infer<typeof briefingContinuationSchema>;
+
 /**
  * The project's work in progress, as a briefing carries it: the card the
  * calling conversation is bound to (with the reason it sits in its column and
@@ -565,19 +614,7 @@ export const briefingWorkSchema = z.object({
       refs: z.number().int().nonnegative(),
       updated_at: z.string(),
       /** The cards directly above it: its parent, blockers, dependencies. */
-      above: z
-        .array(
-          z.object({
-            number: z.number().int(),
-            title: z.string(),
-            state: cardStateSchema,
-            relation: cardLinkRelationSchema,
-            archived: z.boolean().optional(),
-            /** Set only for a card on another board. */
-            scope: z.string().nullable().optional(),
-          })
-        )
-        .optional(),
+      above: z.array(briefingAboveSchema).optional(),
     })
     .nullable(),
   active: z.number().int().nonnegative(),
@@ -602,6 +639,11 @@ export const briefingWorkSchema = z.object({
     })
     .nullable()
     .optional(),
+  /**
+   * The card a new session is offered to continue. Optional: a server that
+   * predates it sends none, and a bound conversation gets null.
+   */
+  continuation: briefingContinuationSchema.nullable().optional(),
 });
 export type BriefingWork = z.infer<typeof briefingWorkSchema>;
 

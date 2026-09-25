@@ -45,8 +45,9 @@ consume the same core (see the R3 client-adapters direction).
 - `work-section.logic.ts` — `renderBoardSummary(work)`: the project board's
   lines in a briefing (the card bound to this conversation with its reason
   and the cards above it, active/waiting counts, the first few cards, each
-  with what blocks it and whether its relations were ever assessed), phrased
-  as declared state, never as instructions. `splitOpenLoops` drains the server's `work` field out of the
+  with what blocks it and whether its relations were ever assessed, and,
+  when the conversation is bound to none, the card you worked on last with
+  how to pick it up), phrased as declared state, never as instructions. `splitOpenLoops` drains the server's `work` field out of the
   pack alongside the loops, and the watcher renders both as ONE work section.
 - `brief-budget.logic.ts` — fitting a briefing into the hook channel, whose
   client spills anything past ~10,000 characters to a file and shows only a
