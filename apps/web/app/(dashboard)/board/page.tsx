@@ -2,17 +2,25 @@ import Link from 'next/link';
 
 import { Alert, AlertDescription } from '@workspace/ui/components/alert';
 import { InfoHint } from '@workspace/ui/components/common/info-hint';
+import { BoardCardList } from '@workspace/ui/components/board/board-card-list';
 import {
   BoardColumns,
   type BoardColumn,
+  type BoardColumnCard,
 } from '@workspace/ui/components/board/board-columns';
+import {
+  BoardContinuation,
+  type BoardContinuationItem,
+} from '@workspace/ui/components/board/board-continuation';
 
 import { BoardFilter } from '@/components/board-filter.client';
 import { BoardSearch } from '@/components/board-search.client';
 import { BoardLive } from '@/components/board-live.client';
+import { BoardMineToggle } from '@/components/board-mine-toggle.client';
 import {
   ALL_BOARDS,
   CARD_STATES,
+  boardContinuationsSchema,
   boardListSchema,
   boardScopesSchema,
   cardEventLabel,
@@ -22,6 +30,7 @@ import {
   releasePolicyLabel,
   releaseSettingsSchema,
   resolveBoardScope,
+  workStepLabel,
   type BoardCard,
 } from '@/lib/board';
 import { scopeOptionLabel } from '@workspace/ui/lib/scope-format';
@@ -39,9 +48,11 @@ const REASON_CHARS = 120;
 export default async function BoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ scope?: string; q?: string }>;
+  searchParams: Promise<{ scope?: string; q?: string; mine?: string }>;
 }) {
-  const { scope, q } = await searchParams;
+  const { scope, q, mine: mineParam } = await searchParams;
+  // The cards I worked on, newest own work first, instead of the columns.
+  const mine = mineParam === '1';
   // A label (ZM-42, #42, 42) or a piece of a title; the store decides which.
   const query = q?.trim() ?? '';
   const { t } = await getRequestMessages();
@@ -80,14 +91,29 @@ export default async function BoardPage({
       ? supabase.rpc('release_settings', { p_scope: selected })
       : Promise.resolve({ data: null });
 
-  const [{ data: releaseData }, { data, error }] = await Promise.all([
+  // The Mine view reads what a new session would be offered, for this board
+  // or, with every board on screen, for each of them.
+  const continuationQuery = mine
+    ? supabase.rpc('board_continuation', { p_scope: selected ?? undefined })
+    : Promise.resolve({ data: null, error: null });
+
+  const [
+    { data: releaseData },
+    { data, error },
+    { data: continuationData, error: continuationError },
+  ] = await Promise.all([
     releaseQuery,
     supabase.rpc('board_list', {
       p_scope: selected ?? undefined,
       p_query: query || undefined,
       p_limit: BOARD_LIMIT,
+      p_worked_by_me: mine,
     }),
+    continuationQuery,
   ]);
+  const continuations = mine
+    ? boardContinuationsSchema.safeParse(continuationData)
+    : null;
   const releaseParsed = releaseSettingsSchema.safeParse(
     (releaseData as { settings?: unknown } | null)?.settings
   );
@@ -103,6 +129,36 @@ export default async function BoardPage({
     byState.get(card.state)?.push(card);
   }
 
+  // What every tile says about its card, in the columns and in Mine alike.
+  const commonBadges = (card: BoardCard) => [
+    { label: scopeLabel(card.scope), variant: 'outline' as const },
+    ...(card.released_in
+      ? [
+          {
+            label: t('board.releasedIn', { version: card.released_in }),
+            variant: 'green' as const,
+          },
+        ]
+      : []),
+    ...(card.blocked
+      ? [
+          {
+            label: t('board.blocked'),
+            variant: 'destructive' as const,
+            testId: 'board-card-blocked',
+          },
+        ]
+      : []),
+    ...(card.refs > 0
+      ? [
+          {
+            label: t('board.refsCount', { count: card.refs }),
+            variant: 'ghost' as const,
+          },
+        ]
+      : []),
+  ];
+
   const columns: BoardColumn[] = CARD_STATES.map((state) => ({
     key: state,
     label: cardStateLabel(state, t),
@@ -112,34 +168,7 @@ export default async function BoardPage({
       href: `/board/${card.id}`,
       numberLabel: cardLabel(card.number),
       title: card.title,
-      badges: [
-        { label: scopeLabel(card.scope), variant: 'outline' as const },
-        ...(card.released_in
-          ? [
-              {
-                label: t('board.releasedIn', { version: card.released_in }),
-                variant: 'green' as const,
-              },
-            ]
-          : []),
-        ...(card.blocked
-          ? [
-              {
-                label: t('board.blocked'),
-                variant: 'destructive' as const,
-                testId: 'board-card-blocked',
-              },
-            ]
-          : []),
-        ...(card.refs > 0
-          ? [
-              {
-                label: t('board.refsCount', { count: card.refs }),
-                variant: 'ghost' as const,
-              },
-            ]
-          : []),
-      ],
+      badges: commonBadges(card),
       // The last thing that happened, with the reason its author gave — the
       // whole point of a column at a glance.
       lastEventLabel: card.last_event
@@ -150,6 +179,80 @@ export default async function BoardPage({
       reason: card.state_reason?.slice(0, REASON_CHARS),
     })),
   }));
+
+  // In the Mine view a tile names the column it would sit in, and its event
+  // line is YOUR latest step, not whatever touched the card last.
+  const mineTiles: BoardColumnCard[] = board.cards.map((card) => ({
+    id: card.id,
+    href: `/board/${card.id}`,
+    numberLabel: cardLabel(card.number),
+    title: card.title,
+    badges: [
+      {
+        label: cardStateLabel(card.state, t),
+        variant: cardStateVariant(card.state),
+        testId: 'board-card-state',
+      },
+      ...commonBadges(card),
+      ...(card.past_horizon
+        ? [
+            {
+              label: t('board.mine.pastHorizon'),
+              variant: 'ghost' as const,
+              testId: 'board-card-past-horizon',
+            },
+          ]
+        : []),
+    ],
+    lastEventLabel: card.my_last
+      ? t('board.mine.myStep', {
+          step: workStepLabel(card.my_last, t),
+          at: formatTimestamp(card.my_last.created_at),
+        })
+      : undefined,
+    reason: card.my_last?.text?.slice(0, REASON_CHARS) ?? undefined,
+  }));
+
+  const continuationItems: BoardContinuationItem[] = (
+    continuations?.success ? continuations.data.boards : []
+  ).map(({ scope: boardScope, continuation }) => {
+    const offered = continuation.card;
+    const last = continuation.last[0];
+    return {
+      key: boardScope,
+      // Every board on screen: each offer says which board it is for.
+      scopeLabel:
+        value === ALL_BOARDS
+          ? scopeOptionLabel(boardScope, aliasByScope.get(boardScope))
+          : undefined,
+      ...(offered
+        ? {
+            href: `/board/${offered.id}`,
+            numberLabel: cardLabel(offered.number),
+            title: offered.title,
+            stateLabel: cardStateLabel(offered.state, t),
+            stateVariant: cardStateVariant(offered.state),
+            reason: offered.state_reason?.slice(0, REASON_CHARS) ?? undefined,
+            lastStepLabel: last
+              ? t('board.mine.myStep', {
+                  step: workStepLabel(last, t),
+                  at: formatTimestamp(last.created_at),
+                })
+              : undefined,
+            lastStepText: last?.text ?? undefined,
+          }
+        : {}),
+      lastSessionLabel: continuation.last_session
+        ? t('board.mine.lastSession', {
+            label: cardLabel(continuation.last_session.number),
+            step: workStepLabel(continuation.last_session, t),
+          })
+        : undefined,
+    };
+  });
+  // A reply that cannot be read is an error on screen, never an empty offer.
+  const mineError =
+    mine && (continuationError !== null || !continuations?.success);
 
   return (
     <div className="flex flex-col gap-6 p-4" data-testid="board">
@@ -184,6 +287,7 @@ export default async function BoardPage({
             </InfoHint>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <BoardMineToggle checked={mine} label={t('board.mine.toggle')} />
             <BoardSearch
               value={query}
               placeholder={t('board.search.placeholder')}
@@ -227,17 +331,37 @@ export default async function BoardPage({
         </div>
       </div>
 
-      {error ? (
+      {error || mineError ? (
         <Alert variant="destructive">
           <AlertDescription>{t('board.loadError')}</AlertDescription>
         </Alert>
       ) : null}
 
-      <BoardColumns
-        columns={columns}
-        emptyLabel={t('board.empty')}
-        linkComponent={Link}
-      />
+      {mine ? (
+        <>
+          <BoardContinuation
+            heading={t('board.mine.continue')}
+            items={continuationItems}
+            emptyLabel={t('board.mine.nothingOffered', {
+              days: continuations?.success
+                ? continuations.data.horizon_days
+                : 0,
+            })}
+            linkComponent={Link}
+          />
+          <BoardCardList
+            cards={mineTiles}
+            emptyLabel={t('board.mine.empty')}
+            linkComponent={Link}
+          />
+        </>
+      ) : (
+        <BoardColumns
+          columns={columns}
+          emptyLabel={t('board.empty')}
+          linkComponent={Link}
+        />
+      )}
 
       <BoardLive />
     </div>

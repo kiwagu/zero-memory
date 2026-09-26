@@ -1,8 +1,8 @@
 'use client';
 
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-
 import { SearchForm } from '@workspace/ui/components/common/search-form';
+
+import { useSearchParamSetter } from '@/components/use-search-param.client';
 
 /**
  * Which cards of the board are on screen: a label (`ZM-42`, `#42`, `42`) or a
@@ -19,9 +19,7 @@ export function BoardSearch({
   placeholder: string;
   submitLabel: string;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const setParam = useSearchParamSetter();
 
   return (
     <SearchForm
@@ -32,17 +30,7 @@ export function BoardSearch({
       placeholder={placeholder}
       submitLabel={submitLabel}
       defaultValue={value}
-      onSearch={(query) => {
-        const params = new URLSearchParams(searchParams.toString());
-        if (query) {
-          params.set('q', query);
-        } else {
-          params.delete('q');
-        }
-        const next = params.toString();
-        router.push(next ? `${pathname}?${next}` : pathname);
-        router.refresh();
-      }}
+      onSearch={(query) => setParam('q', query || null)}
     />
   );
 }
