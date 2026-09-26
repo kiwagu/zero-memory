@@ -114,6 +114,9 @@ export default async function BoardPage({
   const continuations = mine
     ? boardContinuationsSchema.safeParse(continuationData)
     : null;
+  // The offer as read, or null when it could not be: an unreadable answer is
+  // shown as an error, never as an empty offer.
+  const offer = continuations?.success ? continuations.data : null;
   const releaseParsed = releaseSettingsSchema.safeParse(
     (releaseData as { settings?: unknown } | null)?.settings
   );
@@ -213,46 +216,45 @@ export default async function BoardPage({
     reason: card.my_last?.text?.slice(0, REASON_CHARS) ?? undefined,
   }));
 
-  const continuationItems: BoardContinuationItem[] = (
-    continuations?.success ? continuations.data.boards : []
-  ).map(({ scope: boardScope, continuation }) => {
-    const offered = continuation.card;
-    const last = continuation.last[0];
-    return {
-      key: boardScope,
-      // Every board on screen: each offer says which board it is for.
-      scopeLabel:
-        value === ALL_BOARDS
-          ? scopeOptionLabel(boardScope, aliasByScope.get(boardScope))
+  const continuationItems: BoardContinuationItem[] = (offer?.boards ?? []).map(
+    ({ scope: boardScope, continuation }) => {
+      const offered = continuation.card;
+      const last = continuation.last[0];
+      return {
+        key: boardScope,
+        // Every board on screen: each offer says which board it is for.
+        scopeLabel:
+          value === ALL_BOARDS
+            ? scopeOptionLabel(boardScope, aliasByScope.get(boardScope))
+            : undefined,
+        ...(offered
+          ? {
+              href: `/board/${offered.id}`,
+              numberLabel: cardLabel(offered.number),
+              title: offered.title,
+              stateLabel: cardStateLabel(offered.state, t),
+              stateVariant: cardStateVariant(offered.state),
+              reason: offered.state_reason?.slice(0, REASON_CHARS) ?? undefined,
+              lastStepLabel: last
+                ? t('board.mine.myStep', {
+                    step: workStepLabel(last, t),
+                    at: formatTimestamp(last.created_at),
+                  })
+                : undefined,
+              lastStepText: last?.text ?? undefined,
+            }
+          : {}),
+        lastSessionLabel: continuation.last_session
+          ? t('board.mine.lastSession', {
+              label: cardLabel(continuation.last_session.number),
+              step: workStepLabel(continuation.last_session, t),
+            })
           : undefined,
-      ...(offered
-        ? {
-            href: `/board/${offered.id}`,
-            numberLabel: cardLabel(offered.number),
-            title: offered.title,
-            stateLabel: cardStateLabel(offered.state, t),
-            stateVariant: cardStateVariant(offered.state),
-            reason: offered.state_reason?.slice(0, REASON_CHARS) ?? undefined,
-            lastStepLabel: last
-              ? t('board.mine.myStep', {
-                  step: workStepLabel(last, t),
-                  at: formatTimestamp(last.created_at),
-                })
-              : undefined,
-            lastStepText: last?.text ?? undefined,
-          }
-        : {}),
-      lastSessionLabel: continuation.last_session
-        ? t('board.mine.lastSession', {
-            label: cardLabel(continuation.last_session.number),
-            step: workStepLabel(continuation.last_session, t),
-          })
-        : undefined,
-    };
-  });
+      };
+    }
+  );
   // A reply that cannot be read is an error on screen, never an empty offer.
-  const mineError =
-    mine && (continuationError !== null || !continuations?.success);
+  const mineError = mine && (continuationError !== null || offer === null);
 
   return (
     <div className="flex flex-col gap-6 p-4" data-testid="board">
@@ -338,23 +340,25 @@ export default async function BoardPage({
       ) : null}
 
       {mine ? (
-        <>
-          <BoardContinuation
-            heading={t('board.mine.continue')}
-            items={continuationItems}
-            emptyLabel={t('board.mine.nothingOffered', {
-              days: continuations?.success
-                ? continuations.data.horizon_days
-                : 0,
-            })}
-            linkComponent={Link}
-          />
-          <BoardCardList
-            cards={mineTiles}
-            emptyLabel={t('board.mine.empty')}
-            linkComponent={Link}
-          />
-        </>
+        // Nothing but the error when either answer could not be read: an
+        // empty list or "nothing to continue" would claim what is not known.
+        offer && !error ? (
+          <>
+            <BoardContinuation
+              heading={t('board.mine.continue')}
+              items={continuationItems}
+              emptyLabel={t('board.mine.nothingOffered', {
+                days: offer.horizon_days,
+              })}
+              linkComponent={Link}
+            />
+            <BoardCardList
+              cards={mineTiles}
+              emptyLabel={t('board.mine.empty')}
+              linkComponent={Link}
+            />
+          </>
+        ) : null
       ) : (
         <BoardColumns
           columns={columns}

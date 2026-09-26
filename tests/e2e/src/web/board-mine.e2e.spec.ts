@@ -194,4 +194,15 @@ test.describe('The Mine view of the board', () => {
       await mcp.close();
     }
   });
+
+  test('an offer that cannot be read is an error, never an empty offer', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    await signInThroughForm(page, seed.userA);
+    // Not a scope at all: the store refuses it, so there is no answer to show.
+    await page.goto('/board?scope=not%20a%20scope!&mine=1');
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.getByTestId('board-continuation')).toHaveCount(0);
+  });
 });
