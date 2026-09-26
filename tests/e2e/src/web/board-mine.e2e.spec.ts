@@ -161,4 +161,37 @@ test.describe('The Mine view of the board', () => {
       '30'
     );
   });
+
+  test('the offer follows the agent live', async ({ page }) => {
+    const { seed, mcp, scope, create, note } = await boardOf('live');
+    try {
+      const first = await create('Rotate the relay keys', true);
+      await note(first.id, 'keys first');
+
+      await signInThroughForm(page, seed.userA);
+      await page.goto(`/board?scope=${encodeURIComponent(scope)}&mine=1`);
+      const card = page.getByTestId('board-continuation-card');
+      await expect(card).toContainText(`ZM-${first.number}`);
+
+      // A page starts hearing its board a few seconds after it opens; a
+      // change written before that is not delivered. So the agent keeps
+      // working on the new card until the offer moves to it, with no reload.
+      const next = await create('Ship the relay rollout', true);
+      await expect
+        .poll(
+          async () => {
+            const text = (await card.textContent()) ?? '';
+            const moved = text.includes(`ZM-${next.number}`);
+            if (!moved) {
+              await note(next.id, 'now the rollout');
+            }
+            return moved;
+          },
+          { intervals: [2000], timeout: 40_000 }
+        )
+        .toBe(true);
+    } finally {
+      await mcp.close();
+    }
+  });
 });
