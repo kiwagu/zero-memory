@@ -1,12 +1,11 @@
 import * as React from 'react';
 
 import { Badge } from '@workspace/ui/components/badge';
-import { Card, CardContent } from '@workspace/ui/components/card';
 import {
-  BadgeList,
-  type BadgeListItem,
-  type BadgeListVariant,
-} from '@workspace/ui/components/common/badge-list';
+  BoardCardTile,
+  type BoardColumnCard,
+} from '@workspace/ui/components/board/board-card-tile';
+import { type BadgeListVariant } from '@workspace/ui/components/common/badge-list';
 import { EmptyState } from '@workspace/ui/components/common/empty-state';
 
 /**
@@ -18,19 +17,6 @@ import { EmptyState } from '@workspace/ui/components/common/empty-state';
  * would have nowhere to put the justification the move must carry, so the
  * absence of a control here is the design, not an omission.
  */
-
-interface BoardColumnCard {
-  id: string;
-  href: string;
-  /** The project-local address, already formatted (e.g. `ZM-42`). */
-  numberLabel: string;
-  title: string;
-  badges: BadgeListItem[];
-  /** What last happened and when, in one line. */
-  lastEventLabel?: string;
-  /** The reason its author gave for that change. */
-  reason?: string;
-}
 
 interface BoardColumn {
   key: string;
@@ -81,43 +67,11 @@ function BoardColumns({
             </div>
 
             {column.cards.map((card) => (
-              <LinkComponent
+              <BoardCardTile
                 key={card.id}
-                href={card.href}
-                data-testid="board-card"
-                className="focus-visible:ring-ring rounded-lg focus-visible:ring-2 focus-visible:outline-none"
-              >
-                <Card className="hover:border-ring transition-colors">
-                  <CardContent className="flex flex-col gap-2 p-3">
-                    <div className="flex items-baseline gap-2">
-                      {/* The label never breaks: `ZM-12` split after its
-                          hyphen reads as two things. The title wraps. */}
-                      <span
-                        className="text-muted-foreground shrink-0 text-xs whitespace-nowrap tabular-nums"
-                        data-testid="board-card-number"
-                      >
-                        {card.numberLabel}
-                      </span>
-                      <span className="text-sm leading-snug font-medium">
-                        {card.title}
-                      </span>
-                    </div>
-
-                    <BadgeList badges={card.badges} />
-
-                    {card.lastEventLabel ? (
-                      <div className="text-muted-foreground flex flex-col gap-0.5 text-xs">
-                        <span>{card.lastEventLabel}</span>
-                        {card.reason ? (
-                          <span className="text-foreground/80 italic">
-                            {card.reason}
-                          </span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              </LinkComponent>
+                card={card}
+                linkComponent={LinkComponent}
+              />
             ))}
           </section>
         ))}
