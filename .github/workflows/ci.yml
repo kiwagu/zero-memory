@@ -80,9 +80,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
+      # The CLI version lives in one place, the root package.json catalog,
+      # which `bunx supabase` resolves too. A fixed version downloads
+      # directly; "latest" first asks the rate-limited GitHub API.
+      - id: supabase-cli
+        run: echo "version=$(jq -r '.workspaces.catalog.supabase' package.json)" >> "$GITHUB_OUTPUT"
       - uses: supabase/setup-cli@v1
         with:
-          version: 2.117.0 # a fixed version downloads directly; "latest" first asks the rate-limited GitHub API
+          version: ${{ steps.supabase-cli.outputs.version }}
       - run: bun install --frozen-lockfile
       - name: Cache embedding models
         uses: actions/cache@v4
@@ -138,9 +143,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
+      # The CLI version lives in one place, the root package.json catalog,
+      # which `bunx supabase` resolves too. A fixed version downloads
+      # directly; "latest" first asks the rate-limited GitHub API.
+      - id: supabase-cli
+        run: echo "version=$(jq -r '.workspaces.catalog.supabase' package.json)" >> "$GITHUB_OUTPUT"
       - uses: supabase/setup-cli@v1
         with:
-          version: 2.117.0 # a fixed version downloads directly; "latest" first asks the rate-limited GitHub API
+          version: ${{ steps.supabase-cli.outputs.version }}
       - run: bun install --frozen-lockfile
       - name: Cache embedding models
         uses: actions/cache@v4
@@ -180,9 +190,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
+      # The CLI version lives in one place, the root package.json catalog,
+      # which `bunx supabase` resolves too. A fixed version downloads
+      # directly; "latest" first asks the rate-limited GitHub API.
+      - id: supabase-cli
+        run: echo "version=$(jq -r '.workspaces.catalog.supabase' package.json)" >> "$GITHUB_OUTPUT"
       - uses: supabase/setup-cli@v1
         with:
-          version: 2.117.0 # a fixed version downloads directly; "latest" first asks the rate-limited GitHub API
+          version: ${{ steps.supabase-cli.outputs.version }}
       - run: bun install --frozen-lockfile
       # The rehearsal addresses the review stack (its own project and ports),
       # not the test stack — boot that contour's Supabase here.
