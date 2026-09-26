@@ -201,6 +201,17 @@ const boardViewSchema = z.object({
         released_in: z.string().nullable().default(null),
         blocked: z.boolean().default(false),
         links: z.number().default(0),
+        // Only with worked_by_me: kept, or zod would drop them on the way.
+        my_last: z
+          .object({
+            type: z.string(),
+            from_state: z.string().nullable(),
+            to_state: z.string().nullable(),
+            text: z.string().nullable(),
+            created_at: z.string(),
+          })
+          .optional(),
+        past_horizon: z.boolean().optional(),
       })
     )
     .default([]),
@@ -445,6 +456,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_limit: params.limit ?? 50,
       p_related_to: params.relatedTo ?? undefined,
       p_relation: params.relation ?? undefined,
+      p_worked_by_me: params.workedByMe ?? false,
     });
     if (error) {
       throw new Error(`board_list failed: ${error.message}`);

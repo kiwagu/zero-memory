@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  boardCardSchema,
+  boardInputSchema,
   briefingWorkSchema,
   cardBranchViewSchema,
   cardInputSchema,
@@ -11,6 +13,7 @@ import {
   gitCommitShaSchema,
   isGitBranchName,
   parseBranchRef,
+  cardWorkStepSchema,
 } from './card.schema.js';
 
 describe('git names on a card', () => {
@@ -154,5 +157,49 @@ describe('briefingWorkSchema continuation', () => {
     expect(offered.continuation?.card?.number).toBe(30);
     expect(offered.continuation?.card?.above?.[0]?.relation).toBe('child_of');
     expect(offered.continuation?.last_session?.to_state).toBe('waiting');
+  });
+});
+
+describe('the cards I worked on', () => {
+  const row = {
+    id: 'crd_0000000000000031.0000000000',
+    scope: 'proj.usr_0000000000000001_0000000000.acme',
+    number: 31,
+    title: 'Mine',
+    state: 'active',
+    updated_at: '2026-09-26T06:39:00+00:00',
+    archived_at: null,
+    refs: 1,
+    last_event: null,
+  };
+
+  it('asks for them with worked_by_me', () => {
+    expect(
+      boardInputSchema.parse({ action: 'list', worked_by_me: true })
+        .worked_by_me
+    ).toBe(true);
+    expect(boardInputSchema.parse({ action: 'list' }).worked_by_me).toBe(
+      undefined
+    );
+  });
+
+  it('reads my latest step and the horizon mark, and a row without them', () => {
+    const step = {
+      type: 'moved',
+      from_state: 'idea',
+      to_state: 'active',
+      text: 'picked up',
+      created_at: '2026-09-26T06:39:00+00:00',
+    };
+    const mine = boardCardSchema.parse({
+      ...row,
+      my_last: step,
+      past_horizon: false,
+    });
+    expect(mine.my_last).toEqual(cardWorkStepSchema.parse(step));
+    expect(mine.past_horizon).toBe(false);
+    const plain = boardCardSchema.parse(row);
+    expect(plain.my_last).toBeUndefined();
+    expect(plain.past_horizon).toBeUndefined();
   });
 });
