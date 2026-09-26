@@ -15,6 +15,7 @@ import { BoardMineToggle } from '@/components/board-mine-toggle.client';
 import {
   ALL_BOARDS,
   CARD_STATES,
+  readableBoard,
   boardContinuationsSchema,
   boardListSchema,
   boardScopesSchema,
@@ -119,14 +120,15 @@ export default async function BoardPage({
   const release = releaseParsed.success ? releaseParsed.data : null;
 
   const parsed = data ? boardListSchema.safeParse(data) : null;
-  const board = parsed?.success ? parsed.data : null;
   // A reply that cannot be read is an error on screen, never an empty board or
   // a board without its offer.
-  const loadError =
-    error !== null ||
-    board === null ||
-    continuationError !== null ||
-    !continuations.success;
+  const board = readableBoard(
+    error === null && parsed?.success
+      ? { ok: true, value: parsed.data }
+      : { ok: false },
+    { ok: continuationError === null && continuations.success }
+  );
+  const loadError = board === null;
 
   const byState = new Map<string, BoardCard[]>(
     CARD_STATES.map((state) => [state, []])

@@ -4,6 +4,7 @@ import {
   ALL_BOARDS,
   boardChannelChanges,
   boardScopesKey,
+  readableBoard,
   resolveBoardScope,
   type BoardScope,
 } from './board';
@@ -77,5 +78,21 @@ describe('the channels a board page keeps', () => {
     expect(
       boardChannelChanges(new Set(['proj.a', 'proj.b']), ['proj.b', 'proj.c'])
     ).toEqual({ join: ['proj.c'], leave: ['proj.a'] });
+  });
+});
+
+describe('a board as read', () => {
+  const listed = { ok: true as const, value: { cards: [] } };
+
+  it('is the listing when both the listing and the offer were read', () => {
+    expect(readableBoard(listed, { ok: true })).toEqual({ cards: [] });
+  });
+
+  it('is nothing when the offer could not be read, so no board shows without it', () => {
+    expect(readableBoard(listed, { ok: false })).toBeNull();
+  });
+
+  it('is nothing when the listing could not be read', () => {
+    expect(readableBoard({ ok: false }, { ok: true })).toBeNull();
   });
 });

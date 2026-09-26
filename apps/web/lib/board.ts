@@ -115,6 +115,19 @@ export function boardChannelChanges(
   };
 }
 
+/**
+ * The board to show, or null when it must not show at all: both the listing
+ * and the offer have to be read. A board without its offer would read as "no
+ * card to continue", and a listing that failed would read as an empty board;
+ * either is shown as an error instead.
+ */
+export function readableBoard<T>(
+  listing: { ok: true; value: T } | { ok: false },
+  offer: { ok: boolean }
+): T | null {
+  return listing.ok && offer.ok ? listing.value : null;
+}
+
 export const ALL_BOARDS = 'all';
 
 export function resolveBoardScope(
