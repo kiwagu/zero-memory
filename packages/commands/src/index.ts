@@ -10,4 +10,5 @@ export * from './describe-scope.command.js';
 export * from './link.command.js';
 export * from './remember.command.js';
 export * from './move-memories.command.js';
+export * from './release.command.js';
 export * from './share-memory.command.js';

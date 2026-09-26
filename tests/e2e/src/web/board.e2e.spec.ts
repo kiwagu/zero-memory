@@ -8,7 +8,7 @@
  * a card's state, because a drag has nowhere to put a justification. That
  * absence is the feature, so it is asserted rather than assumed.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
@@ -20,6 +20,21 @@ const REASON = 'blocked on the owner picking a cutover window';
 interface CardResult {
   card: { id: string; number: number; scope: string };
 }
+
+/**
+ * Opens the board's hint. The hint opens on a pointer move, and a hover that
+ * lands before a heavy board is interactive is lost — the pointer then sits
+ * still over the icon and nothing opens it. So each try moves away first.
+ */
+const openBoardHint = async (page: Page): Promise<void> => {
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await page.getByTestId('board-hint').hover();
+    await expect(page.getByTestId('board-hint-content')).toBeVisible({
+      timeout: 1000,
+    });
+  }).toPass({ timeout: 20_000 });
+};
 
 test.describe('Project board in the dashboard', () => {
   test('shows a card in its column with the reason it was moved, and offers no way to move it', async ({
@@ -49,6 +64,7 @@ test.describe('Project board in the dashboard', () => {
 
       const promoted = await mcp.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loopId,
         title: 'Migrate the ingest worker',
         body: 'Goal: no traffic on the legacy queue.',
@@ -205,6 +221,7 @@ test.describe('Project board in the dashboard', () => {
       quietTitle = `Quiet board card ${Date.now()}`;
       const quietCard = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope: quietScope,
         title: quietTitle,
       });
@@ -219,6 +236,7 @@ test.describe('Project board in the dashboard', () => {
       busyTitle = `Busy board card ${Date.now()}`;
       const busyCard = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope: busyScope,
         title: busyTitle,
       });
@@ -305,6 +323,7 @@ test.describe('Project board in the dashboard', () => {
 
       const created = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope,
         title: 'Order the nightly jobs',
       });
@@ -333,6 +352,168 @@ test.describe('Project board in the dashboard', () => {
     );
   });
 
+  test('the filter beside the picker narrows the board by label or title, and the address keeps it', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let certs: CardResult['card'];
+    let feed: CardResult['card'];
+    try {
+      scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web filter marker ${Date.now()}: the edge proxy drops long polls`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-board-web-filter-${Date.now()}`,
+        })
+      ).scope;
+      const create = async (title: string) =>
+        firstJson<CardResult>(
+          await mcp.callTool('card', {
+            action: 'create',
+            scope,
+            title,
+            no_links: 'e2e fixture',
+          })
+        ).card;
+      certs = await create('Rotate the edge certificates');
+      feed = await create('Page the memory feed');
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const tiles = page.getByTestId('board-card');
+    await expect(tiles).toHaveCount(2);
+    const search = page.getByTestId('board-search').getByRole('searchbox');
+
+    // The label a commit or a briefing names the card by.
+    await search.fill(`ZM-${feed.number}`);
+    await search.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`[?&]q=ZM-${feed.number}(&|$)`));
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText('Page the memory feed');
+    // The scope stays chosen, and a reload keeps the filter.
+    await expect(page).toHaveURL(/[?&]scope=/);
+    await page.reload();
+    await expect(tiles).toHaveCount(1);
+    await expect(search).toHaveValue(`ZM-${feed.number}`);
+
+    // A bare number and a title fragment find their cards too.
+    await search.fill(String(certs.number));
+    await search.press('Enter');
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText('Rotate the edge certificates');
+    await search.fill('memory feed');
+    await search.press('Enter');
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText('Page the memory feed');
+
+    // Nothing matches: the columns are empty — no other card stands in.
+    await search.fill('ZM-999');
+    await search.press('Enter');
+    await expect(page).toHaveURL(/[?&]q=ZM-999(&|$)/);
+    await expect(tiles).toHaveCount(0);
+
+    // An empty filter clears the query and shows the whole board again.
+    await search.fill('');
+    await search.press('Enter');
+    await expect(page).not.toHaveURL(/[?&]q=/);
+    await expect(tiles).toHaveCount(2);
+  });
+
+  test('a card shows the production version that carries it, and the board shows where production lives', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let cardId: string;
+    try {
+      scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web release marker ${Date.now()}: ship the feed pages`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-board-web-release-${Date.now()}`,
+        })
+      ).scope;
+      const configured = await mcp.callTool('release', {
+        action: 'configure',
+        scope,
+        version_url: 'https://api.example.com/healthz',
+      });
+      expect(configured.isError ?? false).toBe(false);
+      cardId = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          no_links: 'e2e fixture',
+          scope,
+          title: 'Ship the feed pages',
+          state: 'active',
+          branch: { repo: 'acme/memory-service', name: 'feature/feed-ship' },
+        })
+      ).card.id;
+      await mcp.callTool('card', {
+        action: 'land',
+        card_id: cardId,
+        branch: { repo: 'acme/memory-service', name: 'feature/feed-ship' },
+        squash_sha: '5e22b66',
+        target: 'main',
+        reason: 'gate green; waits for the release',
+      });
+      const recorded = await mcp.callTool('release', {
+        action: 'record',
+        scope,
+        version: '1.4.0',
+        build: 'abc1234',
+        release_commit: '6f33c77',
+        source: 'url',
+        card_ids: [cardId],
+      });
+      expect(recorded.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    // What the board is and where production lives are read once, not on
+    // every visit: they sit in the hint beside the title, off the page itself.
+    await expect(page.getByTestId('board-hint-content')).toHaveCount(0);
+    await openBoardHint(page);
+    await expect(page.getByTestId('board-hint-content')).toContainText(
+      'The board is a window'
+    );
+    await expect(page.getByTestId('board-release-settings')).toContainText(
+      'https://api.example.com/healthz'
+    );
+    const tile = page
+      .getByTestId('board-column-waiting')
+      .getByTestId('board-card')
+      .filter({ hasText: 'Ship the feed pages' });
+    await expect(tile).toContainText('shipped in v1.4.0');
+
+    await page.goto(`/board?scope=all`);
+    await openBoardHint(page);
+    await expect(page.getByTestId('board-hint-content')).toContainText(
+      'The board is a window'
+    );
+    await expect(page.getByTestId('board-release-settings')).toHaveCount(0);
+
+    await page.goto(`/board/${cardId}`);
+    await expect(page.getByTestId('card-detail')).toContainText(
+      'shipped in v1.4.0'
+    );
+    await expect(page.getByTestId('card-history')).toContainText('released');
+    await expect(page.getByTestId('card-history')).toContainText('v1.4.0');
+  });
+
   test('a card body renders as markdown, and hostile markup stays inert', async ({
     page,
   }) => {
@@ -354,6 +535,7 @@ test.describe('Project board in the dashboard', () => {
 
       const created = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope,
         title: 'Markdown card',
         body: [
@@ -399,6 +581,133 @@ test.describe('Project board in the dashboard', () => {
  * it closes the dialog. The address stays the card's throughout.
  */
 test.describe('Panel chain in the card dialog', () => {
+  test('a card label in a card text opens that card as the next panel', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const stamp = Date.now();
+    const sourceTitle = `mention source ${stamp}`;
+    const targetTitle = `mention target ${stamp}`;
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+
+    let boardScope: string;
+    let sourceId: string;
+    let targetId: string;
+    let targetNumber: number;
+    let foreignNumber: number;
+    try {
+      // Two fresh boards, so card numbers on each start from scratch: a label
+      // means a card only on its own board.
+      const boardOf = async (hint: string) => {
+        const anchor = await mcp.callTool('remember', {
+          content: `card-mentions anchor ${stamp} for ${hint}`,
+          kind: 'fact',
+          project_hint: hint,
+        });
+        expect(anchor.isError ?? false).toBe(false);
+        return firstJson<{ scope: string }>(anchor).scope;
+      };
+      const create = async (scope: string, title: string, body = '') => {
+        const created = await mcp.callTool('card', {
+          action: 'create',
+          no_links: 'e2e fixture',
+          scope,
+          title,
+          body,
+        });
+        expect(created.isError ?? false).toBe(false);
+        return firstJson<CardResult>(created).card;
+      };
+
+      boardScope = await boardOf(`/tmp/zm-e2e-card-mentions-${stamp}`);
+      const otherScope = await boardOf(
+        `/tmp/zm-e2e-card-mentions-other-${stamp}`
+      );
+
+      const target = await create(boardScope, targetTitle);
+      targetId = target.id;
+      targetNumber = target.number;
+      const others = [];
+      for (const n of [1, 2, 3]) {
+        others.push(await create(otherScope, `mention other ${n} ${stamp}`));
+      }
+
+      const placeholder = await create(boardScope, sourceTitle);
+      sourceId = placeholder.id;
+      const taken = new Set([targetNumber, placeholder.number]);
+      foreignNumber =
+        others.map((card) => card.number).find((n) => !taken.has(n)) ?? -1;
+      expect(foreignNumber).toBeGreaterThan(0);
+
+      const edited = await mcp.callTool('card', {
+        action: 'edit',
+        card_id: sourceId,
+        body: [
+          `Blocked by ZM-${targetNumber}.`,
+          '',
+          `As code: \`ZM-${targetNumber}\``,
+          '',
+          `Unknown: ZM-999999. Another board's: ZM-${foreignNumber}.`,
+          '',
+          'No card can have ZM-99999999999.',
+        ].join('\n'),
+      });
+      expect(edited.isError ?? false).toBe(false);
+      const noted = await mcp.callTool('card_log', {
+        action: 'note',
+        card_id: sourceId,
+        text: `Waits on ZM-${targetNumber} before it starts.`,
+      });
+      expect(noted.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(boardScope)}`);
+    await page
+      .getByTestId('board-card')
+      .filter({ hasText: sourceTitle })
+      .click();
+    await expect(page.getByTestId('card-modal')).toBeVisible();
+
+    const body = page.getByTestId('card-body').first();
+    const label = `ZM-${targetNumber}`;
+    // The label of a card on this board is a link; the same label in code,
+    // a number no card has, and a card of another board stay text.
+    await expect(body.getByRole('link', { name: label })).toHaveCount(1);
+    await expect(body.locator('code')).toHaveText(label);
+    await expect(body.getByRole('link', { name: 'ZM-999999' })).toHaveCount(0);
+    // A number past what a card can have is text, and the card still opens.
+    await expect(body).toContainText('ZM-99999999999');
+    await expect(
+      body.getByRole('link', { name: `ZM-${foreignNumber}` })
+    ).toHaveCount(0);
+    // A note in the history links the same way.
+    await expect(
+      page.getByTestId('card-note').first().getByRole('link', { name: label })
+    ).toHaveCount(1);
+
+    // A click opens the mentioned card as the next panel; the card the reader
+    // came from stays on screen and keeps the address.
+    await body.getByRole('link', { name: label }).click();
+    await expect
+      .poll(() =>
+        page
+          .getByTestId('panel')
+          .evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute('data-panel-key'))
+          )
+      )
+      .toEqual([`card:${sourceId}`, `card:${targetId}`]);
+    await expect(
+      page.locator(`[data-panel-key="card:${targetId}"]`)
+    ).toContainText(targetTitle);
+    await expect(page).toHaveURL(new RegExp(`/board/${sourceId}$`));
+  });
+
   test('links in a card build a canvas of panels to its right', async ({
     page,
   }) => {
@@ -445,6 +754,7 @@ test.describe('Panel chain in the card dialog', () => {
 
       const created = await mcp.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope: b.scope,
         title: cardTitle,
         body: 'panel-chain card body',
@@ -621,6 +931,7 @@ test.describe('Panel chain in the card dialog', () => {
       const created = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Page the memory feed',
           state: 'active',
@@ -660,6 +971,62 @@ test.describe('Panel chain in the card dialog', () => {
     );
     await expect(page.getByTestId('card-branch-state')).toContainText('main');
     await expect(page.getByTestId('card-history')).toContainText('landed');
+    // Landed once: nothing earlier to show.
+    await expect(page.getByTestId('card-branch-earlier')).toHaveCount(0);
+  });
+  test('a branch that landed again shows its earlier landing beside the latest', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let cardId: string;
+    try {
+      const scope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `board-web re-landing marker ${Date.now()}: a fix in its own branch`,
+          kind: 'fact',
+          project_hint: '/tmp/zm-e2e-board-web-reland',
+        })
+      ).scope;
+      cardId = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          no_links: 'e2e fixture',
+          scope,
+          title: 'Fixed where it began',
+          state: 'active',
+          branch: { repo: 'acme/memory-service', name: 'feature/relanded' },
+        })
+      ).card.id;
+      for (const [sha, reason] of [
+        ['aaaaaaa', 'the feature landed'],
+        ['bbbbbbb', 'a bug fixed in the same branch'],
+      ]) {
+        const landed = await mcp.callTool('card', {
+          action: 'land',
+          card_id: cardId,
+          branch: { repo: 'acme/memory-service', name: 'feature/relanded' },
+          squash_sha: sha,
+          target: 'main',
+          reason,
+        });
+        expect(landed.isError ?? false).toBe(false);
+      }
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board/${cardId}`);
+    await expect(page.getByTestId('card-branch')).toHaveCount(1);
+    await expect(page.getByTestId('card-branch-state')).toContainText(
+      'bbbbbbb'
+    );
+    const earlier = page.getByTestId('card-branch-earlier');
+    await expect(earlier).toContainText('aaaaaaa');
+    await expect(earlier).not.toContainText('bbbbbbb');
   });
   test('a card label stays on one line beside a long title', async ({
     page,
@@ -681,6 +1048,7 @@ test.describe('Panel chain in the card dialog', () => {
       cardNumber = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title:
             'Translate imported memories into the canonical language before ' +
@@ -725,6 +1093,7 @@ test.describe('Panel chain in the card dialog', () => {
       cardId = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title:
             'Styled scrollbars that do not break the layout under long ' +
@@ -770,6 +1139,7 @@ test.describe('Panel chain in the card dialog', () => {
       const created = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'A card to link to',
         })
@@ -794,5 +1164,193 @@ test.describe('Panel chain in the card dialog', () => {
       .toBe(new URL(`/board/${cardId}`, page.url()).toString());
     await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
     await expect(label).toHaveText(`ZM-${cardNumber}`);
+  });
+
+  test('a card shows its relations, and a relation opens the other card beside it', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const stamp = Date.now();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    let scope: string;
+    let parent: CardResult['card'];
+    let blocker: CardResult['card'];
+    let blocked: CardResult['card'];
+    let neighbour: CardResult['card'];
+    let elsewhereScope: string;
+    try {
+      const anchor = firstJson<{ scope: string; memory_id: string }>(
+        await mcp.callTool('remember', {
+          content: `card-links web anchor ${stamp}: relations shown on a card`,
+          kind: 'decision',
+          project_hint: `/tmp/zm-e2e-card-links-web-${stamp}`,
+        })
+      );
+      scope = anchor.scope;
+      const create = async (
+        title: string,
+        declaration: Record<string, unknown>
+      ) => {
+        const created = await mcp.callTool('card', {
+          action: 'create',
+          scope,
+          title,
+          ...declaration,
+        });
+        expect(created.isError ?? false).toBe(false);
+        return firstJson<CardResult>(created).card;
+      };
+      parent = await create(`relations parent ${stamp}`, {
+        no_links: 'e2e fixture',
+      });
+      blocker = await create(`relations blocker ${stamp}`, {
+        no_links: 'e2e fixture',
+      });
+      blocked = await create(`relations blocked ${stamp}`, {
+        links: [
+          {
+            card: `ZM-${blocker.number}`,
+            relation: 'blocked_by',
+            reason: 'the blocker ships first',
+          },
+          {
+            card: parent.id,
+            relation: 'child_of',
+            reason: 'one part of the parent',
+          },
+        ],
+      });
+      neighbour = await create(`relations neighbour ${stamp}`, {
+        no_links: 'e2e fixture',
+      });
+      // The old way to point at a card still works, and reads as a relation
+      // nobody typed.
+      const attached = await mcp.callTool('card_log', {
+        action: 'attach',
+        card_id: neighbour.id,
+        ref_kind: 'card',
+        ref_target: blocked.id,
+      });
+      expect(attached.isError ?? false).toBe(false);
+      const memory = await mcp.callTool('card_log', {
+        action: 'attach',
+        card_id: blocked.id,
+        ref_kind: 'memory',
+        ref_target: anchor.memory_id,
+      });
+      expect(memory.isError ?? false).toBe(false);
+      // A card on another board, and a related card that was archived since.
+      elsewhereScope = firstJson<{ scope: string }>(
+        await mcp.callTool('remember', {
+          content: `card-links web other board ${stamp}: the same rollout elsewhere`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-card-links-web-other-${stamp}`,
+        })
+      ).scope;
+      const elsewhere = firstJson<CardResult>(
+        await mcp.callTool('card', {
+          action: 'create',
+          scope: elsewhereScope,
+          title: `relations elsewhere ${stamp}`,
+          no_links: 'e2e fixture',
+        })
+      ).card;
+      const across = await mcp.callTool('card', {
+        action: 'link',
+        card_id: blocked.id,
+        to_card: elsewhere.id,
+        relation: 'relates_to',
+        reason: 'the same rollout on the other board',
+      });
+      expect(across.isError ?? false).toBe(false);
+      const shelved = await mcp.callTool('card', {
+        action: 'archive',
+        card_id: neighbour.id,
+        reason: 'folded into the blocked card',
+      });
+      expect(shelved.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const tileOf = (title: string) =>
+      page.getByTestId('board-card').filter({ hasText: title });
+    // A blocked card says so on its tile; the card that blocks it does not.
+    await expect(
+      tileOf(`relations blocked ${stamp}`).getByTestId('board-card-blocked')
+    ).toHaveText('blocked');
+    await expect(
+      tileOf(`relations blocker ${stamp}`).getByTestId('board-card-blocked')
+    ).toHaveCount(0);
+
+    await tileOf(`relations blocked ${stamp}`).click();
+    const modal = page.getByTestId('card-modal');
+    await expect(modal).toBeVisible();
+
+    // Relations are grouped by side: what is above the card, and what merely
+    // relates to it — with the reason each was declared with.
+    const section = modal.getByTestId('card-links-section').first();
+    const above = section.getByTestId('card-links-group-above');
+    await expect(above.getByTestId('card-link')).toHaveCount(2);
+    await expect(above).toContainText(`child of ZM-${parent.number}`);
+    await expect(above).toContainText(`blocked by ZM-${blocker.number}`);
+    await expect(above).toContainText('the blocker ships first');
+    const related = section.getByTestId('card-links-group-related');
+    await expect(related).toContainText(`relates to ZM-${neighbour.number}`);
+    await expect(related).toContainText('type not declared');
+    // A number alone names a card of this board: one on another board says
+    // which, and an archived card says it was archived.
+    await expect(
+      related
+        .getByTestId('card-link')
+        .filter({ hasText: `relations elsewhere ${stamp}` })
+        .getByTestId('card-link-board')
+    ).toHaveText(elsewhereScope.split('.').at(-1) ?? '');
+    await expect(
+      related
+        .getByTestId('card-link')
+        .filter({ hasText: `relations neighbour ${stamp}` })
+        .getByTestId('card-link-archived')
+    ).toHaveText('archived');
+    await expect(
+      related
+        .getByTestId('card-link')
+        .filter({ hasText: `relations neighbour ${stamp}` })
+        .getByTestId('card-link-board')
+    ).toHaveCount(0);
+
+    // An attached memory is named by its kind, not as "memory".
+    const refs = modal.getByTestId('card-refs').first();
+    await expect(refs).toContainText('decision');
+    await expect(refs).not.toContainText('memory');
+
+    // The history records each relation from this card's side.
+    await expect(modal.getByTestId('card-history').first()).toContainText(
+      `blocked by ZM-${blocker.number}`
+    );
+
+    // Still a window: nothing here changes a card or a relation.
+    const detail = modal.getByTestId('card-detail').first();
+    await expect(detail.getByRole('button')).toHaveCount(0);
+    await expect(detail.locator('form')).toHaveCount(0);
+
+    // A relation opens the other card as the next panel.
+    await above.getByRole('link', { name: `ZM-${blocker.number}` }).click();
+    await expect
+      .poll(() =>
+        page
+          .getByTestId('panel')
+          .evaluateAll((nodes) =>
+            nodes.map((node) => node.getAttribute('data-panel-key'))
+          )
+      )
+      .toEqual([`card:${blocked.id}`, `card:${blocker.id}`]);
+    await expect(
+      page.locator(`[data-panel-key="card:${blocker.id}"]`)
+    ).toContainText(`relations blocker ${stamp}`);
   });
 });

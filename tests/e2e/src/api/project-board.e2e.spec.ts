@@ -85,6 +85,7 @@ test.describe('Project board over MCP', () => {
       // 1. Promoting the loop opens a card and records where it came from.
       const promoted = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Migrate the ingest worker off the legacy queue',
         no_branch: 'an e2e fixture card with no code',
@@ -99,6 +100,7 @@ test.describe('Project board over MCP', () => {
       // A loop promotes into exactly one card, however often it is asked.
       const twice = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Second attempt at the same work',
         no_branch: 'an e2e fixture card with no code',
@@ -310,6 +312,7 @@ test.describe('Project board over MCP', () => {
 
       const created = await owner.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope,
         title: 'Private work nobody else should see',
         body: 'Contains the cutover checklist.',
@@ -408,6 +411,7 @@ test.describe('Project board over MCP', () => {
 
       const created = await agent.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope: early.scope,
         title: 'Keep the nightly jobs from colliding',
       });
@@ -605,6 +609,7 @@ test.describe('Project board over MCP', () => {
 
       const created = await agent.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope,
         title: 'Keep the nightly jobs from colliding',
       });
@@ -736,6 +741,7 @@ test.describe('Project board over MCP', () => {
 
       const promoted = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Move the billing export to parquet',
         no_branch: 'an e2e fixture card with no code',
@@ -747,6 +753,7 @@ test.describe('Project board over MCP', () => {
       // the work, so the caller can go to it instead of guessing.
       const twice = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'The same work again',
         no_branch: 'an e2e fixture card with no code',
@@ -816,6 +823,7 @@ test.describe('Project board over MCP', () => {
         [agent, other].map((client) =>
           client.callTool('card', {
             action: 'promote_loop',
+            no_links: 'e2e fixture',
             loop_id: control.memory_id,
             title: 'Rotate the edge certificates',
             no_branch: 'an e2e fixture card with no code',
@@ -859,6 +867,7 @@ test.describe('Project board over MCP', () => {
         }
       );
       const { data: claimed } = await stranger.rpc('card_create', {
+        p_no_links: 'e2e fixture',
         p_scope: strangerScope,
         p_title: 'Not mine to claim',
         p_origin_loop_id: foreign.memory_id,
@@ -898,6 +907,7 @@ test.describe('Project board over MCP', () => {
       card = firstJson<CardResult>(
         await agent.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope: other,
           title: 'A card in the other project',
         })
@@ -951,5 +961,79 @@ test.describe('Project board over MCP', () => {
       .eq('id', card.id)
       .select('id');
     expect(moved.error?.code).toBe('42501');
+  });
+});
+
+test.describe('Finding a card on the board', () => {
+  test('a query finds a card by its label or by its title, and nothing else', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const agent = await McpTestClient.connect(token);
+    try {
+      const stamp = Date.now();
+      const scopeOf = async (tag: string): Promise<string> =>
+        firstJson<{ scope: string }>(
+          await agent.callTool('remember', {
+            content: `e2e board filter marker ${stamp} ${tag}: the edge proxy drops long polls`,
+            kind: 'fact',
+            project_hint: `/tmp/zm-e2e-board-filter-${tag}-${stamp}`,
+          })
+        ).scope;
+      const create = async (scope: string, title: string): Promise<CardRow> =>
+        firstJson<CardResult>(
+          await agent.callTool('card', {
+            action: 'create',
+            scope,
+            title,
+            no_links: 'e2e fixture',
+          })
+        ).card;
+
+      const scope = await scopeOf('one');
+      const certs = await create(scope, 'Rotate the edge certificates');
+      const feed = await create(scope, 'Page the memory feed');
+      const list = async (query: string): Promise<string[]> =>
+        firstJson<BoardResult>(
+          await agent.callTool('board', { action: 'list', scope, query })
+        ).cards.map((card) => card.id);
+
+      // Every way a person writes the card's label finds that card alone.
+      for (const query of [
+        `ZM-${feed.number}`,
+        `zm-${feed.number}`,
+        `#${feed.number}`,
+        `${feed.number}`,
+        `  ZM-${feed.number} `,
+      ]) {
+        expect(await list(query), query).toEqual([feed.id]);
+      }
+      // A title fragment, in any case, still finds by title.
+      expect(await list('memory feed')).toEqual([feed.id]);
+      expect(await list('EDGE')).toEqual([certs.id]);
+      // A label nobody holds finds nothing — an empty answer, not another card.
+      expect(await list('ZM-999')).toEqual([]);
+
+      // Every board at once: a label is per project, so ZM-1 is card #1 of
+      // each board the reader can see.
+      const other = await scopeOf('two');
+      const otherFirst = await create(other, 'Tune the recall threshold');
+      const db = createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
+        auth: { persistSession: false },
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      const { data, error } = await db.rpc('board_list', {
+        p_query: `ZM-${certs.number}`,
+        p_limit: 200,
+      });
+      expect(error).toBeNull();
+      const ids = (data as { cards: Array<{ id: string }> }).cards.map(
+        (card) => card.id
+      );
+      expect(certs.number).toBe(otherFirst.number);
+      expect(ids).toEqual(expect.arrayContaining([certs.id, otherFirst.id]));
+      expect(ids).not.toContain(feed.id);
+    } finally {
+      await agent.close();
+    }
   });
 });

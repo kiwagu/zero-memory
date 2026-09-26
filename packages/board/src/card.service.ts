@@ -1,6 +1,8 @@
 import {
   cardBodySchema,
   cardBranchSchema,
+  cardDeclarationSchema,
+  cardLinkRelationSchema,
   cardNoteTextSchema,
   cardReasonSchema,
   cardStateSchema,
@@ -11,7 +13,7 @@ import {
   type CardBranch,
 } from '@workspace/contracts';
 import { singleton } from '@workspace/di';
-import { Err, type Result } from 'oxide.ts';
+import { Err, Ok, type Result } from 'oxide.ts';
 
 import { toCardFailure, type CardFailure } from './card.errors.js';
 import {
@@ -27,6 +29,7 @@ import type {
   CreateCardParams,
   EditCardParams,
   LandCardParams,
+  LinkCardParams,
   ListBoardParams,
   MoveCardParams,
   NoteCardParams,
@@ -63,6 +66,37 @@ const branchDeclarationFailure = (
 };
 
 /**
+ * What can be refused about the relation rule without reading the card: a
+ * list of relations together with a statement that there are none, a blank
+ * statement, or either offered to a move that is not into active. Whether a
+ * statement is REQUIRED is the store's call — only it knows whether the card
+ * was ever assessed, and only it can offer candidates.
+ */
+const linkDeclarationFailure = (
+  entering: boolean,
+  params: { links?: unknown[]; noLinks?: string }
+): CardFailure | null => {
+  if (params.links !== undefined && params.noLinks !== undefined) {
+    return invalid('Pass `links` or `no_links`, not both.');
+  }
+  if (params.noLinks !== undefined && params.noLinks.trim() === '') {
+    return invalid(
+      '`no_links` must say why the card relates to no other card.'
+    );
+  }
+  if (
+    !entering &&
+    (params.links !== undefined || params.noLinks !== undefined)
+  ) {
+    return invalid(
+      '`links` and `no_links` apply to work entering active; relate cards at ' +
+        'any time with link.'
+    );
+  }
+  return null;
+};
+
+/**
  * The board's application service.
  *
  * It answers what can be answered WITHOUT the card — a blank reason, an empty
@@ -90,10 +124,9 @@ export class CardService {
     if (!body.success) {
       return Err(invalid('The card body is longer than the limit.'));
     }
-    const rule = branchDeclarationFailure(
-      (params.state ?? 'idea') === 'active',
-      params
-    );
+    const rule =
+      branchDeclarationFailure((params.state ?? 'idea') === 'active', params) ??
+      linkDeclarationFailure(true, params);
     if (rule) {
       return Err(rule);
     }
@@ -111,10 +144,11 @@ export class CardService {
     if (!title.success) {
       return Err(invalid('A card needs a title.'));
     }
-    const rule = branchDeclarationFailure(
-      (params.state ?? 'active') === 'active',
-      params
-    );
+    const rule =
+      branchDeclarationFailure(
+        (params.state ?? 'active') === 'active',
+        params
+      ) ?? linkDeclarationFailure(true, params);
     if (rule) {
       return Err(rule);
     }
@@ -138,7 +172,9 @@ export class CardService {
         invalid('A move must carry a reason saying why the state changed.')
       );
     }
-    const rule = branchDeclarationFailure(state.data === 'active', params);
+    const rule =
+      branchDeclarationFailure(state.data === 'active', params) ??
+      linkDeclarationFailure(state.data === 'active', params);
     if (rule) {
       return Err(rule);
     }
@@ -261,6 +297,47 @@ export class CardService {
       branch: branch.data,
       squashSha: sha.data,
       target: target.data,
+      reason: reason.data,
+    });
+  }
+
+  /** State how this card relates to another, with a reason. */
+  async linkCard(
+    params: LinkCardParams
+  ): Promise<Result<CardWrite, CardFailure>> {
+    const checked = this.#linkParams(params);
+    return checked.isErr() ? checked : this.repository.link(checked.unwrap());
+  }
+
+  /** Retire how this card relates to another, with a reason. */
+  async unlinkCard(
+    params: LinkCardParams
+  ): Promise<Result<CardWrite, CardFailure>> {
+    const checked = this.#linkParams(params);
+    return checked.isErr() ? checked : this.repository.unlink(checked.unwrap());
+  }
+
+  #linkParams(params: LinkCardParams): Result<LinkCardParams, CardFailure> {
+    const relation = cardLinkRelationSchema.safeParse(params.relation);
+    if (!relation.success) {
+      return Err(
+        invalid(
+          `Unknown relation: expected one of ${cardLinkRelationSchema.options.join(', ')}.`
+        )
+      );
+    }
+    const toCard = params.toCard?.trim() ?? '';
+    if (toCard === '') {
+      return Err(invalid('Name the other card: its id, or its label (ZM-42).'));
+    }
+    const reason = cardDeclarationSchema.safeParse(params.reason);
+    if (!reason.success) {
+      return Err(invalid('A relation needs a reason saying why it holds.'));
+    }
+    return Ok({
+      ...params,
+      toCard,
+      relation: relation.data,
       reason: reason.data,
     });
   }

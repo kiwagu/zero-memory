@@ -98,6 +98,22 @@ const insertOrThrow = async (
   }
 };
 
+/**
+ * For an anonymized table keyed by something the fixture reuses: its row
+ * outlives the erasure, so a retried attempt meets it again and must take it
+ * over rather than collide with it.
+ */
+const upsertOrThrow = async (
+  db: SupabaseClient,
+  table: string,
+  row: Record<string, unknown>
+): Promise<void> => {
+  const { error } = await db.from(table).upsert(row);
+  if (error) {
+    throw new Error(`seed ${table}: ${error.message}`);
+  }
+};
+
 const updateOrThrow = async (
   db: SupabaseClient,
   table: string,
@@ -308,6 +324,41 @@ test.describe('account lifecycle: hard_delete_user', () => {
       repo: 'acme/erasure',
       branch: 'feature/erasure',
       attached_by: userId,
+    });
+    // A relation this user stated between two cards: theirs, and gone with
+    // them.
+    const { data: secondCard } = await db
+      .from('cards')
+      .insert({
+        scope: sharedScope,
+        number: 2,
+        title: 'e2e erasure fixture card two',
+        state: 'idea',
+        created_by: userId,
+      })
+      .select('id')
+      .single();
+    await insertOrThrow(db, 'card_links', {
+      src_card_id: cardId,
+      dst_card_id: (secondCard as { id: string }).id,
+      type: 'blocks',
+      src_scope: sharedScope,
+      dst_scope: sharedScope,
+      reason: 'e2e erasure fixture relation',
+      created_by: userId,
+    });
+    // The project's release setting and one production state it was seen in:
+    // the project's rows, which erasure keeps while severing their author.
+    await upsertOrThrow(db, 'scope_release_settings', {
+      scope: sharedScope,
+      updated_by: userId,
+    });
+    await upsertOrThrow(db, 'scope_releases', {
+      scope: sharedScope,
+      version: '0.0.1',
+      release_commit: 'abcdef1',
+      source: 'tag',
+      observed_by: userId,
     });
     await insertOrThrow(db, 'usage_daily', {
       day: '2026-07-20',
@@ -529,6 +580,38 @@ test.describe('account lifecycle: hard_delete_user', () => {
       role: 'reader',
       granted_by: userId,
     });
+    // A relation the survivor stated and the departing user retired: the row is
+    // the survivor's and stays; only who retired it goes.
+    const survivorCard = async (number: number): Promise<string> => {
+      const { data, error } = await db
+        .from('cards')
+        .insert({
+          scope: survivorScope,
+          number,
+          title: `e2e survivor card ${number}`,
+          state: 'idea',
+          created_by: survivorId,
+        })
+        .select('id')
+        .single();
+      if (error) {
+        throw new Error(`seed survivor card: ${error.message}`);
+      }
+      return (data as { id: string }).id;
+    };
+    const survivorCardA = await survivorCard(1);
+    const survivorCardB = await survivorCard(2);
+    await insertOrThrow(db, 'card_links', {
+      src_card_id: survivorCardA,
+      dst_card_id: survivorCardB,
+      type: 'depends_on',
+      src_scope: survivorScope,
+      dst_scope: survivorScope,
+      reason: 'e2e survivor relation',
+      created_by: survivorId,
+      invalidated_at: '2026-07-20T00:00:00Z',
+      invalidated_by: userId,
+    });
 
     // Declared, not hand-listed: every back-reference packages/db enumerates is
     // either probed above or carries a recorded reason it cannot arise on a
@@ -550,6 +633,11 @@ test.describe('account lifecycle: hard_delete_user', () => {
     }> = [
       { table: 'memories', column: 'invalidated_by', match: { id: b1 } },
       { table: 'memories', column: 'superseded_by', match: { id: b2 } },
+      {
+        table: 'card_links',
+        column: 'invalidated_by',
+        match: { src_card_id: survivorCardA, dst_card_id: survivorCardB },
+      },
       {
         table: 'edges',
         column: 'source_memory',
@@ -691,6 +779,22 @@ test.describe('account lifecycle: hard_delete_user', () => {
         row![probe.column],
         `${probe.table}.${probe.column} still points at the erased user`
       ).toBeNull();
+    }
+
+    // Anonymized, not deleted: the project's release rows are still there,
+    // with nobody named as their author.
+    for (const [table, column] of [
+      ['scope_release_settings', 'updated_by'],
+      ['scope_releases', 'observed_by'],
+    ] as const) {
+      const { data, error } = await db
+        .from(table)
+        .select(column)
+        .eq('scope', sharedScope);
+      expect(error, `${table} after erasure`).toBeNull();
+      expect(data, `${table} rows went with the account`).toEqual([
+        { [column]: null },
+      ]);
     }
 
     // Excluded tables are not user data: erasure leaves them as it found them.

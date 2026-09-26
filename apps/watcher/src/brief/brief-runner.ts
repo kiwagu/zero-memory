@@ -60,6 +60,7 @@ import {
 } from '../update/update-check.js';
 import { landingDriftFor } from '../landing/landing-runner.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
+import { checkRelease } from '../release/release-runner.js';
 import { resolveVersion } from '../version/version-runner.js';
 import {
   callBuildContext,
@@ -475,9 +476,18 @@ const runSessionStart = async (
   // card there covers; it holds the floor whenever either is present.
   // A landing git already holds while the card still holds the branch open:
   // checked here, once per session, because only this machine sees its git.
-  const boardBlock = merged.work
+  // Production may have moved since the last command on this machine: the
+  // session learns it before its first step, within a short budget.
+  const releaseLine = await checkRelease(cwd, { budgetMs: 3000 }).catch(
+    () => null
+  );
+  const boardSummary = merged.work
     ? renderBoardSummary(merged.work, landingDriftFor(cwd, merged.work))
     : null;
+  const boardBlock =
+    [boardSummary, releaseLine]
+      .filter((line): line is string => line !== null)
+      .join('\n') || null;
   const projectPack = splits[0];
   const projectMemories = countPackMemories(projectPack?.split.payload);
   const plan = planSectionBudgets(

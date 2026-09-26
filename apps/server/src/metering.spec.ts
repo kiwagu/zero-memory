@@ -98,6 +98,34 @@ describe('recordBriefing — session_briefing metering', () => {
     );
   });
 
+  it('stamps the card the briefing offered to continue, omits it otherwise', async () => {
+    const offered = recorderSpy();
+    recordBriefing(
+      offered.recorder,
+      briefingMetering({
+        briefing: {
+          topicLen: 12,
+          memories: 2,
+          entities: 3,
+          kind: 'session',
+          conversationId: null,
+          continuationCard: 'crd_0000000000000030.0000000000',
+        },
+      })
+    );
+    await flush();
+    expect(firstEvent(offered.record)?.metadata).toMatchObject({
+      continuation_card: 'crd_0000000000000030.0000000000',
+    });
+
+    const none = recorderSpy();
+    recordBriefing(none.recorder, briefingMetering());
+    await flush();
+    expect(firstEvent(none.record)?.metadata).not.toHaveProperty(
+      'continuation_card'
+    );
+  });
+
   it('stamps the task kind on a task briefing', async () => {
     const { recorder, record } = recorderSpy();
 

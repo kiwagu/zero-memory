@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,12 +15,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HookClient, HookInput } from '../hook-client.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
+import { checkRelease } from '../release/release-runner.js';
 import { landingDriftFor, runLanding } from './landing-runner.js';
 
 vi.mock('@workspace/client-runtime', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@workspace/client-runtime')>()),
   callCardBranches: vi.fn(),
 }));
+vi.mock('../release/release-runner.js', () => ({ checkRelease: vi.fn() }));
 
 const env = {
   GIT_AUTHOR_NAME: 't',
@@ -102,6 +104,7 @@ describe('runLanding', () => {
     );
     said = [];
     vi.mocked(callCardBranches).mockReset();
+    vi.mocked(checkRelease).mockReset().mockResolvedValue(null);
   });
   afterEach(() => {
     process.env.XDG_STATE_HOME = previous;
@@ -156,6 +159,74 @@ describe('runLanding', () => {
           target: 'main',
           landed_at: 'x',
           attached_at: 'x',
+          landings: [],
+        },
+      ],
+    });
+    await runLanding(adapter());
+    expect(said).toEqual([]);
+  });
+
+  it('stays silent about the earlier squash of a branch that landed again', async () => {
+    // A bug fixed in the branch that brought it: the branch lands twice, and
+    // its row names only the second squash.
+    const first = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    const second = commit(
+      repo,
+      'c',
+      'fix: the bug, in the same branch',
+      'Squashed-from: feature/x (abcdef2) ZM-19'
+    );
+    vi.mocked(callCardBranches).mockResolvedValue({
+      card: CARD,
+      branches: [
+        {
+          repo: 'acme/memory-service',
+          branch: 'feature/x',
+          state: 'landed',
+          squash_sha: second.slice(0, 7),
+          target: 'main',
+          landed_at: 'x',
+          attached_at: 'x',
+          landings: [
+            { squash_sha: first.slice(0, 7), target: 'main', landed_at: 'x' },
+            { squash_sha: second.slice(0, 7), target: 'main', landed_at: 'x' },
+          ],
+        },
+      ],
+    });
+    await runLanding(adapter());
+    expect(said).toEqual([]);
+  });
+
+  it('stays silent about the squash of a branch its card reopened', async () => {
+    // The card lands the branch, then reopens it to fix its landed code: the
+    // row is open again, and the earlier squash is on record in landings.
+    const landed = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    vi.mocked(callCardBranches).mockResolvedValue({
+      card: CARD,
+      branches: [
+        {
+          repo: 'acme/memory-service',
+          branch: 'feature/x',
+          state: 'open',
+          squash_sha: null,
+          target: null,
+          landed_at: null,
+          attached_at: 'x',
+          landings: [
+            { squash_sha: landed.slice(0, 7), target: 'main', landed_at: 'x' },
+          ],
         },
       ],
     });
@@ -217,6 +288,94 @@ describe('runLanding', () => {
     expect(said).toEqual([]);
   });
 
+  /**
+   * A board that never answers, on a clock the test controls: each lookup
+   * spends exactly its timeout and then fails, so how many lookups fit in a
+   * budget does not depend on the machine's speed or on the git reads before
+   * them.
+   */
+  const stalledBoard = () => {
+    let clock = 0;
+    vi.mocked(callCardBranches).mockImplementation(
+      async (_scope, _number, timeoutMs) => {
+        clock += timeoutMs ?? 0;
+        throw new Error(`no answer within ${timeoutMs} ms`);
+      }
+    );
+    return () => clock;
+  };
+
+  it('shares one budget across its lookups, and leaves the rest for the next command', async () => {
+    const keys = [31, 32, 33, 34].map(
+      (number) =>
+        `${commit(
+          repo,
+          `w${number}`,
+          `feat: work ${number}`,
+          `Squashed-from: feature/x${number} (abcdef1) ZM-${number}`
+        )}#${number}`
+    );
+    const now = stalledBoard();
+    // 450 ms of budget, 200 ms lookups: two fit, and the 50 ms left do not.
+    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450, now });
+    const firstAsked = vi
+      .mocked(callCardBranches)
+      .mock.calls.map(([, number]) => number);
+    expect(firstAsked).toHaveLength(2);
+    // What it had no time for was never marked, so the next command asks it.
+    const stillDue = keys.filter((key) =>
+      landingCheckDue(landingCheckStatePath(), key)
+    );
+    expect(stillDue).toHaveLength(2);
+
+    // Ten minutes on, the attempted ones are due again too — and the ones
+    // never asked go first, so a stalled server cannot starve them.
+    const neverAsked = [31, 32, 33, 34].filter(
+      (number) => !firstAsked.includes(number)
+    );
+    const path = landingCheckStatePath();
+    const aged = Object.fromEntries(
+      Object.entries(
+        JSON.parse(readFileSync(path, 'utf8')) as Record<
+          string,
+          { outcome: string; checked_at: number }
+        >
+      ).map(([key, entry]) => [
+        key,
+        { ...entry, checked_at: entry.checked_at - 11 * 60 * 1000 },
+      ])
+    );
+    writeFileSync(path, JSON.stringify(aged));
+    vi.mocked(callCardBranches).mockClear();
+    await runLanding(adapter(), {
+      lookupTimeoutMs: 200,
+      budgetMs: 450,
+      now: stalledBoard(),
+    });
+    const secondAsked = vi
+      .mocked(callCardBranches)
+      .mock.calls.map(([, number]) => number);
+    expect([...secondAsked].sort()).toEqual([...neverAsked].sort());
+  });
+
+  it('never starts a lookup with too little of the budget left to finish it', async () => {
+    for (const number of [41, 42, 43, 44]) {
+      commit(
+        repo,
+        `m${number}`,
+        `feat: work ${number}`,
+        `Squashed-from: feature/m${number} (abcdef1) ZM-${number}`
+      );
+    }
+    const now = stalledBoard();
+    // Two full lookups use 400 ms of the 450; the 50 left are not a lookup.
+    await runLanding(adapter(), { lookupTimeoutMs: 200, budgetMs: 450, now });
+    const timeouts = vi
+      .mocked(callCardBranches)
+      .mock.calls.map(([, , timeoutMs]) => timeoutMs);
+    expect(timeouts).toEqual([200, 200]);
+  });
+
   it('names the branch the squash landed on, not the one checked out after it', async () => {
     commit(
       repo,
@@ -252,6 +411,33 @@ describe('runLanding', () => {
     } finally {
       git(repo, 'worktree', 'remove', '--force', worktree);
     }
+  });
+
+  it('says what production took even when no squash is fresh', async () => {
+    const line =
+      'PRODUCTION TOOK THE CHANGES: v1.0.0 carries ZM-7; the release is recorded on each.';
+    vi.mocked(checkRelease).mockResolvedValue(line);
+    await runLanding(adapter());
+    expect(said).toEqual([line]);
+    expect(callCardBranches).not.toHaveBeenCalled();
+  });
+
+  it('asks nobody about a folder the user ignored', async () => {
+    writeFileSync(join(repo, '.zero-memory-ignore'), '');
+    commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    vi.mocked(callCardBranches).mockResolvedValue({ card: CARD, branches: [] });
+    vi.mocked(checkRelease).mockResolvedValue(
+      'PRODUCTION TOOK THE CHANGES: v1.0.0 carries ZM-19; the release is recorded on each.'
+    );
+    await runLanding(adapter());
+    expect(said).toEqual([]);
+    expect(callCardBranches).not.toHaveBeenCalled();
+    expect(checkRelease).not.toHaveBeenCalled();
   });
 
   it('says nothing about a project it has never briefed', async () => {
@@ -332,5 +518,46 @@ describe('landingDriftFor', () => {
         target: 'main',
       },
     ]);
+  });
+
+  it('leaves a reopened branch alone while its squash here is one the board recorded', () => {
+    const recorded = commit(
+      repo,
+      'b',
+      'feat: the work',
+      'Squashed-from: feature/x (abcdef1) ZM-19'
+    );
+    const work = (landings: Array<{ squash_sha: string }>) => ({
+      bound_card: null,
+      active: 1,
+      waiting: 0,
+      lead: [],
+      open_branches: [
+        {
+          card_id: CARD.id,
+          number: 27,
+          state: 'active' as const,
+          repo: 'acme/memory-service',
+          branch: 'feature/x',
+          landings,
+        },
+      ],
+    });
+    // The branch landed before (on this card or another) and was named again
+    // for more work: its old squash is on record, so nothing is missing.
+    expect(
+      landingDriftFor(repo, work([{ squash_sha: recorded.slice(0, 7) }]))
+    ).toEqual([]);
+
+    // A new squash of the same branch that nobody recorded is still named.
+    const fresh = commit(
+      repo,
+      'c',
+      'fix: the follow-up',
+      'Squashed-from: feature/x (1234567) ZM-27'
+    );
+    expect(
+      landingDriftFor(repo, work([{ squash_sha: recorded.slice(0, 7) }]))
+    ).toEqual([expect.objectContaining({ cardNumber: 27, squashSha: fresh })]);
   });
 });

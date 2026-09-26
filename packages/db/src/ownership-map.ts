@@ -95,6 +95,7 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   card_events: { kind: 'owned', ownerColumn: 'actor_id' },
   card_refs: { kind: 'owned', ownerColumn: 'attached_by' },
   card_branches: { kind: 'owned', ownerColumn: 'attached_by' },
+  card_links: { kind: 'owned', ownerColumn: 'created_by' },
 
   // Transitively owned through the memory (no owner column of their own).
   memory_entities: {
@@ -160,6 +161,11 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   // `actor_id` but carries no personal content (ids, counters, flags only);
   // erasure severs the reference and keeps the audit row.
   audit_log: { kind: 'anonymize', column: 'actor_id' },
+  // A project's release setting and the production states it was observed
+  // in: configuration and a log, content-free. Erasure keeps the rows and
+  // severs who wrote them.
+  scope_release_settings: { kind: 'anonymize', column: 'updated_by' },
+  scope_releases: { kind: 'anonymize', column: 'observed_by' },
 
   // Not user data.
   oauth_clients: {
@@ -219,6 +225,9 @@ export const USER_BACK_REFERENCES: readonly UserBackReference[] = [
   // the memory it is about — so the row outlives the departing adjudicator.
   { table: 'portability_candidates', column: 'resolved_by', refersTo: 'user' },
   { table: 'scope_members', column: 'granted_by', refersTo: 'user' },
+  // Who RETIRED a relation between two cards, which need not be whoever stated
+  // it — so the retired row outlives the departing user.
+  { table: 'card_links', column: 'invalidated_by', refersTo: 'user' },
 ] as const;
 
 const entries = (): ReadonlyArray<
@@ -236,8 +245,8 @@ export const deletableTables = (): MappedTable[] =>
 
 /**
  * Tables that must hold zero rows attributable to a user after erasure — the
- * deleted tables plus the anonymized one (its reference is nulled, so no row
- * still points at the user).
+ * deleted tables plus the anonymized ones (their reference is nulled, so no
+ * row still points at the user).
  */
 export const userDataTables = (): MappedTable[] =>
   entries()

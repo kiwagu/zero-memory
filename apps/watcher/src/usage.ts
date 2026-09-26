@@ -22,6 +22,8 @@ Commands:
   guide | nudge       emit a memory-first mandate/reminder for a hook
   landing             after a shell command: remind about a squash whose board
                       card has no record of its landing
+  release             check this project's production state now and record
+                      the release on the cards it carries
   status [--json]     report which server this machine talks to and its state
                       (a turn warning as a hook; one JSON line with --json)
   receipt             print the session value receipt (SessionEnd hook)

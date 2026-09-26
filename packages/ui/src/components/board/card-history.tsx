@@ -23,11 +23,14 @@ interface CardHistoryEntry {
   actorLabel: string;
   timeLabel: string;
   reason?: string;
-  /** What the mover declared in place of the branch rule. */
-  declaration?: { label: string; text: string };
+  /**
+   * What the author declared in place of a rule's answer: why the work has
+   * no branch, why the card relates to no other card.
+   */
+  declarations?: Array<{ label: string; text: string }>;
   /** An author's statement, with how it stands to the one it answers. */
   note?: { text: string; relationLabel?: string };
-  /** What was attached or detached, as kind and target. */
+  /** What was attached, detached, linked or unlinked. */
   refLabel?: string;
 }
 
@@ -35,11 +38,14 @@ function CardHistory({
   entries,
   emptyLabel,
   linkComponent = 'a',
+  cardLinks,
 }: {
   entries: CardHistoryEntry[];
   emptyLabel: string;
   /** Client-router link injected by the app (e.g. next/link); plain <a> by default. */
   linkComponent?: React.ElementType;
+  /** The cards a `ZM-N` label in a reason or a note links to. */
+  cardLinks?: Readonly<Record<string, string>>;
 }) {
   if (entries.length === 0) {
     return <EmptyState compact>{emptyLabel}</EmptyState>;
@@ -66,20 +72,26 @@ function CardHistory({
               className="text-foreground/90 italic"
               data-testid="card-reason"
             >
-              <Markdown density="inline" linkComponent={linkComponent}>
+              <Markdown
+                density="inline"
+                linkComponent={linkComponent}
+                cardLinks={cardLinks}
+              >
                 {entry.reason}
               </Markdown>
             </div>
           ) : null}
 
-          {entry.declaration ? (
-            <p className="text-sm" data-testid="card-declaration">
-              <span className="text-muted-foreground">
-                {entry.declaration.label}
-              </span>{' '}
-              {entry.declaration.text}
+          {entry.declarations?.map((declaration) => (
+            <p
+              key={declaration.label}
+              className="text-sm"
+              data-testid="card-declaration"
+            >
+              <span className="text-muted-foreground">{declaration.label}</span>{' '}
+              {declaration.text}
             </p>
-          ) : null}
+          ))}
 
           {entry.note ? (
             <div className="flex items-start gap-2" data-testid="card-note">
@@ -88,7 +100,7 @@ function CardHistory({
                   {entry.note.relationLabel}
                 </Badge>
               ) : null}
-              <Markdown linkComponent={linkComponent}>
+              <Markdown linkComponent={linkComponent} cardLinks={cardLinks}>
                 {entry.note.text}
               </Markdown>
             </div>

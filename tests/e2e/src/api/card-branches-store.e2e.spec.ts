@@ -22,6 +22,12 @@ interface CardJson {
   state: string;
 }
 
+interface LandingJson {
+  squash_sha: string;
+  target: string | null;
+  landed_at: string;
+}
+
 interface BranchJson {
   repo: string;
   branch: string;
@@ -29,6 +35,7 @@ interface BranchJson {
   squash_sha: string | null;
   target: string | null;
   landed_at: string | null;
+  landings: LandingJson[];
 }
 
 interface EventJson {
@@ -91,6 +98,7 @@ test.describe('Card branches in the store', () => {
     const scope = await projectScope(token, `branch-store-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Page the memory feed',
     });
@@ -178,6 +186,7 @@ test.describe('Card branches in the store', () => {
     const scope = await projectScope(ownerToken, `branch-rls-${Date.now()}`);
     const owner = asUser(ownerToken);
     const { card } = await rpc<{ card: CardJson }>(owner, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Rotate the edge certificates',
     });
@@ -227,6 +236,7 @@ test.describe('A branch belongs to its card', () => {
     const other = await projectScope(token, `branch-other-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: other,
       p_title: 'A card in the other project',
     });
@@ -300,12 +310,18 @@ test.describe('The branch rule in the store', () => {
     const bare = await rpc<{ error?: string; message?: string }>(
       db,
       'card_create',
-      { p_scope: scope, p_title: 'Starts running', p_state: 'active' }
+      {
+        p_scope: scope,
+        p_title: 'Starts running',
+        p_state: 'active',
+        p_no_links: 'e2e fixture',
+      }
     );
     expect(bare.error).toBe('branch_required');
     expect(bare.message).toMatch(/branch/u);
 
     const both = await rpc<{ error?: string }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Both at once',
       p_state: 'active',
@@ -316,6 +332,7 @@ test.describe('The branch rule in the store', () => {
     expect(both.error).toBe('invalid');
 
     const idea = await rpc<{ error?: string }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'A branch on an idea',
       p_branch_repo: REPO,
@@ -324,6 +341,7 @@ test.describe('The branch rule in the store', () => {
     expect(idea.error).toBe('invalid');
 
     const withBranch = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Page the feed',
       p_state: 'active',
@@ -343,6 +361,7 @@ test.describe('The branch rule in the store', () => {
     ]);
 
     const noCode = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Measure the recall gap',
       p_state: 'active',
@@ -359,6 +378,7 @@ test.describe('The branch rule in the store', () => {
 
     // A move into active meets the same rule.
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Idea first',
     });
@@ -411,6 +431,7 @@ test.describe('The branch rule in the store', () => {
     const scope = await projectScope(token, `branch-leave-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Swap the embedding model',
       p_state: 'active',
@@ -450,6 +471,7 @@ test.describe('The branch rule in the store', () => {
 
     // A declaration with nothing to declare is refused, not recorded.
     const { card: plain } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Plain idea',
     });
@@ -526,26 +548,83 @@ test.describe('The branch rule in the store', () => {
       (await rpc<CardGetJson>(db, 'card_get', { p_card_id: card.id })).events
     ).toHaveLength(count);
 
-    // A landed branch does not carry the card back into active.
+    // A landed branch alone does not carry the card back into active: the
+    // move has to name the branch it works on again.
     const reentry = await rpc<{ error?: string }>(db, 'card_move', {
       p_card_id: card.id,
       p_to_state: 'active',
       p_reason: 'follow-up',
     });
     expect(reentry.error).toBe('branch_required');
-    const sameBranch = await rpc<{ error?: string; message?: string }>(
+
+    // Naming the landed branch reopens it: its code is being debugged again,
+    // the landing it made stays on record, and the reopening is one more
+    // entry of work with the branch in the history.
+    const reopened = await rpc<{ card: CardJson; error?: string }>(
       db,
       'card_move',
       {
         p_card_id: card.id,
         p_to_state: 'active',
-        p_reason: 'follow-up',
+        p_reason: 'the landed search misses deleted rows; fixing it here',
         p_branch_repo: REPO,
         p_branch_name: 'feature/embeddings',
       }
     );
-    expect(sameBranch.error).toBe('invalid');
-    expect(sameBranch.message).toMatch(/already landed/u);
+    expect(reopened.error).toBeUndefined();
+    expect(reopened.card.state).toBe('active');
+    const open = await rpc<CardGetJson>(db, 'card_get', {
+      p_card_id: card.id,
+    });
+    expect(open.branches).toEqual([
+      expect.objectContaining({
+        branch: 'feature/embeddings',
+        state: 'open',
+        squash_sha: null,
+        target: null,
+        landings: [expect.objectContaining({ squash_sha: 'abcdef1' })],
+      }),
+    ]);
+    expect(open.events.slice(-2)).toEqual([
+      expect.objectContaining({
+        type: 'attached',
+        ref_kind: 'branch',
+        ref_target: `${REPO}:feature/embeddings`,
+      }),
+      expect.objectContaining({
+        type: 'moved',
+        from_state: 'waiting',
+        to_state: 'active',
+      }),
+    ]);
+
+    // The next squash lands the branch again, beside the first landing.
+    const relanded = await rpc<{ card: CardJson; changed: boolean }>(
+      db,
+      'card_land',
+      {
+        p_card_id: card.id,
+        p_repo: REPO,
+        p_branch: 'feature/embeddings',
+        p_squash_sha: 'fedcba9',
+        p_target: 'main',
+        p_reason: 'the fix is green',
+      }
+    );
+    expect(relanded.changed).toBe(true);
+    const twice = await rpc<CardGetJson>(db, 'card_get', {
+      p_card_id: card.id,
+    });
+    expect(twice.branches).toEqual([
+      expect.objectContaining({
+        state: 'landed',
+        squash_sha: 'fedcba9',
+        landings: [
+          expect.objectContaining({ squash_sha: 'abcdef1' }),
+          expect.objectContaining({ squash_sha: 'fedcba9' }),
+        ],
+      }),
+    ]);
   });
 
   test('a forgotten landing is recorded from any state but the archive', async () => {
@@ -554,6 +633,7 @@ test.describe('The branch rule in the store', () => {
     const scope = await projectScope(token, `branch-late-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Shipped long ago',
     });
@@ -576,6 +656,7 @@ test.describe('The branch rule in the store', () => {
 
     // Landing in place: no move, and the reason stays on the landing itself.
     const { card: stay } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Already waiting',
     });
@@ -604,6 +685,7 @@ test.describe('The branch rule in the store', () => {
     // Archiving is not a move: an open branch does not hold a card on the
     // board.
     const { card: dropped } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Abandoned',
       p_state: 'active',
@@ -659,12 +741,89 @@ test.describe('The branch rule in the store', () => {
     expect(foreign.error).toBe('not_found');
   });
 
+  test('a branch that lands again keeps every landing, and an earlier one recorded again changes nothing', async () => {
+    // A bug found on main is fixed in the branch that brought it, and that
+    // branch is squashed again — so one branch can land more than once.
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `branch-reland-${Date.now()}`);
+    const db = asUser(token);
+    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
+      p_scope: scope,
+      p_title: 'Fixed in the branch that brought it',
+    });
+    await rpc(db, 'card_move', {
+      p_card_id: card.id,
+      p_to_state: 'waiting',
+      p_reason: 'set by hand',
+    });
+    const land = (branch: string, sha: string, reason: string) =>
+      rpc<{ changed: boolean; error?: string }>(db, 'card_land', {
+        p_card_id: card.id,
+        p_repo: REPO,
+        p_branch: branch,
+        p_squash_sha: sha,
+        p_target: 'main',
+        p_reason: reason,
+      });
+
+    expect(
+      (await land('feature/relanded', 'aaaaaaa', 'the feature')).changed
+    ).toBe(true);
+    expect(
+      (
+        await land(
+          'feature/relanded',
+          'bbbbbbb',
+          'the fix, from the same branch'
+        )
+      ).changed
+    ).toBe(true);
+    expect(
+      (await land('feature/other', 'ccccccc', 'another branch')).changed
+    ).toBe(true);
+
+    const read = await rpc<CardGetJson>(db, 'card_get', { p_card_id: card.id });
+    const relanded = read.branches.find((b) => b.branch === 'feature/relanded');
+    const other = read.branches.find((b) => b.branch === 'feature/other');
+    // The row keeps the latest landing; the landings keep all of them, oldest
+    // first, and each branch only its own.
+    expect(relanded).toMatchObject({ state: 'landed', squash_sha: 'bbbbbbb' });
+    expect(relanded?.landings.map((l) => l.squash_sha)).toEqual([
+      'aaaaaaa',
+      'bbbbbbb',
+    ]);
+    expect(relanded?.landings[0]).toMatchObject({ target: 'main' });
+    expect(relanded?.landings[0]?.landed_at).toBeTruthy();
+    expect(other?.landings.map((l) => l.squash_sha)).toEqual(['ccccccc']);
+
+    // Recording the earlier squash again — say, from a reminder that could
+    // not see the later one — is already on record, by a short or a longer
+    // sha, and must not wind the row back to it.
+    const again = await land(
+      'feature/relanded',
+      'aaaaaaa1234',
+      'recorded again'
+    );
+    expect(again.error).toBeUndefined();
+    expect(again.changed).toBe(false);
+    const after = await rpc<CardGetJson>(db, 'card_get', {
+      p_card_id: card.id,
+    });
+    const kept = after.branches.find((b) => b.branch === 'feature/relanded');
+    expect(kept?.squash_sha).toBe('bbbbbbb');
+    expect(kept?.landings).toHaveLength(2);
+    expect(after.events.filter((e) => e.type === 'landed')).toHaveLength(3);
+  });
+
   test('the old six-argument move still resolves, and each command keeps one signature', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
     const scope = await projectScope(token, `branch-compat-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Compat',
     });
@@ -702,6 +861,7 @@ test.describe('The branch rule in the store', () => {
     const scope = await projectScope(token, `branch-brief-${Date.now()}`);
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Named in the briefing',
       p_state: 'active',
@@ -715,6 +875,7 @@ test.describe('The branch rule in the store', () => {
         state: string;
         repo: string;
         branch: string;
+        landings: Array<{ squash_sha: string }>;
       }>;
     }>(db, 'briefing_work', { p_scope: scope });
     expect(work.open_branches).toEqual([
@@ -724,7 +885,65 @@ test.describe('The branch rule in the store', () => {
         state: 'active',
         repo: REPO,
         branch: 'feature/briefed',
+        landings: [],
       },
+    ]);
+  });
+
+  test('another card may reopen a landed branch, and the briefing carries its landings', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const scope = await projectScope(token, `branch-reopen-${Date.now()}`);
+    const db = asUser(token);
+
+    const { card: first } = await rpc<{ card: CardJson }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
+      p_scope: scope,
+      p_title: 'Brought the search',
+      p_state: 'active',
+      p_branch_repo: REPO,
+      p_branch_name: 'feature/search',
+    });
+    await rpc(db, 'card_land', {
+      p_card_id: first.id,
+      p_repo: REPO,
+      p_branch: 'feature/search',
+      p_squash_sha: '1111111',
+      p_target: 'main',
+      p_reason: 'green',
+    });
+
+    // The branch that brought a bug is where the bug is fixed, even when the
+    // fix is another card's work.
+    const { card: second, error } = await rpc<{
+      card: CardJson;
+      error?: string;
+    }>(db, 'card_create', {
+      p_no_links: 'e2e fixture',
+      p_scope: scope,
+      p_title: 'Search misses deleted rows',
+      p_state: 'active',
+      p_branch_repo: REPO,
+      p_branch_name: 'feature/search',
+    });
+    expect(error).toBeUndefined();
+
+    // The branch is open for the second card, and the briefing says which
+    // squashes of it the board already holds, so the one on main is not
+    // mistaken for a landing nobody recorded.
+    const work = await rpc<{
+      open_branches: Array<{
+        card_id: string;
+        branch: string;
+        landings: Array<{ squash_sha: string }>;
+      }>;
+    }>(db, 'briefing_work', { p_scope: scope });
+    expect(work.open_branches).toEqual([
+      expect.objectContaining({
+        card_id: second.id,
+        branch: 'feature/search',
+        landings: [{ squash_sha: '1111111' }],
+      }),
     ]);
   });
 });

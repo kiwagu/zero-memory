@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 
 import {
   classifyHref,
+  remarkCardLabelLinks,
   remarkHtmlAsText,
   remarkMemoryIdLinks,
 } from '@workspace/ui/lib/markdown';
@@ -18,7 +19,9 @@ import { cn } from '@workspace/ui/lib/utils';
  * literal text, images never load, script/data links render as plain text,
  * external links open in a new tab with their domain visible. Same-origin
  * links go through `linkComponent`, which is how the panel chain intercepts
- * them. Display-only; `imageLabel` arrives translated.
+ * them. A card label (`ZM-42`) links only to a card the caller resolved in
+ * `cardLinks`, since a label names a card only on its own board. Display-only;
+ * `imageLabel` arrives translated.
  */
 
 type MarkdownDensity = 'card' | 'page' | 'inline';
@@ -30,6 +33,8 @@ interface MarkdownProps {
   linkComponent?: React.ElementType;
   /** Word shown in place of an image, e.g. "image". */
   imageLabel?: string;
+  /** The cards a label in this text may link to: number → the card's page. */
+  cardLinks?: Readonly<Record<string, string>>;
   className?: string;
   'data-testid'?: string;
 }
@@ -169,12 +174,18 @@ function Markdown({
   density = 'card',
   linkComponent = 'a',
   imageLabel = 'image',
+  cardLinks,
   className,
   'data-testid': testId,
 }: MarkdownProps) {
   const rendered = (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkHtmlAsText, remarkMemoryIdLinks]}
+      remarkPlugins={[
+        remarkGfm,
+        remarkHtmlAsText,
+        remarkMemoryIdLinks,
+        ...(cardLinks ? [() => remarkCardLabelLinks(cardLinks)] : []),
+      ]}
       components={components(density, linkComponent, imageLabel)}
     >
       {children}

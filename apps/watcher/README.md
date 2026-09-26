@@ -97,6 +97,11 @@ zero-memory-watcher landing         # PostToolUse on shell commands: a fresh
                                     #   board card has no record of its landing
                                     #   gets one line with the exact `card land`
                                     #   call; each squash checked once per machine
+zero-memory-watcher release         # run the release check by hand and print
+                                    #   what it found — the tool for recording
+                                    #   a release right after a missing tag is
+                                    #   fetched or made, or again for a landing
+                                    #   recorded after the release was
 zero-memory-watcher status          # UserPromptSubmit trailer: warn when the
                                     #   server is unreachable — naming WHICH
                                     #   server (cached per endpoint) AND run
@@ -156,6 +161,16 @@ half: when a branch the board still holds open has already landed in the local
 repository, the work section says so and names the call. See
 [`plugins/zero-memory-claude/`](../../plugins/zero-memory-claude/) and
 [`docs/getting-started/claude-code.mdx`](../../docs/getting-started/claude-code.mdx).
+
+The release check runs the same way: inside the `landing` hook, after every
+shell command, and inside the session-start briefing — it checks whether the
+project's production state changed (a version url or, without one, the
+highest release among its tags) and records it on the board cards it carries.
+`zero-memory-watcher release` is the manual run of that same check: it checks
+now and prints what it found, the tool for recording a release right after a
+missing tag is fetched or made, or again for a card whose landing was recorded
+after the release was. See
+[A release reaches the cards it carries](../../docs/concepts/project-board.mdx#a-release-reaches-the-cards-it-carries).
 
 ### Checkpoint — the compaction boundary
 

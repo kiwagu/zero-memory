@@ -32,11 +32,13 @@ archives it, and its number is not reused.
 ## A reference, not an engine
 
 The board answers "what is going on here", and nothing more. A card's state is
-a **declaration** by whoever moved it. The server asks a move to account for
-itself — a reason, and for work entering or leaving `active`, its branch — but
-it never makes a move, and nothing is dispatched, claimed, leased or blocked by
-a card. No column is a queue. Reading one tells you what somebody decided and why; acting
-on it remains your judgement.
+a **declaration** by whoever moved it. The server asks a card to account for
+itself — a reason for every move, its branch for work entering or leaving
+`active`, and how it relates to other cards when it is made — but it never
+makes a move, and nothing is dispatched, claimed or leased by a card. A card
+marked blocked can still move: the mark says what somebody declared, not what
+the server allows. No column is a queue. Reading one tells you what somebody
+decided and why; acting on it remains your judgement.
 
 The same holds for what agents write on a card. A note is its author's
 statement, so text saying the work is finished does not move the card — only a
@@ -64,11 +66,65 @@ the reason recorded together.
 A card can point at a memory, an entity, a conversation, another card, or an
 external url. Attaching changes **nothing** about the target: not its scope,
 not its visibility, not an open loop's lifecycle. There is no separate kind
-for a loop — a loop is a memory, so it attaches as one.
+for a loop — a loop is a memory, so it attaches as one. Pointing at another
+card records a relation between the two, one nobody typed — see
+[Cards relate to cards](#cards-relate-to-cards).
 
 Every target is authorized per reader. A memory you may not read arrives as an
 id with no preview, exactly as it does in the activity feed, so a shared card
 stays legible without leaking what is behind its references.
+
+## Cards relate to cards
+
+A card can stand in a typed relation to another card. The relation is stored
+once and read from both sides, and each side names it its own way:
+
+| Stored as    | Read from the card that holds it | Read from the other card |
+| ------------ | -------------------------------- | ------------------------ |
+| `blocks`     | `blocks`                         | `blocked_by`             |
+| `depends_on` | `depends_on`                     | `needed_by`              |
+| `parent_of`  | `parent_of`                      | `child_of`               |
+| `duplicates` | `duplicates`                     | `duplicated_by`          |
+| `relates_to` | `relates_to`                     | `relates_to`             |
+
+Any of the nine names can be passed: `blocked_by` said by one card is `blocks`
+said by the other, and both land as the same relation. Every relation carries
+the reason it was declared with, taking one back takes a reason too, and the
+histories of both cards record each change.
+
+**A card says how it relates when it is made.** `create` and `promote_loop`
+are refused with `links_required` unless the call passes `links` — a list of
+`{card, relation, reason}`, where `card` is an id or a `ZM-N` label on the same
+board — or `no_links` with a reason why the card relates to no other card. A
+card that did neither, and has no declared relation, is asked again when it
+moves into `active`; a card that answered once is not asked again. The refusal
+names up to five candidates from the board: cards the text mentions by label
+first, then cards whose title and body share its words. They are where the
+agent's own judgement starts, not an answer to it, because a relation nobody
+declared is invisible to every other agent. A card created with `no_links`
+gets the same candidates back in the result, as a last look.
+
+A card and the relations it is created with are written together: if one of
+them is refused, the card is not created either.
+
+**Above and below.** A card's parent, the cards that block it and the cards it
+depends on sit above it. A card has at most one parent, and its blockers and
+dependencies count as secondary parents. A relation that would put a card
+above itself, through any chain of these, is refused with the name of the card
+already above it; a second parent is refused until the first is unlinked.
+
+**Blocked.** A card is blocked while a card that blocks it is neither done nor
+archived. Only `blocks` does this: a dependency or a parent never blocks.
+
+**Relations nobody typed.** Attaching one card to another with
+`card_log attach` still works. It records a `relates_to` between the two cards
+marked as not declared, detaching retires it, and declaring any typed relation
+between the same two cards replaces it. Card attachments made before relations
+existed were carried over the same way.
+
+**Across boards.** A relation can join cards on two boards when you can write
+both. It shows only to a reader who can see both cards, so a blocker you cannot
+see neither shows nor blocks for you.
 
 ## A bound conversation fills the card
 
@@ -128,7 +184,11 @@ into it — names its `branch` as `{repo, name}`, or says why it has no code wit
 `no_branch`: research, an operation on a running system, documents kept outside
 git. A card that already holds an open branch needs neither, so work coming
 back from review on the same branch simply moves. A branch that already landed
-does not count: follow-up work goes on a new branch.
+can be named again: a bug found on the trunk is fixed in the branch that
+brought it, so naming a landed branch — on this card or another — reopens it
+for the card. Its earlier landings stay on record, and the next `land` adds
+one more. Keeping what the branch already shipped working is the job of
+whoever reopened it.
 
 Work **leaving** `active` while its branch is still open is refused until the
 branch is accounted for. If it landed, record the landing:
@@ -151,6 +211,13 @@ It works from any state but the archive, so a landing that was forgotten can be
 recorded later. If the branch has not landed, pass `not_landed` with the
 reason instead; the branch stays open and can land later. Archiving a card is
 not a move and asks for neither.
+
+A branch can land more than once: a bug found after the squash is fixed in the
+branch that brought it, and the branch is squashed again. Record each landing
+with its own `land`. The branch then names its latest squash commit, and
+`board` `get` lists every landing under `landings`, oldest first; the dashboard
+shows the earlier ones beside the latest. Recording an earlier landing again is
+recording the same landing: it changes nothing, and the branch keeps its latest.
 
 `card_log` attaches or detaches a branch at any time, with `ref_kind: "branch"`
 and `ref_target: "<repo>:<branch>"`, for example
@@ -181,8 +248,71 @@ call filled in:
 Each squash is checked once per machine. A session briefing adds what the hook
 could not see — a landing made in another session or on another client: when a
 branch the board still holds open has already landed in the local repository,
-the briefing says so and names the call. A client connected only over MCP has
+the briefing says so and names the call. A squash the board already recorded,
+on any card, is not reported, so a reopened branch is named only for a new
+squash of it. A client connected only over MCP has
 no hooks and no git; the tool's own rule is what keeps its cards honest.
+
+## A release reaches the cards it carries
+
+A project names its production state once, with the `release` tool's
+`configure` action (a project admin only): a `version_url` — https, or http
+for localhost only, never with credentials, since every member of the
+project reads it — and the JSON field that holds the version (`version_field`,
+default `version`). A project that never deploys names no url; its state is
+then its highest release instead: among the tags matching `tag_pattern`
+(default `v*`), the highest version `tag_template` (default `v{version}`)
+reads from them, a final release above its pre-releases — a matching tag it
+reads no version from is not a release. `tag_template` also maps a version
+to the tag that names it; it holds `{version}` once and otherwise only
+characters a git ref may hold. `on_release` chooses what a release does to the cards it carries:
+`record` (the default) only records it, `record_and_move_done` also moves
+the carried cards in `waiting` to `done`. `configure` changes only the
+fields it is given, and `version_url: null` clears a url that was set.
+
+Each member's client watcher checks for a change after every shell command —
+in the same pass as the landing check — and again at the start of a session.
+The url is asked at most once every two minutes per project — ten after it
+failed to answer, and a version it answered before is not acted on meanwhile —
+the setting at most once every ten; nothing runs as a daemon; a project that names no
+production state costs only that ten-minute look at its setting; a folder
+the user ignored is left alone.
+
+The watcher resolves the current version to a commit through its tag in the
+local checkout; two checkouts of one project on a machine each mark the cards
+whose landings they hold. A card is carried when its latest landing in that repository
+is an ancestor of that commit and nothing was released since the landing —
+so a card released once and then landed again waits for the release that
+actually ships the new work. The watcher records the release on each card it
+carries, as a `released` event, and says one line in the session. A tag it
+cannot find is named once, with the fix — `git fetch --tags`, or tagging the
+release commit by hand. A version lower than the one already seen is a
+rollback: it is recorded and said, but carries no cards — the release that
+would have carried them is the higher version already recorded, not this
+older one. A server or a url that cannot answer costs one pause before the
+next try, never every command. Running `zero-memory-watcher release` by hand
+checks now and prints what it found — the tool for recording a release
+right after a missing tag is fetched or made. It records a state again even
+when it was recorded before, which marks a card whose landing was recorded
+only after the release was; a card with a release since its latest landing
+is never marked twice.
+
+Cards move on their own only when the project set `record_and_move_done`:
+then a carried card in `waiting` moves to `done`, with the version named in
+the reason. With the default `record`, a release only records itself on the
+cards it carries — nothing on the board moves by itself.
+
+A session's briefing names the project's production state — "Production: vX
+… as of …" — and, for the cards it lists, the release that reached them. A
+card a release reached also shows "shipped in vX" — the latest release that
+carried it, which stays true after a rollback — on its dashboard tile and in
+its detail, with the release itself as a `released` line in its history; a board's own setting — where its production state comes from, and
+what a release does to its cards — shows read-only in the hint beside the
+board's title, set only through `configure`, never from the dashboard.
+
+The url is read by each member's own watcher, never by the server, and a
+redirect from it is never followed. Every member of the project can read the
+url once it is set.
 
 ## Visibility
 
@@ -210,11 +340,20 @@ on — the project's scope, which `build_context` reports as `project_scope`:
   "action": "create",
   "scope": "proj.…",
   "title": "Paginate the memory feed",
-  "body": "Goal: the feed stays fast however large the corpus grows.\n\nDone when: a visit loads one page."
+  "body": "Goal: the feed stays fast however large the corpus grows.\n\nDone when: a visit loads one page.",
+  "links": [
+    {
+      "card": "ZM-12",
+      "relation": "child_of",
+      "reason": "One of the feed's performance fixes."
+    }
+  ]
 }
 ```
 
-A new card starts in `idea` unless `state` says otherwise. Moving it takes the
+A new card starts in `idea` unless `state` says otherwise, and states its
+relations — `links`, or `no_links` with a reason — as
+[Cards relate to cards](#cards-relate-to-cards) describes. Moving it takes the
 reason:
 
 ```json
@@ -231,16 +370,36 @@ Work entering `active` names its branch, as above — see
 [A card knows its branches](#a-card-knows-its-branches).
 
 `promote_loop` takes a `loop_id` in place of a scope and opens the card as
-`active`, so it takes `branch` or `no_branch` like any work entering it. `edit` rewrites the title or the body; pass `expected_revision` and
-it refuses to overwrite a change someone made since you read the card.
-`archive` takes the card off the board and, like a move, needs a reason.
+`active`, so it takes `branch` or `no_branch` like any work entering it, and
+`links` or `no_links` like any new card. `edit` rewrites the title or the
+body; pass `expected_revision` and it refuses to overwrite a change someone
+made since you read the card. `archive` takes the card off the board and, like
+a move, needs a reason.
+
+`link` relates the card to another one after the fact: `to_card` names the
+other card by id or label, `relation` says how this card stands to it, and
+`reason` says why.
+
+```json
+{
+  "action": "link",
+  "card_id": "crd_...",
+  "to_card": "ZM-28",
+  "relation": "blocked_by",
+  "reason": "The index rebuild must land first."
+}
+```
+
+Linking the same relation again changes nothing. `unlink` takes the same
+fields and retires the relation; both histories keep it.
 
 `card_log` adds to the record without moving anything. A `note` is a
 statement of your own; it can answer another note through `reply_to`, with a
 `relation` of `supports`, `disputes` or `corrects`. `attach` and `detach`
 point the card at an artifact or stop pointing at it, by `ref_kind` —
-`memory`, `entity`, `thread`, `card` or `url` — and `ref_target`. Attaching
-the same target twice changes nothing. Attaching your own conversation binds
+`memory`, `entity`, `thread`, `card` or `url` — and `ref_target`; a `card`
+target becomes a relation nobody typed. Attaching the same target twice
+changes nothing. Attaching your own conversation binds
 it, so attach it once when you start working on a card:
 
 ```json
@@ -256,13 +415,17 @@ The `thread` field every write accepts only records which conversation wrote
 that entry; it does not bind anything.
 
 `board` is the read side: `list` a scope's cards, narrowed to one column with
-`state` or to matching titles with `query`; `get` one card with its
-attachments, a page of its history — where `after_seq` reads only what
-happened since you last looked — and a page of its feed, newest first,
-continued with the `feed_before` cursor each page returns; or `resolve` a
-project-local number — 42 for `ZM-42` — into its card.
+`state` or with `query` to titles that match — or to a card by its label, since
+`ZM-42`, `#42` and `42` also find card 42 — or to the cards related to one
+card with `related_to` (its id or label), where `relation_filter` `above`
+keeps its parent, blockers and dependencies and `below` what hangs on it;
+`get` one card with its attachments, its relations and whether it is blocked,
+a page of its history — where `after_seq` reads only what happened since you
+last looked — and a page of its feed, newest first, continued with the
+`feed_before` cursor each page returns; or `resolve` a project-local number —
+42 for `ZM-42` — into its card.
 
-`create`, `promote_loop`, `move`, `land`, `note` and `attach` accept an
+`create`, `promote_loop`, `move`, `land`, `link`, `note` and `attach` accept an
 `idempotency_key`: a retry with the same key after a timeout returns the first
 result instead of writing a second row.
 
@@ -272,7 +435,11 @@ A session that opens on a project hears about its board before anything else
 it reads. A budgeted briefing — what the client hooks request — carries a few
 lines of it: the card this conversation is bound to, with its state and the
 reason it is there, how many cards are active and waiting, and the first three
-of them, each with the branches it holds open. At session start the briefing
+of them, each with the branches it holds open. A card that something blocks
+names its blockers, a card whose relations nobody assessed says so, and the
+bound card is followed by a line naming the cards above it. A card on another
+board is named with its board (`ZM-3 on acme`), and an archived card above
+says so. At session start the briefing
 also names a branch the board holds open whose squash is already in the local
 repository — a landing nobody recorded. The lines name the work; `board` reads it. They take the place of one
 row of memories the briefing would otherwise carry, so the briefing does not
@@ -280,16 +447,28 @@ grow, and a loop attached to one of the named cards is left out of the loop
 list, since the card already points at it. A `build_context` call that names
 no budget carries no summary and briefs exactly as it did before.
 
+When the conversation is bound to no card yet — every new session, on any
+device — the briefing names the card you worked on last instead: still active,
+with your last two steps on it and the exact `card_log attach` that picks it
+up. It is an offer; nothing binds until you attach. When your latest step
+finished another card, a line names it (`Last session: ZM-29 moved to
+waiting`). Only your own history counts — what the release step records is not
+your work — and nothing older than 30 days is offered.
+
 ## The board in the dashboard
 
 The dashboard shows the board as one row of columns, which scrolls sideways
 when the window is too narrow for all five. Each tile carries the reason the
 card is in the column it is in — not merely what touched it last, since a note
-or an attachment says nothing about where the work stands.
+or an attachment says nothing about where the work stands — and a card that
+something blocks says **blocked** on its tile. The icon beside
+the title says what the board is and, for a single board, where its
+production state comes from; it opens on hover or keyboard focus, so the page
+itself holds only the cards.
 
 <Screenshot path="/board">
 
-![The project board as one row of state columns — idea, active, waiting, with the rest past the edge — each moved card showing the reason it was moved](/img/project-board.png)
+![The project board as one row of state columns — idea, active, waiting, with the rest past the edge — each moved card showing the reason it was moved, and the idea that another card blocks marked blocked](/img/project-board.png)
 
 </Screenshot>
 
@@ -302,19 +481,33 @@ with no cards stays selected and shows as empty — it is never swapped for a
 different one. The board refreshes itself while agents work on it, so it does
 not show a state that has already moved on.
 
+A filter beside the picker narrows the cards on screen by label or by title:
+`ZM-42`, `#42` or `42` finds card 42, and any other text finds the cards whose
+title contains it. Press Enter or **Filter** to apply it. The filter lands in
+the address next to the board, so a narrowed board can be linked and survives a
+reload; with **All boards** a label finds that number on every board, since a
+card's number belongs to its project. When nothing matches, the columns stay
+empty; clearing the field shows the whole board again.
+
 Opening a card lifts it over the board in a dialog, so the columns stay in
 view, and the address bar still names the card: the step is navigable,
 shareable and reloadable, and closing it goes back to the board. A pasted link
 or a reload lands on the same card as a page of its own. Either way it shows
-the document, the branches its work ran on and where each landed, what the
-card points at, what its bound conversations have remembered, and its whole
-history: who moved it, between which states, and why — with what the mover
-declared when a move went ahead without a branch. The card's `ZM-N` label beside
+the document, the branches its work ran on and where each landed, how it
+relates to other cards, what the card points at, what its bound conversations
+have remembered, and its whole history: who moved it, between which states,
+and why — with what the author declared when a move went ahead without a
+branch or a card said it relates to no other card. Relations are grouped by
+side — above, below, related and duplicates — each named from this card's
+side with its reason, and one nobody typed is marked so. A card on another
+board carries that board's name, since a number alone names a card of this
+one, and an archived card is marked archived. An attached memory is named by
+its kind. The card's `ZM-N` label beside
 its title is its link: a click copies the card's address, ready to paste into a
 chat or a note, and a click with Ctrl or Cmd opens it in a new tab.
 
-A link inside the card — an attachment, a memory in its feed, the loop it came
-from — opens its target as a panel to the right of the card, with the same
+A link inside the card — an attachment, a relation, a memory in its feed, the
+loop it came from — opens its target as a panel to the right of the card, with the same
 look and the same actions as the page it stands for: a memory, another card, or
 an entity. A link inside that panel opens the next one right beside it, so the
 card and everything it leads to sit side by side as one canvas. Each panel says
@@ -328,6 +521,9 @@ Cmd still opens its own page in a new tab.
 Text written to be read — a card's description, its notes and the reasons on
 its moves, and a memory itself — is shown as Markdown: lists, emphasis, code
 and tables render, and a memory id in the text becomes a link to that memory.
+In a card's own text, the label of another card on the same board (`ZM-42`)
+becomes a link too and opens that card as the next panel; a label in code, a
+number no card on the board has, and a card you may not see stay plain text.
 Because that text may come from someone else, anything that looks like HTML is
 shown as the text it is, images are not loaded, and a link to another site
 opens in a new tab with its domain shown.

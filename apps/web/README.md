@@ -26,9 +26,10 @@ dependency is `@workspace/db` for the generated database types.
   shared-with dialog listing the scope's members.
 - `/entities` — knowledge-graph entity search and details;
   `/entities/[id]` — one entity with its edges and the memories that mention it.
-- `/board` — the project board, read-only; `/board/[id]` — one card. Opened
-  from the board, a card is a dialog over it, and its links open as a chain of
-  panels to its right.
+- `/board` — the project board, read-only, where a blocked card says so on
+  its tile; `/board/[id]` — one card with its relations to other cards. Opened
+  from the board, a card is a dialog over it, and its links and relations open
+  as a chain of panels to its right.
 - `/reflections` — reflection candidates and review actions.
 - `/review` — duplicate/supersede/contradiction hygiene queue.
 - `/rules` — standing-rule candidates, delivery budget, and pins.

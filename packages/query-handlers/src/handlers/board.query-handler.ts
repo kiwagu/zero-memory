@@ -43,12 +43,16 @@ export class BoardQueryHandler implements IQueryHandler<
           card: view.card,
           refs: view.refs,
           branches: view.branches,
+          releases: view.releases,
           events: view.events,
           has_more: view.has_more,
           next_after_seq: view.next_after_seq,
           feed: view.feed,
           feed_has_more: view.feed_has_more,
           feed_next_before: view.feed_next_before,
+          links: view.links,
+          blocked: view.blocked,
+          links_assessed: view.links_assessed,
         });
       }
       case 'resolve': {
@@ -71,6 +75,8 @@ export class BoardQueryHandler implements IQueryHandler<
           query: query.query,
           includeArchived: query.include_archived,
           limit: query.limit,
+          relatedTo: query.related_to,
+          relation: query.relation_filter,
         });
         if (listed.isErr()) {
           const cardFailure = listed.unwrapErr();

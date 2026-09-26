@@ -25,11 +25,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { branchNameToTopic, runBrief } from './brief-runner.js';
 import type { HookClient } from '../hook-client.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
+import { checkRelease } from '../release/release-runner.js';
 
 vi.mock('@workspace/client-runtime', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@workspace/client-runtime')>()),
   callBuildContext: vi.fn(),
 }));
+vi.mock('../release/release-runner.js', () => ({ checkRelease: vi.fn() }));
+
+// Every session-start briefing asks what production took; a real check would
+// reach a real server, so it has nothing to say unless a test gives it a line.
+beforeEach(() => {
+  vi.mocked(checkRelease).mockReset().mockResolvedValue(null);
+});
 
 // A sweep drives the whole briefing once per channel size — a hundred or more
 // runs in one test. That takes seconds on a workstation and several times
@@ -1625,5 +1633,22 @@ describe('session-start landing drift', () => {
     const text = await briefSessionStart();
     expect(text).toContain('[active] on feature/x');
     expect(text).not.toContain('landed as');
+  });
+
+  it('puts what production took under the board, and leaves the section as it was without it', async () => {
+    const board = '(`board list` for the rest)';
+    const quiet = await briefSessionStart();
+    expect(quiet).toContain(board);
+    expect(quiet).not.toContain('PRODUCTION');
+
+    // An equally fresh machine, so the release line is the only difference.
+    rmSync(stateDir, { recursive: true, force: true });
+    mkdirSync(stateDir, { recursive: true });
+    const line =
+      'PRODUCTION TOOK THE CHANGES: v1.0.0 carries ZM-7; the release is recorded on each.';
+    vi.mocked(checkRelease).mockResolvedValue(line);
+    const told = await briefSessionStart();
+    expect(told).toBe(quiet.replace(board, `${board}\n${line}`));
+    expect(checkRelease).toHaveBeenLastCalledWith(workDir, { budgetMs: 3000 });
   });
 });

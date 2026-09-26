@@ -50,6 +50,22 @@ describe('Markdown', () => {
     expect(out).toContain('href="/memory/mem_he4120z6tcgfk76a.01m32429w4"');
   });
 
+  it('links the label of a card it was given, and only that', () => {
+    const out = renderToStaticMarkup(
+      <Markdown cardLinks={{ '7': '/board/crd_seven' }}>
+        {'blocked by ZM-7, see `ZM-7` and ZM-8'}
+      </Markdown>
+    );
+    expect(out).toMatch(/<a[^>]*href="\/board\/crd_seven"[^>]*>ZM-7<\/a>/);
+    expect(out.match(/href="\/board\/crd_seven"/g)).toHaveLength(1);
+    expect(out).toMatch(/<code[^>]*>ZM-7<\/code>/);
+    expect(out).not.toMatch(/<a[^>]*>ZM-8<\/a>/);
+  });
+
+  it('leaves card labels as text when given no cards', () => {
+    expect(html('blocked by ZM-7')).not.toContain('<a');
+  });
+
   it('keeps a single line break as a break', () => {
     const out = html('line one\nline two');
     expect(out).toContain('whitespace-pre-line');

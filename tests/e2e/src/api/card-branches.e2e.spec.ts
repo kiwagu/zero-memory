@@ -25,6 +25,11 @@ interface BoardGet {
     state: string;
     squash_sha: string | null;
     target: string | null;
+    landings?: Array<{
+      squash_sha: string;
+      target: string | null;
+      landed_at: string;
+    }>;
   }>;
   events: Array<{
     type: string;
@@ -52,6 +57,7 @@ test.describe('Card branches over MCP', () => {
 
       const bare = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Move the ingest worker',
       });
@@ -60,6 +66,7 @@ test.describe('Card branches over MCP', () => {
 
       const promoted = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Move the ingest worker',
         branch: { repo: REPO, name: 'feature/ingest-queue' },
@@ -123,6 +130,65 @@ test.describe('Card branches over MCP', () => {
     }
   });
 
+  test('a branch that lands again reads back every landing, and an earlier one is already on record', async () => {
+    const seed = await readSeedState();
+    const agent = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    try {
+      const created = await agent.callTool('card', {
+        action: 'create',
+        no_links: 'e2e fixture',
+        scope: firstJson<{ scope: string }>(
+          await agent.callTool('remember', {
+            content: `e2e re-landing marker ${Date.now()}: fix a bug where it began`,
+            kind: 'fact',
+            project_hint: '/tmp/zm-e2e-branch-reland',
+          })
+        ).scope,
+        title: 'Fix it in the branch that brought it',
+        state: 'active',
+        branch: { repo: REPO, name: 'feature/relanded' },
+      });
+      expect(created.isError ?? false).toBe(false);
+      const card = firstJson<CardResult>(created).card;
+      const land = async (sha: string, reason: string) =>
+        firstJson<CardResult>(
+          await agent.callTool('card', {
+            action: 'land',
+            card_id: card.id,
+            branch: { repo: REPO, name: 'feature/relanded' },
+            squash_sha: sha,
+            target: 'main',
+            reason,
+          })
+        );
+
+      expect((await land('aaaaaaa', 'the feature landed')).changed).toBe(true);
+      expect(
+        (await land('bbbbbbb', 'a bug fixed in the same branch')).changed
+      ).toBe(true);
+      // The reminder of a client that saw only the first squash.
+      expect((await land('aaaaaaa', 'recorded again')).changed).toBe(false);
+
+      const read = firstJson<BoardGet>(
+        await agent.callTool('board', { action: 'get', card_id: card.id })
+      );
+      expect(read.branches).toHaveLength(1);
+      expect(read.branches[0]).toMatchObject({
+        branch: 'feature/relanded',
+        state: 'landed',
+        squash_sha: 'bbbbbbb',
+      });
+      expect(read.branches[0]?.landings?.map((l) => l.squash_sha)).toEqual([
+        'aaaaaaa',
+        'bbbbbbb',
+      ]);
+    } finally {
+      await agent.close();
+    }
+  });
+
   test('a stated reason stands in for a branch, and is kept on the record', async () => {
     const seed = await readSeedState();
     const agent = await McpTestClient.connect(
@@ -139,6 +205,7 @@ test.describe('Card branches over MCP', () => {
       const created = firstJson<CardResult>(
         await agent.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Measure the recall gap',
         })
@@ -227,6 +294,7 @@ test.describe('Card branches over MCP', () => {
       const card = firstJson<CardResult>(
         await owner.callTool('card', {
           action: 'create',
+          no_links: 'e2e fixture',
           scope,
           title: 'Rotate the certificates',
           state: 'active',

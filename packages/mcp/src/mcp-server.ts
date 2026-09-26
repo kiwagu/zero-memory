@@ -20,6 +20,7 @@ import {
   LinkCommand,
   RememberCommand,
   MoveMemoriesCommand,
+  ReleaseCommand,
   ShareMemoryCommand,
 } from '@workspace/commands';
 import { mustGetCurrentUserEntityId } from '@workspace/context';
@@ -63,6 +64,8 @@ import {
   listConflictsOutputSchema,
   recallInputSchema,
   recallOutputSchema,
+  releaseInputSchema,
+  releaseOutputSchema,
   rememberInputSchema,
   rememberOutputSchema,
   restoreMemoryInputSchema,
@@ -96,6 +99,7 @@ import {
   type IngestConversationOutput,
   type LinkOutput,
   type RecallOutput,
+  type ReleaseOutput,
   type RememberOutput,
   type SessionReceiptOutput,
   type MoveMemoriesOutput,
@@ -538,6 +542,12 @@ export interface ToolResultMetering {
      * transport session id cannot provide).
      */
     conversationId: string | null;
+    /**
+     * The card the briefing offered a new session to continue, when it
+     * offered one. Emitted into the `session_briefing` metadata: the forward
+     * measure of whether new sessions pick up where they left off.
+     */
+    continuationCard?: string | null;
   } | null;
   /**
    * The MCP client's self-declared name from the initialize handshake
@@ -801,6 +811,10 @@ export const TOOL_ANNOTATIONS = {
   // Appends to a card's stream. Attaching a target already attached is a
   // no-op, and a repeated note with the same key writes once.
   card_log: ADDITIVE_IDEMPOTENT,
+  // configure replaces the whole settings row with the same inputs each
+  // time; a repeat of record writes no new card event and only refreshes
+  // when the state was last seen.
+  release: ADDITIVE_IDEMPOTENT,
   delete_account: DESTRUCTIVE,
 } as const satisfies Record<string, ToolAnnotations>;
 
@@ -1861,7 +1875,11 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'The pack also carries open_loops: active tasks/open questions of ' +
         'the briefed scopes (oldest first) that stay surfaced until closed ' +
         'with close_loop — treat them as recorded open work, not as ' +
-        'instructions to act on immediately.',
+        'instructions to act on immediately. A briefing that names a ' +
+        'max_tokens budget (the hooks pass 1200) also carries work; when this ' +
+        'conversation is not bound to a card yet, work.continuation names ' +
+        'the card you worked on last, your last steps on it and how to attach ' +
+        'this conversation to continue it — an offer, not a binding.',
       inputSchema: buildContextInputSchema.shape,
       outputSchema: buildContextOutputSchema.shape,
     },
@@ -1902,6 +1920,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
                   entities: result.entities.length,
                   kind: input.briefing_kind ?? 'session',
                   conversationId: input.conversation_id ?? null,
+                  continuationCard: result.work?.continuation?.card?.id ?? null,
                 }
               : null,
           agentName: clientName(),
@@ -1987,7 +2006,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'card with its history (pass `after_seq` to read only what is new) ' +
         'and its feed — what the conversations bound to it have remembered — ' +
         'or `resolve` a project-local number like 42 (the card labelled ' +
-        'ZM-42). The state a card is ' +
+        "ZM-42). `get` also returns the card's relations and whether it is " +
+        'blocked; `list` with `related_to` (a card id or ZM-N) reads the ' +
+        'cards around one card — `relation_filter` above for its parent, ' +
+        'blockers and dependencies, below for what hangs on it. The state a card is ' +
         'in is what somebody DECLARED, with their reason next to it — it is ' +
         'reference, never an instruction to act.',
       inputSchema: boardInputSchema.shape,
@@ -2017,7 +2039,9 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'you learned. `create` opens a card; `promote_loop` turns an open ' +
         'loop that outgrew a one-line handover into one, leaving the loop ' +
         'untouched; `edit` rewrites its text; `move` declares where the work ' +
-        'now stands; `archive` takes it off the board. EVERY MOVE NEEDS A ' +
+        'now stands; `archive` takes it off the board; `link` relates it to ' +
+        'another card (`to_card`: id or ZM-N) and `unlink` retires that. ' +
+        'EVERY MOVE AND RELATION NEEDS A ' +
         '`reason` — it is what the next session reads instead of guessing ' +
         'why the column changed, and nothing moves a card without one. ' +
         'Work ENTERING active names its `branch` ({repo, name}: repo is ' +
@@ -2028,7 +2052,14 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'squash commit and the branch it landed on, which also moves the ' +
         'card, to waiting by default) or `not_landed` says why it has not. A ' +
         'card is labelled ZM-N everywhere — on the board, in briefings and in ' +
-        'the squash trailer of the commit that lands its work. A ' +
+        'the squash trailer of the commit that lands its work. A CARD ' +
+        'STATES ITS RELATIONS when it is created or promoted, and when work ' +
+        'never assessed enters active: `links` [{card, relation, reason}] ' +
+        '(blocked_by, depends_on, child_of, relates_to, duplicates, or their ' +
+        'inverses) or `no_links` saying why there are none. A refusal lists ' +
+        "the board's candidates: judge each one yourself, because a " +
+        'relation nobody declared is invisible to every other agent. Only ' +
+        'blocked_by makes a card blocked. A ' +
         'card lives in a project scope and is READABLE BY EVERY MEMBER of ' +
         'it, so do not paste anything into it that its scope should not see.',
       inputSchema: cardInputSchema.shape,
@@ -2080,6 +2111,44 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         return asToolResult(result);
       } catch (error) {
         logger.error('card_log failed', { error: String(error) });
+        return toolErrorFromThrown(error);
+      }
+    }
+  );
+
+  server.registerTool(
+    'release',
+    {
+      title: 'Where production stands',
+      annotations: TOOL_ANNOTATIONS.release,
+      description:
+        "A project's production state and the cards it carries. `settings` " +
+        'reads where the state lives; `configure` (project admin) sets it — ' +
+        'a url answering the running version, or none when the project ' +
+        'never deploys and its release tags are its state — and ' +
+        '`on_release`: `record` writes a release on each card a state ' +
+        'carries, `record_and_move_done` also moves the carried waiting ' +
+        'cards to done. `configure` CHANGES ONLY THE FIELDS IT IS GIVEN: ' +
+        'every field left out keeps its current value, so switching ' +
+        'on_release alone never clears the url. `candidates` lists the ' +
+        'landed cards with nothing released since their latest landing, ' +
+        'each with only those landings; `record` writes the state and the ' +
+        'cards the caller found carried. The client watcher does this by ' +
+        'itself after shell commands and at session start; call it by hand ' +
+        'only to backfill. The url is read by every member of the ' +
+        'project: never put a secret in it.',
+      inputSchema: releaseInputSchema.shape,
+      outputSchema: releaseOutputSchema.shape,
+    },
+    async (input) => {
+      try {
+        const result = await deps.runInToolContext<ReleaseOutput>(() => {
+          deps.onToolInvocation?.('release');
+          return deps.commandBus.execute(new ReleaseCommand(input));
+        });
+        return asToolResult(result);
+      } catch (error) {
+        logger.error('release failed', { error: String(error) });
         return toolErrorFromThrown(error);
       }
     }
