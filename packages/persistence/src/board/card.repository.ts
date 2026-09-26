@@ -201,7 +201,8 @@ const boardViewSchema = z.object({
         released_in: z.string().nullable().default(null),
         blocked: z.boolean().default(false),
         links: z.number().default(0),
-        // Only with worked_by_me: kept, or zod would drop them on the way.
+        // Kept, or zod would drop them on the way: my_last only with
+        // worked_by_me, past_horizon on every card.
         my_last: z
           .object({
             type: z.string(),

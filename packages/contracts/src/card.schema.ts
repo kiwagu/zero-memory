@@ -681,8 +681,9 @@ export const boardCardSchema = z.object({
   /** With `worked_by_me`: your latest step on the card. Absent otherwise. */
   my_last: cardWorkStepSchema.optional(),
   /**
-   * With `worked_by_me`: your latest step is older than the horizon a
-   * briefing counts, so a new session is no longer offered this card.
+   * The card went quiet past the horizon a briefing counts: by its last
+   * event, or with `worked_by_me` by your own latest step. A board folds such
+   * cards. A server that predates it sends none.
    */
   past_horizon: z.boolean().optional(),
 });
@@ -780,8 +781,8 @@ export const boardInputSchema = z.object({
     .describe(
       'For list: only the cards you worked on, newest own work first, with ' +
         'no horizon, so it also finds work the briefing no longer offers. ' +
-        'Each card then carries `my_last`, your latest step on it, and ' +
-        '`past_horizon`.'
+        'Each card then carries `my_last`, your latest step on it, and its ' +
+        '`past_horizon` counts your work instead of its last event.'
     ),
   limit: z.number().int().positive().max(200).optional(),
 });

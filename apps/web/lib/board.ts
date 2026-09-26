@@ -29,16 +29,6 @@ export type CardState = (typeof CARD_STATES)[number];
 
 const cardStateSchema = z.enum(CARD_STATES);
 
-/** One step of a person's own work on a card, as the store names it. */
-const workStepSchema = z.object({
-  type: z.string(),
-  from_state: cardStateSchema.nullable(),
-  to_state: cardStateSchema.nullable(),
-  text: z.string().nullable(),
-  created_at: z.string(),
-});
-export type WorkStep = z.infer<typeof workStepSchema>;
-
 /** One row of the board listing. */
 export const boardCardSchema = z.object({
   id: z.string(),
@@ -69,10 +59,11 @@ export const boardCardSchema = z.object({
   blocked: z.boolean().default(false),
   /** How many live relations the card has. */
   links: z.number().default(0),
-  /** In the Mine view: your latest step on the card. */
-  my_last: workStepSchema.optional(),
-  /** In the Mine view: a briefing no longer offers this card. */
-  past_horizon: z.boolean().optional(),
+  /**
+   * The card went quiet past the horizon: by its last event, or in the Mine
+   * view by your own last work. Such a card is folded in its column.
+   */
+  past_horizon: z.boolean(),
 });
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
@@ -144,43 +135,25 @@ export function resolveBoardScope(
 export const boardListSchema = z.object({
   cards: z.array(boardCardSchema).default([]),
   totals: z.record(z.string(), z.number()).default({}),
+  /** The horizon in days, named in the column arrows' hints. */
+  horizon_days: z.number(),
 });
 export type BoardList = z.infer<typeof boardListSchema>;
 
 /**
- * What a new session would be offered, per board: the card, your last steps
- * on it, and your last step when it was on another card. `horizon_days` is
- * the window the offer counts, so "nothing in N days" names the real N.
+ * What a new session would be offered to continue, per board: the card whose
+ * tile carries the offer badge, or none.
  */
 export const boardContinuationsSchema = z.object({
-  horizon_days: z.number(),
   boards: z.array(
     z.object({
       scope: z.string(),
       continuation: z.object({
-        card: z
-          .object({
-            id: z.string(),
-            number: z.number(),
-            title: z.string(),
-            state: cardStateSchema,
-            state_reason: z.string().nullable(),
-          })
-          .nullable(),
-        last: z.array(workStepSchema),
-        last_session: z
-          .object({
-            number: z.number(),
-            title: z.string(),
-            type: z.string(),
-            to_state: cardStateSchema.nullable(),
-          })
-          .nullable(),
+        card: z.object({ id: z.string() }).nullable(),
       }),
     })
   ),
 });
-export type BoardContinuations = z.infer<typeof boardContinuationsSchema>;
 
 export const cardSchema = z.object({
   id: z.string(),
@@ -401,17 +374,6 @@ export function cardEventLabel(type: string, t: WebTranslator): string {
     default:
       return type;
   }
-}
-
-/** A step as one phrase: what happened and, for a move, where it went. */
-export function workStepLabel(
-  step: { type: string; to_state: string | null },
-  t: WebTranslator
-): string {
-  const label = cardEventLabel(step.type, t);
-  return step.to_state
-    ? `${label} → ${cardStateLabel(step.to_state, t)}`
-    : label;
 }
 
 /** How a card stands to another, in words, from the reading card's side. */

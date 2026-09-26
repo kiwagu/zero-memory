@@ -2,16 +2,11 @@ import Link from 'next/link';
 
 import { Alert, AlertDescription } from '@workspace/ui/components/alert';
 import { InfoHint } from '@workspace/ui/components/common/info-hint';
-import { BoardCardList } from '@workspace/ui/components/board/board-card-list';
 import {
   BoardColumns,
   type BoardColumn,
   type BoardColumnCard,
 } from '@workspace/ui/components/board/board-columns';
-import {
-  BoardContinuation,
-  type BoardContinuationItem,
-} from '@workspace/ui/components/board/board-continuation';
 
 import { BoardFilter } from '@/components/board-filter.client';
 import { BoardSearch } from '@/components/board-search.client';
@@ -30,7 +25,6 @@ import {
   releasePolicyLabel,
   releaseSettingsSchema,
   resolveBoardScope,
-  workStepLabel,
   type BoardCard,
 } from '@/lib/board';
 import { scopeOptionLabel } from '@workspace/ui/lib/scope-format';
@@ -91,11 +85,11 @@ export default async function BoardPage({
       ? supabase.rpc('release_settings', { p_scope: selected })
       : Promise.resolve({ data: null });
 
-  // The Mine view reads what a new session would be offered, for this board
-  // or, with every board on screen, for each of them.
-  const continuationQuery = mine
-    ? supabase.rpc('board_continuation', { p_scope: selected ?? undefined })
-    : Promise.resolve({ data: null, error: null });
+  // What a new session would be offered to continue, for this board or, with
+  // every board on screen, for each of them: a badge on that card's tile.
+  const continuationQuery = supabase.rpc('board_continuation', {
+    p_scope: selected ?? undefined,
+  });
 
   const [
     { data: releaseData },
@@ -111,150 +105,118 @@ export default async function BoardPage({
     }),
     continuationQuery,
   ]);
-  const continuations = mine
-    ? boardContinuationsSchema.safeParse(continuationData)
-    : null;
-  // The offer as read, or null when it could not be: an unreadable answer is
-  // shown as an error, never as an empty offer.
-  const offer = continuations?.success ? continuations.data : null;
+  const continuations = boardContinuationsSchema.safeParse(continuationData);
+  const offered = new Set(
+    continuations.success
+      ? continuations.data.boards.flatMap(({ continuation }) =>
+          continuation.card ? [continuation.card.id] : []
+        )
+      : []
+  );
   const releaseParsed = releaseSettingsSchema.safeParse(
     (releaseData as { settings?: unknown } | null)?.settings
   );
   const release = releaseParsed.success ? releaseParsed.data : null;
 
   const parsed = data ? boardListSchema.safeParse(data) : null;
-  const board = parsed?.success ? parsed.data : { cards: [], totals: {} };
+  const board = parsed?.success ? parsed.data : null;
+  // A reply that cannot be read is an error on screen, never an empty board or
+  // a board without its offer.
+  const loadError =
+    error !== null ||
+    board === null ||
+    continuationError !== null ||
+    !continuations.success;
 
   const byState = new Map<string, BoardCard[]>(
     CARD_STATES.map((state) => [state, []])
   );
-  for (const card of board.cards) {
+  for (const card of board?.cards ?? []) {
     byState.get(card.state)?.push(card);
   }
 
-  // What every tile says about its card, in the columns and in Mine alike.
-  const commonBadges = (card: BoardCard) => [
-    { label: scopeLabel(card.scope), variant: 'outline' as const },
-    ...(card.released_in
-      ? [
-          {
-            label: t('board.releasedIn', { version: card.released_in }),
-            variant: 'green' as const,
-          },
-        ]
-      : []),
-    ...(card.blocked
-      ? [
-          {
-            label: t('board.blocked'),
-            variant: 'destructive' as const,
-            testId: 'board-card-blocked',
-          },
-        ]
-      : []),
-    ...(card.refs > 0
-      ? [
-          {
-            label: t('board.refsCount', { count: card.refs }),
-            variant: 'ghost' as const,
-          },
-        ]
-      : []),
-  ];
-
-  const columns: BoardColumn[] = CARD_STATES.map((state) => ({
-    key: state,
-    label: cardStateLabel(state, t),
-    variant: cardStateVariant(state),
-    cards: (byState.get(state) ?? []).map((card) => ({
-      id: card.id,
-      href: `/board/${card.id}`,
-      numberLabel: cardLabel(card.number),
-      title: card.title,
-      badges: commonBadges(card),
-      // The last thing that happened, with the reason its author gave — the
-      // whole point of a column at a glance.
-      lastEventLabel: card.last_event
-        ? `${cardEventLabel(card.last_event.type, t)} · ${formatTimestamp(
-            card.last_event.created_at
-          )}`
-        : undefined,
-      reason: card.state_reason?.slice(0, REASON_CHARS),
-    })),
-  }));
-
-  // In the Mine view a tile names the column it would sit in, and its event
-  // line is YOUR latest step, not whatever touched the card last.
-  const mineTiles: BoardColumnCard[] = board.cards.map((card) => ({
+  const tile = (card: BoardCard): BoardColumnCard => ({
     id: card.id,
     href: `/board/${card.id}`,
     numberLabel: cardLabel(card.number),
     title: card.title,
     badges: [
-      {
-        label: cardStateLabel(card.state, t),
-        variant: cardStateVariant(card.state),
-        testId: 'board-card-state',
-      },
-      ...commonBadges(card),
-      ...(card.past_horizon
+      { label: scopeLabel(card.scope), variant: 'outline' as const },
+      ...(card.released_in
         ? [
             {
-              label: t('board.mine.pastHorizon'),
+              label: t('board.releasedIn', { version: card.released_in }),
+              variant: 'green' as const,
+            },
+          ]
+        : []),
+      ...(card.blocked
+        ? [
+            {
+              label: t('board.blocked'),
+              variant: 'destructive' as const,
+              testId: 'board-card-blocked',
+            },
+          ]
+        : []),
+      ...(card.refs > 0
+        ? [
+            {
+              label: t('board.refsCount', { count: card.refs }),
               variant: 'ghost' as const,
-              testId: 'board-card-past-horizon',
+            },
+          ]
+        : []),
+      // The card a new session would pick up: the briefing's offer, seen by
+      // the person rather than only by the agent.
+      ...(offered.has(card.id)
+        ? [
+            {
+              label: t('board.offer.badge'),
+              variant: 'blue' as const,
+              testId: 'board-card-offered',
+              hint: t('board.offer.hint'),
             },
           ]
         : []),
     ],
-    lastEventLabel: card.my_last
-      ? t('board.mine.myStep', {
-          step: workStepLabel(card.my_last, t),
-          at: formatTimestamp(card.my_last.created_at),
-        })
+    // The last thing that happened, with the reason its author gave — the
+    // whole point of a column at a glance.
+    lastEventLabel: card.last_event
+      ? `${cardEventLabel(card.last_event.type, t)} · ${formatTimestamp(
+          card.last_event.created_at
+        )}`
       : undefined,
-    reason: card.my_last?.text?.slice(0, REASON_CHARS) ?? undefined,
-  }));
+    reason: card.state_reason?.slice(0, REASON_CHARS),
+  });
 
-  const continuationItems: BoardContinuationItem[] = (offer?.boards ?? []).map(
-    ({ scope: boardScope, continuation }) => {
-      const offered = continuation.card;
-      const last = continuation.last[0];
-      return {
-        key: boardScope,
-        // Every board on screen: each offer says which board it is for.
-        scopeLabel:
-          value === ALL_BOARDS
-            ? scopeOptionLabel(boardScope, aliasByScope.get(boardScope))
-            : undefined,
-        ...(offered
+  // A card that went quiet past the horizon is folded behind the column's
+  // arrow: by its last event on the board, by your own last work in Mine.
+  const columns: BoardColumn[] = CARD_STATES.map((state) => {
+    const cards = byState.get(state) ?? [];
+    const older = cards.filter((card) => card.past_horizon);
+    const hintArgs = { count: older.length, days: board?.horizon_days ?? 0 };
+    return {
+      key: state,
+      label: cardStateLabel(state, t),
+      variant: cardStateVariant(state),
+      cards: cards.filter((card) => !card.past_horizon).map(tile),
+      older: older.map(tile),
+      olderHints:
+        older.length > 0
           ? {
-              href: `/board/${offered.id}`,
-              numberLabel: cardLabel(offered.number),
-              title: offered.title,
-              stateLabel: cardStateLabel(offered.state, t),
-              stateVariant: cardStateVariant(offered.state),
-              reason: offered.state_reason?.slice(0, REASON_CHARS) ?? undefined,
-              lastStepLabel: last
-                ? t('board.mine.myStep', {
-                    step: workStepLabel(last, t),
-                    at: formatTimestamp(last.created_at),
-                  })
-                : undefined,
-              lastStepText: last?.text ?? undefined,
+              show: t(
+                mine ? 'board.older.showMine' : 'board.older.show',
+                hintArgs
+              ),
+              hide: t(
+                mine ? 'board.older.hideMine' : 'board.older.hide',
+                hintArgs
+              ),
             }
-          : {}),
-        lastSessionLabel: continuation.last_session
-          ? t('board.mine.lastSession', {
-              label: cardLabel(continuation.last_session.number),
-              step: workStepLabel(continuation.last_session, t),
-            })
           : undefined,
-      };
-    }
-  );
-  // A reply that cannot be read is an error on screen, never an empty offer.
-  const mineError = mine && (continuationError !== null || offer === null);
+    };
+  });
 
   return (
     <div className="flex flex-col gap-6 p-4" data-testid="board">
@@ -333,42 +295,20 @@ export default async function BoardPage({
         </div>
       </div>
 
-      {error || mineError ? (
+      {loadError ? (
         <Alert variant="destructive">
           <AlertDescription>{t('board.loadError')}</AlertDescription>
         </Alert>
       ) : null}
 
-      {mine ? (
-        // Nothing but the error when either answer could not be read: an
-        // empty list or "nothing to continue" would claim what is not known.
-        offer && !error ? (
-          <>
-            <BoardContinuation
-              heading={t('board.mine.continue')}
-              items={continuationItems}
-              emptyLabel={t('board.mine.nothingOffered', {
-                days: offer.horizon_days,
-              })}
-              linkComponent={Link}
-            />
-            <BoardCardList
-              cards={mineTiles}
-              emptyLabel={t('board.mine.empty')}
-              linkComponent={Link}
-            />
-          </>
-        ) : null
-      ) : (
+      {board ? (
         <BoardColumns
           columns={columns}
           emptyLabel={t('board.empty')}
           linkComponent={Link}
         />
-      )}
+      ) : null}
 
-      {/* One board on screen listens to that board; every board on screen
-          listens to each of them. */}
       <BoardLive
         scopes={selected ? [selected] : boards.map((board) => board.scope)}
       />

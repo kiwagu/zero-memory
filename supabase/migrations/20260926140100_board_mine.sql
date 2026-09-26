@@ -8,13 +8,15 @@
 --
 -- Affected objects:
 --   - function public.board_list: + p_worked_by_me (dropped and recreated:
---     the signature changes); with it each card carries my_last and
---     past_horizon
+--     the signature changes); with it each card carries my_last. Every card
+--     now says whether it is past the horizon (past_horizon: its last event,
+--     or with p_worked_by_me the caller's last work), and the listing names
+--     the horizon (horizon_days), so a board can fold what went quiet
 --   - function public.board_continuation (new)
 --
 -- Special considerations:
 --   - SECURITY INVOKER: the caller's RLS decides which cards exist for them.
---   - Without p_worked_by_me the listing is exactly what it was.
+--   - Without p_worked_by_me no card carries a step of the caller's.
 
 set search_path = public, extensions;
 
@@ -89,14 +91,12 @@ begin
                'archived_at', c.archived_at,
                'refs', (select count(*) from public.card_refs r
                          where r.card_id = c.id),
-               'last_event', (
-                 select jsonb_build_object(
-                          'type', e.type, 'reason', e.reason,
-                          'created_at', e.created_at)
-                   from public.card_events e
-                  where e.card_id = c.id
-                  order by e.seq desc
-                  limit 1),
+               'last_event', case
+                 when le.created_at is null then null
+                 else jsonb_build_object(
+                        'type', le.type, 'reason', le.reason,
+                        'created_at', le.created_at)
+               end,
                -- The latest production state that carried the card.
                'released_in', (
                  select e.release_version from public.card_events e
@@ -124,22 +124,35 @@ begin
                           where l.invalidated_at is null
                             and (l.src_card_id = c.id or l.dst_card_id = c.id))
              )
-             -- The caller's own latest step, and whether a briefing would
-             -- still count it: only when the caller asked for their cards.
+             -- Whether the card went quiet past the horizon: by its last
+             -- event, anyone's, or among the caller's own cards by the
+             -- caller's last work, the age a briefing counts.
+             || jsonb_build_object(
+                  'past_horizon', coalesce(
+                    case when v_mine then m.created_at else le.created_at end
+                      <= now() - make_interval(days => v_horizon),
+                    false))
+             -- The caller's own latest step: only when they asked for
+             -- their cards.
              || case when v_mine then jsonb_build_object(
                   'my_last', jsonb_build_object(
                     'type', m.type,
                     'from_state', m.from_state,
                     'to_state', m.to_state,
                     'text', m.said,
-                    'created_at', m.created_at),
-                  'past_horizon',
-                    m.created_at <= now() - make_interval(days => v_horizon))
+                    'created_at', m.created_at))
                 else '{}'::jsonb end as card,
              c.updated_at,
              m.created_at as my_at,
              m.seq as my_seq
         from public.cards c
+        left join lateral (
+          select e.type, e.reason, e.created_at
+            from public.card_events e
+           where e.card_id = c.id
+           order by e.seq desc
+           limit 1
+        ) le on true
         left join (
           select distinct on (w.card_id)
                  w.card_id, w.seq, w.type, w.from_state, w.to_state, w.said,
@@ -177,7 +190,8 @@ begin
        group by c.state
     ) t;
 
-  return jsonb_build_object('cards', v_cards, 'totals', v_totals);
+  return jsonb_build_object('cards', v_cards, 'totals', v_totals,
+                            'horizon_days', v_horizon);
 end;
 $$;
 
@@ -187,9 +201,10 @@ comment on function public.board_list(
   'related to one card (p_related_to: id, or label with p_scope) above it, '
   'below it or on any side; optionally only the cards the caller worked on '
   '(p_worked_by_me), newest own work first with no horizon, each with the '
-  'caller''s latest step (my_last) and whether a briefing still counts it '
-  '(past_horizon). Each card says whether it is blocked and how many '
-  'relations it has.';
+  'caller''s latest step (my_last). Each card says whether it is blocked, '
+  'how many relations it has, and whether it went quiet past the horizon '
+  '(past_horizon: its last event, or the caller''s last work with '
+  'p_worked_by_me); the listing names the horizon (horizon_days).';
 
 create function public.board_continuation(p_scope text default null)
 returns jsonb

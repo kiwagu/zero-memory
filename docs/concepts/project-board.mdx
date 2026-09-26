@@ -420,8 +420,9 @@ that entry; it does not bind anything.
 card with `related_to` (its id or label), where `relation_filter` `above`
 keeps its parent, blockers and dependencies and `below` what hangs on it; or
 to the cards you worked on with `worked_by_me`, newest own work first and with
-no horizon, each then carrying `my_last`, your latest step on it, and
-`past_horizon` when a briefing no longer counts that work;
+no horizon, each then carrying `my_last`, your latest step on it. Every listed
+card says with `past_horizon` whether it went quiet past the horizon a briefing
+counts: by its last event, or with `worked_by_me` by your own latest step;
 `get` one card with its attachments, its relations and whether it is blocked,
 a page of its history — where `after_seq` reads only what happened since you
 last looked — and a page of its feed, newest first, continued with the
@@ -492,16 +493,21 @@ reload; with **All boards** a label finds that number on every board, since a
 card's number belongs to its project. When nothing matches, the columns stay
 empty; clearing the field shows the whole board again.
 
-**Mine** beside the filter switches the board to the cards you worked on,
-newest own work first. At the top it shows the card a new session would be
-offered to continue: the same offer a briefing makes, with why the card is
-active and your last step on it, and a line naming your last step when it was
-on another card. With every board on screen there is one such line per board.
-When nothing is offered it says so, and names the window it counted. Below,
-each card shows its state and your latest step instead of its latest event;
-work older than that window stays listed and is marked past the briefing
-horizon. The choice lands in the address like the board and the filter, and
-the view follows the agents live.
+A column folds the cards that went quiet: nothing has happened to them for
+30 days or more, the same horizon a briefing counts. An arrow in the right of
+the column's header says they are there; its hint says how many, and a click
+turns it down and opens them below the rest of the column. A column with no
+such cards has no arrow.
+
+**Mine** beside the filter narrows the same board to the cards you worked on,
+newest own work first in each column. There a card folds by your own last work
+on it, so a card a teammate picked up still folds when you have not touched it
+for 30 days. The choice lands in the address like the board and the filter.
+
+The card a new session would be offered to continue, the same offer a briefing
+makes, carries a **continue here** badge on its tile, on the board and in Mine
+alike; its hint says what it means. The board follows the agents live, so the
+badge moves when your work moves to another card.
 
 Opening a card lifts it over the board in a dialog, so the columns stay in
 view, and the address bar still names the card: the step is navigable,

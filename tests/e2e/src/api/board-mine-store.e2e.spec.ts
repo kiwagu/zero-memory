@@ -207,18 +207,43 @@ test.describe('The cards I worked on', () => {
     ).toBe(true);
   });
 
-  test('without the flag the listing is what it was', async () => {
-    const { db, scope, create, note } = await board('mine-off');
-    const x = await create('Relay keys', 'active');
-    await note(x, 'keys first');
-    const { cards } = await rpc<{ cards: Array<Record<string, unknown>> }>(
-      db,
-      'board_list',
-      { p_scope: scope }
-    );
-    expect(cards).toHaveLength(1);
-    expect(cards[0]).not.toHaveProperty('my_last');
-    expect(cards[0]).not.toHaveProperty('past_horizon');
+  test("without the flag no step of mine rides along, and age is the card's own", async () => {
+    const { db, scope, create, note, backdate } = await board('mine-off');
+    const fresh = await create('Relay keys', 'active');
+    await note(fresh, 'keys first');
+    const stale = await create('Relay rollout', 'idea');
+    backdate(stale, 31);
+    const listed = await rpc<{
+      cards: Array<Record<string, unknown> & { id: string }>;
+      horizon_days: number;
+    }>(db, 'board_list', { p_scope: scope });
+    expect(listed.horizon_days).toBe(30);
+    expect(listed.cards).toHaveLength(2);
+    for (const card of listed.cards) {
+      expect(card).not.toHaveProperty('my_last');
+    }
+    const byId = new Map(listed.cards.map((c) => [c.id, c]));
+    expect(byId.get(fresh.id)!.past_horizon).toBe(false);
+    expect(byId.get(stale.id)!.past_horizon).toBe(true);
+  });
+
+  test('on the regular board a card is as old as its last event, whoever wrote it', async () => {
+    const { seed, scope, create, backdate } = await board('board-age');
+    const card = await create('Relay keys', 'idea');
+    backdate(card, 31);
+    await makeMember(scope, seed.userB.id, 'writer');
+    const dbB = asUser(await passwordGrantToken(seed.userB));
+    const read = async () =>
+      (
+        await rpc<{ cards: Array<{ id: string; past_horizon?: boolean }> }>(
+          dbB,
+          'board_list',
+          { p_scope: scope }
+        )
+      ).cards.find((c) => c.id === card.id)!.past_horizon;
+    expect(await read()).toBe(true);
+    await rpc(dbB, 'card_note', { p_card_id: card.id, p_text: 'still here' });
+    expect(await read()).toBe(false);
   });
 
   test('narrows together with a title, a column and a relation', async () => {

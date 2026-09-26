@@ -1,11 +1,18 @@
 /**
- * The Mine view of the board: the cards I worked on, newest own work first,
- * and the card a new session would be offered, shown to the person, live,
- * without asking an agent. Like the rest of the board, it changes nothing.
+ * The board's columns fold what went quiet past the horizon behind an arrow,
+ * and the Mine view is the same board narrowed to my cards, with the card a
+ * new session would continue marked on its tile. Like the rest of the board,
+ * none of it changes a card.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { admin, psql } from '../helpers/board-store.js';
+import {
+  admin,
+  asUser,
+  makeMember,
+  psql,
+  rpc,
+} from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
@@ -55,65 +62,89 @@ const boardOf = async (tag: string) => {
   return { seed, mcp, scope: made.scope, create, note };
 };
 
-test.describe('The Mine view of the board', () => {
-  test('lists my cards newest first, offers the card to continue, and changes nothing', async ({
+const backdate = (id: string, days: number) =>
+  psql(
+    `update public.card_events set created_at = now() - interval '${days} days'
+      where card_id = '${id}'`
+  );
+
+const column = (page: Page, state: string): Locator =>
+  page.getByTestId(`board-column-${state}`);
+
+/**
+ * Hovers until the hint opens, and answers it: a hover that lands before the
+ * page is interactive is lost, so each try moves away first.
+ */
+const hintOf = async (
+  page: Page,
+  target: Locator,
+  hintTestId: string
+): Promise<Locator> => {
+  const tip = page.getByTestId(hintTestId);
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await target.hover();
+    await expect(tip).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 20_000 });
+  return tip;
+};
+
+test.describe('The board folds what went quiet, and Mine is the same board', () => {
+  test('Mine is the same board narrowed to my cards, with the card to continue marked', async ({
     page,
   }) => {
-    const { seed, mcp, scope, create, note } = await boardOf('list');
+    const { seed, mcp, scope, create, note } = await boardOf('same');
     let keys: CardResult['card'];
     let feed: CardResult['card'];
     try {
       keys = await create('Rotate the relay keys', true);
       feed = await create('Page the memory feed', false);
-      await note(keys.id, 'keys rotate weekly');
       await note(feed.id, 'an idea for later');
+      await note(keys.id, 'keys rotate weekly');
     } finally {
       await mcp.close();
     }
 
     await signInThroughForm(page, seed.userA);
     await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
-    await expect(page.getByTestId('board-columns')).toBeVisible();
+    // The offer shows on the regular board too: it is the reader's own.
+    const offeredTile = column(page, 'active')
+      .getByTestId('board-card')
+      .filter({ hasText: `ZM-${keys.number}` });
+    await expect(offeredTile.getByTestId('board-card-offered')).toBeVisible();
 
     await page.getByTestId('board-mine-toggle').click();
     await expect(page).toHaveURL(/[?&]mine=1(&|$)/);
     await expect(page).toHaveURL(/[?&]scope=/);
-    await expect(page.getByTestId('board-columns')).toHaveCount(0);
-
-    // Newest own work first: the idea I noted last, then the active card.
-    const tiles = page.getByTestId('board-mine-list').getByTestId('board-card');
-    await expect(tiles).toHaveCount(2);
-    await expect(tiles.nth(0)).toContainText(`ZM-${feed.number}`);
-    await expect(tiles.nth(1)).toContainText(`ZM-${keys.number}`);
-    await expect(tiles.nth(1)).toContainText('keys rotate weekly');
-
-    // The offer is the active card; my last step was on the other one.
-    const offer = page.getByTestId('board-continuation');
-    await expect(offer.getByTestId('board-continuation-card')).toContainText(
-      `ZM-${keys.number}`
-    );
+    // The same columns, the same tiles.
+    await expect(page.getByTestId('board-columns')).toBeVisible();
     await expect(
-      offer.getByTestId('board-continuation-last-session')
-    ).toContainText(`ZM-${feed.number}`);
+      column(page, 'idea')
+        .getByTestId('board-card')
+        .filter({
+          hasText: `ZM-${feed.number}`,
+        })
+    ).toHaveCount(1);
+    await expect(offeredTile.getByTestId('board-card-offered')).toBeVisible();
+    await expect(
+      column(page, 'idea').getByTestId('board-card-offered')
+    ).toHaveCount(0);
+    await expect(offeredTile.getByTestId('board-card-offered')).toHaveAttribute(
+      'title',
+      /new session/
+    );
 
-    // Nothing here changes a card.
-    for (const part of ['board-mine-list', 'board-continuation']) {
-      await expect(page.getByTestId(part).getByRole('button')).toHaveCount(0);
-      await expect(page.getByTestId(part).locator('form')).toHaveCount(0);
-    }
-
-    // The view survives a reload; the offer opens the card over the list.
+    // The view survives a reload; a tile opens its card over the board.
     await page.reload();
-    await expect(page.getByTestId('board-mine-list')).toBeVisible();
-    await offer.getByTestId('board-continuation-card').click();
+    await expect(page.getByTestId('board-columns')).toBeVisible();
+    await offeredTile.click();
     await expect(page).toHaveURL(new RegExp(`/board/${keys.id}`));
     await page.keyboard.press('Escape');
-    await expect(page.getByTestId('board-mine-list')).toBeVisible();
+    await expect(page.getByTestId('board-columns')).toBeVisible();
 
-    // Off again: the address forgets it and the columns return.
+    // Off again: the address forgets it.
     await page.getByTestId('board-mine-toggle').click();
     await expect(page).not.toHaveURL(/[?&]mine=/);
-    await expect(page.getByTestId('board-columns')).toBeVisible();
   });
 
   test('keeps the filter beside it', async ({ page }) => {
@@ -131,35 +162,89 @@ test.describe('The Mine view of the board', () => {
     await search.press('Enter');
     await expect(page).toHaveURL(/[?&]mine=1(&|$)/);
     await expect(page).toHaveURL(/[?&]q=memory/);
-    const tiles = page.getByTestId('board-mine-list').getByTestId('board-card');
+    const tiles = page.getByTestId('board-card');
     await expect(tiles).toHaveCount(1);
     await expect(tiles).toContainText('Page the memory feed');
   });
 
-  test('marks work past the horizon, and says when nothing is left to continue', async ({
+  test('a column folds its cards untouched past the horizon behind an arrow in its header', async ({
     page,
   }) => {
-    const { seed, mcp, scope, create, note } = await boardOf('horizon');
+    const { seed, mcp, scope, create } = await boardOf('fold');
     let stale: CardResult['card'];
     try {
-      stale = await create('Rotate the relay keys', true);
-      await note(stale.id, 'long ago');
+      await create('Fresh idea', false);
+      stale = await create('Stale idea', false);
     } finally {
       await mcp.close();
     }
-    psql(
-      `update public.card_events set created_at = now() - interval '31 days'
-        where card_id = '${stale.id}'`
-    );
+    backdate(stale.id, 31);
 
     await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const ideas = column(page, 'idea');
+    await expect(ideas.getByTestId('board-card')).toHaveCount(1);
+    await expect(ideas.getByText('Stale idea')).toHaveCount(0);
+    // No quiet cards, no arrow.
+    await expect(
+      column(page, 'active').getByTestId('board-column-older-toggle')
+    ).toHaveCount(0);
+
+    const arrow = ideas.getByTestId('board-column-older-toggle');
+    await expect(arrow).toHaveAttribute('aria-expanded', 'false');
+    const tip = await hintOf(page, arrow, 'board-column-older-hint');
+    await expect(tip).toContainText('30+ days');
+
+    await arrow.click();
+    await expect(arrow).toHaveAttribute('aria-expanded', 'true');
+    await expect(
+      ideas.getByTestId('board-column-older').getByText('Stale idea')
+    ).toBeVisible();
+    await arrow.click();
+    await expect(ideas.getByText('Stale idea')).toHaveCount(0);
+  });
+
+  test("in Mine the fold follows my own last work, not anyone else's", async ({
+    page,
+  }) => {
+    const { seed, mcp, scope, create } = await boardOf('fold-mine');
+    let card: CardResult['card'];
+    try {
+      card = await create('Handed over long ago', false);
+    } finally {
+      await mcp.close();
+    }
+    backdate(card.id, 31);
+    // Another member touches it now: the board sees it fresh, Mine does not.
+    await makeMember(scope, seed.userB.id, 'writer');
+    await rpc(asUser(await passwordGrantToken(seed.userB)), 'card_note', {
+      p_card_id: card.id,
+      p_text: 'picked up by a teammate',
+    });
+
+    await signInThroughForm(page, seed.userA);
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const ideas = column(page, 'idea');
+    await expect(ideas.getByText('Handed over long ago')).toBeVisible();
+    await expect(ideas.getByTestId('board-column-older-toggle')).toHaveCount(0);
+
     await page.goto(`/board?scope=${encodeURIComponent(scope)}&mine=1`);
-    const tile = page.getByTestId('board-mine-list').getByTestId('board-card');
-    await expect(tile).toHaveCount(1);
-    await expect(tile.getByTestId('board-card-past-horizon')).toBeVisible();
-    await expect(page.getByTestId('board-continuation-empty')).toContainText(
-      '30'
-    );
+    await expect(ideas.getByText('Handed over long ago')).toHaveCount(0);
+    const arrow = ideas.getByTestId('board-column-older-toggle');
+    const tip = await hintOf(page, arrow, 'board-column-older-hint');
+    await expect(tip).toContainText('you last worked on');
+  });
+
+  test('a board that cannot be read is an error, never an empty board', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    await signInThroughForm(page, seed.userA);
+    // Not a scope at all: the store refuses it, so there is nothing to show.
+    await page.goto('/board?scope=not%20a%20scope!&mine=1');
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.getByTestId('board-columns')).toHaveCount(0);
+    await expect(page.getByTestId('board-empty')).toHaveCount(0);
   });
 
   test('the offer follows the agent live', async ({ page }) => {
@@ -170,8 +255,12 @@ test.describe('The Mine view of the board', () => {
 
       await signInThroughForm(page, seed.userA);
       await page.goto(`/board?scope=${encodeURIComponent(scope)}&mine=1`);
-      const card = page.getByTestId('board-continuation-card');
-      await expect(card).toContainText(`ZM-${first.number}`);
+      const badgeOn = (n: number) =>
+        page
+          .getByTestId('board-card')
+          .filter({ hasText: `ZM-${n}` })
+          .getByTestId('board-card-offered');
+      await expect(badgeOn(first.number)).toBeVisible();
 
       // A page starts hearing its board a few seconds after it opens; a
       // change written before that is not delivered. So the agent keeps
@@ -180,8 +269,7 @@ test.describe('The Mine view of the board', () => {
       await expect
         .poll(
           async () => {
-            const text = (await card.textContent()) ?? '';
-            const moved = text.includes(`ZM-${next.number}`);
+            const moved = (await badgeOn(next.number).count()) === 1;
             if (!moved) {
               await note(next.id, 'now the rollout');
             }
@@ -190,19 +278,9 @@ test.describe('The Mine view of the board', () => {
           { intervals: [2000], timeout: 40_000 }
         )
         .toBe(true);
+      await expect(badgeOn(first.number)).toHaveCount(0);
     } finally {
       await mcp.close();
     }
-  });
-
-  test('an offer that cannot be read is an error, never an empty offer', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    await signInThroughForm(page, seed.userA);
-    // Not a scope at all: the store refuses it, so there is no answer to show.
-    await page.goto('/board?scope=not%20a%20scope!&mine=1');
-    await expect(page.getByRole('alert')).toBeVisible();
-    await expect(page.getByTestId('board-continuation')).toHaveCount(0);
   });
 });
