@@ -105,8 +105,8 @@ const board = async (tag: string) => {
 };
 
 test.describe('The cards I worked on', () => {
-  test('lists only the cards I worked on, my newest work first', async () => {
-    const { create, note, mine } = await board('mine-order');
+  test("lists only the cards I worked on, in the board's own order, each with my latest step", async () => {
+    const { db, scope, create, note, mine } = await board('mine-order');
     const x = await create('Relay keys', 'active');
     const y = await create('Relay rollout', 'idea');
     const z = await create('Relay docs', 'idea');
@@ -114,19 +114,29 @@ test.describe('The cards I worked on', () => {
     await note(x, `then everywhere ${'x'.repeat(200)}`);
 
     const cards = await mine();
-    expect(cards.map((c) => c.number)).toEqual([x.number, y.number, z.number]);
-    expect(cards[0]!.my_last!.type).toBe('noted');
-    expect(cards[0]!.my_last!.text!).toHaveLength(120);
-    expect(cards[0]!.my_last!.text!.endsWith('…')).toBe(true);
-    expect(cards[1]!.my_last!.text).toBe('canary first');
-    expect(cards[2]!.my_last).toMatchObject({
+    // The board's order, whatever I touched last: one order everywhere.
+    const { cards: regular } = await rpc<{ cards: Listed[] }>(
+      db,
+      'board_list',
+      {
+        p_scope: scope,
+      }
+    );
+    expect(cards.map((c) => c.number)).toEqual(regular.map((c) => c.number));
+    expect(cards.map((c) => c.number)).toEqual([z.number, y.number, x.number]);
+    const byId = new Map(cards.map((c) => [c.id, c]));
+    expect(byId.get(x.id)!.my_last!.type).toBe('noted');
+    expect(byId.get(x.id)!.my_last!.text!).toHaveLength(120);
+    expect(byId.get(x.id)!.my_last!.text!.endsWith('…')).toBe(true);
+    expect(byId.get(y.id)!.my_last!.text).toBe('canary first');
+    expect(byId.get(z.id)!.my_last).toMatchObject({
       type: 'created',
       to_state: 'idea',
     });
     expect(cards.every((c) => c.past_horizon === false)).toBe(true);
   });
 
-  test("another member's later touch does not lift my card, and their cards are not mine", async () => {
+  test("another member's cards are not mine, and their note is not my step", async () => {
     const { seed, scope, create, note, mine } = await board('mine-others');
     const x = await create('Relay keys', 'active');
     const y = await create('Relay rollout', 'idea');
@@ -143,9 +153,13 @@ test.describe('The cards I worked on', () => {
     });
 
     const cards = await mine();
-    expect(cards.map((c) => c.number)).toEqual([x.number, y.number]);
+    expect(cards.map((c) => c.number).sort()).toEqual(
+      [x.number, y.number].sort()
+    );
     expect(cards.some((c) => c.id === theirs.card.id)).toBe(false);
-    expect(cards[1]!.my_last!.text).toBe('mine, earlier');
+    expect(cards.find((c) => c.id === y.id)!.my_last!.text).toBe(
+      'mine, earlier'
+    );
   });
 
   test('a release and the move it makes are not my work', async () => {
@@ -168,9 +182,10 @@ test.describe('The cards I worked on', () => {
     expect(released.moved).toEqual([shipped.id]);
 
     const cards = await mine();
-    expect(cards.map((c) => c.number)).toEqual([x.number, shipped.number]);
-    expect(cards[1]!.state).toBe('done');
-    expect(cards[1]!.my_last!.type).toBe('created');
+    const done = cards.find((c) => c.id === shipped.id)!;
+    expect(done.state).toBe('done');
+    expect(done.my_last!.type).toBe('created');
+    expect(cards.find((c) => c.id === x.id)!.my_last!.text).toBe('keys first');
   });
 
   test('work past the horizon stays listed and is marked', async () => {
@@ -182,10 +197,10 @@ test.describe('The cards I worked on', () => {
     backdate(recent, 29);
 
     const cards = await mine();
-    expect(cards.map((c) => c.number)).toEqual([recent.number, stale.number]);
-    expect(cards[0]!.past_horizon).toBe(false);
-    expect(cards[1]!.past_horizon).toBe(true);
-    expect(cards[1]!.my_last!.text).toBe('long ago');
+    const byId = new Map(cards.map((c) => [c.id, c]));
+    expect(byId.get(recent.id)!.past_horizon).toBe(false);
+    expect(byId.get(stale.id)!.past_horizon).toBe(true);
+    expect(byId.get(stale.id)!.my_last!.text).toBe('long ago');
   });
 
   test('the horizon mark follows the setting', async () => {

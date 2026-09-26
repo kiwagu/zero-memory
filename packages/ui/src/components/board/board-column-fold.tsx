@@ -27,6 +27,7 @@ function BoardColumnFold({
   older,
   olderCount,
   olderHints,
+  olderCaption,
 }: {
   columnKey: string;
   /** The state pill that names the column. */
@@ -37,6 +38,8 @@ function BoardColumnFold({
   olderCount: number;
   /** What the arrow says, folded and open: how many, and why. */
   olderHints?: { show: string; hide: string };
+  /** What the divider above the opened cards says: why they were folded. */
+  olderCaption?: string;
 }) {
   const [open, setOpen] = React.useState(false);
   const hint = open ? olderHints?.hide : olderHints?.show;
@@ -81,7 +84,17 @@ function BoardColumnFold({
       {recent}
 
       {open && older ? (
+        // What the arrow opened is set apart from the rest of the column: a
+        // divider that says why these cards were folded, and dimmed tiles.
         <div className="flex flex-col gap-3" data-testid="board-column-older">
+          <div
+            className="text-muted-foreground flex items-center gap-2 text-xs"
+            data-testid="board-column-older-divider"
+          >
+            <span className="border-border flex-1 border-t border-dashed" />
+            <span className="shrink-0">{olderCaption}</span>
+            <span className="border-border flex-1 border-t border-dashed" />
+          </div>
           {older}
         </div>
       ) : null}

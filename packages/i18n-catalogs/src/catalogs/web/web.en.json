@@ -584,6 +584,8 @@
   "board.older.hide": "Hide the {count} untouched for {days}+ days",
   "board.older.showMine": "{count} you last worked on {days}+ days ago. Show them",
   "board.older.hideMine": "Hide the {count} you last worked on {days}+ days ago",
+  "board.older.caption": "untouched for {days}+ days",
+  "board.older.captionMine": "your last work {days}+ days ago",
   "markdown.image": "image",
   "panels.previous": "Previous panel",
   "panels.next": "Next panel",

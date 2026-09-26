@@ -1,9 +1,9 @@
 -- Migration: the cards a person worked on, and what a new session is offered
 --
 -- Purpose:
---   The board lists, on request, the cards the caller worked on, newest own
---   work first and with no horizon, so work the briefing no longer offers
---   stays reachable. A reader of the dashboard sees the continuation offer a
+--   The board lists, on request, the cards the caller worked on, in the
+--   board's own order and with no horizon, so work the briefing no longer
+--   offers stays reachable. A reader of the dashboard sees the continuation offer a
 --   new session would get, without asking an agent.
 --
 -- Affected objects:
@@ -74,10 +74,9 @@ begin
     end if;
   end if;
 
-  select coalesce(jsonb_agg(listed.card
-                            order by listed.my_at desc nulls last,
-                                     listed.my_seq desc nulls last,
-                                     listed.updated_at desc),
+  -- One order everywhere, the board's own: the caller's cards are listed
+  -- like the board lists them.
+  select coalesce(jsonb_agg(listed.card order by listed.updated_at desc),
                   '[]'::jsonb)
     into v_cards
     from (
@@ -142,9 +141,7 @@ begin
                     'text', m.said,
                     'created_at', m.created_at))
                 else '{}'::jsonb end as card,
-             c.updated_at,
-             m.created_at as my_at,
-             m.seq as my_seq
+             c.updated_at
         from public.cards c
         left join lateral (
           select e.type, e.reason, e.created_at
@@ -174,8 +171,7 @@ begin
                                    v_related, coalesce(p_relation, 'any')) r))
          -- Only the cards with the caller's own work, when asked for.
          and (not v_mine or m.card_id is not null)
-       order by m.created_at desc nulls last, m.seq desc nulls last,
-                c.updated_at desc
+       order by c.updated_at desc
        limit v_limit
     ) listed;
 
@@ -200,7 +196,7 @@ comment on function public.board_list(
   'List cards, optionally one scope, state or query; optionally only the cards '
   'related to one card (p_related_to: id, or label with p_scope) above it, '
   'below it or on any side; optionally only the cards the caller worked on '
-  '(p_worked_by_me), newest own work first with no horizon, each with the '
+  '(p_worked_by_me), in the same order and with no horizon, each with the '
   'caller''s latest step (my_last). Each card says whether it is blocked, '
   'how many relations it has, and whether it went quiet past the horizon '
   '(past_horizon: its last event, or the caller''s last work with '

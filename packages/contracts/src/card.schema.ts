@@ -779,8 +779,8 @@ export const boardInputSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      'For list: only the cards you worked on, newest own work first, with ' +
-        'no horizon, so it also finds work the briefing no longer offers. ' +
+      "For list: only the cards you worked on, in the board's own order, " +
+        'with no horizon, so it also finds work the briefing no longer offers. ' +
         'Each card then carries `my_last`, your latest step on it, and its ' +
         '`past_horizon` counts your work instead of its last event.'
     ),

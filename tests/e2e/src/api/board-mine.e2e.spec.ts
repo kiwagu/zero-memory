@@ -60,12 +60,13 @@ test('the board tool lists the cards I worked on, with my latest step', async ()
     });
     expect(mine.isError ?? false).toBe(false);
     const cards = firstJson<{ cards: Listed[] }>(mine).cards;
-    expect(cards.map((c) => c.number)).toEqual([older.number, newer.number]);
-    expect(cards[0]!.my_last).toMatchObject({
+    // The board's own order: the card made last comes first.
+    expect(cards.map((c) => c.number)).toEqual([newer.number, older.number]);
+    expect(cards[1]!.my_last).toMatchObject({
       type: 'noted',
       text: 'keys first',
     });
-    expect(cards[0]!.past_horizon).toBe(false);
+    expect(cards[1]!.past_horizon).toBe(false);
 
     const plain = firstJson<{ cards: Listed[] }>(
       await mcp.callTool('board', { action: 'list', scope: made.scope })

@@ -197,9 +197,20 @@ test.describe('The board folds what went quiet, and Mine is the same board', () 
 
     await arrow.click();
     await expect(arrow).toHaveAttribute('aria-expanded', 'true');
+    // What the arrow opened is set apart: a divider that says why, and
+    // dimmed tiles below it.
+    const opened = ideas.getByTestId('board-column-older');
+    await expect(opened.getByText('Stale idea')).toBeVisible();
     await expect(
-      ideas.getByTestId('board-column-older').getByText('Stale idea')
-    ).toBeVisible();
+      opened.getByTestId('board-column-older-divider')
+    ).toContainText('30+ days');
+    await expect(opened.getByTestId('board-card')).toHaveAttribute(
+      'data-quiet',
+      'true'
+    );
+    await expect(
+      ideas.getByTestId('board-card').filter({ hasText: 'Fresh idea' })
+    ).not.toHaveAttribute('data-quiet', 'true');
     await arrow.click();
     await expect(ideas.getByText('Stale idea')).toHaveCount(0);
   });

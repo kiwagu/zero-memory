@@ -29,6 +29,8 @@ interface BoardColumn {
   older?: BoardColumnCard[];
   /** What the arrow says, folded and open. Required when `older` has cards. */
   olderHints?: { show: string; hide: string };
+  /** What the divider above the opened cards says: why they were folded. */
+  olderCaption?: string;
 }
 
 interface BoardColumnsProps {
@@ -82,11 +84,13 @@ function BoardColumns({
               <BoardCardTile
                 key={card.id}
                 card={card}
+                quiet
                 linkComponent={LinkComponent}
               />
             ))}
             olderCount={column.older?.length ?? 0}
             olderHints={column.olderHints}
+            olderCaption={column.olderCaption}
           />
         ))}
       </div>

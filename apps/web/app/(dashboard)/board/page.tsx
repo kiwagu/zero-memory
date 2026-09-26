@@ -204,6 +204,10 @@ export default async function BoardPage({
       variant: cardStateVariant(state),
       cards: cards.filter((card) => !card.past_horizon).map(tile),
       older: older.map(tile),
+      olderCaption: t(
+        mine ? 'board.older.captionMine' : 'board.older.caption',
+        hintArgs
+      ),
       olderHints:
         older.length > 0
           ? {

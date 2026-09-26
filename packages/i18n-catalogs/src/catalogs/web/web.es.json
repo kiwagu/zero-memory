@@ -584,6 +584,8 @@
   "board.older.hide": "Ocultar las {count} sin cambios desde hace {days}+ días",
   "board.older.showMine": "{count} en las que trabajaste por última vez hace {days}+ días. Mostrarlas",
   "board.older.hideMine": "Ocultar las {count} en las que trabajaste por última vez hace {days}+ días",
+  "board.older.caption": "sin cambios desde hace {days}+ días",
+  "board.older.captionMine": "tu último trabajo hace {days}+ días",
   "markdown.image": "imagen",
   "panels.previous": "Panel anterior",
   "panels.next": "Panel siguiente",

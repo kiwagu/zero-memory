@@ -419,8 +419,8 @@ that entry; it does not bind anything.
 `ZM-42`, `#42` and `42` also find card 42 — or to the cards related to one
 card with `related_to` (its id or label), where `relation_filter` `above`
 keeps its parent, blockers and dependencies and `below` what hangs on it; or
-to the cards you worked on with `worked_by_me`, newest own work first and with
-no horizon, each then carrying `my_last`, your latest step on it. Every listed
+to the cards you worked on with `worked_by_me`, in the board's own order and
+with no horizon, each then carrying `my_last`, your latest step on it. Every listed
 card says with `past_horizon` whether it went quiet past the horizon a briefing
 counts: by its last event, or with `worked_by_me` by your own latest step;
 `get` one card with its attachments, its relations and whether it is blocked,
@@ -496,11 +496,12 @@ empty; clearing the field shows the whole board again.
 A column folds the cards that went quiet: nothing has happened to them for
 30 days or more, the same horizon a briefing counts. An arrow in the right of
 the column's header says they are there; its hint says how many, and a click
-turns it down and opens them below the rest of the column. A column with no
-such cards has no arrow.
+turns it down and opens them below the rest of the column, dimmed, under a
+divider that says why they were folded. A column with no such cards has no
+arrow.
 
-**Mine** beside the filter narrows the same board to the cards you worked on,
-newest own work first in each column. There a card folds by your own last work
+**Mine** beside the filter narrows the same board, in the same order, to the
+cards you worked on. There a card folds by your own last work
 on it, so a card a teammate picked up still folds when you have not touched it
 for 30 days. The choice lands in the address like the board and the filter.
 

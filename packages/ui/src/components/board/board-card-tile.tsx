@@ -28,9 +28,12 @@ interface BoardColumnCard {
 
 function BoardCardTile({
   card,
+  quiet = false,
   linkComponent: LinkComponent = 'a',
 }: {
   card: BoardColumnCard;
+  /** A card that went quiet past the horizon: drawn dimmed. */
+  quiet?: boolean;
   /** Client-router link injected by the app; plain <a> by default. */
   linkComponent?: React.ElementType;
 }) {
@@ -38,9 +41,16 @@ function BoardCardTile({
     <LinkComponent
       href={card.href}
       data-testid="board-card"
+      data-quiet={quiet ? 'true' : undefined}
       className="focus-visible:ring-ring rounded-lg focus-visible:ring-2 focus-visible:outline-none"
     >
-      <Card className="hover:border-ring transition-colors">
+      <Card
+        className={
+          quiet
+            ? 'bg-muted/60 hover:border-ring transition-colors'
+            : 'hover:border-ring transition-colors'
+        }
+      >
         <CardContent className="flex flex-col gap-2 p-3">
           <div className="flex items-baseline gap-2">
             {/* The label never breaks: `ZM-12` split after its hyphen reads
