@@ -31,6 +31,13 @@ Components live under `src/components`, global styles under
   - `board/card-links` — how a card stands to other cards, grouped by side
     (above, below, related, duplicates), each relation named from the card's
     side with its reason; display-only, the other card's label opens it.
+  - `board/board-card-tile` — one card as the board shows it; the columns
+    and the list of your own cards draw the same tile.
+  - `board/board-card-list` — cards as one list in the order given, for the
+    cards you worked on, newest first; an empty list says so.
+  - `board/board-continuation` — the card a new session would be offered to
+    continue, with your last step, one line per board; says so when nothing
+    is offered.
   - `panels/panel-strip` — the controlled strip of panels a dialog opens:
     equal-width panels in one snapping row, paged by arrows at the screen
     edges, each with its source and its ×.

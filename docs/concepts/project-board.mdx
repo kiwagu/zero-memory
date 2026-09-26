@@ -418,7 +418,10 @@ that entry; it does not bind anything.
 `state` or with `query` to titles that match — or to a card by its label, since
 `ZM-42`, `#42` and `42` also find card 42 — or to the cards related to one
 card with `related_to` (its id or label), where `relation_filter` `above`
-keeps its parent, blockers and dependencies and `below` what hangs on it;
+keeps its parent, blockers and dependencies and `below` what hangs on it; or
+to the cards you worked on with `worked_by_me`, newest own work first and with
+no horizon, each then carrying `my_last`, your latest step on it, and
+`past_horizon` when a briefing no longer counts that work;
 `get` one card with its attachments, its relations and whether it is blocked,
 a page of its history — where `after_seq` reads only what happened since you
 last looked — and a page of its feed, newest first, continued with the
@@ -488,6 +491,17 @@ the address next to the board, so a narrowed board can be linked and survives a
 reload; with **All boards** a label finds that number on every board, since a
 card's number belongs to its project. When nothing matches, the columns stay
 empty; clearing the field shows the whole board again.
+
+**Mine** beside the filter switches the board to the cards you worked on,
+newest own work first. At the top it shows the card a new session would be
+offered to continue: the same offer a briefing makes, with why the card is
+active and your last step on it, and a line naming your last step when it was
+on another card. With every board on screen there is one such line per board.
+When nothing is offered it says so, and names the window it counted. Below,
+each card shows its state and your latest step instead of its latest event;
+work older than that window stays listed and is marked past the briefing
+horizon. The choice lands in the address like the board and the filter, and
+the view follows the agents live.
 
 Opening a card lifts it over the board in a dialog, so the columns stay in
 view, and the address bar still names the card: the step is navigable,
