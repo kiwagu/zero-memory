@@ -565,6 +565,20 @@ export const briefingAboveSchema = z.object({
 });
 
 /**
+ * One step of a person's own work on a card, as the board and the briefing
+ * name it: what happened, between which states, what they said, and when.
+ */
+export const cardWorkStepSchema = z.object({
+  type: cardEventTypeSchema,
+  from_state: cardStateSchema.nullable(),
+  to_state: cardStateSchema.nullable(),
+  /** The reason or note, clipped to one short line by the server. */
+  text: z.string().nullable(),
+  created_at: z.string(),
+});
+export type CardWorkStep = z.infer<typeof cardWorkStepSchema>;
+
+/**
  * Where a new session left off: the card its caller worked on last (still
  * active, within the horizon), the caller's two newest entries on it, and
  * the caller's last step when it was on another card. Sent only when the
@@ -578,16 +592,7 @@ export const briefingContinuationSchema = z.object({
       above: z.array(briefingAboveSchema).optional(),
     })
     .nullable(),
-  last: z.array(
-    z.object({
-      type: cardEventTypeSchema,
-      from_state: cardStateSchema.nullable(),
-      to_state: cardStateSchema.nullable(),
-      /** The reason or note, clipped to one short line by the server. */
-      text: z.string().nullable(),
-      created_at: z.string(),
-    })
-  ),
+  last: z.array(cardWorkStepSchema),
   last_session: z
     .object({
       number: z.number().int().positive(),
@@ -673,6 +678,14 @@ export const boardCardSchema = z.object({
   blocked: z.boolean().default(false),
   /** How many live relations it has with cards the reader can see. */
   links: z.number().int().nonnegative().default(0),
+  /** With `worked_by_me`: your latest step on the card. Absent otherwise. */
+  my_last: cardWorkStepSchema.optional(),
+  /**
+   * The card went quiet past the horizon a briefing counts: by its last
+   * event, or with `worked_by_me` by your own latest step. A board folds such
+   * cards. A server that predates it sends none.
+   */
+  past_horizon: z.boolean().optional(),
 });
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
@@ -761,6 +774,15 @@ export const boardInputSchema = z.object({
       'With related_to: above = its parent, blockers and what it depends ' +
         'on; below = its children, what it blocks and what depends on it; ' +
         'any (default) = every relation.'
+    ),
+  worked_by_me: z
+    .boolean()
+    .optional()
+    .describe(
+      "For list: only the cards you worked on, in the board's own order, " +
+        'with no horizon, so it also finds work the briefing no longer offers. ' +
+        'Each card then carries `my_last`, your latest step on it, and its ' +
+        '`past_horizon` counts your work instead of its last event.'
     ),
   limit: z.number().int().positive().max(200).optional(),
 });

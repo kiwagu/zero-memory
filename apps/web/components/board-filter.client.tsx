@@ -1,11 +1,11 @@
 'use client';
 
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-
 import {
   FacetSelect,
   type FacetOption,
 } from '@workspace/ui/components/common/facet-select';
+
+import { useSearchParamSetter } from '@/components/use-search-param.client';
 
 /**
  * Which board is on screen.
@@ -27,9 +27,7 @@ export function BoardFilter({
   value: string;
   testId?: string;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const setParam = useSearchParamSetter();
 
   return (
     <FacetSelect
@@ -40,17 +38,7 @@ export function BoardFilter({
       // As wide as the board's own name, never wider: a truncated scope reads
       // as nothing at all, and a full-width control eats the title's row.
       width="content"
-      onChange={(next) => {
-        const params = new URLSearchParams(searchParams.toString());
-        if (next) {
-          params.set('scope', next);
-        } else {
-          params.delete('scope');
-        }
-        const query = params.toString();
-        router.push(query ? `${pathname}?${query}` : pathname);
-        router.refresh();
-      }}
+      onChange={(next) => setParam('scope', next || null)}
     />
   );
 }

@@ -124,6 +124,8 @@ export interface ListBoardParams {
   relatedTo?: string | null;
   /** Which side of `relatedTo`: above, below, or any. */
   relation?: 'any' | 'above' | 'below' | null;
+  /** Only the cards the caller worked on, newest own work first. */
+  workedByMe?: boolean;
 }
 
 /** A card plus whether the call changed anything or replayed an earlier one. */

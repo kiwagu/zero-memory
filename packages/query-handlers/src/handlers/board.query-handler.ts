@@ -77,6 +77,7 @@ export class BoardQueryHandler implements IQueryHandler<
           limit: query.limit,
           relatedTo: query.related_to,
           relation: query.relation_filter,
+          workedByMe: query.worked_by_me,
         });
         if (listed.isErr()) {
           const cardFailure = listed.unwrapErr();

@@ -5,14 +5,18 @@ import { InfoHint } from '@workspace/ui/components/common/info-hint';
 import {
   BoardColumns,
   type BoardColumn,
+  type BoardColumnCard,
 } from '@workspace/ui/components/board/board-columns';
 
 import { BoardFilter } from '@/components/board-filter.client';
 import { BoardSearch } from '@/components/board-search.client';
 import { BoardLive } from '@/components/board-live.client';
+import { BoardMineToggle } from '@/components/board-mine-toggle.client';
 import {
   ALL_BOARDS,
   CARD_STATES,
+  readableBoard,
+  boardContinuationsSchema,
   boardListSchema,
   boardScopesSchema,
   cardEventLabel,
@@ -39,9 +43,11 @@ const REASON_CHARS = 120;
 export default async function BoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ scope?: string; q?: string }>;
+  searchParams: Promise<{ scope?: string; q?: string; mine?: string }>;
 }) {
-  const { scope, q } = await searchParams;
+  const { scope, q, mine: mineParam } = await searchParams;
+  // The cards I worked on, newest own work first, instead of the columns.
+  const mine = mineParam === '1';
   // A label (ZM-42, #42, 42) or a piece of a title; the store decides which.
   const query = q?.trim() ?? '';
   const { t } = await getRequestMessages();
@@ -80,76 +86,143 @@ export default async function BoardPage({
       ? supabase.rpc('release_settings', { p_scope: selected })
       : Promise.resolve({ data: null });
 
-  const [{ data: releaseData }, { data, error }] = await Promise.all([
+  // What a new session would be offered to continue, for this board or, with
+  // every board on screen, for each of them: a badge on that card's tile.
+  const continuationQuery = supabase.rpc('board_continuation', {
+    p_scope: selected ?? undefined,
+  });
+
+  const [
+    { data: releaseData },
+    { data, error },
+    { data: continuationData, error: continuationError },
+  ] = await Promise.all([
     releaseQuery,
     supabase.rpc('board_list', {
       p_scope: selected ?? undefined,
       p_query: query || undefined,
       p_limit: BOARD_LIMIT,
+      p_worked_by_me: mine,
     }),
+    continuationQuery,
   ]);
+  const continuations = boardContinuationsSchema.safeParse(continuationData);
+  const offered = new Set(
+    continuations.success
+      ? continuations.data.boards.flatMap(({ continuation }) =>
+          continuation.card ? [continuation.card.id] : []
+        )
+      : []
+  );
   const releaseParsed = releaseSettingsSchema.safeParse(
     (releaseData as { settings?: unknown } | null)?.settings
   );
   const release = releaseParsed.success ? releaseParsed.data : null;
 
   const parsed = data ? boardListSchema.safeParse(data) : null;
-  const board = parsed?.success ? parsed.data : { cards: [], totals: {} };
+  // A reply that cannot be read is an error on screen, never an empty board or
+  // a board without its offer.
+  const board = readableBoard(
+    error === null && parsed?.success
+      ? { ok: true, value: parsed.data }
+      : { ok: false },
+    { ok: continuationError === null && continuations.success }
+  );
+  const loadError = board === null;
 
   const byState = new Map<string, BoardCard[]>(
     CARD_STATES.map((state) => [state, []])
   );
-  for (const card of board.cards) {
+  for (const card of board?.cards ?? []) {
     byState.get(card.state)?.push(card);
   }
 
-  const columns: BoardColumn[] = CARD_STATES.map((state) => ({
-    key: state,
-    label: cardStateLabel(state, t),
-    variant: cardStateVariant(state),
-    cards: (byState.get(state) ?? []).map((card) => ({
-      id: card.id,
-      href: `/board/${card.id}`,
-      numberLabel: cardLabel(card.number),
-      title: card.title,
-      badges: [
-        { label: scopeLabel(card.scope), variant: 'outline' as const },
-        ...(card.released_in
-          ? [
-              {
-                label: t('board.releasedIn', { version: card.released_in }),
-                variant: 'green' as const,
-              },
-            ]
-          : []),
-        ...(card.blocked
-          ? [
-              {
-                label: t('board.blocked'),
-                variant: 'destructive' as const,
-                testId: 'board-card-blocked',
-              },
-            ]
-          : []),
-        ...(card.refs > 0
-          ? [
-              {
-                label: t('board.refsCount', { count: card.refs }),
-                variant: 'ghost' as const,
-              },
-            ]
-          : []),
-      ],
-      // The last thing that happened, with the reason its author gave — the
-      // whole point of a column at a glance.
-      lastEventLabel: card.last_event
-        ? `${cardEventLabel(card.last_event.type, t)} · ${formatTimestamp(
-            card.last_event.created_at
-          )}`
-        : undefined,
-      reason: card.state_reason?.slice(0, REASON_CHARS),
-    })),
-  }));
+  const tile = (card: BoardCard): BoardColumnCard => ({
+    id: card.id,
+    href: `/board/${card.id}`,
+    numberLabel: cardLabel(card.number),
+    title: card.title,
+    badges: [
+      { label: scopeLabel(card.scope), variant: 'outline' as const },
+      ...(card.released_in
+        ? [
+            {
+              label: t('board.releasedIn', { version: card.released_in }),
+              variant: 'green' as const,
+            },
+          ]
+        : []),
+      ...(card.blocked
+        ? [
+            {
+              label: t('board.blocked'),
+              variant: 'destructive' as const,
+              testId: 'board-card-blocked',
+            },
+          ]
+        : []),
+      ...(card.refs > 0
+        ? [
+            {
+              label: t('board.refsCount', { count: card.refs }),
+              variant: 'ghost' as const,
+            },
+          ]
+        : []),
+      // The card a new session would pick up: the briefing's offer, seen by
+      // the person rather than only by the agent.
+      ...(offered.has(card.id)
+        ? [
+            {
+              label: t('board.offer.badge'),
+              variant: 'blue' as const,
+              testId: 'board-card-offered',
+              hint: t('board.offer.hint'),
+            },
+          ]
+        : []),
+    ],
+    // The last thing that happened, with the reason its author gave — the
+    // whole point of a column at a glance.
+    lastEventLabel: card.last_event
+      ? `${cardEventLabel(card.last_event.type, t)} · ${formatTimestamp(
+          card.last_event.created_at
+        )}`
+      : undefined,
+    reason: card.state_reason?.slice(0, REASON_CHARS),
+  });
+
+  // A card that went quiet past the horizon is folded behind the column's
+  // arrow: by its last event on the board, by your own last work in Mine.
+  const columns: BoardColumn[] = CARD_STATES.map((state) => {
+    const cards = byState.get(state) ?? [];
+    const older = cards.filter((card) => card.past_horizon);
+    const hintArgs = { count: older.length, days: board?.horizon_days ?? 0 };
+    return {
+      key: state,
+      label: cardStateLabel(state, t),
+      variant: cardStateVariant(state),
+      cards: cards.filter((card) => !card.past_horizon).map(tile),
+      older: older.map(tile),
+      olderCaption: t(
+        mine ? 'board.older.captionMine' : 'board.older.caption',
+        hintArgs
+      ),
+      olderHints:
+        older.length > 0
+          ? {
+              show: t(
+                mine ? 'board.older.showMine' : 'board.older.show',
+                hintArgs
+              ),
+              hide: t(
+                mine ? 'board.older.hideMine' : 'board.older.hide',
+                hintArgs
+              ),
+            }
+          : undefined,
+    };
+  });
 
   return (
     <div className="flex flex-col gap-6 p-4" data-testid="board">
@@ -184,6 +257,7 @@ export default async function BoardPage({
             </InfoHint>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
+            <BoardMineToggle checked={mine} label={t('board.mine.toggle')} />
             <BoardSearch
               value={query}
               placeholder={t('board.search.placeholder')}
@@ -227,20 +301,20 @@ export default async function BoardPage({
         </div>
       </div>
 
-      {error ? (
+      {loadError ? (
         <Alert variant="destructive">
           <AlertDescription>{t('board.loadError')}</AlertDescription>
         </Alert>
       ) : null}
 
-      <BoardColumns
-        columns={columns}
-        emptyLabel={t('board.empty')}
-        linkComponent={Link}
-      />
+      {board ? (
+        <BoardColumns
+          columns={columns}
+          emptyLabel={t('board.empty')}
+          linkComponent={Link}
+        />
+      ) : null}
 
-      {/* One board on screen listens to that board; every board on screen
-          listens to each of them. */}
       <BoardLive
         scopes={selected ? [selected] : boards.map((board) => board.scope)}
       />

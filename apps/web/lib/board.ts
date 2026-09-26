@@ -59,6 +59,11 @@ export const boardCardSchema = z.object({
   blocked: z.boolean().default(false),
   /** How many live relations the card has. */
   links: z.number().default(0),
+  /**
+   * The card went quiet past the horizon: by its last event, or in the Mine
+   * view by your own last work. Such a card is folded in its column.
+   */
+  past_horizon: z.boolean(),
 });
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
@@ -110,6 +115,19 @@ export function boardChannelChanges(
   };
 }
 
+/**
+ * The board to show, or null when it must not show at all: both the listing
+ * and the offer have to be read. A board without its offer would read as "no
+ * card to continue", and a listing that failed would read as an empty board;
+ * either is shown as an error instead.
+ */
+export function readableBoard<T>(
+  listing: { ok: true; value: T } | { ok: false },
+  offer: { ok: boolean }
+): T | null {
+  return listing.ok && offer.ok ? listing.value : null;
+}
+
 export const ALL_BOARDS = 'all';
 
 export function resolveBoardScope(
@@ -130,8 +148,25 @@ export function resolveBoardScope(
 export const boardListSchema = z.object({
   cards: z.array(boardCardSchema).default([]),
   totals: z.record(z.string(), z.number()).default({}),
+  /** The horizon in days, named in the column arrows' hints. */
+  horizon_days: z.number(),
 });
 export type BoardList = z.infer<typeof boardListSchema>;
+
+/**
+ * What a new session would be offered to continue, per board: the card whose
+ * tile carries the offer badge, or none.
+ */
+export const boardContinuationsSchema = z.object({
+  boards: z.array(
+    z.object({
+      scope: z.string(),
+      continuation: z.object({
+        card: z.object({ id: z.string() }).nullable(),
+      }),
+    })
+  ),
+});
 
 export const cardSchema = z.object({
   id: z.string(),

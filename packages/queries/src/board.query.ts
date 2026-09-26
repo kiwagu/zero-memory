@@ -19,6 +19,7 @@ export class BoardQuery extends Query implements BoardInput {
   public readonly limit?: number;
   public readonly related_to?: string;
   public readonly relation_filter?: BoardInput['relation_filter'];
+  public readonly worked_by_me?: boolean;
 
   constructor(props: QueryProps<BoardInput>) {
     super();
@@ -34,5 +35,6 @@ export class BoardQuery extends Query implements BoardInput {
     this.limit = props.limit;
     this.related_to = props.related_to;
     this.relation_filter = props.relation_filter;
+    this.worked_by_me = props.worked_by_me;
   }
 }

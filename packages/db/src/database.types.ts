@@ -1984,6 +1984,7 @@ export type Database = {
         Args: { p_role: string; p_scope: unknown; p_user: string };
         Returns: undefined;
       };
+      board_continuation: { Args: { p_scope?: string }; Returns: Json };
       board_list: {
         Args: {
           p_include_archived?: boolean;
@@ -1993,6 +1994,7 @@ export type Database = {
           p_relation?: string;
           p_scope?: string;
           p_state?: string;
+          p_worked_by_me?: boolean;
         };
         Returns: Json;
       };

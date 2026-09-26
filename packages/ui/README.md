@@ -31,6 +31,10 @@ Components live under `src/components`, global styles under
   - `board/card-links` — how a card stands to other cards, grouped by side
     (above, below, related, duplicates), each relation named from the card's
     side with its reason; display-only, the other card's label opens it.
+  - `board/board-card-tile` — one card as the board shows it.
+  - `board/board-column-fold` — one column with the cards past the horizon
+    folded behind an arrow in the right of its header; the arrow shows only
+    when there are such cards, and its hint says how many and why.
   - `panels/panel-strip` — the controlled strip of panels a dialog opens:
     equal-width panels in one snapping row, paged by arrows at the screen
     edges, each with its source and its ×.
