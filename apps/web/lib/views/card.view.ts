@@ -65,6 +65,8 @@ export interface CardViewData {
   id: string;
   /** `ZM-<number> <title>` — what names the card in a panel. */
   title: string;
+  /** The board the card lives on, whose channel its page listens to. */
+  scope: string;
   detail: CardDetailData;
 }
 
@@ -294,6 +296,7 @@ export async function loadCardView(id: string): Promise<CardViewData | null> {
   return {
     id: card.id,
     title: `${cardLabel(card.number)} ${card.title}`,
+    scope: card.scope,
     detail: {
       numberLabel: cardLabel(card.number),
       link: {

@@ -239,7 +239,11 @@ export default async function BoardPage({
         linkComponent={Link}
       />
 
-      <BoardLive />
+      {/* One board on screen listens to that board; every board on screen
+          listens to each of them. */}
+      <BoardLive
+        scopes={selected ? [selected] : boards.map((board) => board.scope)}
+      />
     </div>
   );
 }

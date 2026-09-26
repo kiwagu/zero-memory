@@ -43,7 +43,7 @@ export async function CardView({
           </Link>
         ) : null
       }
-      footer={variant === 'page' ? <BoardLive /> : null}
+      footer={variant === 'page' ? <BoardLive scopes={[view.scope]} /> : null}
     />
   );
 }

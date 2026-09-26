@@ -85,6 +85,31 @@ export const boardScopesSchema = z.array(boardScopeSchema);
  * — and quietly showing a different board instead would tell the reader the
  * address they are looking at holds something it does not.
  */
+/**
+ * The boards a page listens to, named the same way whatever order they arrive
+ * in: activity reorders the boards on every refresh, and that alone must not
+ * make the page leave and rejoin their channels.
+ */
+export function boardScopesKey(scopes: string[]): string {
+  return [...new Set(scopes)].sort().join('\n');
+}
+
+/**
+ * Which board channels to join and which to leave, going from the boards a
+ * page listens to now to the boards it should listen to. A board that stays
+ * keeps its channel, so no change is missed while a channel rejoins.
+ */
+export function boardChannelChanges(
+  current: ReadonlySet<string>,
+  wanted: string[]
+): { join: string[]; leave: string[] } {
+  const next = new Set(wanted);
+  return {
+    join: [...next].filter((scope) => !current.has(scope)).sort(),
+    leave: [...current].filter((scope) => !next.has(scope)).sort(),
+  };
+}
+
 export const ALL_BOARDS = 'all';
 
 export function resolveBoardScope(
