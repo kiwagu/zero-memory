@@ -1,3 +1,3 @@
-# zero-memory-watcher — version 0.34.1 (binary = plugin manifest) — built from git d664155-dirty (feature/board-mine)  commit=d66415555d2fe24a3513cacf49e00e3dfcdb7f1c-dirty
+# zero-memory-watcher — version 0.34.0 (binary = plugin manifest) — built from git 9d7bcd4-dirty (feature/session-continuation)  commit=9d7bcd4dcfa1cb584b227986863d01373783e39f-dirty
 # build-env: bun=1.3.14  target=linux-x64  arch=x86_64  os=Ubuntu 26.04.1 LTS
-d1a97a5501f202a513f417d649127dbf490b0efcc0c3189bddf6d6ae9375e242  zero-memory-watcher
+70e6b8cf0fd74834dd566049d210415f6f721cb825077847e23730ea8c9a8591  zero-memory-watcher
