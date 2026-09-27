@@ -109,6 +109,7 @@ const makeScopeAccess = (options?: {
     .mockResolvedValue(
       options?.createScopeError ? Err(options.createScopeError) : Ok(undefined)
     ),
+  listMemberProjects: vi.fn().mockResolvedValue(Ok([])),
 });
 
 const makeBindings = (

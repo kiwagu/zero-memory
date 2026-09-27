@@ -7,6 +7,7 @@ import {
 } from '@workspace/contracts';
 import { queryHandler, type IQueryHandler } from '@workspace/cqrs';
 import { inject, singleton } from '@workspace/di';
+import { ProjectTargetService } from '@workspace/memory';
 import { BoardQuery } from '@workspace/queries';
 
 const required = (field: string, action: string): never => {
@@ -21,7 +22,11 @@ export class BoardQueryHandler implements IQueryHandler<
   BoardQuery,
   BoardOutput
 > {
-  constructor(@inject(CardService) private readonly service: CardService) {}
+  constructor(
+    @inject(CardService) private readonly service: CardService,
+    @inject(ProjectTargetService)
+    private readonly target: ProjectTargetService
+  ) {}
 
   async execute(query: BoardQuery): Promise<BoardOutput> {
     switch (query.action ?? 'list') {
@@ -57,7 +62,7 @@ export class BoardQueryHandler implements IQueryHandler<
       }
       case 'resolve': {
         const resolved = await this.service.resolveCard(
-          query.scope ?? required('scope', 'resolve a number'),
+          (await this.#board(query)) ?? required('scope', 'resolve a number'),
           query.number ?? required('number', 'resolve a number')
         );
         if (resolved.isErr()) {
@@ -70,7 +75,7 @@ export class BoardQueryHandler implements IQueryHandler<
       }
       default: {
         const listed = await this.service.listBoard({
-          scope: query.scope,
+          scope: (await this.#board(query)) ?? undefined,
           state: query.state,
           query: query.query,
           includeArchived: query.include_archived,
@@ -92,5 +97,21 @@ export class BoardQueryHandler implements IQueryHandler<
         });
       }
     }
+  }
+
+  /**
+   * The board a read names: its scope, else the project its hint names. A
+   * read naming neither keeps the default it always had.
+   */
+  async #board(query: BoardQuery): Promise<string | null> {
+    const board = await this.target.resolveBoard({
+      scope: query.scope,
+      projectHint: query.project_hint,
+      sessionDefault: false,
+    });
+    if (board.isErr()) {
+      throw new FailureError(board.unwrapErr());
+    }
+    return board.unwrap();
   }
 }

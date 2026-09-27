@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeProjectHint } from './project-hint.vo.js';
+import { isProjectNameHint, normalizeProjectHint } from './project-hint.vo.js';
 
 describe('normalizeProjectHint', () => {
   it('normalizes https git remotes', () => {
@@ -43,5 +43,35 @@ describe('normalizeProjectHint', () => {
     expect(normalizeProjectHint('   ').isErr()).toBe(true);
     expect(normalizeProjectHint('/').isErr()).toBe(true);
     expect(normalizeProjectHint('https://github.com/').isErr()).toBe(true);
+  });
+});
+
+describe('isProjectNameHint', () => {
+  it('treats a bare name in any spelling as a name', () => {
+    for (const hint of ['zero-memory', 'Zero Memory', 'zero_memory', 'ZM']) {
+      expect(isProjectNameHint(hint)).toBe(true);
+    }
+  });
+
+  it('treats a scope path as a name, since it carries no slash', () => {
+    expect(isProjectNameHint('proj.usr_abc.zero_memory')).toBe(true);
+  });
+
+  it('treats paths and git remotes as machine identities', () => {
+    for (const hint of [
+      '/srv/src/acme-app',
+      'src/acme-app',
+      '~/src/acme-app',
+      'C:\\src\\acme-app',
+      'https://github.com/acme/acme-app.git',
+      'git@github.com:acme/acme-app.git',
+      'ssh://git@github.com/acme/acme-app.git',
+    ]) {
+      expect(isProjectNameHint(hint)).toBe(false);
+    }
+  });
+
+  it('does not call an empty hint a name', () => {
+    expect(isProjectNameHint('   ')).toBe(false);
   });
 });

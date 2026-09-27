@@ -728,7 +728,20 @@ export const boardInputSchema = z.object({
   scope: z
     .string()
     .optional()
-    .describe('Which project board. Required for list and resolve.'),
+    .describe(
+      'Which project board, as its scope id. For list and resolve, pass it ' +
+        'or `project_hint`.'
+    ),
+  project_hint: z
+    .string()
+    .optional()
+    .describe(
+      'The project whose board you mean, named the way you know it: its ' +
+        'name in any spelling ("zero-memory", "Zero Memory", "ZM"), a repo ' +
+        "root path or a git remote. It reads another project's board without " +
+        'its scope id and never moves your session. A name that fits none of ' +
+        'your projects, or several, is refused with the list of them.'
+    ),
   state: cardStateSchema.optional().describe('Show only this column.'),
   query: z
     .string()
@@ -843,7 +856,24 @@ export const cardInputSchema = z.object({
   card_id: cardIdSchema
     .optional()
     .describe('Required for edit, move and archive.'),
-  scope: z.string().optional().describe('Which project board. For create.'),
+  scope: z
+    .string()
+    .optional()
+    .describe(
+      'Which project board, as its scope id. For create; with neither it ' +
+        "nor `project_hint`, the card goes to your session's project."
+    ),
+  project_hint: z
+    .string()
+    .optional()
+    .describe(
+      'For create: the project whose board the card belongs on, named the ' +
+        'way you know it — its name in any spelling ("zero-memory", "Zero ' +
+        'Memory", "ZM"), a repo root path or a git remote. File work you ' +
+        "found for ANOTHER project on that project's board; your session " +
+        'stays where it is. A name never creates a project: one that fits ' +
+        'none of yours, or several, is refused with the list of them.'
+    ),
   loop_id: memoryIdSchema
     .optional()
     .describe('The task or open-question memory to promote.'),

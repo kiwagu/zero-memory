@@ -21,6 +21,7 @@ export class CardCommand extends Command implements CardInput {
   public readonly action: CardInput['action'];
   public readonly card_id?: CardInput['card_id'];
   public readonly scope?: string;
+  public readonly project_hint?: string;
   public readonly loop_id?: MemoryId;
   public readonly title?: string;
   public readonly body?: string;
@@ -46,6 +47,7 @@ export class CardCommand extends Command implements CardInput {
     this.action = props.action;
     this.card_id = props.card_id;
     this.scope = props.scope;
+    this.project_hint = props.project_hint;
     this.loop_id = props.loop_id;
     this.title = props.title;
     this.body = props.body;

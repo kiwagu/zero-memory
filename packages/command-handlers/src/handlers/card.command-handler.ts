@@ -8,6 +8,7 @@ import {
 } from '@workspace/contracts';
 import { commandHandler, type ICommandHandler } from '@workspace/cqrs';
 import { inject, singleton } from '@workspace/di';
+import { ProjectTargetService } from '@workspace/memory';
 import type { Result } from 'oxide.ts';
 import type { CardFailure, CardWrite } from '@workspace/board';
 
@@ -27,7 +28,11 @@ export class CardCommandHandler implements ICommandHandler<
   CardCommand,
   CardOutput
 > {
-  constructor(@inject(CardService) private readonly service: CardService) {}
+  constructor(
+    @inject(CardService) private readonly service: CardService,
+    @inject(ProjectTargetService)
+    private readonly target: ProjectTargetService
+  ) {}
 
   async execute(command: CardCommand): Promise<CardOutput> {
     const authorship = {
@@ -41,7 +46,7 @@ export class CardCommandHandler implements ICommandHandler<
       case 'create':
         result = await this.service.createCard({
           ...authorship,
-          scope: command.scope ?? missing('scope', 'open'),
+          scope: await this.#board(command),
           title: command.title ?? missing('title', 'open'),
           body: command.body,
           state: command.state,
@@ -138,5 +143,22 @@ export class CardCommandHandler implements ICommandHandler<
       replayed: write.replayed,
       candidates: write.candidates ?? [],
     };
+  }
+
+  /**
+   * The board a new card goes on: its scope, else the project its hint
+   * names, else the session's project — never a project a name made up.
+   */
+  async #board(command: CardCommand): Promise<string> {
+    const board = await this.target.resolveBoard({
+      scope: command.scope,
+      projectHint: command.project_hint,
+      thread: command.thread,
+      sessionDefault: true,
+    });
+    if (board.isErr()) {
+      throw new FailureError(board.unwrapErr());
+    }
+    return board.unwrap() ?? missing('scope', 'open');
   }
 }

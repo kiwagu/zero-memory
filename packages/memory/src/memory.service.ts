@@ -26,7 +26,6 @@ import {
   PORTABLE_LAYER_MIN_CONFIDENCE,
   PORTABLE_SUBJECT_KINDS,
   portableLayerDeniedMessage,
-  projectHintUnresolvableMessage,
   scopeTargetRequiredMessage,
   type RecallInput,
   type RecallOutput,
@@ -108,6 +107,7 @@ import { injectUserRulesReader } from './user-rules.reader.provider.js';
 import type { IUserRulesReader } from './user-rules.reader.js';
 import { injectScopeAccessService } from './scope-access.provider.js';
 import type { IScopeAccessService } from './scope-access.service.js';
+import { projectHintMissMessage } from './project-name.utils.js';
 import { ScopeRoutingService } from './scope-routing.service.js';
 import {
   SUPERSEDE_APERTURE_CAP,
@@ -293,15 +293,20 @@ export class MemoryService {
     // An explicit scope wins outright, so the hint is not even resolved:
     // resolving it would bind (and possibly bootstrap) a project the caller
     // never asked to write into.
-    const hintScopePath =
+    // A hint naming no project is refused with the projects the caller can
+    // retry with: a typed name never creates one.
+    const hintTarget =
       !input.scope && input.project_hint
-        ? await this.#resolveWriteHintScope(input.project_hint)
+        ? await this.scopeRouting.resolveProjectTarget(input.project_hint)
         : null;
-    if (!input.scope && input.project_hint && !hintScopePath) {
+    if (hintTarget?.isErr()) {
       return Err(
-        validationFailed(projectHintUnresolvableMessage(input.project_hint))
+        validationFailed(
+          projectHintMissMessage(input.project_hint!, hintTarget.unwrapErr())
+        )
       );
     }
+    const hintScopePath = hintTarget ? hintTarget.unwrap().path : null;
     // The project this write defaults to, if any — named separately from the
     // target because the portable-layer gate below needs somewhere to send a
     // write whose portability is not confirmed.
@@ -990,7 +995,19 @@ export class MemoryService {
       }
       scope = await this.#canonicalWriteScope(scopeResult.unwrap(), byUserId);
     } else {
-      scope = await this.scopeRouting.resolveProjectScope(input.project_hint!);
+      const target = await this.scopeRouting.resolveProjectTarget(
+        input.project_hint!
+      );
+      if (target.isErr()) {
+        return Err(
+          validationFailed(
+            projectHintMissMessage(input.project_hint!, target.unwrapErr(), {
+              portableLayers: false,
+            })
+          )
+        );
+      }
+      scope = target.unwrap();
     }
     // A move is a project-convergence gesture: refusing a personal target
     // keeps an unroutable hint from silently "moving" memories to where they
@@ -1404,21 +1421,6 @@ export class MemoryService {
   }
 
   /**
-   * Resolves a write's `project_hint` to a PROJECT scope, or null when it does
-   * not name one. Routing degrades an unusable hint to the personal scope
-   * (fail-safe for the read side, where a narrowed set is worse than a wide
-   * one); on the write side that degradation IS the silent mis-routing this
-   * path exists to prevent, so it is reported as "unresolvable" and refused.
-   */
-  async #resolveWriteHintScope(projectHint: string): Promise<string | null> {
-    const resolved = await this.scopeRouting.resolveProjectScope(projectHint);
-    if (!resolved.isShareable) {
-      return null;
-    }
-    return resolved.path;
-  }
-
-  /**
    * Decides whether a write may leave the project for the owner's portable
    * (`core`) or personal layer.
    *
@@ -1540,6 +1542,22 @@ export class MemoryService {
       });
       return undefined;
     }
+  }
+
+  /**
+   * The project this conversation works in, as a scope-less `remember` would
+   * find it: the thread the caller echoed, else the transport session's
+   * thread, else the session default. Undefined when the session has none.
+   *
+   * Public for work written outside this service — a card opened without
+   * naming its board lands where a memory written in the same breath would.
+   */
+  async sessionProjectScope(
+    thread: string | undefined
+  ): Promise<string | undefined> {
+    const live =
+      (await this.#liveThread(thread)) ?? (await this.#transportThread());
+    return this.#threadScopePath(live) ?? this.context.getDefaultScope();
   }
 
   /**

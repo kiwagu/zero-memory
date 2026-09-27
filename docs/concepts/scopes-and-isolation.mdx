@@ -91,6 +91,34 @@ treated as absent, because the read must not narrow below the no-hint
 behavior; on a **write** it is refused, because a write aimed at a project
 that does not resolve must not land anywhere else.
 
+### A project named by name
+
+A path or a git remote is what a machine reports about a repository, and the
+first time one is seen it sets that repository's project up. A **name** —
+anything without a slash that is not a git remote — is what a person or an
+agent typed, and it only ever points at a project you already belong to. It
+is matched deterministically:
+
+1. the project's scope path itself;
+2. the project's name or its dashboard alias, compared lowercased with every
+   space, `_` and `-` removed — `zero-memory`, `zero_memory`, `Zero Memory`
+   and `ZeroMemory` are one name;
+3. only when nothing matched by spelling, the initials of a multi-word name —
+   `ZM` for `zero_memory` — when exactly one of your projects has them.
+
+Projects shared with you count, so a teammate's project can be named too,
+but never at the expense of your own: when the first test that matches finds
+only projects other people own while one of yours fits the name by any test,
+both are offered instead. Another owner controls their project's name and
+alias, and a nickname they choose must not carry your work into a scope they
+read.
+
+A name that fits one project routes there. One that fits several, or none, is
+never guessed at and never creates a project: a write naming it is refused
+with the projects you can pick from, and a read treats it as absent. A
+misspelt name therefore cannot open an empty project nobody reads. To start a
+new project, name its repository by path or git remote.
+
 A briefing pinned by a hint answers with the resolved `project_scope`, and
 the server stashes it as the session's project: the session's later
 scope-less writes land in the project. Clients persist the resolved scope
@@ -128,7 +156,8 @@ instead of the human wording:
 - `scope_target_required:` — the write named no target and the session has
   no attached project;
 - `project_hint_unresolvable:` — the write named a `project_hint` that
-  resolves to nothing.
+  resolves to nothing, or a project name that fits none or several of your
+  projects; the message lists the projects to retry with.
 
 Everything after the prefix is for humans and may be reworded in any
 release; the prefixes are API. Every `remember`, `recall`, and

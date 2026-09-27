@@ -332,8 +332,12 @@ move a card is told they may not, rather than that the card does not exist.
 Cards are written and read through three MCP tools. An agent calls them; there
 is nothing to type into a terminal.
 
-`card` opens and steers one piece of work. Opening one names the board it goes
-on — the project's scope, which `build_context` reports as `project_scope`:
+`card` opens and steers one piece of work. A new card goes on the board of the
+project the session works in, so opening one names nothing more; to put it on a
+particular board, pass `scope` — the project's scope, which `build_context`
+reports as `project_scope` — or `project_hint`, as
+[Filing work on another project's board](#filing-work-on-another-projects-board)
+describes:
 
 ```json
 {
@@ -414,7 +418,8 @@ it, so attach it once when you start working on a card:
 The `thread` field every write accepts only records which conversation wrote
 that entry; it does not bind anything.
 
-`board` is the read side: `list` a scope's cards, narrowed to one column with
+`board` is the read side: `list` a board's cards — named by `scope` or
+`project_hint` — narrowed to one column with
 `state` or with `query` to titles that match — or to a card by its label, since
 `ZM-42`, `#42` and `42` also find card 42 — or to the cards related to one
 card with `related_to` (its id or label), where `relation_filter` `above`
@@ -432,6 +437,36 @@ last looked — and a page of its feed, newest first, continued with the
 `create`, `promote_loop`, `move`, `land`, `link`, `note` and `attach` accept an
 `idempotency_key`: a retry with the same key after a timeout returns the first
 result instead of writing a second row.
+
+### Filing work on another project's board
+
+Work found in one project often belongs to another: a fix a dependency needs,
+noticed only while using it. The agent files it where it belongs by naming
+that project in `project_hint`, the way a person would name it — in any
+spelling, or by the repository's path or git remote:
+
+```json
+{
+  "action": "create",
+  "project_hint": "zero-memory",
+  "title": "Accept a project name in any spelling",
+  "no_links": "Found while working on the importer; nothing on this board relates yet."
+}
+```
+
+`zero-memory`, `Zero Memory`, `zero_memory`, `ZeroMemory` and, when no other
+project shares the initials, `ZM` all name the same project; the rules are in
+[A project named by name](/docs/concepts/scopes-and-isolation#a-project-named-by-name).
+A name only ever points at a project you already belong to: one that fits
+none, or several, is refused with the list of your projects, and nothing is
+created for it. `board` `list` and `resolve` take `project_hint` the same way,
+so the other board can be read without its scope.
+
+Filing there never moves the session. The conversation stays in its own
+project, and so do its later scope-less memories and cards; the card's
+history records which conversation opened it. A card on the session's own
+board relates to the new one by its id (`crd_…`) — a `ZM-N` label names a
+card of the card's own board.
 
 ## The board at the start of a session
 

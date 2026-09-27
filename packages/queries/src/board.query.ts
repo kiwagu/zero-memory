@@ -9,6 +9,7 @@ import { Query, type QueryProps } from '@workspace/domain';
 export class BoardQuery extends Query implements BoardInput {
   public readonly action: BoardInput['action'];
   public readonly scope?: string;
+  public readonly project_hint?: string;
   public readonly state?: CardState;
   public readonly query?: string;
   public readonly include_archived?: boolean;
@@ -25,6 +26,7 @@ export class BoardQuery extends Query implements BoardInput {
     super();
     this.action = props.action;
     this.scope = props.scope;
+    this.project_hint = props.project_hint;
     this.state = props.state;
     this.query = props.query;
     this.include_archived = props.include_archived;

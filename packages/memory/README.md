@@ -56,12 +56,25 @@ adapters live in `@workspace/persistence` and are bound in the app host.
   with `anchor_hint`, because only its author can name a subject the graph
   has never seen. No model runs on this path: the judgement it needs is the
   writing agent's, which already has it in context.
-- `ScopeRoutingService` — routes a project identity (git remote, path,
-  project name) to the scope its auto-populated memories belong in. On the
-  READ side an unusable hint degrades to the personal scope (a narrowed read
-  set is worse than a wide one); on the WRITE side that degradation is
-  reported as unresolvable, because writing on a guess is the failure this
-  package refuses.
+- `ScopeRoutingService` — routes a project identity to the scope its
+  memories belong in. A git remote or a path is what a machine reports about
+  a repository, and the first sight of one sets its project up. A project
+  NAME is what a person or an agent typed, and it only ever points at a
+  project the caller already belongs to (`project-name.utils.ts`): the same
+  spelling key entities resolve by, the dashboard alias under that key, then
+  initials when exactly one project has them — `zero-memory`, `Zero Memory`,
+  `ZeroMemory` and `ZM` are one project. Projects shared with the caller
+  count too, but another owner's name or alias never wins over one of the
+  caller's own projects that fits the same name — both are offered. A name
+  never creates a project or a binding. On the READ side an unusable hint degrades to the personal scope (a
+  narrowed read set is worse than a wide one); on the WRITE side
+  (`resolveProjectTarget`) it is refused with the caller's projects to pick
+  from, because writing on a guess is the failure this package refuses.
+- `ProjectTargetService` — which project board a card call means: its
+  `scope`, else the project its `project_hint` names, else, for a new card,
+  the session's project (`MemoryService.sessionProjectScope`, found the way a
+  scope-less `remember` finds it). Naming another project's board never moves
+  the session.
 - Write targeting — `remember` needs a target: an explicit `scope` (`"core"`
   for portable knowledge, `"personal"` for facts about the owner), a
   `project_hint`, or a session default attached by an earlier hint-pinned
@@ -71,7 +84,9 @@ adapters live in `@workspace/persistence` and are bound in the app host.
   (`ProjectAttachmentRegistry`, in-process and lossy) so the retry is
   deterministic — a suggestion the caller must echo, never an attachment.
 - `ScopeAccessService` port — fail-closed write-access checks before
-  mutating an aggregate (RLS stays the enforcement boundary in the DB).
+  mutating an aggregate (RLS stays the enforcement boundary in the DB), and
+  the caller's accepted project memberships with their aliases, which is all
+  a project name may point at.
 
 ## Ports and DI tokens
 
