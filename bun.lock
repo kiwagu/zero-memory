@@ -51,7 +51,7 @@
     },
     "apps/server": {
       "name": "server",
-      "version": "0.28.0",
+      "version": "0.29.0",
       "bin": {
         "zero-memory-mcp": "./src/mcp-stdio.ts",
       },
@@ -93,7 +93,7 @@
     },
     "apps/watcher": {
       "name": "watcher",
-      "version": "0.34.0",
+      "version": "0.34.2",
       "bin": {
         "zero-memory-watcher": "./src/index.ts",
       },
@@ -121,7 +121,7 @@
     },
     "apps/web": {
       "name": "web",
-      "version": "0.28.0",
+      "version": "0.29.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "catalog:",
         "@supabase/ssr": "catalog:",
