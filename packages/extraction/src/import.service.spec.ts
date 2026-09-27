@@ -80,6 +80,7 @@ const makeGraphService = (): IGraphService => ({
 const makeScopeAccess = (): IScopeAccessService => ({
   canWrite: vi.fn().mockResolvedValue(true),
   createScope: vi.fn().mockResolvedValue(Ok(undefined)),
+  listMemberProjects: vi.fn().mockResolvedValue(Ok([])),
 });
 
 const makeBindings = (): IProjectBindingRepository => ({
@@ -213,6 +214,22 @@ describe('ImportService', () => {
     expect(result.unwrapErr().code).toBe('validation_failed');
     expect(result.unwrapErr().message).toMatch(/project_hint is required/);
     expect(ingestLog.hashes.has('h-nohint')).toBe(false); // released
+  });
+
+  it('refuses a project import whose name fits none of the projects, instead of going personal', async () => {
+    const { service, remember, ingestLog } = makeService();
+    const input = baseInput({
+      target: 'project',
+      project_hint: 'zero-memry',
+      source_hash: 'h-typo',
+    });
+
+    const result = await service.import(input);
+
+    expect(result.isErr()).toBe(true);
+    expect(result.unwrapErr().message).toMatch(/^project_hint_unresolvable:/);
+    expect(remember).not.toHaveBeenCalled();
+    expect(ingestLog.hashes.has('h-typo')).toBe(false); // released
   });
 
   it('releases the claim when the underlying write fails', async () => {

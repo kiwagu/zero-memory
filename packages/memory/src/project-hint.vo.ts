@@ -83,3 +83,21 @@ export const normalizeProjectHint = (
     ? normalizeGitRemote(trimmed)
     : normalizePath(trimmed);
 };
+
+/**
+ * Whether a hint is a project NAME a person or an agent typed ("zero-memory",
+ * "Zero Memory", "ZM") rather than an identity a machine reported (a path or a
+ * git remote). The two are routed differently: a path or a remote seen for
+ * the first time is how a new repository gets its project, while a name only
+ * ever points at a project that already exists — a misspelt name that minted
+ * a scope would open an empty phantom project nobody reads.
+ */
+export const isProjectNameHint = (raw: string): boolean => {
+  const trimmed = raw.trim();
+  return (
+    trimmed.length > 0 &&
+    !GIT_REMOTE_PATTERN.test(trimmed) &&
+    !/[/\\]/.test(trimmed) &&
+    !trimmed.startsWith('~')
+  );
+};

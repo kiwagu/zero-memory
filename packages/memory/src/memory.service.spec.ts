@@ -37,6 +37,7 @@ import { MemoryService } from './memory.service.js';
 import type { IProjectBindingRepository } from './project-binding.repository.js';
 import type { IBriefingWorkReader } from './briefing-work.reader.js';
 import type { IProjectRulesReader } from './project-rules.reader.js';
+import type { ProjectCandidate } from './project-name.utils.js';
 import type { IScopeAccessService } from './scope-access.service.js';
 import { ScopeRoutingService } from './scope-routing.service.js';
 import type { ITranslator } from './translator.js';
@@ -99,9 +100,13 @@ const makeEntityRepository = (
   listForMemories: vi.fn().mockResolvedValue(new Map()),
 });
 
-const makeScopeAccess = (canWrite = true): IScopeAccessService => ({
+const makeScopeAccess = (
+  canWrite = true,
+  projects: ProjectCandidate[] = []
+): IScopeAccessService => ({
   canWrite: vi.fn().mockResolvedValue(canWrite),
   createScope: vi.fn().mockResolvedValue(Ok(undefined)),
+  listMemberProjects: vi.fn().mockResolvedValue(Ok(projects)),
 });
 
 const makeProjectBindings = (): IProjectBindingRepository => ({
@@ -557,6 +562,52 @@ describe('MemoryService.remember', () => {
 
     expect(result.isErr()).toBe(true);
     expect(result.unwrapErr().code).toBe('validation_failed');
+    expect(repository.insert).not.toHaveBeenCalled();
+  });
+
+  it('routes a project NAME in any spelling to the existing project', async () => {
+    const zeroMemory = Scope.project(USER_ENTITY_ID, 'zero_memory');
+    const scopeAccess = makeScopeAccess(true, [
+      { scope: zeroMemory, alias: null, own: true },
+      {
+        scope: Scope.project(USER_ENTITY_ID, 'harbor'),
+        alias: null,
+        own: true,
+      },
+    ]);
+    const { service, repository } = makeService({ scopeAccess });
+
+    for (const hint of ['ZM', 'Zero Memory', 'ZeroMemory']) {
+      const result = await service.remember({
+        content: `a fact filed under ${hint}`,
+        project_hint: hint,
+      });
+      expect(result.isOk()).toBe(true);
+    }
+
+    for (const [fragment] of vi.mocked(repository.insert).mock.calls) {
+      expect(fragment.scope.path).toBe(zeroMemory.path);
+    }
+    expect(scopeAccess.createScope).not.toHaveBeenCalled();
+  });
+
+  it('refuses a project NAME that fits none of the projects, listing them, and creates nothing', async () => {
+    const zeroMemory = Scope.project(USER_ENTITY_ID, 'zero_memory');
+    const scopeAccess = makeScopeAccess(true, [
+      { scope: zeroMemory, alias: null, own: true },
+    ]);
+    const { service, repository } = makeService({ scopeAccess });
+
+    const result = await service.remember({
+      content: 'a fact aimed at a misspelt project',
+      project_hint: 'zero-memry',
+    });
+
+    expect(result.isErr()).toBe(true);
+    expect(result.unwrapErr().message).toContain(
+      `zero_memory (${zeroMemory.path})`
+    );
+    expect(scopeAccess.createScope).not.toHaveBeenCalled();
     expect(repository.insert).not.toHaveBeenCalled();
   });
 
@@ -2816,5 +2867,34 @@ describe('MemoryService.buildContext — the work summary', () => {
     });
 
     expect(briefingWork.forBriefing).not.toHaveBeenCalled();
+  });
+});
+
+describe('MemoryService.sessionProjectScope', () => {
+  it('answers with the project of the thread the caller echoed', async () => {
+    const threads = makeThreads();
+    const project = Scope.project(USER_ENTITY_ID, 'zero_memory');
+    vi.mocked(threads.findByToken).mockResolvedValue(
+      Some({ token: TEST_THREAD, conversationId: 'conv-1', scope: project })
+    );
+    const { service } = makeService({ threads });
+
+    expect(await service.sessionProjectScope(TEST_THREAD)).toBe(project.path);
+  });
+
+  it('falls back to the session default when no thread names a project', async () => {
+    const { service } = makeService({
+      context: { ...contextStub, getDefaultScope: () => 'proj.usr_a.harbor' },
+    });
+
+    expect(await service.sessionProjectScope(undefined)).toBe(
+      'proj.usr_a.harbor'
+    );
+  });
+
+  it('answers undefined when the session has no project', async () => {
+    const { service } = makeService();
+
+    expect(await service.sessionProjectScope('thr_unknown')).toBeUndefined();
   });
 });

@@ -536,10 +536,14 @@ const boardCall = async <T>(
 
 try {
   // Project-scoped, so the scopes screen shows a real project beside the
-  // personal one and feed cards carry a project badge.
+  // personal one and feed cards carry a project badge. Named by a path: on a
+  // fresh stand the project does not exist yet, and only a path or a git
+  // remote sets a project up — a bare name only points at an existing one.
   const projectWrites = [];
   for (const memory of GRAPH_MEMORIES) {
-    projectWrites.push(await write({ ...memory, project_hint: 'zero-memory' }));
+    projectWrites.push(
+      await write({ ...memory, project_hint: '/demo/zero-memory' })
+    );
   }
   const [anchor] = projectWrites;
   if (!anchor) {

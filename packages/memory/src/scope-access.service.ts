@@ -1,5 +1,6 @@
 import type { Result } from 'oxide.ts';
 
+import type { ProjectCandidate } from './project-name.utils.js';
 import type { Scope } from './scope.vo.js';
 
 /**
@@ -20,4 +21,11 @@ export interface IScopeAccessService {
    * caller decides whether that is fatal or a fallback trigger.
    */
   createScope(scope: Scope): Promise<Result<void, string>>;
+
+  /**
+   * The shared projects the current user is an accepted member of, each with
+   * the alias an admin gave it — the only projects a typed project name may
+   * point at.
+   */
+  listMemberProjects(): Promise<Result<ProjectCandidate[], string>>;
 }
