@@ -59,13 +59,13 @@ describe('isProjectNameHint', () => {
 
   it('treats paths and git remotes as machine identities', () => {
     for (const hint of [
-      '/home/dev/repos/zero-memory',
-      'repos/zero-memory',
-      '~/repos/zero-memory',
-      'C:\\repos\\zero-memory',
-      'https://github.com/acme/zero-memory.git',
-      'git@github.com:acme/zero-memory.git',
-      'ssh://git@github.com/acme/zero-memory.git',
+      '/srv/src/acme-app',
+      'src/acme-app',
+      '~/src/acme-app',
+      'C:\\src\\acme-app',
+      'https://github.com/acme/acme-app.git',
+      'git@github.com:acme/acme-app.git',
+      'ssh://git@github.com/acme/acme-app.git',
     ]) {
       expect(isProjectNameHint(hint)).toBe(false);
     }
