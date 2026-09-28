@@ -44,8 +44,7 @@ export type ChainAction =
   | { type: 'close'; key: string }
   | { type: 'closeLast' };
 
-export const panelKey = (kind: PanelKind, id: string): string =>
-  `${kind}:${id}`;
+const panelKey = (kind: PanelKind, id: string): string => `${kind}:${id}`;
 
 export function initialChain(root: {
   kind: PanelKind;
@@ -66,7 +65,7 @@ export function initialChain(root: {
 }
 
 /** A panel and every panel opened from it, however deep. */
-export function branchOf(panels: PanelRef[], key: string): Set<string> {
+function branchOf(panels: PanelRef[], key: string): Set<string> {
   const branch = new Set([key]);
   let grew = true;
   while (grew) {

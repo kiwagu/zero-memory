@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  branchOf,
   chainReducer,
   initialChain,
-  panelKey,
   parsePanelHref,
   type ChainState,
 } from './panel-chain';
@@ -13,6 +11,9 @@ const CARD = 'crd_0000000000000000.0000000000';
 const A = 'mem_aaaaaaaaaaaaaaaa.aaaaaaaaaa';
 const B = 'mem_bbbbbbbbbbbbbbbb.bbbbbbbbbb';
 const C = 'mem_cccccccccccccccc.cccccccccc';
+const D = 'mem_dddddddddddddddd.dddddddddd';
+/** A panel's key: the `data-panel-key` the page carries for it. */
+const panelKey = (kind: 'card' | 'memory', id: string) => `${kind}:${id}`;
 const root = panelKey('card', CARD);
 const keys = (state: ChainState) => state.panels.map((panel) => panel.key);
 const open = (state: ChainState, id: string, from: string) =>
@@ -43,11 +44,12 @@ describe('chainReducer', () => {
     });
   });
 
-  it('closes a panel together with everything opened from it', () => {
+  it('closes a panel together with everything opened from it, however deep', () => {
     let state = initialChain({ kind: 'card', id: CARD });
     state = open(state, A, root);
     state = open(state, B, panelKey('memory', A));
     state = open(state, C, root);
+    state = open(state, D, panelKey('memory', B));
     state = chainReducer(state, { type: 'close', key: panelKey('memory', A) });
     expect(keys(state)).toEqual([root, panelKey('memory', C)]);
     expect(state.openOrder).toEqual([panelKey('memory', C)]);
@@ -86,18 +88,6 @@ describe('chainReducer', () => {
     expect(chainReducer(state, { type: 'close', key: root })).toBe(state);
     expect(chainReducer(state, { type: 'closeLast' })).toBe(state);
     expect(open(state, A, 'memory:gone')).toBe(state);
-  });
-});
-
-describe('branchOf', () => {
-  it('collects descendants transitively', () => {
-    const panels = [
-      { key: 'r', kind: 'card' as const, id: 'r', from: null },
-      { key: 'a', kind: 'memory' as const, id: 'a', from: 'r' },
-      { key: 'b', kind: 'memory' as const, id: 'b', from: 'a' },
-      { key: 'c', kind: 'memory' as const, id: 'c', from: 'b' },
-    ];
-    expect([...branchOf(panels, 'a')].sort()).toEqual(['a', 'b', 'c']);
   });
 });
 

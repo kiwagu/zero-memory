@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { Markdown } from '@workspace/ui/components/common/markdown';
+import { cardLabelNumbers } from '@workspace/ui/lib/markdown';
 
 const html = (text: string, density?: 'card' | 'page' | 'inline') =>
   renderToStaticMarkup(<Markdown density={density}>{text}</Markdown>);
@@ -45,9 +46,10 @@ describe('Markdown', () => {
     expect(out).toContain('docs.example.com');
   });
 
-  it('links a bare memory id to its page', () => {
-    const out = html('see mem_he4120z6tcgfk76a.01m32429w4 here');
-    expect(out).toContain('href="/memory/mem_he4120z6tcgfk76a.01m32429w4"');
+  it('links a bare memory id to its page, but not one that runs on', () => {
+    const id = 'mem_he4120z6tcgfk76a.01m32429w4';
+    expect(html(`see ${id} here`)).toContain(`href="/memory/${id}"`);
+    expect(html(`see ${id}x here`)).not.toContain('href="/memory/');
   });
 
   it('links the label of a card it was given, and only that', () => {
@@ -64,6 +66,34 @@ describe('Markdown', () => {
 
   it('leaves card labels as text when given no cards', () => {
     expect(html('blocked by ZM-7')).not.toContain('<a');
+  });
+
+  it('does not link a label that runs on or starts inside a word', () => {
+    const out = renderToStaticMarkup(
+      <Markdown cardLinks={{ '7': '/board/crd_seven' }}>
+        {'ZM-70 xZM-7 ZM-7a ZM-7-2'}
+      </Markdown>
+    );
+    expect(out).not.toContain('<a');
+  });
+
+  it('agrees with the collected labels on a number no card can have', () => {
+    // What a view resolves and what the render links must be the same set:
+    // a label that is never collected must never link either.
+    const cardLinks = {
+      '7': '/board/crd_seven',
+      '2147483647': '/board/crd_max',
+    };
+    const rendered = (text: string) =>
+      renderToStaticMarkup(<Markdown cardLinks={cardLinks}>{text}</Markdown>);
+    for (const text of ['ZM-007', 'ZM-0', 'ZM-2147483648']) {
+      expect(cardLabelNumbers([text])).toEqual([]);
+      expect(rendered(text)).not.toContain('<a');
+    }
+    expect(cardLabelNumbers(['ZM-2147483647'])).toEqual([2147483647]);
+    expect(rendered('ZM-2147483647')).toMatch(
+      /<a[^>]*href="\/board\/crd_max"[^>]*>ZM-2147483647<\/a>/
+    );
   });
 
   it('keeps a single line break as a break', () => {

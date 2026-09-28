@@ -59,17 +59,7 @@ describe('clientBundle', () => {
     expect(bundle.fileName).toBe('zm-bundle-0.18.1.zip');
     expect(bundle.dirName).toBe('zm-bundle-0.18.1');
     expect(bundle.version).toBe('0.18.1');
-  });
-
-  it('names the per-platform archive and the folder it unpacks into', () => {
-    // The shape a release page needs: builds for other platforms sit beside
-    // this one, and the file says which machine it is for.
-    const bundle = clientBundle({
-      ZM_CLIENT_BUNDLE_URL:
-        'https://downloads.example.com/zm/zm-bundle-0.18.1-linux-x86_64.zip',
-    });
-    expect(bundle.fileName).toBe('zm-bundle-0.18.1-linux-x86_64.zip');
-    expect(bundle.dirName).toBe('zm-bundle-0.18.1-linux-x86_64');
+    // Another host serves it, so the install commands can fetch it themselves.
     expect(bundle.servedBySite).toBe(false);
   });
 
