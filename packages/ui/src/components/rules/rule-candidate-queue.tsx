@@ -213,6 +213,20 @@ export interface RuleCandidateItem {
    * app pre-formats it; absent/null when the rule still has live evidence.
    */
   staleSignal?: string | null;
+  /**
+   * A PROMOTED rule moved to the successor of its memory but kept a curated
+   * text, which may no longer say what the successor says. Pre-formatted by
+   * the app; absent/null otherwise.
+   */
+  reviewSignal?: string | null;
+  /**
+   * A PROMOTED rule still anchored to a memory that was retired: superseded
+   * without the rule moving along, or forgotten. It is still delivered.
+   * Pre-formatted by the app; absent/null otherwise.
+   */
+  sourceSignal?: string | null;
+  /** The memory this rule last moved away from, when it moved. */
+  carriedFrom?: { id: string; href: string } | null;
 }
 
 export interface RuleCandidateQueueLabels {
@@ -249,6 +263,8 @@ export interface RuleCandidateQueueLabels {
   pinHint: string;
   /** Badge on a pinned rule's card. */
   pinnedBadge: string;
+  /** Label ahead of the memory a rule moved away from. */
+  carriedFrom: string;
 }
 
 /** Client-side download of the rendered rule file for one environment. */
@@ -491,10 +507,33 @@ export function RuleCandidateQueue({
                   {item.memory.id}
                 </LinkComponent>
                 <span>({item.memory.kind})</span>
+                {item.carriedFrom ? (
+                  <>
+                    <span>·</span>
+                    <span>{labels.carriedFrom}:</span>
+                    <LinkComponent
+                      href={item.carriedFrom.href}
+                      className="text-primary font-mono break-all select-all hover:underline"
+                      data-testid="rule-carried-from"
+                    >
+                      {item.carriedFrom.id}
+                    </LinkComponent>
+                  </>
+                ) : null}
               </div>
               {item.staleSignal ? (
                 <Badge variant="amber" data-testid="rule-stale-signal">
                   {item.staleSignal}
+                </Badge>
+              ) : null}
+              {item.reviewSignal ? (
+                <Badge variant="amber" data-testid="rule-review-signal">
+                  {item.reviewSignal}
+                </Badge>
+              ) : null}
+              {item.sourceSignal ? (
+                <Badge variant="amber" data-testid="rule-source-signal">
+                  {item.sourceSignal}
                 </Badge>
               ) : null}
               {item.scopes.length > 1 ? (

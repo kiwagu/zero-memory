@@ -146,3 +146,11 @@ export const deliveredRuleIds = (
   }
   return delivered;
 };
+
+/**
+ * Same set, read against the current time — for React Server Components,
+ * like {@link ruleDeliveryCutoffNow}.
+ */
+export const deliveredRuleIdsNow = (
+  rules: readonly DeliveryCandidate[]
+): Set<string> => deliveredRuleIds(rules, Date.now());
