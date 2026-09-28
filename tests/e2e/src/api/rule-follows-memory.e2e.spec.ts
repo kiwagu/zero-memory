@@ -520,24 +520,60 @@ const sqlNow = (statement: string): string => {
   return result.stdout.trim();
 };
 
-/**
- * Waits until a backend running a statement tagged `marker` is asleep in
- * pg_sleep — proof that everything before the sleep in its transaction has
- * run and holds its locks.
- */
-const untilAsleep = async (marker: string): Promise<void> => {
+/** Polls `probe` until it holds, or fails the test after 20 s. */
+const until = async (what: string, probe: () => boolean): Promise<void> => {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    const asleep = sqlNow(
-      `select count(*) from pg_stat_activity where wait_event = 'PgSleep' ` +
-        `and query like '%${marker}%' and pid <> pg_backend_pid()`
-    );
-    if (asleep === '1') {
+    if (probe()) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error(`${marker} never reached its sleep`);
+  throw new Error(`timed out waiting for ${what}`);
+};
+
+/** Whether a backend running a statement tagged `marker` waits as `where`. */
+const waiting = (marker: string, where: string): boolean =>
+  sqlNow(
+    `select count(*) from pg_stat_activity where ${where} ` +
+      `and query like '%${marker}%' and pid <> pg_backend_pid()`
+  ) === '1';
+
+/**
+ * A barrier the test controls: a session holding an advisory lock that a
+ * transaction under test takes right after the statements it must hold,
+ * so that transaction stays open, uncommitted, for exactly as long as the
+ * test needs — no timed sleeps. `release` ends the holding session.
+ */
+const barrier = async (tag: string) => {
+  const key = Math.floor(Math.random() * 2_000_000_000);
+  const marker = `gate-${tag}`;
+  const holder = sqlInBackground(
+    `/* ${marker} */ select pg_advisory_lock(${key}); select pg_sleep(60);`
+  );
+  await until(`${marker} to hold its lock`, () =>
+    waiting(marker, "wait_event = 'PgSleep'")
+  );
+  return {
+    /** The statement a transaction runs to wait at the barrier. */
+    wait: `select pg_advisory_xact_lock(${key});`,
+    release: async (): Promise<void> => {
+      sqlNow(
+        `select pg_terminate_backend(pid) from pg_stat_activity ` +
+          `where query like '%${marker}%' and pid <> pg_backend_pid()`
+      );
+      await holder;
+    },
+  };
+};
+
+/** Resolves once `promise` settled, so its state can be polled. */
+const settled = (promise: Promise<unknown>) => {
+  const state = { done: false };
+  void promise.finally(() => {
+    state.done = true;
+  });
+  return state;
 };
 
 test.describe('Delivery and concurrency', () => {
@@ -632,21 +668,34 @@ test.describe('Delivery and concurrency', () => {
     const rewritten = `rule-race ${run}: the successor, rewritten`;
 
     // One transaction rewrites the successor, as the canonicalization does,
-    // and holds the write uncommitted; only once it provably does, the
-    // supersede runs. It must wait for the rewrite, and the rule must end on
-    // the successor with its final text.
+    // and is held open at a barrier with the write uncommitted. The
+    // supersede runs while it is held: it must wait for the rewrite, and the
+    // rule must end on the successor with its final text.
+    const gate = await barrier(`race-${run}`);
     const marker = `race-${run}`;
     const rewrite = sqlInBackground(
       `/* ${marker} */ begin; update public.memories set content = ` +
-        `'${rewritten}' where id = '${successorId}'; ` +
-        `select pg_sleep(3); commit;`
+        `'${rewritten}' where id = '${successorId}'; ${gate.wait} commit;`
     );
-    await untilAsleep(marker);
-    sqlNow(
-      `update public.memories set superseded_by = '${successorId}', ` +
-        `invalidated_at = now() where id = '${oldId}';`
+    await until('the rewrite to wait at the barrier', () =>
+      waiting(marker, "wait_event = 'advisory'")
     );
+    const supersedeMarker = `race-move-${run}`;
+    const supersede = sqlInBackground(
+      `/* ${supersedeMarker} */ update public.memories set superseded_by = ` +
+        `'${successorId}', invalidated_at = now() where id = '${oldId}';`
+    );
+    const supersedeState = settled(supersede);
+    // It either waits on the successor's row, or (without the lock) is done.
+    await until(
+      'the supersede to wait on the successor or finish',
+      () =>
+        supersedeState.done ||
+        waiting(supersedeMarker, "wait_event_type = 'Lock'")
+    );
+    await gate.release();
     expect((await rewrite).status).toBe(0);
+    expect((await supersede).status).toBe(0);
 
     const after = await ruleById(rule.id);
     expect(after.memory_id).toBe(successorId);
@@ -671,22 +720,37 @@ test.describe('Delivery and concurrency', () => {
     });
 
     // Each supersede's foreign-key check takes a KEY SHARE lock on the
-    // successor before the rule moves. Both hold one here at the same time;
-    // the move's own lock on the successor must not conflict with them.
+    // successor before the rule moves. Both hold one here at the same time —
+    // the first is held open at a barrier with its KEY SHARE taken while the
+    // second runs — and the move's own lock on the successor must not
+    // conflict with them.
+    const gate = await barrier(`pair-${run}`);
     const firstMarker = `pair-a-${run}`;
     const firstTx = sqlInBackground(
       `/* ${firstMarker} */ begin; select 1 from public.memories ` +
-        `where id = '${successorId}' for key share; select pg_sleep(3); ` +
+        `where id = '${successorId}' for key share; ${gate.wait} ` +
         `update public.memories set superseded_by = '${successorId}', ` +
         `invalidated_at = now() where id = '${firstId}'; commit;`
     );
-    await untilAsleep(firstMarker);
-    const secondTx = sqlInBackground(
-      `begin; select 1 from public.memories where id = '${successorId}' ` +
-        `for key share; update public.memories set superseded_by = ` +
-        `'${successorId}', invalidated_at = now() where id = '${secondId}'; ` +
-        `commit;`
+    await until('the first supersede to wait at the barrier', () =>
+      waiting(firstMarker, "wait_event = 'advisory'")
     );
+    const secondMarker = `pair-b-${run}`;
+    const secondTx = sqlInBackground(
+      `/* ${secondMarker} */ begin; select 1 from public.memories ` +
+        `where id = '${successorId}' for key share; update public.memories ` +
+        `set superseded_by = '${successorId}', invalidated_at = now() ` +
+        `where id = '${secondId}'; commit;`
+    );
+    const secondState = settled(secondTx);
+    // It either finishes, or (with a lock that conflicts with KEY SHARE)
+    // waits on the successor — the moment the two would deadlock.
+    await until(
+      'the second supersede to finish or wait on the successor',
+      () =>
+        secondState.done || waiting(secondMarker, "wait_event_type = 'Lock'")
+    );
+    await gate.release();
     const [a, b] = await Promise.all([firstTx, secondTx]);
     expect(a.status, a.stderr).toBe(0);
     expect(b.status, b.stderr).toBe(0);
