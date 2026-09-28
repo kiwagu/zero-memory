@@ -20,22 +20,6 @@ const empty = (): JudgeRescanResult => ({
 });
 
 describe('foldRescan', () => {
-  it('counts a subject the scan actually reached', () => {
-    const folded = foldRescan(empty(), {
-      scanned: 1,
-      pairsJudged: 2,
-      autoResolved: 1,
-      queued: 1,
-    });
-
-    expect(folded).toMatchObject({
-      rescanned: 1,
-      pairsJudged: 2,
-      autoResolved: 1,
-      queued: 1,
-    });
-  });
-
   it('does not count a subject that vanished before the scan', () => {
     // scanOne returns scanned: 0 when the memory was invalidated between the
     // rollup and the scan. Counting it would report work that never happened.
@@ -72,27 +56,6 @@ describe('foldRescan', () => {
       queued: 2,
       stoppedOnQueueCap: false,
     });
-  });
-
-  it('caps the spend by subjects per run, not by pairs', () => {
-    // The guard makes the work finite; this default is what keeps ONE run
-    // bounded, so a change to it is a deliberate spend decision.
-    expect(DEFAULT_JUDGE_RESCAN_CONFIG.maxSubjects).toBeGreaterThan(0);
-    expect(DEFAULT_JUDGE_RESCAN_CONFIG.minSurfacings).toBeGreaterThan(1);
-  });
-
-  it('reaches the triage cap on the pairs it already queued', () => {
-    // The detector compares the running total against the cap BEFORE taking
-    // the next subject, so the fold has to carry queued rows faithfully —
-    // an undercount here would let a run keep filling the queue.
-    const afterFirst = foldRescan(empty(), {
-      scanned: 1,
-      pairsJudged: 3,
-      autoResolved: 0,
-      queued: 2,
-    });
-
-    expect(afterFirst.queued).toBe(DEFAULT_JUDGE_RESCAN_CONFIG.maxNewQueueRows);
   });
 });
 

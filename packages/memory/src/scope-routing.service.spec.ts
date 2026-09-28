@@ -1,5 +1,5 @@
 import type { IContext } from '@workspace/context';
-import { None, Ok, Some } from 'oxide.ts';
+import { Err, None, Ok, Some } from 'oxide.ts';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { IProjectBindingRepository } from './project-binding.repository.js';
@@ -108,6 +108,22 @@ describe('ScopeRoutingService — a path or a git remote', () => {
     expect(scope.path).toBe(Scope.project(OWNER, 'new_app').path);
     expect(scopeAccess.createScope).toHaveBeenCalledOnce();
     expect(bindings.insert).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to the personal scope when the first-sight bootstrap fails', async () => {
+    const { routing, scopeAccess, bindings } = makeRouting();
+    vi.mocked(scopeAccess.createScope).mockResolvedValue(
+      Err('scope already has members')
+    );
+
+    const scope = await routing.resolveProjectScope(
+      'git@github.com:acme/queue-svc.git'
+    );
+
+    // Stored privately, never lost and never leaked; and no binding points a
+    // repository at a scope that was never set up.
+    expect(scope.isPersonal).toBe(true);
+    expect(bindings.insert).not.toHaveBeenCalled();
   });
 
   it('follows an existing binding', async () => {

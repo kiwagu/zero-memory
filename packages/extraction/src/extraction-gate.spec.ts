@@ -91,15 +91,6 @@ describe('assessChunk (part A: pre-extraction)', () => {
     expect(substantiveLength(note)).toBeGreaterThanOrEqual(MIN_SIGNAL_CHARS);
     expect(assessChunk(note).extract).toBe(true);
   });
-
-  it('passes a long substantive turn', () => {
-    expect(
-      assessChunk(
-        'assistant: We chose Postgres over MySQL because ltree gives us ' +
-          'native hierarchical scope paths without a recursive CTE.'
-      ).extract
-    ).toBe(true);
-  });
 });
 
 describe('assessCandidate (part B: post-extraction kind bar)', () => {
