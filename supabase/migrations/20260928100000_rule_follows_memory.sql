@@ -149,7 +149,12 @@ begin
   -- Locked, so the successor's text and lifecycle cannot change between
   -- this read and the move: a concurrent rewrite of its content (the
   -- canonicalization) waits, then finds the rule already on it and carries
-  -- the text along through memories_rule_text_follows.
+  -- the text along through memories_rule_text_follows. NO KEY UPDATE, not
+  -- UPDATE: the foreign-key check on superseded_by has already taken a KEY
+  -- SHARE lock on this row, and two supersedes onto one successor would each
+  -- hold one — FOR UPDATE conflicts with KEY SHARE and would deadlock them,
+  -- while NO KEY UPDATE does not and still excludes every content or
+  -- lifecycle update.
   select m.owner_id, m.scope::text, m.content, m.invalidated_at
     into
       v_successor_owner,
@@ -158,7 +163,7 @@ begin
       v_successor_invalidated
     from public.memories m
     where m.id = new.superseded_by
-    for update;
+    for no key update;
   if not found
     or v_successor_owner is distinct from new.owner_id
     or v_successor_invalidated is not null

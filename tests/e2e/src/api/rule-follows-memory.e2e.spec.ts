@@ -7,8 +7,8 @@
  * losing anything the owner decided about it: the pin, the layer, the
  * delivery address, its place in the delivery TTL and, above all, a curated
  * text. Where the move would cost any of that, the rule stays where it is and
- * keeps being delivered. These specs pin that down at the database, the way
- * every path reaches it.
+ * stays promoted. These specs pin that down at the database, the way every
+ * path reaches it.
  */
 import { spawn, spawnSync } from 'node:child_process';
 
@@ -483,10 +483,67 @@ test.describe('A promoted rule follows its memory', () => {
   });
 });
 
+/** SQL as the database owner on the test contour, the statements in one go. */
+const sqlArgs = (statement: string): string[] => [
+  'exec',
+  '-i',
+  'supabase_db_zero-memory-e2e',
+  'psql',
+  '-U',
+  'postgres',
+  '-d',
+  'postgres',
+  '-v',
+  'ON_ERROR_STOP=1',
+  '-Atc',
+  statement,
+];
+
+/** Runs `statement` in the background; resolves with its exit status. */
+const sqlInBackground = (
+  statement: string
+): Promise<{ status: number | null; stderr: string }> =>
+  new Promise((resolve) => {
+    const child = spawn('docker', sqlArgs(statement));
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on('close', (status) => resolve({ status, stderr }));
+  });
+
+const sqlNow = (statement: string): string => {
+  const result = spawnSync('docker', sqlArgs(statement), { encoding: 'utf8' });
+  if (result.status !== 0) {
+    throw new Error(`psql: ${result.stderr}`);
+  }
+  return result.stdout.trim();
+};
+
+/**
+ * Waits until a backend running a statement tagged `marker` is asleep in
+ * pg_sleep — proof that everything before the sleep in its transaction has
+ * run and holds its locks.
+ */
+const untilAsleep = async (marker: string): Promise<void> => {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const asleep = sqlNow(
+      `select count(*) from pg_stat_activity where wait_event = 'PgSleep' ` +
+        `and query like '%${marker}%' and pid <> pg_backend_pid()`
+    );
+    if (asleep === '1') {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`${marker} never reached its sleep`);
+};
+
 test.describe('Delivery and concurrency', () => {
   test("newer rules of other projects never crowd a project's rule out of its briefing", async () => {
     const run = fresh();
-    // A user of its own: the crowd below is dozens of promoted rules.
+    // A user of its own: the crowd below is over a thousand promoted rules.
     const user = await provisionE2EUser(`e2e-rule-crowd-${run}@zm.e2e`);
     const token = await passwordGrantToken(user);
     const markers: string[] = [];
@@ -500,17 +557,48 @@ test.describe('Delivery and concurrency', () => {
       applies_scope: project,
       promoted_at: new Date(Date.now() - 10 * 86_400_000).toISOString(),
     });
-    // More, and newer, rules than any row bound, all for another project.
-    for (let i = 0; i < 70; i += 1) {
-      const memoryId = await seedOwnedMemory(
-        user,
-        `rule-crowd ${run}: crowd anchor ${i}`
-      );
-      await promote(memoryId, {
-        rule_text: `rule-crowd ${run}: crowd rule ${i}`,
-        target_layer: 'project',
-        applies_scope: `proj.e2e_crowd_${run}`,
-      });
+
+    // More, and newer, rules for another project than one PostgREST response
+    // carries (its max-rows cap is 1000): a reader that reads a single page
+    // before filtering by project never sees this project's rule.
+    const { data: profile } = await admin()
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .single();
+    const ownerId = (profile as { id: string }).id;
+    const crowd = 1001;
+    for (let offset = 0; offset < crowd; offset += 500) {
+      const size = Math.min(500, crowd - offset);
+      const { data: anchors, error } = await admin()
+        .from('memories')
+        .insert(
+          Array.from({ length: size }, (_, i) => ({
+            content: `rule-crowd ${run}: crowd anchor ${offset + i}`,
+            kind: 'convention',
+            scope: `user.${ownerId.replace('.', '_')}`,
+            owner_id: ownerId,
+          }))
+        )
+        .select('id');
+      expect(error).toBeNull();
+      const { error: rulesError } = await admin()
+        .from('rule_candidates')
+        .insert(
+          (anchors as { id: string }[]).map((anchor, i) => ({
+            memory_id: anchor.id,
+            status: 'promoted',
+            resolution: 'promoted',
+            promoted_at: new Date().toISOString(),
+            resolved_at: new Date().toISOString(),
+            rule_text: `rule-crowd ${run}: crowd rule ${offset + i}`,
+            target_layer: 'project',
+            applies_scope: `proj.e2e_crowd_${run}`,
+            useful_sessions: 0,
+            window_days: 0,
+          }))
+        );
+      expect(rulesError).toBeNull();
     }
 
     const mcp = await McpTestClient.connect(token);
@@ -543,48 +631,71 @@ test.describe('Delivery and concurrency', () => {
     );
     const rewritten = `rule-race ${run}: the successor, rewritten`;
 
-    // One transaction rewrites the successor (as the canonicalization does)
-    // and holds it; the supersede starts meanwhile. However the two
-    // interleave, the rule must end on the successor with its final text.
-    const sql = (statement: string): string[] => [
-      'exec',
-      '-i',
-      'supabase_db_zero-memory-e2e',
-      'psql',
-      '-U',
-      'postgres',
-      '-d',
-      'postgres',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-Atc',
-      statement,
-    ];
-    const rewrite = spawn(
-      'docker',
-      sql(
-        `begin; update public.memories set content = '${rewritten}' ` +
-          `where id = '${successorId}'; select pg_sleep(3); commit;`
-      )
+    // One transaction rewrites the successor, as the canonicalization does,
+    // and holds the write uncommitted; only once it provably does, the
+    // supersede runs. It must wait for the rewrite, and the rule must end on
+    // the successor with its final text.
+    const marker = `race-${run}`;
+    const rewrite = sqlInBackground(
+      `/* ${marker} */ begin; update public.memories set content = ` +
+        `'${rewritten}' where id = '${successorId}'; ` +
+        `select pg_sleep(3); commit;`
     );
-    const rewriteDone = new Promise<number | null>((resolve) =>
-      rewrite.on('close', resolve)
+    await untilAsleep(marker);
+    sqlNow(
+      `update public.memories set superseded_by = '${successorId}', ` +
+        `invalidated_at = now() where id = '${oldId}';`
     );
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    const supersede = spawnSync(
-      'docker',
-      sql(
-        `update public.memories set superseded_by = '${successorId}', ` +
-          `invalidated_at = now() where id = '${oldId}';`
-      ),
-      { encoding: 'utf8' }
-    );
-    expect(supersede.status, supersede.stderr).toBe(0);
-    expect(await rewriteDone).toBe(0);
+    expect((await rewrite).status).toBe(0);
 
     const after = await ruleById(rule.id);
     expect(after.memory_id).toBe(successorId);
     expect(after.rule_text).toBe(rewritten);
+  });
+
+  test('two supersedes onto one successor at once both go through', async () => {
+    const run = fresh();
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userB);
+    const firstId = await remember(token, `rule-pair ${run}: the first old`);
+    const secondId = await remember(token, `rule-pair ${run}: the second old`);
+    const successorId = await remember(
+      token,
+      `rule-pair ${run}: the successor`
+    );
+    const first = await promote(firstId, {
+      rule_text: `rule-pair ${run}: the first rule`,
+    });
+    const second = await promote(secondId, {
+      rule_text: `rule-pair ${run}: the second rule`,
+    });
+
+    // Each supersede's foreign-key check takes a KEY SHARE lock on the
+    // successor before the rule moves. Both hold one here at the same time;
+    // the move's own lock on the successor must not conflict with them.
+    const firstMarker = `pair-a-${run}`;
+    const firstTx = sqlInBackground(
+      `/* ${firstMarker} */ begin; select 1 from public.memories ` +
+        `where id = '${successorId}' for key share; select pg_sleep(3); ` +
+        `update public.memories set superseded_by = '${successorId}', ` +
+        `invalidated_at = now() where id = '${firstId}'; commit;`
+    );
+    await untilAsleep(firstMarker);
+    const secondTx = sqlInBackground(
+      `begin; select 1 from public.memories where id = '${successorId}' ` +
+        `for key share; update public.memories set superseded_by = ` +
+        `'${successorId}', invalidated_at = now() where id = '${secondId}'; ` +
+        `commit;`
+    );
+    const [a, b] = await Promise.all([firstTx, secondTx]);
+    expect(a.status, a.stderr).toBe(0);
+    expect(b.status, b.stderr).toBe(0);
+
+    // One rule moved; the other found the successor taken and stayed.
+    const moved = [await ruleById(first.id), await ruleById(second.id)].filter(
+      (row) => row.memory_id === successorId
+    );
+    expect(moved).toHaveLength(1);
   });
 });
 
