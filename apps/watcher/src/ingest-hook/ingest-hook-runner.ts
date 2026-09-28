@@ -66,7 +66,7 @@ const saveOffsets = (path: string, offsets: Record<string, number>): void => {
  * nothing. It is omitted rather than sent empty — absent means "this slice
  * surfaced no memories", which is a different claim from "none were useful".
  */
-export const recalledIdsField = (
+const recalledIdsField = (
   recalledIds: readonly string[]
 ): { recalled_ids?: string[] } =>
   recalledIds.length > 0 ? { recalled_ids: [...recalledIds] } : {};

@@ -1,6 +1,17 @@
+import { Readable } from 'node:stream';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { clientKindFromArgs, hookClient } from './hook-client.js';
+
+/** Feeds `payload` to the hook's stdin, the way the client spawns it. */
+const stdinOf = (payload: unknown): void => {
+  vi.spyOn(process, 'stdin', 'get').mockReturnValue(
+    Readable.from([
+      Buffer.from(JSON.stringify(payload)),
+    ]) as unknown as typeof process.stdin
+  );
+};
 
 const captureStdout = () => {
   const lines: string[] = [];
@@ -118,6 +129,17 @@ describe('hookClient', () => {
     });
   });
 
+  it('leaves systemMessage out of the frame when the chat line is empty', () => {
+    const out = captureStdout();
+    hookClient('claude').emitSessionBrief('brief', '');
+    expect(JSON.parse(out[0] ?? '')).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'SessionStart',
+        additionalContext: 'brief',
+      },
+    });
+  });
+
   it('routes turn context through Claude’s single frame for every event', () => {
     const out = captureStdout();
     hookClient('claude').emitTurnContext('PreToolUse', 'nudge');
@@ -149,6 +171,25 @@ describe('hookClient', () => {
       continue: true,
       user_message: 'offline',
     });
+  });
+
+  it('reads a Cursor session’s project from its first workspace root', async () => {
+    // Cursor transcripts carry no cwd: the payload's workspace roots stand in.
+    stdinOf({
+      conversation_id: 'conv-1',
+      hook_event_name: 'stop',
+      workspace_roots: ['/work/alpha', '/work/beta'],
+    });
+    expect(await hookClient('cursor').readInput()).toMatchObject({
+      sessionId: 'conv-1',
+      cwd: '/work/alpha',
+      hookEventName: 'stop',
+    });
+  });
+
+  it('falls back to the process directory when Cursor names no workspace root', async () => {
+    stdinOf({ conversation_id: 'conv-2' });
+    expect((await hookClient('cursor').readInput()).cwd).toBe(process.cwd());
   });
 
   it('delivers the receipt on Claude and stays silent on Cursor', () => {

@@ -72,7 +72,7 @@ const writeCache = (path: string, cache: HealthCache): void => {
  * answered from the previous one's verdict, which is how a machine reports
  * itself healthy while talking to a server it no longer uses.
  */
-export const isFresh = (
+const isFresh = (
   cache: HealthCache | null,
   now: number,
   serverUrl: string | null = resolveServerUrlOrNull()

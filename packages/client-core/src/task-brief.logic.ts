@@ -11,7 +11,7 @@ import {
  */
 
 /** Prompts shorter than this (after trimming) are not worth a briefing. */
-export const MIN_PROMPT_LENGTH = 30;
+const MIN_PROMPT_LENGTH = 30;
 
 /**
  * Short acknowledgements that carry no task signal even when padded with
@@ -21,7 +21,7 @@ export const MIN_PROMPT_LENGTH = 30;
  * confirmations are in another language supplies them through config, and the
  * adapter passes the merged set to `isSubstantivePrompt`.
  */
-export const DEFAULT_ACKNOWLEDGEMENT_WORDS: readonly string[] = [
+const DEFAULT_ACKNOWLEDGEMENT_WORDS: readonly string[] = [
   'yes',
   'no',
   'ok',

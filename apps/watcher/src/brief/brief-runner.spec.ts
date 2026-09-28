@@ -22,7 +22,7 @@ import type { ContextMemory, ContextRule } from '@workspace/contracts';
 import { memoryIdSchema } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { branchNameToTopic, runBrief } from './brief-runner.js';
+import { runBrief } from './brief-runner.js';
 import { hookClient, type HookClient } from '../hook-client.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
 import { checkRelease } from '../release/release-runner.js';
@@ -44,33 +44,101 @@ beforeEach(() => {
 // longer on a shared CI runner, past the default five-second limit.
 const SWEEP_TIMEOUT_MS = 60_000;
 
-describe('branchNameToTopic', () => {
-  it('turns a feature branch into a space-separated topic', () => {
-    expect(branchNameToTopic('feature/ui-extractor-settings')).toBe(
-      'ui extractor settings'
-    );
+/**
+ * Session start briefs the project and, on a branch worth a second lookup,
+ * the branch as a topic of its own: which topic a real checkout yields is the
+ * contract, read off the lookups the runner makes.
+ */
+describe('session-start branch topic', () => {
+  let stateDir: string;
+  let workDir: string;
+  let previousState: string | undefined;
+
+  const topicsOn = async (
+    checkout: (git: (...args: string[]) => void) => void
+  ): Promise<string[]> => {
+    const git = (...args: string[]): void =>
+      void execFileSync(
+        'git',
+        [
+          '-c',
+          'user.email=test@example.com',
+          '-c',
+          'user.name=test',
+          '-c',
+          'commit.gpgsign=false',
+          ...args,
+        ],
+        { cwd: workDir }
+      );
+    git('init', '-q', '-b', 'trunk-placeholder');
+    git('commit', '-q', '--no-verify', '--allow-empty', '-m', 'init');
+    checkout(git);
+    vi.mocked(callBuildContext).mockResolvedValue({
+      memories: [],
+      entities: [],
+      edges: [],
+      linked_memories: [],
+      project_scope: 'proj.usr_x.demo',
+    });
+    await runBrief('session-start', {
+      ...hookClient('codex'),
+      readInput: async () => ({
+        sessionId: 'sess-topic',
+        cwd: workDir,
+        prompt: '',
+        transcriptPath: '',
+        hookEventName: 'SessionStart',
+        toolName: '',
+        alreadyContinued: false,
+        source: '',
+        trigger: '',
+      }),
+      emitSessionBrief: () => {},
+    });
+    return vi
+      .mocked(callBuildContext)
+      .mock.calls.map(([args]) => String(args.topic));
+  };
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), 'zm-topic-state-'));
+    workDir = mkdtempSync(join(tmpdir(), 'zm-topic-work-'));
+    previousState = process.env.XDG_STATE_HOME;
+    process.env.XDG_STATE_HOME = stateDir;
   });
 
-  it('normalizes slashes and dashes to single spaces', () => {
-    expect(branchNameToTopic('feature/watcher-brief/hooks')).toBe(
-      'watcher brief hooks'
-    );
+  afterEach(() => {
+    vi.mocked(callBuildContext).mockReset();
+    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previousState;
+    rmSync(stateDir, { recursive: true, force: true });
+    rmSync(workDir, { recursive: true, force: true });
   });
 
-  it('keeps a non-feature branch name as its topic', () => {
-    expect(branchNameToTopic('spike-oauth')).toBe('spike oauth');
+  it.each([
+    ['feature/ui-extractor-settings', 'ui extractor settings'],
+    ['feature/watcher-brief/hooks', 'watcher brief hooks'],
+    ['spike-oauth', 'spike oauth'],
+  ])('briefs the branch %s as the topic "%s"', async (branch, topic) => {
+    expect(
+      await topicsOn((git) => git('checkout', '-q', '-b', branch))
+    ).toEqual([basename(workDir), topic]);
   });
 
   it.each(['main', 'dev', 'stage', 'master'])(
-    'skips the trunk branch %s (briefing == project briefing)',
-    (branch) => {
-      expect(branchNameToTopic(branch)).toBeNull();
+    'briefs the project alone on the trunk branch %s',
+    async (branch) => {
+      expect(
+        await topicsOn((git) => git('checkout', '-q', '-b', branch))
+      ).toEqual([basename(workDir)]);
     }
   );
 
-  it('skips a detached HEAD and empty names', () => {
-    expect(branchNameToTopic('HEAD')).toBeNull();
-    expect(branchNameToTopic('')).toBeNull();
+  it('briefs the project alone on a detached HEAD', async () => {
+    expect(await topicsOn((git) => git('checkout', '-q', '--detach'))).toEqual([
+      basename(workDir),
+    ]);
   });
 });
 

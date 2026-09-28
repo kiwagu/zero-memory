@@ -4,35 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  ClaudeCodeSourceAdapter,
-  mapKind,
-  mapTarget,
-} from './claude-code-adapter.js';
-
-describe('mapKind', () => {
-  it('maps frontmatter types to memory kinds', () => {
-    expect(mapKind('user', 'x')).toBe('preference');
-    expect(mapKind('feedback', 'x')).toBe('convention');
-    expect(mapKind('reference', 'x')).toBe('reference');
-    expect(mapKind(undefined, 'x')).toBe('fact');
-  });
-
-  it('splits project on the **Why:** decision marker', () => {
-    expect(mapKind('project', 'Chose X.\n**Why:** faster.')).toBe('decision');
-    expect(mapKind('project', 'The port is 55322.')).toBe('fact');
-  });
-});
-
-describe('mapTarget', () => {
-  it('routes user/feedback personal, project/reference to project', () => {
-    expect(mapTarget('user')).toBe('personal');
-    expect(mapTarget('feedback')).toBe('personal');
-    expect(mapTarget('project')).toBe('project');
-    expect(mapTarget('reference')).toBe('project');
-    expect(mapTarget(undefined)).toBe('project');
-  });
-});
+import { ClaudeCodeSourceAdapter } from './claude-code-adapter.js';
 
 describe('ClaudeCodeSourceAdapter.discover', () => {
   let home: string;
@@ -108,6 +80,40 @@ describe('ClaudeCodeSourceAdapter.discover', () => {
       projectHint: '/home/dev/repos/alpha',
     });
   });
+
+  // Kind from the frontmatter type (a project memory with a **Why:** is a
+  // decision), and target by who it is about: the user, or the project.
+  it.each([
+    ['user', 'The user prefers Bun.', 'preference', 'personal'],
+    ['feedback', 'Keep commits to one line.', 'convention', 'personal'],
+    ['reference', 'The runbook lives in the wiki.', 'reference', 'project'],
+    ['project', 'Chose X.\n**Why:** faster.', 'decision', 'project'],
+    ['project', 'The port is 55322.', 'fact', 'project'],
+    [undefined, 'An untyped note.', 'fact', 'project'],
+  ])(
+    'imports a memory of type %s as its kind and target',
+    async (type, body, kind, target) => {
+      const memoryDir = join(
+        home,
+        '.claude',
+        'projects',
+        '-home-dev-repos-alpha',
+        'memory'
+      );
+      mkdirSync(memoryDir, { recursive: true });
+      writeFileSync(
+        join(memoryDir, 'one.md'),
+        type === undefined ? body : memoryFile(type, body)
+      );
+
+      const [item] = await new ClaudeCodeSourceAdapter().discover({
+        homeDir: home,
+        cwd: home,
+      });
+
+      expect(item).toMatchObject({ content: body, kind, target });
+    }
+  );
 
   it('discovers user-global CLAUDE.md prose as personal conventions', async () => {
     mkdirSync(join(home, '.claude'), { recursive: true });

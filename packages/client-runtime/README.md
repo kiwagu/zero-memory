@@ -71,7 +71,7 @@ per-client differences (event map, output frame, transcript source) live in the
 ### Ingest consent (shared policy)
 
 - `project-consent.ts` — the per-project capture gate every client path shares
-  (`ingestAllowed` / `projectIgnored` / `ingestMode`). Reads
+  (`ingestAllowed` / `projectIgnored`). Reads
   `~/.config/zero-memory/ingest.json` (`ZM_INGEST_CONFIG`) — one of
   `allowlist` / `denylist` of path globs, default `off` — and honors
   `.zero-memory-ignore` / `.zero-memory-allow` markers. Lives here (not in the

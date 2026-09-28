@@ -80,7 +80,6 @@ export { ImportClient } from './import-client.js';
 // uniformly no matter which client or mode ships the transcript.
 export {
   ingestAllowed,
-  ingestMode,
   projectIgnored,
   type IngestMode,
 } from './project-consent.js';
