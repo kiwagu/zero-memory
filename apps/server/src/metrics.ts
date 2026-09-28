@@ -71,8 +71,3 @@ export const renderMetrics = (): string => {
   }
   return lines.length > 0 ? `${lines.join('\n')}\n` : '';
 };
-
-/** Test-only: clear every counter. */
-export const resetMetrics = (): void => {
-  metrics.clear();
-};

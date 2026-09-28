@@ -45,4 +45,9 @@ interfaces.
 
 ## Testing
 
-`bun run test:vitest` — schema round-trip specs live next to the schemas.
+`bun run test:vitest` — specs live next to the schemas and own what no
+end-to-end call exercises: rejection rules, defaults a client relies on against
+an older server, the error taxonomy, and the prefix and metrics drift guards.
+They do not re-parse valid tool payloads: the MCP SDK validates every tool's
+input and declared output schema on each call, so the e2e suite already proves
+those.

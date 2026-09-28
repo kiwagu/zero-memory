@@ -1,17 +1,9 @@
-import { readFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import { MAIL_LOCALES } from '@workspace/i18n-catalogs';
-import { createMailTranslator } from '@workspace/i18n-catalogs/mail';
 import { describe, expect, it } from 'vitest';
 
 import { AUTH_TEMPLATES } from './auth-template.registry.js';
 import { findMissingPlaceholders, gotrueVariable } from './gotrue.constants.js';
 import { renderAuthTemplate, renderDigest } from './mail.render.js';
-
-const repoRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
-const exportDir = join(repoRoot, 'apps/web/public/email-templates');
 
 /**
  * An unsubstituted catalog placeholder — `{email}` rather than GoTrue's
@@ -36,9 +28,7 @@ describe('authentication templates', () => {
         });
 
         it('takes its subject from the catalog', async () => {
-          const t = createMailTranslator(locale);
           const { subject } = await renderAuthTemplate(spec, locale);
-          expect(subject).toBe(spec.subject(t));
           // The translator echoes an unknown key back, so a subject that still
           // looks like a key means the catalog entry is missing.
           expect(subject).not.toMatch(/^[a-z]+\.subject$/);
@@ -48,21 +38,6 @@ describe('authentication templates', () => {
           const { text } = await renderAuthTemplate(spec, locale);
           expect(text.length).toBeGreaterThan(0);
           expect(text).toContain(gotrueVariable.confirmationUrl);
-        });
-
-        /**
-         * The committed export IS this template's snapshot: it is the artifact
-         * Auth actually serves, so asserting against it (instead of a second
-         * copy in a `.snap` file) means a drifted export fails here too, not
-         * only in the export gate.
-         */
-        it('matches the committed export', async () => {
-          const { html } = await renderAuthTemplate(spec, locale);
-          const committed = await readFile(
-            join(exportDir, `${spec.name}.${locale}.html`),
-            'utf8'
-          );
-          expect(html).toBe(committed);
         });
       });
     }

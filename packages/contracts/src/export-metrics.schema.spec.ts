@@ -49,10 +49,6 @@ describe('export_metrics metric keys (twin of the operator surface)', () => {
     );
   });
 
-  it('carries the owner-only top_facts the operator surface omits', () => {
-    expect(exportMetricsMetricsSchema.shape).toHaveProperty('top_facts');
-  });
-
   it('series point is the operator point minus the aggregate users_active', () => {
     const expected = new Set(
       Object.keys(instanceMetricsSeriesPointSchema.shape).filter(
@@ -88,10 +84,6 @@ describe('export_metrics output (stable-keyed contract)', () => {
     metrics,
     series: [seriesPoint],
   };
-
-  it('accepts a well-formed payload', () => {
-    expect(exportMetricsOutputSchema.parse(payload)).toBeTruthy();
-  });
 
   it('has a stable top-level and metric key set', () => {
     const parsed = exportMetricsOutputSchema.parse(payload);

@@ -70,7 +70,7 @@ export const createEmbedderProbe = () => (): EmbedderState => {
     : 'cold';
 };
 
-export const checkReadiness = async (
+const checkReadiness = async (
   probes: ReadinessProbes
 ): Promise<ReadinessReport> => {
   const supabase = await probes.supabase();

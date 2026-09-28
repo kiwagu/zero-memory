@@ -15,6 +15,12 @@ app for one-line-per-entry JSON logs.
   a correlation id from an `AsyncLocalStorage`) merged into every entry; keeps
   this package a leaf while logs still carry request context. Explicit bindings
   win on key collision.
+- `runDetached(task, logger, message, context?)` — starts a side write without
+  awaiting it; a rejection or a synchronous throw is logged at warn (with the
+  context and the error message) and dropped, never thrown into the caller.
+  `recordUsage` (`@workspace/usage`) and `recordAudit` (`@workspace/audit`)
+  are thin wrappers over it; its fire-and-forget contract is tested here, once
+  (`src/run-detached.spec.ts`).
 - Types: `Logger`, `LogLevel`, `LogContext`, `LogContextResolver`.
 
 ## Environment variables

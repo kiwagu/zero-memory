@@ -11,22 +11,24 @@ import {
 
 const body = (chars: number): string => 'a'.repeat(chars);
 
+/**
+ * Content in which every character is different (consecutive CJK ideographs,
+ * one UTF-16 unit each), so two windows can share a span of text only by
+ * covering the same positions — never by coincidence, as `'a'.repeat` would.
+ */
+const distinctBody = (chars: number): string =>
+  Array.from({ length: chars }, (_, i) => String.fromCharCode(0x4e00 + i)).join(
+    ''
+  );
+
 /** Every character index the segments after the primary one actually cover. */
 const overflowCoverage = (content: string): Set<number> => {
   const covered = new Set<number>();
-  const stride = EMBEDDING_WINDOW_CHARS - WINDOW_OVERLAP_CHARS;
-  passageWindows(content)
-    .slice(1)
-    .forEach((_window, index) => {
-      const start = stride * (index + 1);
-      for (
-        let i = start;
-        i < Math.min(start + EMBEDDING_WINDOW_CHARS, content.length);
-        i++
-      ) {
-        covered.add(i);
-      }
-    });
+  for (const window of passageWindows(content).slice(1)) {
+    for (let i = 0; i < window.text.length; i++) {
+      covered.add(window.charStart + i);
+    }
+  }
   return covered;
 };
 
@@ -61,13 +63,18 @@ describe('passageWindows', () => {
   });
 
   it('overlaps neighbouring windows so no sentence falls between them', () => {
-    const content = body(10_000);
-    const segments = passageWindows(content).slice(1);
-    const stride = EMBEDDING_WINDOW_CHARS - WINDOW_OVERLAP_CHARS;
-    // Consecutive starts advance by less than a full window: the difference
-    // is exactly the shared span.
-    expect(EMBEDDING_WINDOW_CHARS - stride).toBe(WINDOW_OVERLAP_CHARS);
-    expect(segments.length).toBeGreaterThan(1);
+    const segments = passageWindows(distinctBody(10_000)).slice(1);
+    expect(segments.length).toBeGreaterThan(2);
+    for (let i = 1; i < segments.length; i++) {
+      const previous = segments[i - 1]!.text;
+      const next = segments[i]!.text;
+      // The next window opens on exactly the text the previous one closed
+      // on — the overlap span, and not one character more.
+      expect(next.slice(0, WINDOW_OVERLAP_CHARS)).toBe(
+        previous.slice(-WINDOW_OVERLAP_CHARS)
+      );
+      expect(previous).not.toContain(next.slice(0, WINDOW_OVERLAP_CHARS + 1));
+    }
   });
 
   it('ends the last window at the end of the passage', () => {

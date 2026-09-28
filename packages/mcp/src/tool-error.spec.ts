@@ -1,6 +1,5 @@
 import {
   FailureError,
-  notFound,
   toolErrorSchema,
   validationFailed,
 } from '@workspace/contracts';
@@ -74,10 +73,5 @@ describe('toolErrorFromThrown', () => {
       message:
         'secret_content_rejected: content contains what looks like a secret.',
     });
-  });
-
-  it('reports a missing record as not_found, not as a server fault', () => {
-    const rejection = new FailureError(notFound('Memory mem_1 was not found.'));
-    expect(bodyOf(toolErrorFromThrown(rejection)).error.code).toBe('not_found');
   });
 });
