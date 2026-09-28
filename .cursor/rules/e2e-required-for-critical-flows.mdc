@@ -56,6 +56,10 @@ Every feature ships with 2–3 e2e specs: one happy path plus the one or two
 failure modes that would hurt users most. More than 3 usually means matrix
 testing that belongs a layer down (see the pyramid rule).
 
+Every new or changed test, at any layer, first passes the authoring gate in
+`/.claude/skills/test-audit/SKILL.md`: which contract it protects, which
+regression fails it, and why existing coverage does not already catch that.
+
 ## Test Pyramid Decision Rule (unit/integration vs E2E)
 
 Choose the lowest layer that can verify the behavior without losing product
