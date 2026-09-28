@@ -92,3 +92,65 @@ export const capUnpinnedRules = <T extends { pinned: boolean }>(
   ...rules.filter((rule) => rule.pinned),
   ...rules.filter((rule) => !rule.pinned).slice(0, Math.max(0, cap)),
 ];
+
+/** A live promoted rule, as far as delivery is concerned. */
+export interface DeliveryCandidate {
+  id: string;
+  /** `user` rides every session; `project` rides its project's briefing. */
+  targetLayer: 'user' | 'project';
+  /**
+   * Where a project rule is delivered: its explicit address, else its
+   * memory's scope. Not read for a General rule.
+   */
+  effectiveScope: string;
+  pinned: boolean;
+  promotedAt: string | null;
+}
+
+/**
+ * The ids of the rules a session actually receives, out of the owner's live
+ * promoted rules (the caller passes only those). The readers' rule, in one
+ * place for anything that must agree with them: a pinned rule always, then
+ * per channel the newest unpinned rules still within the delivery TTL, up to
+ * the channel's cap. General rules share one channel; each project's rules
+ * share that project's briefing, so a project is capped on its own.
+ */
+export const deliveredRuleIds = (
+  rules: readonly DeliveryCandidate[],
+  nowMs: number
+): Set<string> => {
+  const cutoff = Date.parse(ruleDeliveryCutoff(nowMs));
+  const promotedMs = (rule: DeliveryCandidate): number =>
+    rule.promotedAt ? Date.parse(rule.promotedAt) : Number.NEGATIVE_INFINITY;
+  const channels = new Map<string, DeliveryCandidate[]>();
+  for (const rule of rules) {
+    if (!rule.pinned && promotedMs(rule) < cutoff) {
+      continue;
+    }
+    const channel =
+      rule.targetLayer === 'user' ? 'user' : `project:${rule.effectiveScope}`;
+    channels.set(channel, [...(channels.get(channel) ?? []), rule]);
+  }
+  const delivered = new Set<string>();
+  for (const [channel, members] of channels) {
+    const newestFirst = [...members].sort(
+      (a, b) => promotedMs(b) - promotedMs(a)
+    );
+    const cap =
+      channel === 'user'
+        ? RULE_DELIVERY.generalRulesCap
+        : RULE_DELIVERY.projectRulesCap;
+    for (const rule of capUnpinnedRules(newestFirst, cap)) {
+      delivered.add(rule.id);
+    }
+  }
+  return delivered;
+};
+
+/**
+ * Same set, read against the current time — for React Server Components,
+ * like {@link ruleDeliveryCutoffNow}.
+ */
+export const deliveredRuleIdsNow = (
+  rules: readonly DeliveryCandidate[]
+): Set<string> => deliveredRuleIds(rules, Date.now());

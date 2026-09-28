@@ -929,7 +929,10 @@ export class HygieneScanner {
         return null;
 
       case 'forget':
-        await this.#forget(action.loser, model);
+        // A duplicate has a known replacement — the twin that stays — so the
+        // loser records it like any supersede: whatever is anchored to the
+        // loser, a promoted rule above all, follows the winner.
+        await this.#supersede(action.loser, action.winner, model);
         await this.#link(action.winner, action.loser, 'supersedes');
         await this.#audit('HygieneAutoDuplicate', {
           winner: action.winner,
@@ -1046,22 +1049,6 @@ export class HygieneScanner {
       this.#logger.warn('hygiene: judge metering failed', {
         error: error.message,
       });
-    }
-  }
-
-  async #forget(memoryId: string, model: string): Promise<void> {
-    // System invalidation: no usr_ actor, so attribute the scanner + judge
-    // model instead of invalidated_by (see the memories column comments).
-    const { error } = await this.client
-      .from('memories')
-      .update({
-        invalidated_at: new Date().toISOString(),
-        invalidated_by_agent: 'hygiene-scanner',
-        invalidated_by_model: model,
-      })
-      .eq('id', memoryId);
-    if (error) {
-      throw new Error(`hygiene: forget ${memoryId} failed: ${error.message}`);
     }
   }
 

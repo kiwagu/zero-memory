@@ -1,6 +1,8 @@
+import Link from 'next/link';
+
 import {
-  deliveredRuleCount,
-  RULE_DELIVERY,
+  type DeliveryCandidate,
+  deliveredRuleIdsNow,
   ruleDeliveryCutoffNow,
 } from '@workspace/db';
 import { Badge } from '@workspace/ui/components/badge';
@@ -26,7 +28,12 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 const GENERAL_FILTER = '__general__';
 
 const CANDIDATE_COLUMNS =
-  'id, memory_id, useful_sessions, first_used_at, last_used_at, rule_text, target_layer, judge_confidence, judge_rationale, status, suggested_scopes, applies_scope, pinned' as const;
+  'id, memory_id, useful_sessions, first_used_at, last_used_at, rule_text, target_layer, judge_confidence, judge_rationale, status, suggested_scopes, applies_scope, pinned, carried_from, text_review_since' as const;
+
+/** The pinned facet: pinned only, or unpinned only. */
+const PINNED_VALUES = ['pinned', 'unpinned'] as const;
+/** The delivery facet: what a session receives, or promoted but dropped. */
+const DELIVERY_VALUES = ['delivered', 'undelivered'] as const;
 
 /**
  * Rule candidates are a curated, low-volume incubator output (not the raw
@@ -49,6 +56,8 @@ type CandidateRow = {
   suggested_scopes: unknown;
   applies_scope: unknown;
   pinned: boolean;
+  carried_from: string | null;
+  text_review_since: string | null;
 };
 
 /**
@@ -85,7 +94,12 @@ const parseSuggestedScopes = (
 export default async function RulesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ scope?: string; status?: string }>;
+  searchParams: Promise<{
+    scope?: string;
+    status?: string;
+    pinned?: string;
+    delivery?: string;
+  }>;
 }) {
   const supabase = await createServerSupabaseClient();
   const { t } = await getRequestMessages();
@@ -98,6 +112,11 @@ export default async function RulesPage({
     : 'pending';
   // The concrete statuses "all" spans (revoked stays out of the review view).
   const ALL_STATUSES = ['pending', 'promoted', 'dismissed'] as const;
+  // Facets whose default is "any": absent from the URL unless chosen.
+  const selectedPinned =
+    PINNED_VALUES.find((value) => value === params.pinned) ?? null;
+  const selectedDelivery =
+    DELIVERY_VALUES.find((value) => value === params.delivery) ?? null;
 
   // The scope filter has three modes: none, the "General" sentinel (the
   // user-layer group — no project home), or a concrete project scope.
@@ -143,26 +162,22 @@ export default async function RulesPage({
   } else if (scopeFilter) {
     listQuery = listQuery.contains('suggested_scopes', scopeFilter);
   }
+  if (selectedPinned) {
+    listQuery = listQuery.eq('pinned', selectedPinned === 'pinned');
+  }
   const { data: listRows } = await listQuery
     .order('pinned', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(GROUP_FETCH_CAP);
 
-  // Header badges keep the standing pending/promoted totals (filter-agnostic).
-  // promotedUserCount is the delivery denominator M for the General channel:
-  // every promoted General rule is one the owner expects sessions to obey,
-  // but a session receives only the pinned ones plus the first
-  // RULE_DELIVERY.generalRulesCap of the rest — so the page reports
-  // "delivered N of M" honestly instead of hiding the drop.
+  // Header badges keep the standing totals (filter-agnostic). Every number
+  // about delivery comes from ONE read of the live promoted rules and one
+  // function — the readers' own rule (pinned always, then per channel the
+  // newest unpinned within the TTL, up to the cap) — so the badges, the
+  // delivery facet and what a session actually receives cannot disagree.
+  // The same set drives the facet below.
   const deliveryCutoff = ruleDeliveryCutoffNow();
-  const [
-    { count: pendingCount },
-    { count: promotedCount },
-    { count: promotedUserCount },
-    { count: pinnedGeneralCount },
-    { count: unpinnedGeneralInTtl },
-    { count: pinnedCount },
-  ] = await Promise.all([
+  const [{ count: pendingCount }, { data: liveRows }] = await Promise.all([
     supabase
       .from('rule_candidates')
       .select('id', { count: 'exact', head: true })
@@ -170,58 +185,33 @@ export default async function RulesPage({
       .not('rule_text', 'is', null),
     supabase
       .from('rule_candidates')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'promoted'),
-    // M = every promoted General rule (the denominator).
-    supabase
-      .from('rule_candidates')
-      .select('id', { count: 'exact', head: true })
+      .select(
+        'id, target_layer, applies_scope, pinned, promoted_at, memories!inner(scope)'
+      )
       .eq('status', 'promoted')
-      .eq('target_layer', 'user')
-      .is('revoked_at', null)
       .not('rule_text', 'is', null),
-    // The two groups the delivery arithmetic needs, counted separately
-    // because they are bounded differently (see deliveredRuleCount): PINNED
-    // General rules bypass the cap and the TTL entirely…
-    supabase
-      .from('rule_candidates')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'promoted')
-      .eq('target_layer', 'user')
-      .is('revoked_at', null)
-      .not('rule_text', 'is', null)
-      .eq('pinned', true),
-    // …while the UNPINNED ones must still be within the soft-TTL, and only
-    // the first `generalRulesCap` of those actually ride along.
-    supabase
-      .from('rule_candidates')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'promoted')
-      .eq('target_layer', 'user')
-      .is('revoked_at', null)
-      .not('rule_text', 'is', null)
-      .eq('pinned', false)
-      .gte('promoted_at', deliveryCutoff),
-    // Pinned = the guaranteed-delivery subset, across BOTH layers (either can
-    // be capped, so either can be pinned).
-    supabase
-      .from('rule_candidates')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'promoted')
-      .is('revoked_at', null)
-      .not('rule_text', 'is', null)
-      .eq('pinned', true),
   ]);
-  const deliveryTotal = promotedUserCount ?? 0;
-  // Delivered = every pinned rule plus the capped unpinned remainder — the
-  // same arithmetic the reader performs, so "N of M" reflects the cap, TTL
-  // expiry AND the pin exemption, and goes amber whenever a promoted rule is
-  // not delivered.
-  const deliveredCount = deliveredRuleCount(
-    pinnedGeneralCount ?? 0,
-    unpinnedGeneralInTtl ?? 0,
-    RULE_DELIVERY.generalRulesCap
-  );
+  const live: DeliveryCandidate[] = (liveRows ?? []).map((row) => ({
+    id: row.id,
+    targetLayer: row.target_layer === 'user' ? 'user' : 'project',
+    effectiveScope: String(
+      row.applies_scope ??
+        (row.memories as unknown as { scope: unknown }).scope ??
+        ''
+    ),
+    pinned: row.pinned,
+    promotedAt: row.promoted_at,
+  }));
+  const deliveredIds = deliveredRuleIdsNow(live);
+  const promotedCount = live.length;
+  const pinnedCount = live.filter((rule) => rule.pinned).length;
+  // "Delivered N of M" speaks for the General channel, which rides every
+  // session: M = every live General rule, N = the ones a session receives.
+  const generalLive = live.filter((rule) => rule.targetLayer === 'user');
+  const deliveryTotal = generalLive.length;
+  const deliveredCount = generalLive.filter((rule) =>
+    deliveredIds.has(rule.id)
+  ).length;
   const deliveryTruncated = deliveryTotal > deliveredCount;
 
   // Distinct project scopes across the owner's candidates drive the filter's
@@ -245,12 +235,22 @@ export default async function RulesPage({
     .in('status', [...ALL_STATUSES]);
   const hasGeneral = (generalCount ?? 0) > 0;
 
-  const rows = (listRows ?? []) as CandidateRow[];
+  // The delivery facet reads the same set as the badges: "not delivered" is
+  // a promoted rule a session does not receive (over the cap, past the TTL).
+  const rows = ((listRows ?? []) as CandidateRow[]).filter((row) => {
+    if (selectedDelivery === 'delivered') {
+      return deliveredIds.has(row.id);
+    }
+    if (selectedDelivery === 'undelivered') {
+      return row.status === 'promoted' && !deliveredIds.has(row.id);
+    }
+    return true;
+  });
   const memoryIds = [...new Set(rows.map((row) => row.memory_id))];
   const { data: memories } = memoryIds.length
     ? await supabase
         .from('memories')
-        .select('id, kind, scope')
+        .select('id, kind, scope, invalidated_at, superseded_by')
         .in('id', memoryIds)
     : { data: [] };
   const memoryById = new Map(
@@ -312,6 +312,22 @@ export default async function RulesPage({
       scopes: parseSuggestedScopes(row.suggested_scopes, memoryScope),
       staleSignal: cold ? t('rules.staleSignal') : null,
       pinned: row.pinned,
+      // A promoted rule follows the successor of its memory; these say when
+      // that left something for the owner: a curated text kept through the
+      // move, or a rule still anchored to a memory that was retired.
+      reviewSignal:
+        row.status === 'promoted' && row.text_review_since
+          ? t('rules.reviewSignal')
+          : null,
+      sourceSignal:
+        row.status !== 'promoted' || !memory.invalidated_at
+          ? null
+          : memory.superseded_by
+            ? t('rules.sourceSuperseded')
+            : t('rules.sourceForgotten'),
+      carriedFrom: row.carried_from
+        ? { id: row.carried_from, href: `/memory/${row.carried_from}` }
+        : null,
     };
     return [
       { groupScope: isPersonalScope(effective) ? null : effective, item },
@@ -390,6 +406,7 @@ export default async function RulesPage({
     pin: t('rules.pin'),
     pinHint: t('rules.pinHint'),
     pinnedBadge: t('rules.pinnedBadge'),
+    carriedFrom: t('rules.carriedFrom'),
   };
 
   const revokeLabels = {
@@ -416,32 +433,46 @@ export default async function RulesPage({
             </Badge>
             {/* The killer metric: rules born from memory. */}
             <Badge variant="secondary" data-testid="rules-promoted-count">
-              {t('rules.promotedCount', { count: promotedCount ?? 0 })}
+              {t('rules.promotedCount', { count: promotedCount })}
             </Badge>
             {/* Delivery honesty: how many General rules actually ride the MCP
                 instructions (the rest are promoted but silently undelivered). */}
             {deliveryTotal > 0 ? (
-              <Badge
-                variant={deliveryTruncated ? 'amber' : 'secondary'}
-                data-testid="rules-delivered-count"
-                title={t('rules.deliveredHint')}
+              // A link into the delivery facet: amber opens what is NOT
+              // delivered, the problem the colour points at.
+              <Link
+                href={`/rules?status=promoted&delivery=${
+                  deliveryTruncated ? 'undelivered' : 'delivered'
+                }`}
+                data-testid="rules-delivered-link"
               >
-                {t('rules.deliveredCount', {
-                  delivered: deliveredCount,
-                  total: deliveryTotal,
-                })}
-              </Badge>
+                <Badge
+                  variant={deliveryTruncated ? 'amber' : 'secondary'}
+                  data-testid="rules-delivered-count"
+                  title={t('rules.deliveredHint')}
+                >
+                  {t('rules.deliveredCount', {
+                    delivered: deliveredCount,
+                    total: deliveryTotal,
+                  })}
+                </Badge>
+              </Link>
             ) : null}
             {/* The guaranteed-delivery subset: pinned rules lead the
                 briefing's rules[], exempt from the delivery cap and TTL. */}
-            {(pinnedCount ?? 0) > 0 ? (
-              <Badge
-                variant="secondary"
-                data-testid="rules-pinned-count"
-                title={t('rules.pinnedCountHint')}
+            {pinnedCount > 0 ? (
+              <Link
+                href="/rules?status=promoted&pinned=pinned"
+                data-testid="rules-pinned-link"
               >
-                {t('rules.pinnedCount', { count: pinnedCount ?? 0 })}
-              </Badge>
+                <Badge
+                  variant="secondary"
+                  data-testid="rules-pinned-count"
+                  title={t('rules.pinnedCountHint')}
+                >
+                  {t('rules.pinnedCount', { count: pinnedCount })}
+                </Badge>
+              </Link>
             ) : null}
           </div>
           <p className="text-muted-foreground text-sm">
@@ -463,6 +494,19 @@ export default async function RulesPage({
       <RulesFilter
         scope={generalSelected ? GENERAL_FILTER : (selectedScope ?? '')}
         status={selectedStatus}
+        pinned={selectedPinned ?? ''}
+        delivery={selectedDelivery ?? ''}
+        pinnedOptions={[
+          { value: 'pinned', label: t('rules.facet.pinned.pinned') },
+          { value: 'unpinned', label: t('rules.facet.pinned.unpinned') },
+        ]}
+        deliveryOptions={[
+          { value: 'delivered', label: t('rules.facet.delivery.delivered') },
+          {
+            value: 'undelivered',
+            label: t('rules.facet.delivery.undelivered'),
+          },
+        ]}
         scopes={[
           ...(hasGeneral
             ? [{ value: GENERAL_FILTER, label: t('rules.groupGeneral') }]
@@ -478,7 +522,11 @@ export default async function RulesPage({
           { value: 'promoted', label: t('rules.status.promoted') },
           { value: 'dismissed', label: t('rules.status.dismissed') },
         ]}
-        labels={{ allScopes: t('rules.filterAll') }}
+        labels={{
+          allScopes: t('rules.filterAll'),
+          pinnedAny: t('rules.facet.pinned.any'),
+          deliveryAny: t('rules.facet.delivery.any'),
+        }}
       />
 
       {listItems.length === 0 ? (

@@ -9,12 +9,11 @@ import { singleton } from '@workspace/di';
 import { createLogger } from '@workspace/logger';
 import type { IProjectRulesReader, Scope } from '@workspace/memory';
 
+import { readAllPages } from '../paged-read.js';
 import { createUserClient, type Client } from '../supabase.client.js';
 
 /** A briefing carries a handful of rules, not a rulebook. */
 const PROJECT_RULES_CAP = RULE_DELIVERY.projectRulesCap;
-/** Over-fetch bound before the effective-scope filter. */
-const PROJECT_RULES_FETCH = 64;
 
 const logger = createLogger('SupabaseProjectRulesReader');
 
@@ -37,27 +36,44 @@ export class SupabaseProjectRulesReader implements IProjectRulesReader {
     if (scopes.length === 0) {
       return [];
     }
-    const { data, error } = await this.#client()
-      .from('rule_candidates')
-      .select('rule_text, pinned, applies_scope, memories!inner(scope)')
-      .eq('status', 'promoted')
-      .eq('target_layer', 'project')
-      .is('revoked_at', null)
-      .not('rule_text', 'is', null)
-      // Soft-TTL: a rule older than the delivery TTL drops out of the briefing
-      // — unless it is PINNED, which exempts it (the pin is a standing
-      // decision, not something that expires by age).
-      .or(`pinned.eq.true,promoted_at.gte.${ruleDeliveryCutoff(Date.now())}`)
-      // Pinned first (never dropped by the cap), then newest-first: at the
-      // cap, freshly promoted rules win over older ones.
-      .order('pinned', { ascending: false })
-      .order('promoted_at', { ascending: false })
-      .limit(PROJECT_RULES_FETCH);
-    if (error) {
-      throw new Error(`project rules lookup failed: ${error.message}`);
-    }
+    const client = this.#client();
+    const cutoff = ruleDeliveryCutoff(Date.now());
+    // Every eligible row, paged: the effective-scope filter below runs in
+    // memory, so any bound before it — a row limit, or PostgREST's own
+    // max-rows cap on a single response — would let newer rules of OTHER
+    // projects crowd a project's own rules out of its briefing. The cap
+    // belongs to each briefing, after the filter (the /rules page counts
+    // delivery the same way).
+    const rows = await readAllPages(
+      (from, to) =>
+        client
+          .from('rule_candidates')
+          .select('rule_text, pinned, applies_scope, memories!inner(scope)')
+          .eq('status', 'promoted')
+          .eq('target_layer', 'project')
+          .is('revoked_at', null)
+          .not('rule_text', 'is', null)
+          // Soft-TTL: a rule older than the delivery TTL drops out of the
+          // briefing — unless it is PINNED, which exempts it (the pin is a
+          // standing decision, not something that expires by age).
+          .or(`pinned.eq.true,promoted_at.gte.${cutoff}`)
+          // Pinned first (never dropped by the cap), then newest-first: at
+          // the cap, freshly promoted rules win over older ones. The id
+          // breaks ties so no row lands on two pages or on none.
+          .order('pinned', { ascending: false })
+          .order('promoted_at', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to),
+      { label: 'project rules lookup' }
+    ).catch((error: unknown) => {
+      throw new Error(
+        `project rules lookup failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    });
     const briefed = new Set(scopes.map((scope) => scope.path));
-    const eligible = (data ?? [])
+    const eligible = rows
       .filter((row) => {
         const anchor = (row.memories as unknown as { scope: unknown }).scope;
         const effective = String(row.applies_scope ?? anchor ?? '');
