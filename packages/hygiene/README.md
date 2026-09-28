@@ -18,8 +18,10 @@ For each recently-written active memory (`lookbackDays` window):
 unrelated` with a confidence.
 3. **Act** — `HygieneScanner`:
    - **Tier-AUTO** (confidence ≥ `autoConfidence`): reversible lifecycle writes
-     — invalidate a duplicate's older twin, or supersede the losing memory —
-     plus a `supersedes` link and an `audit_log` entry (auditable + reversible).
+     — supersede a duplicate's older twin by the twin that stays, or the
+     losing memory by the winner — plus a `supersedes` link and an
+     `audit_log` entry (auditable + reversible). Both record the winner in
+     `superseded_by`, so a promoted rule anchored to the loser follows it.
    - **Tier-HUMAN** (contradictions, low-confidence pairs): a row in
      `public.memory_review_queue` (deny-all) plus a `contradicts` link, for a
      person to resolve.
