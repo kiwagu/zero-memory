@@ -85,6 +85,39 @@ layer, or copy and download its text. A promoted rule whose source memory has
 stopped being recalled usefully is flagged as a "still relevant?" hint rather
 than removed.
 
+A promoted rule is always a live one. Promoting a rule you revoked earlier,
+from the dashboard or with `promote_rule`, clears the revoke in the same
+step, so a rule can never read as promoted while no session receives it.
+
+### A rule follows its memory
+
+Memories get replaced: a writer supersedes an outdated one, a reviewer
+resolves a conflict, hygiene folds a duplicate. Whenever a memory with a
+promoted rule is superseded, on any of those paths, the rule moves to the
+memory that replaced it. It keeps everything you decided about it: the pin,
+the layer, the project it is delivered to and its place in the delivery TTL.
+
+- If the rule's text was the memory's own words, it takes the successor's
+  words. The same holds when a memory's text is rewritten in place, such as
+  its translation into English.
+- If the text was curated (distilled, or written by hand), the text is kept
+  and the rule is flagged **Text to review** on `/rules`. The writer's
+  `remember` reply says so and names the call that sets a new text:
+  `promote_rule` on the successor, with `rule_text`.
+- The rule stays where it is, and is still delivered, when moving it could
+  cost it anything: the successor already has a rule of its own or was
+  dismissed or revoked as one, belongs to another owner, or is itself retired.
+  A task or open question closed by its answer keeps its rule too, since an
+  answer does not replace an instruction. `/rules` flags such a rule.
+
+`remember` lists what happened to each rule under `rules`: carried, carried
+with its curated text kept, or not carried. `promote_rule` on a superseded
+memory names the successor to promote instead.
+
+Forgetting a memory does not retire its rule. The rule keeps being delivered,
+`/rules` flags that its memory is gone, and the `forget` reply says so. Only
+you revoke a rule, on `/rules`.
+
 ### Delivery
 
 Promoted rules have several delivery paths, in order of how little client
@@ -160,9 +193,13 @@ arrives through `build_context` and hooks rather than the instruction window.
 
 The `/rules` screen reports `Delivered N of M` for the General layer and turns
 amber whenever a promoted rule is not being delivered, alongside a count of
-pinned rules, so a budget overflow is visible rather than silent. The same
-arithmetic backs both the badge and the readers that build the delivered set,
-so the number and the delivery cannot drift apart.
+pinned rules, so a budget overflow is visible rather than silent. Two filters
+list the rules behind those numbers: **pinned** or not, and **delivered** or
+not, where _not delivered_ is a promoted rule the cap or the TTL keeps from
+sessions. The badges open the matching filter. One function backs the badge,
+the filter and the readers that build the delivered set, so what the page
+shows and what a session receives cannot drift apart. For project rules it
+counts each project on its own.
 
 ### Closing the loop
 
