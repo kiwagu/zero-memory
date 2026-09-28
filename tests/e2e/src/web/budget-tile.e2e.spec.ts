@@ -7,18 +7,12 @@
  * no tile announcing that it has no limits. A tile saying "unlimited" would
  * advertise a constraint that does not exist here.
  */
-import { createClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { seedInsightsUsage } from '../helpers/insights.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { signInThroughForm } from '../helpers/web.js';
-
-const admin = () =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
 const entityIdOf = async (authUserId: string): Promise<string> => {
   const { data, error } = await admin()

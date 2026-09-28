@@ -11,19 +11,13 @@
  * specs assert on.
  */
 import { expect, test, type Page } from '@playwright/test';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { seedOwnedMemory } from '../helpers/rules.js';
 import { provisionE2EUser, type E2EUser } from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
 
 const DAY = 86_400_000;
-
-const admin = (): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
 interface Seeded {
   user: E2EUser;

@@ -7,10 +7,9 @@
  * database as the signed-in role. Those are asserted here rather than only in
  * SQL, because this is the surface a person actually touches.
  */
-import { createClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken, userRestClient } from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
@@ -18,11 +17,6 @@ import { signInThroughForm } from '../helpers/web.js';
 /** Recognisable, and long enough to pass the shape check. */
 const KEY = 'sk-ant-e2e-provider-key-DO-NOT-LEAK-7788';
 const REPLACEMENT = 'sk-ant-e2e-second-provider-key-VALUE-9900';
-
-const admin = () =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
 const entityIdOf = async (authUserId: string): Promise<string> => {
   const { data, error } = await admin()

@@ -4,10 +4,9 @@
  * and flips to "shared" once someone else joins the scope. The dedicated
  * share-glyph button on the detail page opens a dialog listing who can see it.
  */
-import { createClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken, userRestClient } from '../helpers/users.js';
@@ -55,12 +54,7 @@ test.describe('Memory sharing badge', () => {
     // Deliberately add userB to the scope -> the memory is now truly shared.
     // scope_members.user_id is the usr_ entity id, not the auth uuid — resolve
     // it from profiles (service role, keyed by the auth uuid).
-    const admin = createClient(
-      e2eEnv.supabaseUrl,
-      e2eEnv.supabaseServiceRoleKey,
-      { auth: { persistSession: false, autoRefreshToken: false } }
-    );
-    const profile = await admin
+    const profile = await admin()
       .from('profiles')
       .select('id')
       .eq('user_id', seed.userB.id)

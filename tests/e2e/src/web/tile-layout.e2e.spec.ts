@@ -11,21 +11,15 @@
  * KPI row from three tiles into four, so the same page is measured in both
  * arrangements.
  */
-import { createClient } from '@supabase/supabase-js';
 import { expect, test, type Locator } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { seedInsightsUsage } from '../helpers/insights.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { signInThroughForm } from '../helpers/web.js';
 
 /** Tolerance in px: sub-pixel rounding of percentage widths is not a hole. */
 const FLUSH_TOLERANCE = 2;
-
-const admin = () =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
 const entityIdOf = async (authUserId: string): Promise<string> => {
   const { data, error } = await admin()

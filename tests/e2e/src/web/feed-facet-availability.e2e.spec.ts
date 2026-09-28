@@ -10,19 +10,13 @@
  * Every view is narrowed by the shared marker, so the assertions hold whatever
  * else the stand's corpus contains.
  */
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
-
-const adminClient = (): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
 const MARKER = 'e2e feed-facet marker';
 const LIVE = `${MARKER}: the weekly digest is assembled on Sunday evening`;
@@ -80,7 +74,7 @@ test.describe('feed facet availability', () => {
   // of the same feed — leaving them behind would push the fixtures off it.
   test.afterAll(async () => {
     if (seededMemories.length > 0) {
-      await adminClient().from('memories').delete().in('id', seededMemories);
+      await admin().from('memories').delete().in('id', seededMemories);
     }
   });
 

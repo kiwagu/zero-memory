@@ -4,10 +4,9 @@
  * other facts that came out of the same conversation — the readable half of
  * the marker, and the reason it is worth stamping.
  */
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
@@ -17,11 +16,6 @@ interface Briefed {
   project_scope?: string;
   session?: { thread?: string };
 }
-
-const adminClient = (): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
 /** Ids seeded here, removed in afterAll — see the note on the describe block. */
 const seededMemories: string[] = [];
@@ -33,7 +27,7 @@ test.describe('the session marker on a memory page', () => {
   // one. The house pattern: delete what the spec seeded.
   test.afterAll(async () => {
     if (seededMemories.length > 0) {
-      await adminClient().from('memories').delete().in('id', seededMemories);
+      await admin().from('memories').delete().in('id', seededMemories);
     }
   });
 
