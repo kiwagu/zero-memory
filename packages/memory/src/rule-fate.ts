@@ -30,8 +30,8 @@ export const ruleFateReport = (fact: RuleFateFact): RuleFate => {
         );
       case 'not_carried':
         return (
-          `The promoted rule anchored to ${from} stayed on it and is still ` +
-          `delivered: ${to} ` +
+          `The promoted rule anchored to ${from} stayed on it and stays ` +
+          `promoted: ${to} ` +
           (fact.successorCandidacy
             ? `already has a rule candidacy of its own ` +
               `(${fact.successorCandidacy}).`
@@ -54,7 +54,7 @@ export const keptLiveRule = (
 ): NonNullable<ForgetOutput['rule']> => ({
   outcome: 'kept_live',
   note:
-    `The promoted rule anchored to ${memoryId} stays live and keeps ` +
-    `reaching sessions: forgetting a memory does not retire its rule. Only ` +
-    `the owner revokes a rule, on /rules.`,
+    `The promoted rule anchored to ${memoryId} stays promoted, subject to ` +
+    `the usual delivery limits: forgetting a memory does not retire its ` +
+    `rule. Only the owner revokes a rule, on /rules.`,
 });

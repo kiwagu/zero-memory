@@ -104,7 +104,7 @@ the layer, the project it is delivered to and its place in the delivery TTL.
   and the rule is flagged **Text to review** on `/rules`. The writer's
   `remember` reply says so and names the call that sets a new text:
   `promote_rule` on the successor, with `rule_text`.
-- The rule stays where it is, and is still delivered, when moving it could
+- The rule stays where it is, and stays promoted, when moving it could
   cost it anything: the successor already has a rule of its own or was
   dismissed or revoked as one, belongs to another owner, or is itself retired.
   A task or open question closed by its answer keeps its rule too, since an
@@ -114,9 +114,9 @@ the layer, the project it is delivered to and its place in the delivery TTL.
 with its curated text kept, or not carried. `promote_rule` on a superseded
 memory names the successor to promote instead.
 
-Forgetting a memory does not retire its rule. The rule keeps being delivered,
-`/rules` flags that its memory is gone, and the `forget` reply says so. Only
-you revoke a rule, on `/rules`.
+Forgetting a memory does not retire its rule. The rule stays promoted, within
+the usual delivery limits, `/rules` flags that its memory is gone, and the
+`forget` reply says so. Only you revoke a rule, on `/rules`.
 
 ### Delivery
 

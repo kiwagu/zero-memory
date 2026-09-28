@@ -177,7 +177,7 @@ export type SessionAttachment = z.infer<typeof sessionAttachmentSchema>;
  * A rule follows the successor of its memory: `carried` when it took the
  * successor's text (its text was the memory's own words), `carried_text_kept`
  * when it kept a curated text that is now flagged for review, `not_carried`
- * when it stayed on the retired memory and is still delivered.
+ * when it stayed on the retired memory and stays promoted there.
  */
 export const ruleFateSchema = z.object({
   /** The retired memory the rule was anchored to. */

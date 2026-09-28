@@ -221,7 +221,7 @@ export interface RuleCandidateItem {
   reviewSignal?: string | null;
   /**
    * A PROMOTED rule still anchored to a memory that was retired: superseded
-   * without the rule moving along, or forgotten. It is still delivered.
+   * without the rule moving along, or forgotten. It stays promoted.
    * Pre-formatted by the app; absent/null otherwise.
    */
   sourceSignal?: string | null;
