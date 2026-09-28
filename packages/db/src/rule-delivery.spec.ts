@@ -17,19 +17,10 @@ describe('deliveredRuleCount', () => {
 
   it('delivers every pinned rule ON TOP of the cap', () => {
     // The pin's promise: a pinned rule is never the one that gets dropped,
-    // so it does not consume a capped slot either.
+    // so it does not consume a capped slot either — which is why a naive
+    // min(everything, cap) would understate delivery once anything is pinned.
     expect(deliveredRuleCount(10, 100, CAP)).toBe(10 + CAP);
     expect(deliveredRuleCount(3, 0, CAP)).toBe(3);
-  });
-
-  it('matches the naive min() only while nothing is pinned', () => {
-    // This is the bug the function exists to prevent: with pins in play,
-    // min(everything, cap) understates what the reader actually delivers.
-    const pinned = 10;
-    const unpinned = 100;
-    const naive = Math.min(pinned + unpinned, CAP);
-    expect(deliveredRuleCount(pinned, unpinned, CAP)).toBeGreaterThan(naive);
-    expect(deliveredRuleCount(0, unpinned, CAP)).toBe(naive);
   });
 
   it('never returns a negative count', () => {

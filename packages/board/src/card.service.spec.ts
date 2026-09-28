@@ -129,6 +129,9 @@ describe('CardService', () => {
   });
 
   it('passes a real move through', async () => {
+    // Into active with no branch named: whether the card already holds an
+    // open branch is known only under the store's lock, so that question is
+    // left to the store.
     const result = await service.moveCard({
       cardId,
       to: 'active',
@@ -244,13 +247,6 @@ describe('CardService', () => {
     });
     expect(result.isErr()).toBe(true);
     expect(repository.calls).toEqual([]);
-  });
-
-  it('leaves the open-branch question to the store', async () => {
-    // Whether the card already holds an open branch is known only under its
-    // lock.
-    await service.moveCard({ cardId, to: 'active', reason: 'resume' });
-    expect(repository.calls).toEqual(['move']);
   });
 
   it('refuses a landing without its commit, target or reason before a round trip', async () => {
