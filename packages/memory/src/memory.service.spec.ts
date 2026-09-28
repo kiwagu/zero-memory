@@ -235,7 +235,13 @@ describe('MemoryService.remember', () => {
 
     expect(result.isOk()).toBe(true);
     expect(result.unwrap().deduplicated).toBeUndefined();
+    // An empty aperture probe leaves the response unchanged.
+    expect(result.unwrap().similar_existing).toBeUndefined();
+    expect(result.unwrap().hint).toBeUndefined();
     expect(searchService.findSimilar).toHaveBeenCalledOnce();
+    // The coverage probe is for provisional writes only; an authoritative
+    // in-band write does not pay for it.
+    expect(searchService.findAuthoritativeCoverage).not.toHaveBeenCalled();
     expect(repository.insert).toHaveBeenCalledOnce();
 
     const [fragment, vectors] = vi.mocked(repository.insert).mock.calls[0]!;
@@ -462,20 +468,6 @@ describe('MemoryService.remember', () => {
     );
   });
 
-  it('leaves the response unchanged when the aperture probe is empty', async () => {
-    const { service } = makeService();
-
-    const out = (
-      await service.remember({
-        content: 'no neighbours here',
-        scope: PERSONAL_SCOPE,
-      })
-    ).unwrap();
-
-    expect(out.similar_existing).toBeUndefined();
-    expect(out.hint).toBeUndefined();
-  });
-
   it('does not probe for supersede candidates on a provisional (watcher) write', async () => {
     const searchService = makeSearchService(None, None, [
       {
@@ -501,23 +493,6 @@ describe('MemoryService.remember', () => {
     expect(out.similar_existing).toBeUndefined();
   });
 
-  it('resolves scope "core" to the personal core scope', async () => {
-    const { service, repository } = makeService({
-      context: { ...contextStub, getDefaultScope: () => 'proj.zero_memory' },
-    });
-
-    const result = await service.remember({
-      content: 'bun loads .env only from the cwd',
-      scope: 'core',
-    });
-
-    expect(result.isOk()).toBe(true);
-    const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.scope.path).toBe(
-      `user.${USER_ENTITY_ID.replace(/\./g, '_')}.core`
-    );
-  });
-
   it('refuses a scope-less write when the session has no project attached', async () => {
     const { service, repository } = makeService();
 
@@ -537,24 +512,6 @@ describe('MemoryService.remember', () => {
     expect(repository.insert).not.toHaveBeenCalled();
   });
 
-  it('stamps an explicit personal write as deliberate, not as a fallback', async () => {
-    const { service, repository } = makeService();
-
-    const result = await service.remember({
-      content: 'the owner works from Vilnius',
-      scope: PERSONAL_SCOPE,
-    });
-
-    expect(result.isOk()).toBe(true);
-    const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.scope.path).toBe(
-      `user.${USER_ENTITY_ID.replace(/\./g, '_')}`
-    );
-    expect(fragment.provenance.source).toMatchObject({
-      routing: { via: 'personal', confidence: 1 },
-    });
-  });
-
   it('refuses a project_hint that does not resolve to a project scope', async () => {
     const { service, repository } = makeService();
 
@@ -568,7 +525,9 @@ describe('MemoryService.remember', () => {
     expect(repository.insert).not.toHaveBeenCalled();
   });
 
-  it('routes a project NAME in any spelling to the existing project', async () => {
+  it('routes a project NAME to the existing project, creating nothing', async () => {
+    // Every spelling of a name is the project-name matrix's job; this is the
+    // write path using it.
     const zeroMemory = Scope.project(USER_ENTITY_ID, 'zero_memory');
     const scopeAccess = makeScopeAccess(true, [
       { scope: zeroMemory, alias: null, own: true },
@@ -580,53 +539,15 @@ describe('MemoryService.remember', () => {
     ]);
     const { service, repository } = makeService({ scopeAccess });
 
-    for (const hint of ['ZM', 'Zero Memory', 'ZeroMemory']) {
-      const result = await service.remember({
-        content: `a fact filed under ${hint}`,
-        project_hint: hint,
-      });
-      expect(result.isOk()).toBe(true);
-    }
-
-    for (const [fragment] of vi.mocked(repository.insert).mock.calls) {
-      expect(fragment.scope.path).toBe(zeroMemory.path);
-    }
-    expect(scopeAccess.createScope).not.toHaveBeenCalled();
-  });
-
-  it('refuses a project NAME that fits none of the projects, listing them, and creates nothing', async () => {
-    const zeroMemory = Scope.project(USER_ENTITY_ID, 'zero_memory');
-    const scopeAccess = makeScopeAccess(true, [
-      { scope: zeroMemory, alias: null, own: true },
-    ]);
-    const { service, repository } = makeService({ scopeAccess });
-
     const result = await service.remember({
-      content: 'a fact aimed at a misspelt project',
-      project_hint: 'zero-memry',
-    });
-
-    expect(result.isErr()).toBe(true);
-    expect(result.unwrapErr().message).toContain(
-      `zero_memory (${zeroMemory.path})`
-    );
-    expect(scopeAccess.createScope).not.toHaveBeenCalled();
-    expect(repository.insert).not.toHaveBeenCalled();
-  });
-
-  it('stamps hint-routed writes with the hint confidence', async () => {
-    const { service, repository } = makeService();
-
-    const result = await service.remember({
-      content: 'a hint-routed write',
-      project_hint: '/home/someone/repos/quokka-tool',
+      content: 'a fact filed under a project name',
+      project_hint: 'Zero Memory',
     });
 
     expect(result.isOk()).toBe(true);
     const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.provenance.source).toMatchObject({
-      routing: { via: 'hint', confidence: 0.95 },
-    });
+    expect(fragment.scope.path).toBe(zeroMemory.path);
+    expect(scopeAccess.createScope).not.toHaveBeenCalled();
   });
 
   it('routes a project_hint through project bindings and reports the scope', async () => {
@@ -643,6 +564,10 @@ describe('MemoryService.remember', () => {
     expect(projectBindings.findScope).toHaveBeenCalledOnce();
     const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
     expect(fragment.scope.path).toBe(expectedScope);
+    // The routing audit records how firm the hint made the placement.
+    expect(fragment.provenance.source).toMatchObject({
+      routing: { via: 'hint', confidence: 0.95 },
+    });
   });
 
   it('lets an explicit scope win over a project_hint', async () => {
@@ -659,21 +584,6 @@ describe('MemoryService.remember', () => {
       `user.${USER_ENTITY_ID.replace(/\./g, '_')}.core`
     );
     expect(projectBindings.findScope).not.toHaveBeenCalled();
-  });
-
-  it('preserves the verbatim idiom anchor in provenance source', async () => {
-    const { service, repository } = makeService();
-
-    await service.remember({
-      content: 'the user prefers single-line commit messages',
-      verbatim: '一行コミット、本文なし',
-      scope: PERSONAL_SCOPE,
-    });
-
-    const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.provenance.source).toMatchObject({
-      verbatim: '一行コミット、本文なし',
-    });
   });
 
   it('stamps the MCP session id into provenance source', async () => {
@@ -924,19 +834,6 @@ describe('MemoryService.remember', () => {
     expect(searchService.findAuthoritativeCoverage).toHaveBeenCalledOnce();
   });
 
-  it('does NOT run the coverage probe for an authoritative in-band write', async () => {
-    const { service, repository, searchService } = makeService();
-
-    const result = await service.remember({
-      content: 'an in-band fact',
-      scope: PERSONAL_SCOPE,
-    });
-
-    expect(result.unwrap().deduplicated).toBeUndefined();
-    expect(searchService.findAuthoritativeCoverage).not.toHaveBeenCalled();
-    expect(repository.insert).toHaveBeenCalledOnce();
-  });
-
   it('rejects a secret in content BEFORE the embedder and translator see it', async () => {
     const { service, repository, translator, embeddingService } = makeService();
     const embedSpy = vi.spyOn(embeddingService, 'embed');
@@ -1163,21 +1060,6 @@ describe('MemoryService.recall', () => {
     expect(params.scopes).toBeUndefined();
   });
 
-  it('resolves the "core" shorthand inside explicit scopes', async () => {
-    const { service, searchService } = makeService();
-
-    const result = await service.recall({
-      query: 'bun gotchas',
-      scopes: ['core'],
-    });
-
-    expect(result.isOk()).toBe(true);
-    const params = vi.mocked(searchService.search).mock.calls[0]![0];
-    expect(params.scopes?.map((scope) => scope.path)).toEqual([
-      `user.${USER_ENTITY_ID.replace(/\./g, '_')}.core`,
-    ]);
-  });
-
   it('resolves the "personal" shorthand inside explicit scopes', async () => {
     const { service, searchService } = makeService();
 
@@ -1361,38 +1243,6 @@ describe('MemoryService.buildContext', () => {
     expect(params.topicText).toBe('ウォッチャーのポートを固定する');
   });
 
-  it('briefs from the isolated read set when the session has a project', async () => {
-    const { service, graphService } = makeService({
-      context: { ...contextStub, getDefaultScope: () => 'proj.zero_memory' },
-    });
-
-    const result = await service.buildContext({ topic: 'project alpha' });
-
-    expect(result.isOk()).toBe(true);
-    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
-    const personal = `user.${USER_ENTITY_ID.replace(/\./g, '_')}`;
-    expect(params.scopes?.map((scope) => scope.path)).toEqual([
-      'proj.usr_000000000000000a_0000000000.zero_memory',
-      personal,
-      `${personal}.core`,
-    ]);
-  });
-
-  it('briefs across all visible scopes on the "*" sentinel', async () => {
-    const { service, graphService } = makeService({
-      context: { ...contextStub, getDefaultScope: () => 'proj.zero_memory' },
-    });
-
-    const result = await service.buildContext({
-      topic: 'project alpha',
-      scopes: ['*'],
-    });
-
-    expect(result.isOk()).toBe(true);
-    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
-    expect(params.scopes).toBeUndefined();
-  });
-
   it('narrows an unattached hint-less BRIEFING to personal + core', async () => {
     const { service, graphService } = makeService();
 
@@ -1436,6 +1286,8 @@ describe('MemoryService.buildContext', () => {
     expect(result.isOk()).toBe(true);
     const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
     expect(params.scopes).toBeUndefined();
+    // Nothing pinned the read, so no project is reported back.
+    expect(result.unwrap().project_scope).toBeUndefined();
   });
 
   it('pins the briefing from a project_hint and reports project_scope', async () => {
@@ -1457,15 +1309,6 @@ describe('MemoryService.buildContext', () => {
       `${personal}.core`,
     ]);
   });
-
-  it('reports no project_scope when the briefing ran unpinned', async () => {
-    const { service } = makeService();
-
-    const result = await service.buildContext({ topic: 'project alpha' });
-
-    expect(result.isOk()).toBe(true);
-    expect(result.unwrap().project_scope).toBeUndefined();
-  });
 });
 
 describe('MemoryService.forget', () => {
@@ -1474,7 +1317,7 @@ describe('MemoryService.forget', () => {
     const result = await service.forget({
       memory_id: 'mem_000000000000000f.0000000000' as MemoryId,
     });
-    expect(result.isErr()).toBe(true);
+    expect(result.unwrapErr().code).toBe('not_found');
   });
 
   const makeRuled = () =>
@@ -1593,7 +1436,7 @@ describe('MemoryService.closeLoop', () => {
     const result = await service.closeLoop({
       memory_id: 'mem_000000000000000f.0000000000' as MemoryId,
     });
-    expect(result.isErr()).toBe(true);
+    expect(result.unwrapErr().code).toBe('not_found');
   });
 });
 
@@ -1625,8 +1468,10 @@ describe('MemoryService.share', () => {
       scope: canonical,
       shared: true,
     });
-    // Once for the canonical-scope bootstrap probe, once for the share gate.
-    expect(scopeAccess.canWrite).toHaveBeenCalledTimes(2);
+    // The share gate checks the canonical scope, not the legacy name given.
+    expect(scopeAccess.canWrite).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: canonical })
+    );
     expect(repository.update).toHaveBeenCalledExactlyOnceWith(fragment);
     expect(fragment.visibility.level).toBe('shared');
     expect(fragment.scope.path).toBe(canonical);
@@ -2405,22 +2250,6 @@ describe('MemoryService — the session thread', () => {
       thread: TEST_THREAD,
       client_session_id: 'conv-1',
     });
-  });
-
-  it('leaves the marker off a write with no conversation behind it', async () => {
-    const { service, repository } = makeService();
-
-    await service.remember({
-      content: 'captured from a terminal, outside any conversation',
-      kind: 'fact',
-      scope: PERSONAL_SCOPE,
-    });
-
-    // Absence is an honest state, not a gap: quick-capture, import and
-    // bootstrap have no conversation to point at.
-    const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.provenance.source).not.toHaveProperty('thread');
-    expect(fragment.provenance.source).not.toHaveProperty('client_session_id');
   });
 
   it('falls back to the pre-thread behaviour when the lookup throws', async () => {

@@ -29,7 +29,7 @@ const makeService = (repository: IEntityRepository) =>
   );
 
 describe('EntityResolutionService.resolve — decision table (DESIGN §6.6)', () => {
-  it('exact normalized match attaches without touching the embedder', async () => {
+  it('exact normalized match attaches, whatever type the caller names', async () => {
     const repository = makeRepository({
       exact: Some({
         id: 'ent_0000000000000001.0000000000' as EntityId,
@@ -105,25 +105,29 @@ describe('EntityResolutionService.resolve — decision table (DESIGN §6.6)', ()
     }
   });
 
-  it('attaching by either probe costs no model call', async () => {
-    const embedder = new DeterministicHashEmbeddingService();
-    const embed = vi.spyOn(embedder, 'embed');
-    const repository = makeRepository({
-      matchKey: Some({
-        id: 'ent_0000000000000002.0000000000' as EntityId,
-        name: 'zero-memory',
-      }),
-    });
+  it.each(['exact', 'matchKey'] as const)(
+    'attaching by the %s probe costs no model call',
+    async (probe) => {
+      const embedder = new DeterministicHashEmbeddingService();
+      const embed = vi.spyOn(embedder, 'embed');
+      const repository = makeRepository({
+        [probe]: Some({
+          id: 'ent_0000000000000002.0000000000' as EntityId,
+          name: 'zero-memory',
+        }),
+      });
 
-    await new EntityResolutionService(repository, embedder).resolve(
-      'zero_memory',
-      'repo',
-      scope
-    );
+      const result = await new EntityResolutionService(
+        repository,
+        embedder
+      ).resolve('zero_memory', 'repo', scope);
 
-    // Both probes are exact, so the embedding is computed only for an insert.
-    expect(embed).not.toHaveBeenCalled();
-  });
+      // Both probes are exact, so the embedding is computed only for an
+      // insert.
+      expect(result.unwrap().created).toBe(false);
+      expect(embed).not.toHaveBeenCalled();
+    }
+  );
 
   it('a serial-numbered sibling is a DISTINCT subject and is created', async () => {
     // The regression this design exists for: the cosine probe it replaced
@@ -194,29 +198,6 @@ describe('EntityResolutionService.resolve — decision table (DESIGN §6.6)', ()
     const [, , probeScope] = vi.mocked(repository.findByMatchKey).mock
       .calls[0]!;
     expect(probeScope).toBe(otherScope);
-  });
-
-  it('type-agnostic resolve (link tool) reuses an exact hit of any type', async () => {
-    const repository = makeRepository({
-      exact: Some({
-        id: 'ent_0000000000000003.0000000000' as EntityId,
-        name: 'alpha',
-      }),
-    });
-    const service = makeService(repository);
-
-    const result = await service.resolve('Alpha', null, scope);
-
-    expect(result.unwrap()).toEqual({
-      entityId: 'ent_0000000000000003.0000000000' as EntityId,
-      name: 'alpha',
-      created: false,
-    });
-    expect(repository.findByNormalizedName).toHaveBeenCalledWith(
-      'alpha',
-      null,
-      scope
-    );
   });
 
   it('type-agnostic resolve falls back to creating a concept entity', async () => {
