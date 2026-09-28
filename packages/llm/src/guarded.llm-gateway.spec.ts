@@ -19,14 +19,14 @@ const requestFor = (purpose: LlmPurpose): LlmToolCallRequest => ({
   purpose,
 });
 
-const routerOf = () => ({
+const routerOf = (ranOnCallerKey = false) => ({
   callTool: vi.fn(() =>
     Promise.resolve({
       input: { ok: true },
       model: 'a-model',
       inputTokens: 10,
       outputTokens: 5,
-      ranOnCallerKey: false,
+      ranOnCallerKey,
     })
   ),
   searchWeb: vi.fn(() =>
@@ -295,8 +295,10 @@ describe('a caller running on their own key', () => {
   });
 
   it('leaves platform-key calls unmarked', async () => {
+    // The router claims the caller's key; the gateway chose the platform's,
+    // so its own answer must override the router's.
     const gateway = new GuardedLlmGateway(
-      routerOf(),
+      routerOf(true),
       new BudgetGuard([], meterOf(0)),
       credentialsOf(platformKey),
       () => 'usr_1'
