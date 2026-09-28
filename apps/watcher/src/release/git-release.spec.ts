@@ -1,30 +1,11 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { commit, git } from '../testing/git-repo.fixture.js';
 import { isAncestorOf, latestTag, tagCommit } from './git-release.js';
-
-const env = {
-  GIT_AUTHOR_NAME: 't',
-  GIT_AUTHOR_EMAIL: 't@t',
-  GIT_COMMITTER_NAME: 't',
-  GIT_COMMITTER_EMAIL: 't@t',
-};
-const git = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  }).trim();
-const commit = (cwd: string, file: string): string => {
-  writeFileSync(join(cwd, file), file);
-  git(cwd, 'add', file);
-  git(cwd, 'commit', '-q', '-m', `add ${file}`);
-  return git(cwd, 'rev-parse', 'HEAD');
-};
 
 describe('release facts from git', () => {
   let repo: string;

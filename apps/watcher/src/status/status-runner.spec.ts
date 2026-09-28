@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { probeServer, type ServerProbe } from '@workspace/client-runtime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { HookClient } from '../hook-client.js';
+import { fakeHookClient } from '../testing/hook-client.fake.js';
+import { restoreEnv, useStateDirs } from '../testing/state-dir.fixture.js';
 import { runStatus } from './status-runner.js';
 
 vi.mock('@workspace/client-runtime', async (importOriginal) => ({
@@ -29,43 +29,35 @@ const probe = (state: ServerProbe['state'], serverUrl: string | null) => ({
  * probe is the one collaborator faked: whether it is asked is the contract.
  */
 describe('runStatus health cache', () => {
-  let dir: string;
+  const dirs = useStateDirs('zm-status');
   const saved: Record<string, string | undefined> = {};
-  const env = ['XDG_STATE_HOME', 'XDG_CONFIG_HOME', 'ZM_SERVER_URL'] as const;
-
-  const said: string[] = [];
-  const adapter = {
-    kind: 'claude',
-    readInput: async () => {
-      throw new Error('no payload');
-    },
-    emitTurnContext: (_event: string, text: string) => void said.push(text),
-  } as unknown as HookClient;
+  // The server this machine talks to comes from the environment or from a
+  // config file, so both are pointed away from the machine's own.
+  const env = ['XDG_CONFIG_HOME', 'ZM_SERVER_URL', 'ZM_HEALTH_TTL_MS'];
+  let said: string[] = [];
 
   /** A verdict this machine already cached, `ageMs` before now. */
   const cached = (ageMs: number, verdict: ServerProbe): void => {
-    mkdirSync(join(dir, 'state', 'zero-memory'), { recursive: true });
+    mkdirSync(join(dirs.state, 'zero-memory'), { recursive: true });
     writeFileSync(
-      join(dir, 'state', 'zero-memory', 'health.json'),
+      join(dirs.state, 'zero-memory', 'health.json'),
       JSON.stringify({ ts: NOW - ageMs, probe: verdict })
     );
   };
 
   const probedAt = async (serverUrl: string | null): Promise<boolean> => {
-    if (serverUrl === null) delete process.env.ZM_SERVER_URL;
-    else process.env.ZM_SERVER_URL = serverUrl;
+    restoreEnv('ZM_SERVER_URL', serverUrl ?? undefined);
     vi.mocked(probeServer).mockClear();
-    await runStatus(adapter);
+    const client = fakeHookClient({}, { kind: 'claude' });
+    await runStatus(client);
+    said = client.emitted;
     return vi.mocked(probeServer).mock.calls.length > 0;
   };
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'zm-status-'));
     for (const key of env) saved[key] = process.env[key];
-    process.env.XDG_STATE_HOME = join(dir, 'state');
-    process.env.XDG_CONFIG_HOME = join(dir, 'config');
+    process.env.XDG_CONFIG_HOME = join(dirs.work, 'config');
     delete process.env.ZM_HEALTH_TTL_MS;
-    said.length = 0;
     vi.spyOn(Date, 'now').mockReturnValue(NOW);
     vi.mocked(probeServer)
       .mockReset()
@@ -74,12 +66,7 @@ describe('runStatus health cache', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    for (const key of env) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key];
-    }
-    delete process.env.ZM_HEALTH_TTL_MS;
-    rmSync(dir, { recursive: true, force: true });
+    for (const key of env) restoreEnv(key, saved[key]);
   });
 
   it('probes when nothing is cached', async () => {

@@ -1,11 +1,12 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { IngestConversationInput } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { hookClient, type HookInput } from '../hook-client.js';
+import { hookClient } from '../hook-client.js';
+import { hookInput } from '../testing/hook-client.fake.js';
+import { restoreEnv, useStateDirs } from '../testing/state-dir.fixture.js';
 import { flushTranscriptDelta } from './ingest-hook-runner.js';
 
 const { sent } = vi.hoisted(() => ({
@@ -73,44 +74,33 @@ const recallLines = [
  * off the parse result, so even a correct parser measured nothing.
  */
 describe('flushTranscriptDelta', () => {
-  let dir: string;
-  let previousState: string | undefined;
+  const dirs = useStateDirs('zm-ingest-hook');
   let previousConsent: string | undefined;
 
   const flush = (lines: string[]) => {
-    const transcriptPath = join(dir, 'rollout.jsonl');
+    const transcriptPath = join(dirs.work, 'rollout.jsonl');
     writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
-    const input: HookInput = {
-      sessionId: 'codex-session',
-      cwd: dir,
-      prompt: '',
-      transcriptPath,
-      hookEventName: 'Stop',
-      toolName: '',
-      alreadyContinued: false,
-      source: '',
-      trigger: '',
-    };
-    return flushTranscriptDelta(hookClient('codex'), 'stop', input);
+    return flushTranscriptDelta(
+      hookClient('codex'),
+      'stop',
+      hookInput({
+        sessionId: 'codex-session',
+        cwd: dirs.work,
+        transcriptPath,
+        hookEventName: 'Stop',
+      })
+    );
   };
 
   beforeEach(() => {
     sent.length = 0;
-    dir = mkdtempSync(join(tmpdir(), 'zm-ingest-hook-'));
-    previousState = process.env.XDG_STATE_HOME;
+    // Capture is off by default: this project consents to it.
     previousConsent = process.env.ZM_INGEST_CONFIG;
-    process.env.XDG_STATE_HOME = join(dir, 'state');
-    process.env.ZM_INGEST_CONFIG = join(dir, 'ingest.json');
+    process.env.ZM_INGEST_CONFIG = join(dirs.state, 'ingest.json');
     writeFileSync(process.env.ZM_INGEST_CONFIG, '{"allowlist":["*"]}');
   });
 
-  afterEach(() => {
-    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
-    else process.env.XDG_STATE_HOME = previousState;
-    if (previousConsent === undefined) delete process.env.ZM_INGEST_CONFIG;
-    else process.env.ZM_INGEST_CONFIG = previousConsent;
-    rmSync(dir, { recursive: true, force: true });
-  });
+  afterEach(() => restoreEnv('ZM_INGEST_CONFIG', previousConsent));
 
   it('sends the ids a Codex recall surfaced as recalled_ids', async () => {
     expect(await flush([userLine, ...recallLines])).toMatch(/^sent:/);

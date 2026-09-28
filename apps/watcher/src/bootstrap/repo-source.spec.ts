@@ -1,10 +1,10 @@
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { git } from '../testing/git-repo.fixture.js';
 import { collectDocChunks, collectHistoryChunks } from './repo-source.js';
 
 /** The chunk-size cap a bootstrap holds every chunk to (~6k tokens). */
@@ -27,19 +27,6 @@ afterEach(() => {
     repoDir = null;
   }
 });
-
-const git = (dir: string, ...args: string[]): void => {
-  execFileSync('git', ['-C', dir, ...args], {
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'spec',
-      GIT_AUTHOR_EMAIL: 'spec@example.invalid',
-      GIT_COMMITTER_NAME: 'spec',
-      GIT_COMMITTER_EMAIL: 'spec@example.invalid',
-    },
-  });
-};
 
 describe('collectDocChunks', () => {
   it('reads root READMEs and docs/**/*.md, skipping hidden and build dirs', () => {

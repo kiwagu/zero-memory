@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +18,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveProjectHint } from '../project-hint-resolver.js';
 import { isAncestorOf } from './git-release.js';
+import { commit, git, initRepo } from '../testing/git-repo.fixture.js';
+import { useStateDirs } from '../testing/state-dir.fixture.js';
 import { checkRelease, runRelease } from './release-runner.js';
 
 vi.mock('@workspace/client-runtime', async (importOriginal) => ({
@@ -40,25 +41,6 @@ beforeEach(() => {
     .mockImplementation(actualGit.isAncestorOf);
 });
 
-const env = {
-  GIT_AUTHOR_NAME: 't',
-  GIT_AUTHOR_EMAIL: 't@t',
-  GIT_COMMITTER_NAME: 't',
-  GIT_COMMITTER_EMAIL: 't@t',
-};
-const git = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  }).trim();
-const commit = (cwd: string, file: string, ...messages: string[]): string => {
-  writeFileSync(join(cwd, file), file);
-  git(cwd, 'add', file);
-  git(cwd, 'commit', '-q', ...messages.flatMap((m) => ['-m', m]));
-  return git(cwd, 'rev-parse', 'HEAD');
-};
-
 const REPO = 'acme/memory-service';
 const T0 = Date.parse('2026-09-24T08:00:00Z');
 const MIN = 60 * 1000;
@@ -74,9 +56,8 @@ const candidate = (n: number, squash: string): ReleaseCandidate => ({
 });
 
 describe('checkRelease', () => {
-  let state: string;
+  const dirs = useStateDirs('zm-release');
   let repo: string;
-  let previous: string | undefined;
   let settings: ReleaseSettings | null;
   let candidates: ReleaseCandidate[];
   let firstObserved: boolean;
@@ -99,19 +80,8 @@ describe('checkRelease', () => {
       .mock.calls.filter(([input]) => input.action === action);
 
   beforeEach(() => {
-    previous = process.env.XDG_STATE_HOME;
-    state = mkdtempSync(join(tmpdir(), 'zm-release-state-'));
-    process.env.XDG_STATE_HOME = state;
-    repo = mkdtempSync(join(tmpdir(), 'zm-release-repo-'));
-    git(repo, 'init', '-q', '-b', 'main');
-    git(
-      repo,
-      'remote',
-      'add',
-      'origin',
-      'git@github.com:acme/memory-service.git'
-    );
-    commit(repo, 'a', 'chore: start');
+    repo = dirs.work;
+    initRepo(repo, { origin: 'git@github.com:acme/memory-service.git' });
     recordProjectScope(
       projectScopeStatePath(),
       resolveProjectHint(repo),
@@ -140,12 +110,6 @@ describe('checkRelease', () => {
       });
     vi.mocked(fetchDeployedVersion).mockReset();
   });
-  afterEach(() => {
-    process.env.XDG_STATE_HOME = previous;
-    rmSync(state, { recursive: true, force: true });
-    rmSync(repo, { recursive: true, force: true });
-  });
-
   it('records the release on every card it carries and says so once', async () => {
     const landed = commit(
       repo,
@@ -434,15 +398,7 @@ describe('checkRelease', () => {
   it('lets each checkout of a project mark the cards it carries, and a manual run records a recorded state again', async () => {
     const other = mkdtempSync(join(tmpdir(), 'zm-release-repo-b-'));
     try {
-      git(other, 'init', '-q', '-b', 'main');
-      git(
-        other,
-        'remote',
-        'add',
-        'origin',
-        'git@github.com:acme/edge-proxy.git'
-      );
-      commit(other, 'a', 'chore: start');
+      initRepo(other, { origin: 'git@github.com:acme/edge-proxy.git' });
       recordProjectScope(
         projectScopeStatePath(),
         resolveProjectHint(other),
@@ -617,9 +573,8 @@ describe('checkRelease', () => {
 });
 
 describe('runRelease', () => {
-  let state: string;
+  const dirs = useStateDirs('zm-release-run');
   let repo: string;
-  let previous: string | undefined;
   let printed: string[];
 
   const settings: ReleaseSettings = {
@@ -655,18 +610,8 @@ describe('runRelease', () => {
   };
 
   beforeEach(() => {
-    previous = process.env.XDG_STATE_HOME;
-    state = mkdtempSync(join(tmpdir(), 'zm-release-run-state-'));
-    process.env.XDG_STATE_HOME = state;
-    repo = mkdtempSync(join(tmpdir(), 'zm-release-run-repo-'));
-    git(repo, 'init', '-q', '-b', 'main');
-    git(
-      repo,
-      'remote',
-      'add',
-      'origin',
-      'git@github.com:acme/memory-service.git'
-    );
+    repo = dirs.work;
+    initRepo(repo, { origin: 'git@github.com:acme/memory-service.git' });
     git(repo, 'tag', 'v0.25.0', commit(repo, 'a', 'chore(release): 0.25.0'));
     recordProjectScope(
       projectScopeStatePath(),
@@ -686,9 +631,6 @@ describe('runRelease', () => {
   });
   afterEach(() => {
     vi.mocked(process.stdout.write).mockRestore();
-    process.env.XDG_STATE_HOME = previous;
-    rmSync(state, { recursive: true, force: true });
-    rmSync(repo, { recursive: true, force: true });
   });
 
   it('prints what it found', async () => {
