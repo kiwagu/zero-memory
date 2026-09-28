@@ -198,7 +198,9 @@ export class RuleCandidateDetector {
 
     const { data: memory, error: memErr } = await this.client
       .from('memories')
-      .select('id, kind, scope, content, owner_id, invalidated_at')
+      .select(
+        'id, kind, scope, content, owner_id, invalidated_at, superseded_by'
+      )
       .eq('id', memoryId)
       .maybeSingle();
     if (memErr) {
@@ -208,6 +210,15 @@ export class RuleCandidateDetector {
       throw new Error('promote_rule: memory not found or not owned by you.');
     }
     if (memory.invalidated_at !== null) {
+      // A superseded memory's rule moved to its successor with it, so the
+      // way forward is the successor, not the retired version.
+      if (memory.superseded_by) {
+        throw new Error(
+          `promote_rule: memory ${memoryId} was superseded by ` +
+            `${memory.superseded_by}; its rule follows the successor — ` +
+            `call promote_rule on ${memory.superseded_by}.`
+        );
+      }
       throw new Error('promote_rule: cannot promote an invalidated memory.');
     }
 
@@ -285,6 +296,12 @@ export class RuleCandidateDetector {
         resolved_by: ownerId,
         resolved_at: now,
         promoted_at: now,
+        // Promoted means live: a re-promote of a revoked rule brings it back
+        // (delivery skips any row that still carries a revoke), and the text
+        // was just set again, so it needs no review.
+        revoked_at: null,
+        revoke_reason: null,
+        text_review_since: null,
       },
       { onConflict: 'memory_id' }
     );

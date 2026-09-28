@@ -1578,6 +1578,8 @@ export type Database = {
       rule_candidates: {
         Row: {
           applies_scope: unknown;
+          carried_at: string | null;
+          carried_from: string | null;
           created_at: string;
           first_used_at: string | null;
           id: string;
@@ -1599,11 +1601,14 @@ export type Database = {
           status: string;
           suggested_scopes: Json | null;
           target_layer: string | null;
+          text_review_since: string | null;
           useful_sessions: number;
           window_days: number;
         };
         Insert: {
           applies_scope?: unknown;
+          carried_at?: string | null;
+          carried_from?: string | null;
           created_at?: string;
           first_used_at?: string | null;
           id?: string;
@@ -1625,11 +1630,14 @@ export type Database = {
           status?: string;
           suggested_scopes?: Json | null;
           target_layer?: string | null;
+          text_review_since?: string | null;
           useful_sessions: number;
           window_days: number;
         };
         Update: {
           applies_scope?: unknown;
+          carried_at?: string | null;
+          carried_from?: string | null;
           created_at?: string;
           first_used_at?: string | null;
           id?: string;
@@ -1651,6 +1659,7 @@ export type Database = {
           status?: string;
           suggested_scopes?: Json | null;
           target_layer?: string | null;
+          text_review_since?: string | null;
           useful_sessions?: number;
           window_days?: number;
         };

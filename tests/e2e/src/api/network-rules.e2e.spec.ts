@@ -122,10 +122,15 @@ test.describe('Standing rules over MCP', () => {
       await stranger.close();
     }
 
-    // Revoke: the rule drops out of the briefing.
+    // Revoke, the way /rules does it: the rule drops out of the briefing.
     const { error } = await adminClient()
       .from('rule_candidates')
-      .update({ revoked_at: new Date().toISOString() })
+      .update({
+        status: 'revoked',
+        resolution: 'revoked',
+        revoked_at: new Date().toISOString(),
+        revoke_reason: 'e2e revoke',
+      })
       .eq('id', ruleId);
     expect(error).toBeNull();
     const after = await McpTestClient.connect(token);

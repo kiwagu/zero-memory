@@ -164,4 +164,38 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
       detector.promoteOnDemand({ memoryId: MEMORY, ownerId: OWNER })
     ).rejects.toThrow(/invalidated/);
   });
+
+  it('refuses a superseded memory by naming the successor its rule follows', async () => {
+    const successor = 'mem_0000000000000002.0000000000';
+    const { detector } = make({
+      ...personalMemory,
+      invalidated_at: new Date().toISOString(),
+      superseded_by: successor,
+    });
+    await expect(
+      detector.promoteOnDemand({ memoryId: MEMORY, ownerId: OWNER })
+    ).rejects.toThrow(
+      new RegExp(`superseded by ${successor}.*promote_rule on ${successor}`)
+    );
+  });
+
+  it('makes a revoked rule live again: the revoke and the review flag are cleared', async () => {
+    const { detector, upserts } = make(personalMemory);
+
+    await detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'always squash',
+      force: true,
+    });
+
+    // A promoted row with a revoke is never delivered, so the upsert must
+    // clear it in the same statement that sets the status.
+    expect(upserts[0]!.row).toMatchObject({
+      status: 'promoted',
+      revoked_at: null,
+      revoke_reason: null,
+      text_review_since: null,
+    });
+  });
 });
