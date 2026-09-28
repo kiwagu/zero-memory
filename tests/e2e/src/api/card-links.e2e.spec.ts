@@ -6,14 +6,10 @@
  */
 import { expect, test } from '@playwright/test';
 
+import { type CardResult } from '../helpers/board-store.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
-
-interface CardResult {
-  card: { id: string; number: number; scope: string };
-  candidates?: Array<{ number: number; why: string }>;
-}
 
 interface BoardGet {
   links: Array<{ card_id: string; number: number; relation: string }>;

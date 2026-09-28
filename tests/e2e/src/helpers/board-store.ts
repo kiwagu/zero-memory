@@ -11,6 +11,11 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { e2eEnv } from './env.js';
 import { firstJson, McpTestClient } from './mcp.js';
 
+/** The card a `card` tool call answers with, as far as specs read it. */
+export interface CardResult {
+  card: { id: string; number: number; scope: string };
+}
+
 export const asUser = (token: string): SupabaseClient =>
   createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
     auth: { persistSession: false },

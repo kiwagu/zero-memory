@@ -16,6 +16,7 @@ import { RLS_PRIVATE_MEMORY } from '../helpers/fixture-memories.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import {
+  entityIdOf,
   passwordGrantToken,
   provisionE2EUser,
   userRestClient,
@@ -89,17 +90,6 @@ test.describe('Roster is not enumerable', () => {
     createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-
-  /** usr_ entity id behind an auth uuid, read past RLS with the service role. */
-  const entityIdOf = async (authUserId: string): Promise<string> => {
-    const { data, error } = await admin()
-      .from('profiles')
-      .select('id')
-      .eq('user_id', authUserId)
-      .single();
-    expect(error).toBeNull();
-    return (data as { id: string }).id;
-  };
 
   /**
    * Makes `user` an admin member of `scope`, using the service role: the

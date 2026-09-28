@@ -10,7 +10,7 @@
  */
 import { expect, test } from '@playwright/test';
 
-import { admin } from '../helpers/board-store.js';
+import { admin, type CardResult } from '../helpers/board-store.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
@@ -22,10 +22,6 @@ interface Briefed {
 interface Remembered {
   memory_id: string;
   scope: string;
-}
-
-interface CardResult {
-  card: { id: string; scope: string; number: number };
 }
 
 interface BoardResult {
