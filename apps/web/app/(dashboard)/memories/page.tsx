@@ -25,6 +25,7 @@ import {
   facetCountIndex,
   facetTotal,
   feedStatusLabel,
+  filterFeedStatus,
   kindLabel,
   memoryCardProps,
   memoryIdSearchPrefix,
@@ -268,19 +269,7 @@ export default async function FeedPage({
   if (scope) {
     query = query.eq('scope', scope);
   }
-  // Lifecycle status — the SQL twin of matchesFeedStatus. `all` adds nothing.
-  if (status === 'active') {
-    // Everything except a historical version (retired AND replaced).
-    query = query.or('invalidated_at.is.null,superseded_by.is.null');
-  } else if (status === 'live') {
-    query = query.is('invalidated_at', null);
-  } else if (status === 'superseded') {
-    query = query
-      .not('invalidated_at', 'is', null)
-      .not('superseded_by', 'is', null);
-  } else if (status === 'invalidated') {
-    query = query.not('invalidated_at', 'is', null).is('superseded_by', null);
-  }
+  query = filterFeedStatus(query, status);
   if (q) {
     if (idPrefix) {
       // An id (or id fragment) pasted from a card: prefix-match the id. The
