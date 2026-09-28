@@ -105,7 +105,7 @@ test.describe('the session marker on a memory page', () => {
     ).toBeVisible();
   });
 
-  test('a memory born outside any conversation shows no session section', async ({
+  test('a memory born outside any conversation, with no other version, shows neither section', async ({
     page,
   }) => {
     const seed = await readSeedState();
@@ -136,5 +136,7 @@ test.describe('the session marker on a memory page', () => {
     // report on, and an empty "from the same session" would imply there was.
     await expect(page.getByTestId('memory-detail-content')).toBeVisible();
     await expect(page.getByTestId('memory-same-session')).toHaveCount(0);
+    // A fresh memory has no other version either, so no history section.
+    await expect(page.getByTestId('memory-version-history')).toHaveCount(0);
   });
 });

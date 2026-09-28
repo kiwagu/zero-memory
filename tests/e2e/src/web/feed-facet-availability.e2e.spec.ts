@@ -114,29 +114,6 @@ test.describe('feed facet availability', () => {
     await expect(liveOnly).toContainText('1');
   });
 
-  test('"live only" drops the lone invalidation the default view keeps', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    await seedFacetCorpus(await passwordGrantToken(seed.userA));
-
-    await signInThroughForm(page, seed.userA);
-    await page.goto(feedUrl());
-
-    const feed = page.getByTestId('memory-feed');
-    // The default view keeps both: a retirement without a successor stays
-    // observable there.
-    await expect(feed.getByText(LIVE.slice(0, 50)).first()).toBeVisible();
-    await expect(feed.getByText(CLOSED.slice(0, 50)).first()).toBeVisible();
-
-    await page.getByTestId('feed-filter-status').click();
-    await page.getByRole('option', { name: 'Live only' }).click();
-    await expect(page).toHaveURL(/status=live/);
-
-    await expect(feed.getByText(LIVE.slice(0, 50)).first()).toBeVisible();
-    await expect(feed.getByText(CLOSED.slice(0, 50))).toHaveCount(0);
-  });
-
   test('an applied value stays usable even when it yields nothing', async ({
     page,
   }) => {

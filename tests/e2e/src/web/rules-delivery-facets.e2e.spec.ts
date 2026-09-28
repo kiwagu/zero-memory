@@ -103,7 +103,7 @@ const item = (page: Page, ruleText: string) =>
   page.getByTestId('rule-item').filter({ hasText: ruleText });
 
 test.describe('/rules delivery and pinned facets', () => {
-  test('the facets and the badge agree with what a session receives', async ({
+  test('the facets and the badge agree with what a session receives, and live in the URL', async ({
     page,
   }) => {
     const { user, text } = await seedRules();
@@ -135,14 +135,8 @@ test.describe('/rules delivery and pinned facets', () => {
     await expect(page).toHaveURL(/pinned=pinned/);
     await expect(page.getByTestId('rule-item')).toHaveCount(1);
     await expect(item(page, text.pinned)).toHaveCount(1);
-  });
 
-  test('the facets live in the URL and clear back to "any"', async ({
-    page,
-  }) => {
-    const { user, text } = await seedRules();
-    await signInThroughForm(page, user);
-
+    // Both facets together survive a reload, and clearing one leaves the other.
     await page.goto(
       '/rules?status=promoted&pinned=unpinned&delivery=undelivered'
     );
