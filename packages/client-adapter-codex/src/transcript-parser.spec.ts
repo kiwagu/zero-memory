@@ -208,18 +208,4 @@ describe('parseCodexTranscript', () => {
       expect(parseCodexTranscript(jsonl).recalledIds).toEqual([RECALLED_ID]);
     });
   });
-
-  it('tolerates blank lines and torn JSON', () => {
-    const jsonl = [
-      '',
-      '{not json',
-      line({
-        type: 'event_msg',
-        payload: { type: 'user_message', message: 'hi' },
-      }),
-    ].join('\n');
-    expect(parseCodexTranscript(jsonl).entries).toEqual([
-      { role: 'user', text: 'hi' },
-    ]);
-  });
 });

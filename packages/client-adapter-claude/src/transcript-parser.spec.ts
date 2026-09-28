@@ -1,4 +1,3 @@
-import { formatEntries } from '@workspace/client-core';
 import { describe, expect, it } from 'vitest';
 
 import { parseTranscript } from './transcript-parser.js';
@@ -110,14 +109,13 @@ describe('parseTranscript', () => {
     expect(parsed.recalledIds).not.toContain(createdByRemember);
   });
 
-  it('skips meta lines, torn JSON, and empty text', () => {
+  it('skips meta lines and empty text', () => {
     const jsonl = [
       line({
         type: 'user',
         isMeta: true,
         message: { role: 'user', content: 'injected context' },
       }),
-      '{"type":"assistant","message":{"role":"assistant","content":"tor', // torn
       line({
         type: 'assistant',
         message: { role: 'assistant', content: '  ' },
@@ -172,16 +170,5 @@ describe('parseTranscript', () => {
       { role: 'user', text: 'why did we pick postgres?' },
       { role: 'assistant', text: 'Picking up where we left off.' },
     ]);
-  });
-});
-
-describe('formatEntries', () => {
-  it('renders role-prefixed lines', () => {
-    expect(
-      formatEntries([
-        { role: 'user', text: 'hi' },
-        { role: 'assistant', text: 'hello' },
-      ])
-    ).toBe('user: hi\nassistant: hello');
   });
 });

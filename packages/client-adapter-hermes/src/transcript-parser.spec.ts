@@ -67,11 +67,12 @@ describe('parseHermesTranscript', () => {
     expect(parseHermesTranscript(jsonl).recalledIds).toEqual([]);
   });
 
-  it('survives a slice that starts mid-file: no header, torn first line', () => {
-    const jsonl = [
-      '{"type":"message","role":"user","te',
-      line({ type: 'message', role: 'assistant', text: 'still parsed' }),
-    ].join('\n');
+  it('parses a slice that starts after the session header, with no cwd', () => {
+    const jsonl = line({
+      type: 'message',
+      role: 'assistant',
+      text: 'still parsed',
+    });
 
     expect(parseHermesTranscript(jsonl)).toEqual({
       entries: [{ role: 'assistant', text: 'still parsed' }],

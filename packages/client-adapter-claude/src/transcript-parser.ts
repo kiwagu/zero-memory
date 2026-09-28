@@ -1,6 +1,7 @@
 import {
   collectMemoryIds,
   isRecallTool,
+  parseJsonLines,
   type ParsedTranscript,
   type TranscriptEntry,
 } from '@workspace/client-core';
@@ -55,23 +56,9 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
   const recallCallIds = new Set<string>();
   const recalledIds = new Set<string>();
 
-  for (const rawLine of jsonl.split('\n')) {
-    const trimmed = rawLine.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue; // torn or non-JSON line
-    }
-    const line = transcriptLineSchema.safeParse(parsed);
-    if (!line.success) {
-      continue;
-    }
-    const { type, isMeta, isCompactSummary, message } = line.data;
-    cwd ??= line.data.cwd;
+  for (const line of parseJsonLines(jsonl, transcriptLineSchema)) {
+    const { type, isMeta, isCompactSummary, message } = line;
+    cwd ??= line.cwd;
 
     // A context compaction appends its summary as a record that looks exactly
     // like something the human typed: `type: "user"`, `message.role: "user"`,

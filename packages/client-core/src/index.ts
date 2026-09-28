@@ -65,6 +65,8 @@ export {
 } from './offline-briefing.js';
 export {
   formatEntries,
+  parseJsonLines,
+  type JsonLineSchema,
   type ParsedTranscript,
   type TranscriptEntry,
 } from './transcript.js';

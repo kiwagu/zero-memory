@@ -132,11 +132,9 @@ describe('parseCursorTranscript', () => {
     });
   });
 
-  it('tolerates string content, blank lines, and torn JSON', () => {
+  it('reads a plain-string message body as well as content blocks', () => {
     const jsonl = [
-      '',
       line({ role: 'user', message: { content: 'plain string body' } }),
-      '{not json',
       line({
         role: 'assistant',
         message: { content: [{ type: 'text', text: 'ok' }] },
