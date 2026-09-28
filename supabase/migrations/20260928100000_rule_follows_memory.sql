@@ -30,10 +30,11 @@
 --   - triggers memories_carry_rule, memories_rule_text_follows on
 --     public.memories (new)
 --   - function public.promote_memory_to_rule (replaced, same signature): a
---     promote sets the text again, so it clears the review flag
+--     promote sets the text again, so it clears the review flag; a rule that
+--     is or was live keeps its layer and address unless the caller names one
 --
 -- Special considerations:
---   - The rule stays where it is, still delivered, whenever the move could
+--   - The rule stays where it is, still promoted, whenever the move could
 --     cost it anything: the retired memory is an open loop (closing a loop with
 --     its evidence answers it, it does not replace an instruction); the
 --     successor belongs to another owner (a rule must never change hands);
@@ -145,6 +146,10 @@ begin
     return null;
   end if;
 
+  -- Locked, so the successor's text and lifecycle cannot change between
+  -- this read and the move: a concurrent rewrite of its content (the
+  -- canonicalization) waits, then finds the rule already on it and carries
+  -- the text along through memories_rule_text_follows.
   select m.owner_id, m.scope::text, m.content, m.invalidated_at
     into
       v_successor_owner,
@@ -152,7 +157,8 @@ begin
       v_successor_content,
       v_successor_invalidated
     from public.memories m
-    where m.id = new.superseded_by;
+    where m.id = new.superseded_by
+    for update;
   if not found
     or v_successor_owner is distinct from new.owner_id
     or v_successor_invalidated is not null
@@ -355,8 +361,19 @@ begin
   )
   on conflict (memory_id) do update set
     rule_text = coalesce(excluded.rule_text, rc.rule_text),
-    target_layer = excluded.target_layer,
-    applies_scope = excluded.applies_scope,
+    -- A rule that is or was live keeps the address it was delivered to
+    -- unless the caller names a new one: re-promoting to set its text again
+    -- must not move it to another project or layer.
+    target_layer = case
+      when p_applies_scope is null and rc.status in ('promoted', 'revoked')
+      then rc.target_layer
+      else excluded.target_layer
+    end,
+    applies_scope = case
+      when p_applies_scope is null and rc.status in ('promoted', 'revoked')
+      then rc.applies_scope
+      else excluded.applies_scope
+    end,
     status = 'promoted',
     resolution = 'promoted',
     resolved_by = excluded.resolved_by,

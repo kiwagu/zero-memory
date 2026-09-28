@@ -15,7 +15,7 @@ const MEMORY = 'mem_0000000000000001.0000000000';
  */
 function fakeClient(
   memory: Record<string, unknown> | null,
-  existingStatus: string | null = null
+  existing: Record<string, unknown> | null = null
 ) {
   const upserts: Array<{ row: Record<string, unknown>; opts: unknown }> = [];
   const client = {
@@ -34,10 +34,7 @@ function fakeClient(
           select: () => ({
             eq: () => ({
               maybeSingle: () =>
-                Promise.resolve({
-                  data: existingStatus ? { status: existingStatus } : null,
-                  error: null,
-                }),
+                Promise.resolve({ data: existing, error: null }),
             }),
           }),
           upsert: (row: Record<string, unknown>, opts: unknown) => {
@@ -68,9 +65,10 @@ const distillerReturning = (ruleText: string): RuleDistiller =>
 
 const make = (
   memory: Record<string, unknown> | null,
-  distillText = 'distilled rule'
+  distillText = 'distilled rule',
+  existing: Record<string, unknown> | null = null
 ) => {
-  const { client, upserts } = fakeClient(memory);
+  const { client, upserts } = fakeClient(memory, existing);
   const distiller = distillerReturning(distillText);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const detector = new RuleCandidateDetector(client as any, distiller);
@@ -177,6 +175,64 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     ).rejects.toThrow(
       new RegExp(`superseded by ${successor}.*promote_rule on ${successor}`)
     );
+  });
+
+  it('keeps the address of a live or revoked rule when re-promoted without one', async () => {
+    for (const status of ['promoted', 'revoked']) {
+      // A rule carried from a project memory to a personal one keeps the
+      // project it was delivered to; setting its text again must not undo it.
+      const { detector, upserts } = make(personalMemory, 'unused', {
+        status,
+        target_layer: 'project',
+        applies_scope: 'proj.usr_000000000000000a_0000000000.zero_memory',
+      });
+
+      const out = await detector.promoteOnDemand({
+        memoryId: MEMORY,
+        ownerId: OWNER,
+        ruleText: 'the corrected text',
+        force: true,
+      });
+
+      expect(out).toMatchObject({
+        target_layer: 'project',
+        applies_scope: 'proj.usr_000000000000000a_0000000000.zero_memory',
+      });
+      expect(upserts[0]!.row).toMatchObject({
+        target_layer: 'project',
+        applies_scope: 'proj.usr_000000000000000a_0000000000.zero_memory',
+        rule_text: 'the corrected text',
+      });
+    }
+  });
+
+  it('a named address wins, and a mere proposal is addressed afresh', async () => {
+    const named = make(personalMemory, 'unused', {
+      status: 'promoted',
+      target_layer: 'project',
+      applies_scope: 'proj.usr_000000000000000a_0000000000.old',
+    });
+    const renamed = await named.detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'text',
+      appliesScope: 'proj.usr_000000000000000a_0000000000.new',
+    });
+    expect(renamed.applies_scope).toBe(
+      'proj.usr_000000000000000a_0000000000.new'
+    );
+
+    const proposal = make(personalMemory, 'unused', {
+      status: 'pending',
+      target_layer: 'project',
+      applies_scope: 'proj.usr_000000000000000a_0000000000.old',
+    });
+    const fresh = await proposal.detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'text',
+    });
+    expect(fresh).toMatchObject({ target_layer: 'user', applies_scope: null });
   });
 
   it('makes a revoked rule live again: the revoke and the review flag are cleared', async () => {

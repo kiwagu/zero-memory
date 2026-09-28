@@ -13,8 +13,6 @@ import { createUserClient, type Client } from '../supabase.client.js';
 
 /** A briefing carries a handful of rules, not a rulebook. */
 const PROJECT_RULES_CAP = RULE_DELIVERY.projectRulesCap;
-/** Over-fetch bound before the effective-scope filter. */
-const PROJECT_RULES_FETCH = 64;
 
 const logger = createLogger('SupabaseProjectRulesReader');
 
@@ -51,8 +49,12 @@ export class SupabaseProjectRulesReader implements IProjectRulesReader {
       // Pinned first (never dropped by the cap), then newest-first: at the
       // cap, freshly promoted rules win over older ones.
       .order('pinned', { ascending: false })
-      .order('promoted_at', { ascending: false })
-      .limit(PROJECT_RULES_FETCH);
+      .order('promoted_at', { ascending: false });
+    // No row bound before the effective-scope filter below: the owner's
+    // promoted project rules are few, and a bound here would let newer rules
+    // of OTHER projects crowd a project's own rules out of its briefing — the
+    // cap belongs to each briefing, after the filter (the /rules page counts
+    // delivery the same way).
     if (error) {
       throw new Error(`project rules lookup failed: ${error.message}`);
     }

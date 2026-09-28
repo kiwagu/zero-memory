@@ -222,22 +222,32 @@ export class RuleCandidateDetector {
       throw new Error('promote_rule: cannot promote an invalidated memory.');
     }
 
+    const { data: existing } = await this.client
+      .from('rule_candidates')
+      .select('status, target_layer, applies_scope')
+      .eq('memory_id', memoryId)
+      .maybeSingle();
     // Guard the upsert: reviving a DELIBERATELY dismissed candidacy needs an
     // explicit override, so a routine promote never silently overturns the
     // owner's earlier "not a rule" decision.
-    if (!force) {
-      const { data: existing } = await this.client
-        .from('rule_candidates')
-        .select('status')
-        .eq('memory_id', memoryId)
-        .maybeSingle();
-      if (existing?.status === 'dismissed') {
-        throw new Error(
-          'promote_rule: this memory was deliberately dismissed as a rule; ' +
-            'pass force to promote it anyway.'
-        );
-      }
+    if (!force && existing?.status === 'dismissed') {
+      throw new Error(
+        'promote_rule: this memory was deliberately dismissed as a rule; ' +
+          'pass force to promote it anyway.'
+      );
     }
+    // A rule that is or was live keeps the address it was delivered to
+    // unless the caller names a new one: promoting it again to set its text
+    // must not move it to another project or layer (a rule carried to a
+    // successor in another scope has its address frozen for exactly this).
+    const keptAddress =
+      !appliesScope &&
+      (existing?.status === 'promoted' || existing?.status === 'revoked')
+        ? {
+            targetLayer: existing.target_layer as RuleTargetLayer,
+            appliesScope: (existing.applies_scope as string | null) ?? null,
+          }
+        : null;
 
     const scope = memory.scope as unknown as string;
     // Distill for clean imperative text + scope suggestions unless the caller
@@ -273,9 +283,12 @@ export class RuleCandidateDetector {
       text = memory.content.trim();
     }
 
-    const targetLayer: RuleTargetLayer = appliesScope
-      ? 'project'
-      : targetLayerForScope(scope);
+    const targetLayer: RuleTargetLayer =
+      keptAddress?.targetLayer ??
+      (appliesScope ? 'project' : targetLayerForScope(scope));
+    const address = keptAddress
+      ? keptAddress.appliesScope
+      : (appliesScope ?? null);
     const suggestedScopes = mergeScopeSuggestions(scope, suggestions, []);
     const now = new Date().toISOString();
 
@@ -286,7 +299,7 @@ export class RuleCandidateDetector {
         window_days: 0,
         rule_text: text,
         target_layer: targetLayer,
-        applies_scope: appliesScope ?? null,
+        applies_scope: address,
         suggested_scopes: suggestedScopes,
         judge_confidence: confidence,
         judge_rationale: rationale,
@@ -312,14 +325,14 @@ export class RuleCandidateDetector {
     await this.#audit('incubator.promote_on_demand', {
       memory_id: memoryId,
       target_layer: targetLayer,
-      applies_scope: appliesScope ?? '',
+      applies_scope: address ?? '',
     });
 
     return {
       memory_id: memoryId,
       rule_text: text,
       target_layer: targetLayer,
-      applies_scope: appliesScope ?? null,
+      applies_scope: address,
       status: 'promoted',
     };
   }

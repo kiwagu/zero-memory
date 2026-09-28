@@ -10,12 +10,15 @@
  * keeps being delivered. These specs pin that down at the database, the way
  * every path reaches it.
  */
+import { spawn, spawnSync } from 'node:child_process';
+
 import { expect, test } from '@playwright/test';
 
 import { admin, asUser, projectScope } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
+import { seedOwnedMemory } from '../helpers/rules.js';
 import { readSeedState } from '../helpers/runtime-state.js';
-import { passwordGrantToken } from '../helpers/users.js';
+import { passwordGrantToken, provisionE2EUser } from '../helpers/users.js';
 
 interface RuleRow {
   id: string;
@@ -310,6 +313,34 @@ test.describe('A promoted rule follows its memory', () => {
     expect(after.memory_id).toBe(newId);
     expect(after.target_layer).toBe('project');
     expect(after.applies_scope).toBe(project);
+    // The curated text was kept, so the reply points at promote_rule to set
+    // it again — and doing exactly that must not undo the kept address.
+    expect(after.text_review_since).not.toBeNull();
+
+    const mcp = await McpTestClient.connect(token);
+    try {
+      const corrected = await mcp.callTool('promote_rule', {
+        memory_id: newId,
+        rule_text: `rule-follows ${run}: deploy only signed, tagged builds`,
+      });
+      expect(corrected.isError ?? false).toBe(false);
+    } finally {
+      await mcp.close();
+    }
+    const reviewed = await ruleById(rule.id);
+    expect(reviewed.target_layer).toBe('project');
+    expect(reviewed.applies_scope).toBe(project);
+    expect(reviewed.text_review_since).toBeNull();
+    expect(reviewed.rule_text).toBe(
+      `rule-follows ${run}: deploy only signed, tagged builds`
+    );
+
+    // The dashboard's re-promote keeps it too.
+    const repromoted = await asUser(token).rpc('promote_memory_to_rule', {
+      p_memory_id: newId,
+    });
+    expect(repromoted.error).toBeNull();
+    expect((await ruleById(rule.id)).applies_scope).toBe(project);
   });
 
   test('a successor that already has a rule of its own does not take this one', async () => {
@@ -449,6 +480,111 @@ test.describe('A promoted rule follows its memory', () => {
     expect((await ruleById(curated.id)).rule_text).toBe(
       'Curated: one-line commit subjects.'
     );
+  });
+});
+
+test.describe('Delivery and concurrency', () => {
+  test("newer rules of other projects never crowd a project's rule out of its briefing", async () => {
+    const run = fresh();
+    // A user of its own: the crowd below is dozens of promoted rules.
+    const user = await provisionE2EUser(`e2e-rule-crowd-${run}@zm.e2e`);
+    const token = await passwordGrantToken(user);
+    const markers: string[] = [];
+    const project = await projectScope(token, `rule-crowd-${run}`, markers);
+
+    const ownId = await seedOwnedMemory(user, `rule-crowd ${run}: own anchor`);
+    const ownText = `rule-crowd ${run}: the rule of this project`;
+    await promote(ownId, {
+      rule_text: ownText,
+      target_layer: 'project',
+      applies_scope: project,
+      promoted_at: new Date(Date.now() - 10 * 86_400_000).toISOString(),
+    });
+    // More, and newer, rules than any row bound, all for another project.
+    for (let i = 0; i < 70; i += 1) {
+      const memoryId = await seedOwnedMemory(
+        user,
+        `rule-crowd ${run}: crowd anchor ${i}`
+      );
+      await promote(memoryId, {
+        rule_text: `rule-crowd ${run}: crowd rule ${i}`,
+        target_layer: 'project',
+        applies_scope: `proj.e2e_crowd_${run}`,
+      });
+    }
+
+    const mcp = await McpTestClient.connect(token);
+    try {
+      const briefed = await mcp.callTool('build_context', {
+        topic: 'anything about this project',
+        briefing: true,
+        scopes: [project],
+      });
+      expect(briefed.isError ?? false).toBe(false);
+      const texts = firstJson<{ rules: { text: string }[] }>(briefed).rules.map(
+        (rule) => rule.text
+      );
+      expect(texts).toContain(ownText);
+    } finally {
+      await mcp.close();
+    }
+  });
+
+  test('a rewrite of the successor that races the supersede still reaches the rule', async () => {
+    const run = fresh();
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userB);
+    const oldText = `rule-race ${run}: the old words`;
+    const oldId = await remember(token, oldText);
+    const rule = await promote(oldId, { rule_text: oldText });
+    const successorId = await remember(
+      token,
+      `rule-race ${run}: the successor, before its rewrite`
+    );
+    const rewritten = `rule-race ${run}: the successor, rewritten`;
+
+    // One transaction rewrites the successor (as the canonicalization does)
+    // and holds it; the supersede starts meanwhile. However the two
+    // interleave, the rule must end on the successor with its final text.
+    const sql = (statement: string): string[] => [
+      'exec',
+      '-i',
+      'supabase_db_zero-memory-e2e',
+      'psql',
+      '-U',
+      'postgres',
+      '-d',
+      'postgres',
+      '-v',
+      'ON_ERROR_STOP=1',
+      '-Atc',
+      statement,
+    ];
+    const rewrite = spawn(
+      'docker',
+      sql(
+        `begin; update public.memories set content = '${rewritten}' ` +
+          `where id = '${successorId}'; select pg_sleep(3); commit;`
+      )
+    );
+    const rewriteDone = new Promise<number | null>((resolve) =>
+      rewrite.on('close', resolve)
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const supersede = spawnSync(
+      'docker',
+      sql(
+        `update public.memories set superseded_by = '${successorId}', ` +
+          `invalidated_at = now() where id = '${oldId}';`
+      ),
+      { encoding: 'utf8' }
+    );
+    expect(supersede.status, supersede.stderr).toBe(0);
+    expect(await rewriteDone).toBe(0);
+
+    const after = await ruleById(rule.id);
+    expect(after.memory_id).toBe(successorId);
+    expect(after.rule_text).toBe(rewritten);
   });
 });
 
