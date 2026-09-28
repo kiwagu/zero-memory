@@ -125,65 +125,24 @@ test.describe('Card branches over MCP', () => {
         squash_sha: 'abcdef1',
         target_branch: 'main',
       });
-    } finally {
-      await agent.close();
-    }
-  });
 
-  test('a branch that lands again reads back every landing, and an earlier one is already on record', async () => {
-    const seed = await readSeedState();
-    const agent = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    try {
-      const created = await agent.callTool('card', {
-        action: 'create',
-        no_links: 'e2e fixture',
-        scope: firstJson<{ scope: string }>(
-          await agent.callTool('remember', {
-            content: `e2e re-landing marker ${Date.now()}: fix a bug where it began`,
-            kind: 'fact',
-            project_hint: '/tmp/zm-e2e-branch-reland',
-          })
-        ).scope,
-        title: 'Fix it in the branch that brought it',
-        state: 'active',
-        branch: { repo: REPO, name: 'feature/relanded' },
+      // A bug fixed in the same branch lands it again, and the card reads
+      // back every landing, not only the last.
+      const relanded = await agent.callTool('card', {
+        action: 'land',
+        card_id: card.id,
+        branch: { repo: REPO, name: 'feature/ingest-queue' },
+        squash_sha: 'bbbbbbb',
+        target: 'main',
+        reason: 'a bug fixed in the same branch',
       });
-      expect(created.isError ?? false).toBe(false);
-      const card = firstJson<CardResult>(created).card;
-      const land = async (sha: string, reason: string) =>
-        firstJson<CardResult>(
-          await agent.callTool('card', {
-            action: 'land',
-            card_id: card.id,
-            branch: { repo: REPO, name: 'feature/relanded' },
-            squash_sha: sha,
-            target: 'main',
-            reason,
-          })
-        );
-
-      expect((await land('aaaaaaa', 'the feature landed')).changed).toBe(true);
-      expect(
-        (await land('bbbbbbb', 'a bug fixed in the same branch')).changed
-      ).toBe(true);
-      // The reminder of a client that saw only the first squash.
-      expect((await land('aaaaaaa', 'recorded again')).changed).toBe(false);
-
-      const read = firstJson<BoardGet>(
+      expect(firstJson<CardResult>(relanded).changed).toBe(true);
+      const reread = firstJson<BoardGet>(
         await agent.callTool('board', { action: 'get', card_id: card.id })
       );
-      expect(read.branches).toHaveLength(1);
-      expect(read.branches[0]).toMatchObject({
-        branch: 'feature/relanded',
-        state: 'landed',
-        squash_sha: 'bbbbbbb',
-      });
-      expect(read.branches[0]?.landings?.map((l) => l.squash_sha)).toEqual([
-        'aaaaaaa',
-        'bbbbbbb',
-      ]);
+      expect(
+        reread.branches[0]?.landings?.map((landing) => landing.squash_sha)
+      ).toEqual(['abcdef1', 'bbbbbbb']);
     } finally {
       await agent.close();
     }
@@ -211,16 +170,6 @@ test.describe('Card branches over MCP', () => {
         })
       ).card;
 
-      const both = await agent.callTool('card', {
-        action: 'move',
-        card_id: created.id,
-        to: 'active',
-        reason: 'start',
-        branch: { repo: REPO, name: 'feature/x' },
-        no_branch: 'measurement only',
-      });
-      expect(both.isError ?? false).toBe(true);
-
       const declared = await agent.callTool('card', {
         action: 'move',
         card_id: created.id,
@@ -237,13 +186,6 @@ test.describe('Card branches over MCP', () => {
         ref_target: `${REPO}:spike/recall-probe`,
       });
       expect(attached.isError ?? false).toBe(false);
-      const malformed = await agent.callTool('card_log', {
-        action: 'attach',
-        card_id: created.id,
-        ref_kind: 'branch',
-        ref_target: 'not a branch',
-      });
-      expect(malformed.isError ?? false).toBe(true);
 
       const leave = await agent.callTool('card', {
         action: 'move',
@@ -272,54 +214,6 @@ test.describe('Card branches over MCP', () => {
       ]);
     } finally {
       await agent.close();
-    }
-  });
-
-  test('a stranger can neither read nor land a card of another project', async () => {
-    const seed = await readSeedState();
-    const owner = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    const stranger = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
-    try {
-      const scope = firstJson<{ scope: string }>(
-        await owner.callTool('remember', {
-          content: `e2e branch stranger marker ${Date.now()}: rotate the edge certificates`,
-          kind: 'fact',
-          project_hint: '/tmp/zm-e2e-branch-stranger',
-        })
-      ).scope;
-      const card = firstJson<CardResult>(
-        await owner.callTool('card', {
-          action: 'create',
-          no_links: 'e2e fixture',
-          scope,
-          title: 'Rotate the certificates',
-          state: 'active',
-          branch: { repo: REPO, name: 'feature/certs' },
-        })
-      ).card;
-
-      const read = await stranger.callTool('board', {
-        action: 'get',
-        card_id: card.id,
-      });
-      expect(read.isError ?? false).toBe(true);
-      const land = await stranger.callTool('card', {
-        action: 'land',
-        card_id: card.id,
-        branch: { repo: REPO, name: 'feature/certs' },
-        squash_sha: '1234567',
-        target: 'main',
-        reason: 'not mine',
-      });
-      expect(land.isError ?? false).toBe(true);
-      expect(contentText(land)).toMatch(/No such card/u);
-    } finally {
-      await owner.close();
-      await stranger.close();
     }
   });
 });

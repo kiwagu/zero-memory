@@ -10,23 +10,15 @@
  * one aggregate, both read in the same database snapshot as the aggregate, and
  * the two structural guarantees.
  */
-import { spawnSync } from 'node:child_process';
-
-import { createClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin, psql } from '../helpers/board-store.js';
 import { seedInsightsUsage } from '../helpers/insights.js';
 import {
   passwordGrantToken,
   provisionE2EUser,
   userRestClient,
 } from '../helpers/users.js';
-
-const admin = () =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
 /**
  * The aggregate next to independent instance-wide counts, read from ONE
@@ -42,35 +34,22 @@ const snapshotCounts = (): {
   live_share_num: number;
   live: number;
 } => {
-  const result = spawnSync(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '--network',
-      'host',
-      '-i',
-      'supabase/postgres:17.6.1.136',
-      'psql',
-      'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-qtA',
-      '-c',
-      'begin transaction isolation level repeatable read read only; ' +
-        "select json_build_object('users_total', (m->>'users_total')::int, " +
-        "'profiles', (select count(*) from public.profiles), " +
-        "'live_share_num', (m->>'live_share_num')::int, " +
-        "'live', (select count(*) from public.memories " +
-        'where invalidated_at is null and superseded_by is null)) ' +
-        'from (select public.instance_metrics(30) as m) s; commit;',
-    ],
-    { encoding: 'utf8' }
-  );
-  if (result.status !== 0) {
-    throw new Error(`psql failed: ${result.stderr}`);
+  // psql echoes BEGIN and COMMIT around the one row that matters.
+  const row = psql(
+    'begin transaction isolation level repeatable read read only; ' +
+      "select json_build_object('users_total', (m->>'users_total')::int, " +
+      "'profiles', (select count(*) from public.profiles), " +
+      "'live_share_num', (m->>'live_share_num')::int, " +
+      "'live', (select count(*) from public.memories " +
+      'where invalidated_at is null and superseded_by is null)) ' +
+      'from (select public.instance_metrics(30) as m) s; commit;'
+  )
+    .split('\n')
+    .find((line) => line.startsWith('{'));
+  if (!row) {
+    throw new Error('instance_metrics snapshot returned no row');
   }
-  return JSON.parse(result.stdout.trim()) as {
+  return JSON.parse(row) as {
     users_total: number;
     profiles: number;
     live_share_num: number;

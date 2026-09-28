@@ -5,12 +5,18 @@
  * that would put a card above itself — through parents, blockers or
  * dependencies — is refused.
  */
-import { spawn, spawnSync } from 'node:child_process';
-
 import { expect, test } from '@playwright/test';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 
-import { e2eEnv } from '../helpers/env.js';
+import {
+  admin,
+  asUser,
+  makeMember,
+  projectScope,
+  psql,
+  psqlInBackground,
+  rpc,
+} from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken, provisionE2EUser } from '../helpers/users.js';
@@ -47,17 +53,6 @@ interface EventRow {
   reason: string | null;
 }
 
-const asUser = (token: string): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
-    auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-
-const admin = (): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false },
-  });
-
 /**
  * The memories this file writes only to make a project scope. They are
  * deleted when the file is done: facts of the seed user would otherwise
@@ -70,39 +65,6 @@ test.afterAll(async () => {
     await admin().from('memories').delete().in('id', markers);
   }
 });
-
-/** A project scope the caller may write, made the way an agent makes one. */
-const projectScope = async (token: string, tag: string): Promise<string> => {
-  const agent = await McpTestClient.connect(token);
-  try {
-    const made = await agent.callTool('remember', {
-      content: `e2e card links marker ${tag}: the relay drops frames under load`,
-      kind: 'fact',
-      project_hint: `/tmp/zm-e2e-${tag}`,
-    });
-    expect(made.isError ?? false).toBe(false);
-    const { scope, memory_id } = firstJson<{
-      scope: string;
-      memory_id: string;
-    }>(made);
-    markers.push(memory_id);
-    return scope;
-  } finally {
-    await agent.close();
-  }
-};
-
-const rpc = async <T>(
-  client: SupabaseClient,
-  fn: string,
-  args: Record<string, unknown>
-): Promise<T> => {
-  const { data, error } = await client.rpc(fn, args);
-  if (error) {
-    throw new Error(`${fn}: ${error.message}`);
-  }
-  return data as T;
-};
 
 const newCard = async (
   db: SupabaseClient,
@@ -175,32 +137,6 @@ const lastEvent = async (
   return data as EventRow;
 };
 
-/** SQL as the database owner, for fixtures no role may write through the API. */
-const psql = (query: string): string => {
-  const result = spawnSync(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '--network',
-      'host',
-      '-i',
-      'supabase/postgres:17.6.1.136',
-      'psql',
-      'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-Atc',
-      query,
-    ],
-    { encoding: 'utf8' }
-  );
-  if (result.status !== 0) {
-    throw new Error(`psql: ${result.stderr}`);
-  }
-  return result.stdout.trim();
-};
-
 interface Candidate {
   id: string;
   number: number;
@@ -219,7 +155,7 @@ interface CreateResult {
 const board = async (tag: string) => {
   const seed = await readSeedState();
   const token = await passwordGrantToken(seed.userA);
-  const scope = await projectScope(token, `${tag}-${Date.now()}`);
+  const scope = await projectScope(token, `${tag}-${Date.now()}`, markers);
   return { seed, token, scope, db: asUser(token) };
 };
 
@@ -265,22 +201,20 @@ test.describe('Card links in the store', () => {
     });
   });
 
-  test('an inverse relation name states the same link', async () => {
-    const { scope, db } = await board('links-inverse');
+  test('a relation stated from either side, by either name, is one row', async () => {
+    const { scope, db } = await board('links-one-row');
+    // An inverse name states the same link…
     const a = await newCard(db, scope, 'Rotate the relay keys');
     const b = await newCard(db, scope, 'Ship the relay');
     expect((await link(db, a.id, b.id, 'blocks')).changed).toBe(true);
     expect((await link(db, b.id, a.id, 'blocked_by')).changed).toBe(false);
     expect(await rowsBetween(db, a.id, b.id)).toHaveLength(1);
-  });
-
-  test('relates_to is one row whichever side states it', async () => {
-    const { scope, db } = await board('links-relates');
-    const a = await newCard(db, scope, 'Relay metrics');
-    const b = await newCard(db, scope, 'Relay dashboards');
-    expect((await link(db, a.id, b.id, 'relates_to')).changed).toBe(true);
-    expect((await link(db, b.id, a.id, 'relates_to')).changed).toBe(false);
-    expect(await rowsBetween(db, a.id, b.id)).toHaveLength(1);
+    // …and a symmetric relation is one row whichever side states it.
+    const c = await newCard(db, scope, 'Relay metrics');
+    const d = await newCard(db, scope, 'Relay dashboards');
+    expect((await link(db, c.id, d.id, 'relates_to')).changed).toBe(true);
+    expect((await link(db, d.id, c.id, 'relates_to')).changed).toBe(false);
+    expect(await rowsBetween(db, c.id, d.id)).toHaveLength(1);
   });
 
   test('refuses a link to itself, an unknown relation and a blank reason', async () => {
@@ -295,7 +229,11 @@ test.describe('Card links in the store', () => {
 
   test("resolves a label only on the card's own board", async () => {
     const { token, scope, db } = await board('links-label');
-    const other = await projectScope(token, `links-label-other-${Date.now()}`);
+    const other = await projectScope(
+      token,
+      `links-label-other-${Date.now()}`,
+      markers
+    );
     const a = await newCard(db, scope, 'Relay metrics');
     const b = await newCard(db, scope, 'Relay dashboards');
     // A card numbered higher than anything on the first board, on the second.
@@ -390,7 +328,11 @@ test.describe('Card links in the store', () => {
     const a = await newCard(db, scope, 'Rotate the relay keys');
     const tokenB = await passwordGrantToken(seed.userB);
     const dbB = asUser(tokenB);
-    const own = await projectScope(tokenB, `links-stranger-b-${Date.now()}`);
+    const own = await projectScope(
+      tokenB,
+      `links-stranger-b-${Date.now()}`,
+      markers
+    );
     const mine = await newCard(dbB, own, 'Stranger card');
 
     expect((await link(dbB, mine.id, a.id, 'relates_to')).error).toBe(
@@ -476,18 +418,37 @@ test.describe('Card links in the store', () => {
     // boards" would only slow down the dashboard specs that open it.
     const seed = await readSeedState();
     const tokenB = await passwordGrantToken(seed.userB);
-    const scope = await projectScope(tokenB, `links-long-cycle-${Date.now()}`);
+    const scope = await projectScope(
+      tokenB,
+      `links-long-cycle-${Date.now()}`,
+      markers
+    );
     const db = asUser(tokenB);
-    const chain: CardJson[] = [];
-    for (let i = 0; i < 70; i += 1) {
-      chain.push(await newCard(db, scope, `Relay step ${i}`));
-    }
-    for (let i = 0; i + 1 < chain.length; i += 1) {
-      expect(
-        (await link(db, chain[i]!.id, chain[i + 1]!.id, 'blocks')).changed
-      ).toBe(true);
-    }
-    const closing = await link(db, chain[69]!.id, chain[0]!.id, 'blocks');
+    // The chain itself is a fixture: seventy cards, each blocking the next,
+    // written in one statement. Only the closing link goes through the command
+    // under test, and it has to walk all of them.
+    const [first, last] = psql(
+      `with owner as (
+         select id from public.profiles where user_id = '${seed.userB.id}'
+       ), made as (
+         insert into public.cards (scope, number, title, created_by)
+         select '${scope}', n, 'Relay step ' || n, owner.id
+         from generate_series(1, 70) as n, owner
+         returning id, number
+       ), linked as (
+         insert into public.card_links
+           (src_card_id, dst_card_id, type, src_scope, dst_scope, reason, created_by)
+         select a.id, b.id, 'blocks', '${scope}', '${scope}', 'e2e chain', owner.id
+         from made as a join made as b on b.number = a.number + 1, owner
+         returning 1
+       )
+       select id from made
+       where number in (1, 70) and (select count(*) from linked) = 69
+       order by number`
+    ).split('\n');
+    expect(first).toBeTruthy();
+    expect(last).toBeTruthy();
+    const closing = await link(db, last!, first!, 'blocks');
     expect(closing.error).toBe('invalid');
     expect(closing.message).toContain('above itself');
   });
@@ -496,7 +457,8 @@ test.describe('Card links in the store', () => {
     const { seed, token, scope, db } = await board('links-hidden-parent');
     const hidden = await projectScope(
       token,
-      `links-hidden-parent-a-${Date.now()}`
+      `links-hidden-parent-a-${Date.now()}`,
+      markers
     );
     const parent = await newCard(db, hidden, 'Hidden epic');
     const child = await newCard(db, scope, 'Shared child');
@@ -524,27 +486,9 @@ test.describe('Card links in the store', () => {
 
     // Another session holds the relation lock, as a relation command does
     // while it writes; erasure must queue behind it before it touches a row.
-    const holder = spawn(
-      'docker',
-      [
-        'run',
-        '--rm',
-        '--network',
-        'host',
-        '-i',
-        'supabase/postgres:17.6.1.136',
-        'psql',
-        'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
-        '-v',
-        'ON_ERROR_STOP=1',
-        '-Atc',
-        "set application_name = 'e2e-links-lock-holder'; begin; " +
-          'select private.card_links_lock(); select pg_sleep(4); commit;',
-      ],
-      { stdio: 'ignore' }
-    );
-    const held = new Promise<number | null>((resolve) =>
-      holder.on('exit', resolve)
+    const held = psqlInBackground(
+      "set application_name = 'e2e-links-lock-holder'; begin; " +
+        'select private.card_links_lock(); select pg_sleep(4); commit;'
     );
     await expect
       .poll(
@@ -566,12 +510,16 @@ test.describe('Card links in the store', () => {
     const waited = Date.now() - started;
     expect(error).toBeNull();
     expect(waited).toBeGreaterThan(1500);
-    expect(await held).toBe(0);
+    expect((await held).status).toBe(0);
   });
 
   test('links across boards need write rights on both', async () => {
     const { seed, token, scope, db } = await board('links-cross');
-    const other = await projectScope(token, `links-cross-other-${Date.now()}`);
+    const other = await projectScope(
+      token,
+      `links-cross-other-${Date.now()}`,
+      markers
+    );
     const a = await newCard(db, scope, 'Relay keys');
     const b = await newCard(db, other, 'Transport keys');
     expect((await link(db, a.id, b.id, 'depends_on')).changed).toBe(true);
@@ -596,7 +544,11 @@ test.describe('Card links in the store', () => {
         { onConflict: 'scope,user_id' }
       );
     expect(joined.error).toBeNull();
-    const own = await projectScope(tokenB, `links-cross-b-${Date.now()}`);
+    const own = await projectScope(
+      tokenB,
+      `links-cross-b-${Date.now()}`,
+      markers
+    );
     const mine = await newCard(dbB, own, 'Reader card');
     expect((await link(dbB, mine.id, a.id, 'relates_to')).error).toBe(
       'forbidden'
@@ -991,90 +943,7 @@ const readCard = (db: SupabaseClient, id: string): Promise<CardGet> =>
 const makeReader = (scope: string, authUserId: string): Promise<string> =>
   makeMember(scope, authUserId, 'reader');
 
-/** Adds a user to a board with a role, and answers their profile id. */
-async function makeMember(
-  scope: string,
-  authUserId: string,
-  role: 'reader' | 'writer'
-): Promise<string> {
-  const { data: profile } = await admin()
-    .from('profiles')
-    .select('id')
-    .eq('user_id', authUserId)
-    .single();
-  const joined = await admin()
-    .from('scope_members')
-    .upsert(
-      {
-        scope,
-        user_id: (profile as { id: string }).id,
-        role,
-        accepted_at: new Date().toISOString(),
-      },
-      { onConflict: 'scope,user_id' }
-    );
-  expect(joined.error).toBeNull();
-  return (profile as { id: string }).id;
-}
-
 test.describe('Relations are read', () => {
-  test('a briefing names the board of a card on another one, and marks an archived card above', async () => {
-    const { token, scope, db } = await board('read-brief-boards');
-    const other = await projectScope(token, `read-brief-other-${Date.now()}`);
-    const x = (
-      await rpc<{ card: CardJson }>(db, 'card_create', {
-        p_scope: scope,
-        p_title: 'Relay rollout',
-        p_state: 'active',
-        p_no_branch: 'e2e fixture',
-        p_no_links: 'e2e fixture',
-      })
-    ).card;
-    const blocker = await newCard(db, other, 'Transport keys');
-    const parent = await newCard(db, scope, 'Relay epic');
-    await link(db, blocker.id, x.id, 'blocks', 'keys first');
-    await link(db, parent.id, x.id, 'parent_of', 'part of the epic');
-    await rpc(db, 'card_archive', {
-      p_card_id: parent.id,
-      p_reason: 'the epic was split up',
-    });
-    const thread = `thr_e2eboard${String(Date.now()).slice(-8)}.0000000000`;
-    await rpc(db, 'card_attach', {
-      p_card_id: x.id,
-      p_kind: 'thread',
-      p_target: thread,
-    });
-
-    const work = await rpc<{
-      bound_card: {
-        blocked_by: Array<{ number: number; scope?: string | null }>;
-        above: Array<{
-          number: number;
-          relation: string;
-          scope?: string | null;
-          archived?: boolean;
-        }>;
-      };
-    }>(db, 'briefing_work', { p_scope: scope, p_thread: thread });
-
-    expect(work.bound_card.blocked_by).toEqual([
-      { number: blocker.number, state: 'idea', scope: other },
-    ]);
-    const above = Object.fromEntries(
-      work.bound_card.above.map((card) => [card.relation, card])
-    );
-    expect(above['blocked_by']).toMatchObject({
-      number: blocker.number,
-      scope: other,
-      archived: false,
-    });
-    expect(above['child_of']).toMatchObject({
-      number: parent.number,
-      scope: null,
-      archived: true,
-    });
-  });
-
   test("a card reads its relations with the other card's label, from its own side", async () => {
     const { scope, db } = await board('read-sides');
     const a = await newCard(db, scope, 'Relay keys');
@@ -1156,7 +1025,11 @@ test.describe('Relations are read', () => {
 
   test('a relation to a card the reader cannot see is not shown and does not block', async () => {
     const { seed, token, scope, db } = await board('read-hidden');
-    const hidden = await projectScope(token, `read-hidden-other-${Date.now()}`);
+    const hidden = await projectScope(
+      token,
+      `read-hidden-other-${Date.now()}`,
+      markers
+    );
     const blocked = await newCard(db, scope, 'Visible to the reader');
     const blocker = await newCard(db, hidden, 'Not visible to the reader');
     await link(db, blocker.id, blocked.id, 'blocks', 'hidden blocker');
@@ -1217,9 +1090,16 @@ test.describe('Relations are read', () => {
   });
 
   test('a briefing names what blocks a card, what is above the bound card, and whether relations were assessed', async () => {
-    const { seed, scope, db } = await board('read-brief');
+    const { seed, token, scope, db } = await board('read-brief');
+    const other = await projectScope(
+      token,
+      `read-brief-other-${Date.now()}`,
+      markers
+    );
     const p = await newCard(db, scope, 'Relay epic');
     const d = await newCard(db, scope, 'Relay transport');
+    // A blocker on another board: the briefing names that board.
+    const t = await newCard(db, other, 'Transport keys');
     const active = (title: string) =>
       rpc<{ card: CardJson }>(db, 'card_create', {
         p_scope: scope,
@@ -1233,6 +1113,12 @@ test.describe('Relations are read', () => {
     await link(db, p.id, x.id, 'parent_of', 'part of the epic');
     await link(db, b.id, x.id, 'blocks', 'keys first');
     await link(db, x.id, d.id, 'depends_on', 'needs transport');
+    await link(db, t.id, x.id, 'blocks', 'transport keys first');
+    // An archived parent stays above the card, marked as archived.
+    await rpc(db, 'card_archive', {
+      p_card_id: p.id,
+      p_reason: 'the epic was split up',
+    });
     const thread = `thr_e2elinks${String(Date.now()).slice(-8)}.0000000000`;
     await rpc(db, 'card_attach', {
       p_card_id: x.id,
@@ -1261,13 +1147,19 @@ test.describe('Relations are read', () => {
     const work = await rpc<{
       bound_card: {
         id: string;
-        blocked_by: Array<{ number: number; state: string }>;
+        blocked_by: Array<{
+          number: number;
+          state: string;
+          scope: string | null;
+        }>;
         links_assessed: boolean;
         above: Array<{
           number: number;
           title: string;
           state: string;
           relation: string;
+          archived: boolean;
+          scope: string | null;
         }>;
       };
       lead: Array<{
@@ -1278,10 +1170,14 @@ test.describe('Relations are read', () => {
     }>(db, 'briefing_work', { p_scope: scope, p_thread: thread });
 
     expect(work.bound_card.id).toBe(x.id);
-    // Same board: no scope to name.
-    expect(work.bound_card.blocked_by).toEqual([
-      { number: b.number, state: 'active', scope: null },
-    ]);
+    // Same board: no scope to name; another board: its scope.
+    expect(work.bound_card.blocked_by).toEqual(
+      expect.arrayContaining([
+        { number: b.number, state: 'active', scope: null },
+        { number: t.number, state: 'idea', scope: other },
+      ])
+    );
+    expect(work.bound_card.blocked_by).toHaveLength(2);
     expect(work.bound_card.links_assessed).toBe(true);
     expect(work.bound_card.above).toEqual(
       expect.arrayContaining([
@@ -1290,7 +1186,7 @@ test.describe('Relations are read', () => {
           title: 'Relay epic',
           state: 'idea',
           relation: 'child_of',
-          archived: false,
+          archived: true,
           scope: null,
         },
         {
@@ -1309,9 +1205,17 @@ test.describe('Relations are read', () => {
           archived: false,
           scope: null,
         },
+        {
+          number: t.number,
+          title: 'Transport keys',
+          state: 'idea',
+          relation: 'blocked_by',
+          archived: false,
+          scope: other,
+        },
       ])
     );
-    expect(work.bound_card.above).toHaveLength(3);
+    expect(work.bound_card.above).toHaveLength(4);
     expect(
       work.lead.find((card) => card.id === (old as { id: string }).id)
     ).toMatchObject({

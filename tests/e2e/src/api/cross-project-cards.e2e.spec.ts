@@ -9,9 +9,8 @@
  * created for it.
  */
 import { expect, test } from '@playwright/test';
-import { createClient } from '@supabase/supabase-js';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
@@ -62,35 +61,26 @@ test.describe('Cards across project boards', () => {
       );
       expect(upstream.scope).toMatch(/quokka_ledger/);
 
-      // Filed on the upstream board by name, in the spellings people use.
-      const filed: string[] = [];
-      for (const name of [
-        `Quokka Ledger ${id}`,
-        `quokka_ledger_${id}`,
-        `QuokkaLedger${id}`,
-      ]) {
-        const created = await agent.callTool('card', {
-          action: 'create',
-          project_hint: name,
-          title: `The ledger export drops the last row (${name})`,
-          no_links: 'e2e fixture',
-        });
-        expect(created.isError ?? false, contentText(created)).toBe(false);
-        const card = firstJson<CardResult>(created).card;
-        expect(card.scope).toBe(upstream.scope);
-        filed.push(card.id);
-      }
+      // Filed on the upstream board by name, the way a person writes it (the
+      // spellings a name may take are the name matcher's unit tests).
+      const created = await agent.callTool('card', {
+        action: 'create',
+        project_hint: `Quokka Ledger ${id}`,
+        title: 'The ledger export drops the last row',
+        no_links: 'e2e fixture',
+      });
+      expect(created.isError ?? false, contentText(created)).toBe(false);
+      const filed = firstJson<CardResult>(created).card;
+      expect(filed.scope).toBe(upstream.scope);
 
-      // The upstream board, read by name, holds them.
+      // The upstream board, read by another spelling of its name, holds it.
       const board = firstJson<BoardResult>(
         await agent.callTool('board', {
           action: 'list',
           project_hint: `quokka-ledger-${id}`,
         })
       );
-      expect(board.cards.map((card) => card.id)).toEqual(
-        expect.arrayContaining(filed)
-      );
+      expect(board.cards.map((card) => card.id)).toContain(filed.id);
 
       // The conversation never moved: its next scope-less writes land home.
       const note = firstJson<Remembered>(
@@ -142,16 +132,11 @@ test.describe('Cards across project boards', () => {
       expect(contentText(memory)).toContain(upstream.scope);
 
       // Neither refusal set up a project for the misspelt name.
-      const admin = createClient(
-        e2eEnv.supabaseUrl,
-        e2eEnv.supabaseServiceRoleKey,
-        { auth: { persistSession: false, autoRefreshToken: false } }
-      );
       const phantom = upstream.scope.replace(
         /[^.]+$/u,
         `bilby_schedular_${id}`
       );
-      const { data, error } = await admin
+      const { data, error } = await admin()
         .from('scope_members')
         .select('scope')
         .eq('scope', phantom);
@@ -201,13 +186,8 @@ test.describe('Cards across project boards', () => {
   test("a teammate's nickname never captures a name meant for your own project, and a teammate's project takes a card by its name", async () => {
     const seed = await readSeedState();
     const id = run();
-    const admin = createClient(
-      e2eEnv.supabaseUrl,
-      e2eEnv.supabaseServiceRoleKey,
-      { auth: { persistSession: false, autoRefreshToken: false } }
-    );
     const profileOf = async (authUserId: string): Promise<string> => {
-      const { data } = await admin
+      const { data } = await admin()
         .from('profiles')
         .select('id')
         .eq('user_id', authUserId)
@@ -230,24 +210,28 @@ test.describe('Cards across project boards', () => {
     } finally {
       await owner.close();
     }
-    const joined = await admin.from('scope_members').upsert(
-      {
-        scope: teammate.scope,
-        user_id: await profileOf(seed.userA.id),
-        role: 'writer',
-        accepted_at: new Date().toISOString(),
-      },
-      { onConflict: 'scope,user_id' }
-    );
+    const joined = await admin()
+      .from('scope_members')
+      .upsert(
+        {
+          scope: teammate.scope,
+          user_id: await profileOf(seed.userA.id),
+          role: 'writer',
+          accepted_at: new Date().toISOString(),
+        },
+        { onConflict: 'scope,user_id' }
+      );
     expect(joined.error).toBeNull();
-    const aliased = await admin.from('scopes').upsert(
-      {
-        scope: teammate.scope,
-        alias: 'QX',
-        created_by: await profileOf(seed.userB.id),
-      },
-      { onConflict: 'scope' }
-    );
+    const aliased = await admin()
+      .from('scopes')
+      .upsert(
+        {
+          scope: teammate.scope,
+          alias: 'QX',
+          created_by: await profileOf(seed.userB.id),
+        },
+        { onConflict: 'scope' }
+      );
     expect(aliased.error).toBeNull();
 
     const agent = await McpTestClient.connect(

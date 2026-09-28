@@ -3,7 +3,7 @@
  * given user, the service role, SQL as the database owner, and a project
  * scope made the way an agent makes one.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 import { expect } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -34,31 +34,53 @@ export const rpc = async <T>(
   return data as T;
 };
 
+/**
+ * The test contour's database container, named by the stack's `project_id`
+ * (tests/e2e/supabase/config.toml). SQL runs inside the RUNNING container: a
+ * `docker run` per statement used to start a fresh container every time.
+ */
+const DB_CONTAINER = 'supabase_db_zero-memory-e2e';
+
+const psqlArgs = (statement: string): string[] => [
+  'exec',
+  '-i',
+  DB_CONTAINER,
+  'psql',
+  '-U',
+  'postgres',
+  '-d',
+  'postgres',
+  '-v',
+  'ON_ERROR_STOP=1',
+  '-Atc',
+  statement,
+];
+
 /** SQL as the database owner, for fixtures no role may write through the API. */
 export const psql = (query: string): string => {
-  const result = spawnSync(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '--network',
-      'host',
-      '-i',
-      'supabase/postgres:17.6.1.136',
-      'psql',
-      'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-Atc',
-      query,
-    ],
-    { encoding: 'utf8' }
-  );
+  const result = spawnSync('docker', psqlArgs(query), { encoding: 'utf8' });
   if (result.status !== 0) {
     throw new Error(`psql: ${result.stderr}`);
   }
   return result.stdout.trim();
 };
+
+/**
+ * SQL as the database owner in a session of its own, left running: for a spec
+ * that holds a lock while another call races it. Resolves with the exit status
+ * once the session ends.
+ */
+export const psqlInBackground = (
+  statement: string
+): Promise<{ status: number | null; stderr: string }> =>
+  new Promise((resolve) => {
+    const child = spawn('docker', psqlArgs(statement));
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on('close', (status) => resolve({ status, stderr }));
+  });
 
 /**
  * One statement as a signed-in user, with session settings of its own: the
@@ -84,11 +106,12 @@ export const asOwnerSql = (
 };
 
 /**
- * A conversation id of its own; `tag` is one letter of the id alphabet
- * (Crockford base32 has no i, l, o or u).
+ * A conversation id of its own, valid wherever a thread id is checked: `thr_`,
+ * sixteen characters, a dot and ten more, all from the id alphabet. `tag` is
+ * one letter of that alphabet (Crockford base32 has no i, l, o or u).
  */
 export const thread = (tag: string): string =>
-  `thr_e2emine${tag}${String(Date.now()).slice(-9)}.0000000000`;
+  `thr_e2ecnt${tag}${String(Date.now()).slice(-9)}.0000000000`;
 
 /**
  * A project scope the caller may write, made the way an agent makes one. The
@@ -102,7 +125,7 @@ export const projectScope = async (
   const agent = await McpTestClient.connect(token);
   try {
     const made = await agent.callTool('remember', {
-      content: `e2e board-mine marker ${tag}: the relay drops frames under load`,
+      content: `e2e board store marker ${tag}: the relay drops frames under load`,
       kind: 'fact',
       project_hint: `/tmp/zm-e2e-${tag}`,
     });
