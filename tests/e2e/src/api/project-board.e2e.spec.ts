@@ -298,6 +298,13 @@ test.describe('Project board over MCP', () => {
       });
       expect(peek.isError ?? false).toBe(true);
       expect(contentText(peek)).not.toContain('cutover checklist');
+      // Refused the way a card that does not exist is: the stranger cannot
+      // even learn that there is one.
+      const refusal = firstJson<{ error: { code: string; message: string } }>(
+        peek
+      ).error;
+      expect(refusal.code).toBe('not_found');
+      expect(refusal.message).toMatch(/No such card/u);
 
       const listed = await stranger.callTool('board', {
         action: 'list',

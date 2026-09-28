@@ -132,20 +132,18 @@ test.describe('write-path error taxonomy', () => {
       await passwordGrantToken(seed.userA)
     );
     try {
-      const error = errorOf(
-        await mcp.callTool('remember', {
-          content:
-            'deploy runs with ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA on the runner',
-          scope: 'personal',
-        })
-      );
+      const secret = 'ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      const result = await mcp.callTool('remember', {
+        content: `deploy runs with ${secret} on the runner`,
+        scope: 'personal',
+      });
+      const error = errorOf(result);
       expect(error.code).toBe('validation_failed');
       // The message is the agent's course-correction and must survive the
-      // throw — and must never echo the secret back.
+      // throw — and nothing in the answer may echo the secret back: not the
+      // message, not its details, not any other block.
       expect(error.message).toContain('secret_content_rejected');
-      expect(error.message).not.toContain(
-        'ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-      );
+      expect(contentText(result)).not.toContain(secret);
     } finally {
       await mcp.close();
     }

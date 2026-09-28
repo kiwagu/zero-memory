@@ -35,11 +35,12 @@ test.describe('export_metrics over MCP @smoke', () => {
 
     const mcp = await McpTestClient.connect(token);
     try {
+      // No `days`: the window the tool reports is the one it chose itself.
       const out = firstJson<ExportMetrics>(
-        await mcp.callTool('export_metrics', { days: 30 })
+        await mcp.callTool('export_metrics', {})
       );
 
-      // Window echo and shape.
+      // The default window, echoed, and the shape.
       expect(out.window.days).toBe(30);
       expect(typeof out.window.since).toBe('string');
       expect(Array.isArray(out.series)).toBe(true);

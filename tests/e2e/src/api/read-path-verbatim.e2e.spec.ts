@@ -2,8 +2,11 @@
  * The flags a previous contract used to carry (`translate_query`, `query_lang`)
  * are gone. An older client that still sends them must be no worse off than one
  * that does not: over the wire they are stripped, not refused, and they change
- * nothing. (That the server searches the string it was given, unrewritten, is
- * the memory service's unit tests' to pin: they see what reaches the embedder.)
+ * nothing. That holds for both read tools; build_context is the one the older
+ * session-start hooks sent them on, and it no longer reports a rewritten
+ * `searched_as` either. (That the server searches the string it was given,
+ * unrewritten, is the memory service's unit tests' to pin: they see what
+ * reaches the embedder.)
  */
 import { expect, test } from '@playwright/test';
 
@@ -35,6 +38,24 @@ test.describe('the read path searches verbatim over MCP', () => {
           (memory) => memory.id
         );
       expect(idsOf(stale)).toEqual(idsOf(plain));
+
+      const plainPack = await mcp.callTool('build_context', {
+        topic: EN_QUERY,
+      });
+      const stalePack = await mcp.callTool('build_context', {
+        topic: EN_QUERY,
+        translate_query: true,
+        query_lang: 'ja',
+      });
+
+      expect(plainPack.isError ?? false).toBe(false);
+      expect(stalePack.isError ?? false).toBe(false);
+      expect(firstJson<Record<string, unknown>>(stalePack)).not.toHaveProperty(
+        'searched_as'
+      );
+      // The premise: the pack found something, so equal ids are a comparison.
+      expect(idsOf(plainPack).length).toBeGreaterThan(0);
+      expect(idsOf(stalePack)).toEqual(idsOf(plainPack));
     } finally {
       await mcp.close();
     }
