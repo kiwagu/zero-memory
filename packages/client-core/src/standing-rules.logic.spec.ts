@@ -98,7 +98,9 @@ describe('renderStandingRulesSection', () => {
 
   it('carries a rule of any length in full when no ceiling is given', () => {
     const long = 'x'.repeat(5000);
-    const section = renderStandingRulesSection([{ text: long, pinned: true }]);
+    // Unpinned on purpose: a pinned rule arrives whole under any ceiling, so
+    // only an ordinary rule shows that the default ceiling is unlimited.
+    const section = renderStandingRulesSection([{ text: long, pinned: false }]);
     expect(section).toContain(long);
   });
 

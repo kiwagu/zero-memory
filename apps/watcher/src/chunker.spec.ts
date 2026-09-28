@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
-import { ConversationChunker, sha256 } from './chunker.js';
+import { ConversationChunker } from './chunker.js';
 import { decodeProjectDir } from './watcher.js';
 
 describe('ConversationChunker', () => {
@@ -13,7 +15,10 @@ describe('ConversationChunker', () => {
     expect(chunk).toBeDefined();
     expect(chunk!.conversationId).toBe('conv-1');
     expect(chunk!.text).toBe('user: short\nassistant: enough now');
-    expect(chunk!.hash).toBe(sha256(chunk!.text));
+    // The ingest idempotency key, computed here independently of the chunker.
+    expect(chunk!.hash).toBe(
+      createHash('sha256').update(chunk!.text, 'utf8').digest('hex')
+    );
     expect(chunk!.projectHint).toBe('/p');
     // Buffer is reset after the flush.
     expect(chunker.flushAll()).toEqual([]);

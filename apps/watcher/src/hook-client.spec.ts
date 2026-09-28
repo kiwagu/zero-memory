@@ -137,11 +137,6 @@ describe('hookClient', () => {
     });
   });
 
-  it('marks task-brief support per client (Cursor cannot inject on prompt)', () => {
-    expect(hookClient('claude').canTaskBrief).toBe(true);
-    expect(hookClient('cursor').canTaskBrief).toBe(false);
-  });
-
   it('routes turn context through Claude’s single frame for every event', () => {
     const out = captureStdout();
     hookClient('claude').emitTurnContext('PreToolUse', 'nudge');

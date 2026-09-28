@@ -23,7 +23,7 @@ import { memoryIdSchema } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { branchNameToTopic, runBrief } from './brief-runner.js';
-import type { HookClient } from '../hook-client.js';
+import { hookClient, type HookClient } from '../hook-client.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
 import { checkRelease } from '../release/release-runner.js';
 
@@ -228,6 +228,34 @@ describe('per-message project/thread banner', () => {
     // The prompt itself never reaches the server.
     const sent = vi.mocked(callBuildContext).mock.calls[0]?.[0];
     expect(sent?.topic).toBe(basename(workDir));
+  });
+
+  it('sends nothing and asks the server nothing on a client with no task-brief channel', async () => {
+    // Cursor's prompt event has no model-context channel, so its task
+    // briefing is skipped outright rather than built for nowhere: not the
+    // banner, not a drained chunk, not a server call.
+    recordSessionThread(briefStatePath(), 'sess-cursor', 'thr_cursor.01f');
+    const emitted: string[] = [];
+    await runBrief('task', {
+      ...hookClient('cursor'),
+      readInput: async () => ({
+        sessionId: 'sess-cursor',
+        cwd: workDir,
+        prompt:
+          'add a retry with backoff to the ingest worker, it drops chunks',
+        transcriptPath: '',
+        hookEventName: 'beforeSubmitPrompt',
+        toolName: '',
+        alreadyContinued: false,
+        source: '',
+        trigger: '',
+      }),
+      emitTaskBrief: (context) => void emitted.push(context),
+      emitTurnContext: (_event, text) => void emitted.push(text),
+    });
+
+    expect(emitted).toEqual([]);
+    expect(callBuildContext).not.toHaveBeenCalled();
   });
 
   it('rebriefs after compaction and emits one Codex frame with the same thread', async () => {
@@ -614,14 +642,10 @@ describe('session-start memory floor', () => {
       memories: Array.from({ length: 12 }, (_, i) => memory(i, 900)),
     });
     expect(briefing.length).toBeLessThanOrEqual(9_000);
-    // Either a stub survives, or — if the pack were still squeezed past
-    // even the floor — the honest starved notice does. What must NOT
-    // happen is neither: the loops silently taking the room the floor
-    // was supposed to hold for the pack.
-    const hasMemorySection =
-      briefing.includes('mem_0000000000000000') ||
-      briefing.includes('they arrive in the next messages');
-    expect(hasMemorySection).toBe(true);
+    // Nothing here outranks the floor (no pinned rules), so the pack must
+    // still NAME its lead memory: the starved notice alone would mean the
+    // loops took the room the floor was supposed to hold.
+    expect(briefing).toContain('mem_0000000000000000');
   });
 
   it(

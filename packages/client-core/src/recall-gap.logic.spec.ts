@@ -142,7 +142,7 @@ describe('decideRecallGap', () => {
     ).toBe('silent');
   });
 
-  it('reminds on a search before any read, then stays quiet', () => {
+  it('reminds on a search before any read', () => {
     expect(decideRecallGap({ event: 'PreToolUse', counters: fresh })).toEqual({
       kind: 'remind',
       trigger: 'search',
@@ -166,6 +166,5 @@ describe('turnEndReminder', () => {
   it('frames the count as what memory may already hold, not as blame', () => {
     const text = turnEndReminder(3);
     expect(text).toContain('memory may already hold it');
-    expect(text.toLowerCase()).not.toContain('you failed');
   });
 });

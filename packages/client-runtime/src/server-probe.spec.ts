@@ -64,7 +64,11 @@ describe('probeServer — liveness branch (classifies before any auth)', () => {
 
 describe('probeServer — an unconfigured machine is its own state', () => {
   it('does not probe (nothing to probe) and says how to configure', async () => {
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('never asked')));
+    vi.stubGlobal('fetch', fetchSpy);
     const probe = await probeServer(null, 50);
+    vi.unstubAllGlobals();
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(probe.state).toBe('not-configured');
     expect(probe.serverUrl).toBeNull();
     expect(probe.fix).toContain('zero-memory-watcher login');

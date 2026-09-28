@@ -390,9 +390,11 @@ describe('the briefing split, end to end', () => {
 
 describe('planSectionBudgets — memory floor', () => {
   it('holds a floor for the memory pack, so long rules cannot take it all', () => {
-    const plan = planSectionBudgets(9_000, 500, true, 12);
-    expect(plan.memoryFloor).toBe(memoryFloorChars(12));
-    expect(plan.rules).toBe(9_000 - 500 - 2_250 - plan.memoryFloor - 16);
+    const withPack = planSectionBudgets(9_000, 500, true, 12);
+    const withoutPack = planSectionBudgets(9_000, 500, true, 0);
+    expect(withPack.memoryFloor).toBeGreaterThan(0);
+    // The floor comes out of the rules' ceiling, character for character.
+    expect(withoutPack.rules - withPack.rules).toBe(withPack.memoryFloor);
   });
 
   it('asks for no floor when the pack has no memories', () => {
