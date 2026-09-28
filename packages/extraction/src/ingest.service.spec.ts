@@ -487,22 +487,47 @@ describe('IngestService — usefulness judge', () => {
     });
   });
 
-  it('does not judge when no recalled ids accompany the chunk', async () => {
+  it('does not judge a chunk that carries no recalled ids', async () => {
+    // Everything a judgement needs is in place — a readable fact behind any
+    // id and a judge that calls it used — so the missing recalled ids are
+    // the only reason nothing is judged. The judge runs fire-and-forget and
+    // a failure there is only logged, so a warning is the one trace a broken
+    // guard leaves: none may appear.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const usage: IUsageRecorder = {
       record: vi.fn().mockResolvedValue(undefined),
     };
-    const { service } = makeService({ usage });
+    const judge: IUsefulnessJudge = {
+      judge: vi
+        .fn()
+        .mockResolvedValue([
+          { mem_id: 'mem_x', useful: true, relevant: true, confidence: 0.9 },
+        ]),
+    };
+    const { service } = makeService({
+      usage,
+      judge,
+      repository: repositoryWithFact('mem_x', 'we chose postgres for ltree'),
+    });
 
-    await service.ingest(
-      baseInput({ transcript_chunk: 'DECISION: chose postgres because ltree' })
-    );
-    await flush();
+    try {
+      await service.ingest(
+        baseInput({
+          transcript_chunk: 'DECISION: chose postgres because ltree',
+        })
+      );
+      await flush();
 
-    const judged = vi
-      .mocked(usage.record)
-      .mock.calls.map(([event]) => event)
-      .filter((event) => event.eventType === 'recall_used');
-    expect(judged).toHaveLength(0);
+      expect(judge.judge).not.toHaveBeenCalled();
+      const judged = vi
+        .mocked(usage.record)
+        .mock.calls.map(([event]) => event)
+        .filter((event) => event.eventType === 'recall_used');
+      expect(judged).toHaveLength(0);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

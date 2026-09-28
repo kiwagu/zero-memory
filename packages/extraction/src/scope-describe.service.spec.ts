@@ -125,15 +125,15 @@ describe('ScopeDescribeService', () => {
     expect(result.unwrapErr().message).toContain('no memories');
   });
 
-  it('rejects an unrooted scope path', async () => {
-    const service = new ScopeDescribeService(
-      context,
-      makeSearch([]),
-      makeMeta()
-    );
+  it('rejects an unrooted scope path before sampling anything', async () => {
+    // The scope has memories to describe, so the path itself is the only
+    // reason to refuse.
+    const search = makeSearch([{ content: 'anything', kind: 'fact' }]);
+    const service = new ScopeDescribeService(context, search, makeMeta());
 
     const result = await service.describe({ scope: 'acme' });
 
-    expect(result.isErr()).toBe(true);
+    expect(result.unwrapErr().code).toBe('validation_failed');
+    expect(search.listRecentByScope).not.toHaveBeenCalled();
   });
 });
