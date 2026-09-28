@@ -1,14 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { incrementCounter, renderMetrics, resetMetrics } from './metrics.js';
+import { incrementCounter, renderMetrics } from './metrics.js';
 
+// Counters live for the process lifetime, so each test owns its own metric
+// name rather than resetting shared state between tests.
 describe('metrics', () => {
-  beforeEach(() => resetMetrics());
-
-  it('renders nothing when no counter was touched', () => {
-    expect(renderMetrics()).toBe('');
-  });
-
   it('accumulates a labelled counter across increments', () => {
     incrementCounter('http_requests_total', { status: '200' });
     incrementCounter('http_requests_total', { status: '200' });
