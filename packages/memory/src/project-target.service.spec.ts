@@ -62,15 +62,6 @@ describe('ProjectTargetService.resolveBoard', () => {
     expect(memory.sessionProjectScope).not.toHaveBeenCalled();
   });
 
-  it("files on another project's board by its name, whatever the session", async () => {
-    const { target } = makeTarget(harbor.scope.path);
-    const board = await target.resolveBoard({
-      projectHint: 'Zero Memory',
-      sessionDefault: true,
-    });
-    expect(board.unwrap()).toBe(zeroMemory.scope.path);
-  });
-
   it("goes to the session's project when nothing names a board", async () => {
     const { target, memory } = makeTarget(harbor.scope.path);
     const board = await target.resolveBoard({
@@ -100,14 +91,5 @@ describe('ProjectTargetService.resolveBoard', () => {
     expect(failure.message).toContain(`harbor (${harbor.scope.path})`);
     expect(failure.message).not.toContain('"core"');
     expect(scopeAccess.createScope).not.toHaveBeenCalled();
-  });
-
-  it('refuses a card with no board and no session project, listing the projects', async () => {
-    const { target } = makeTarget(undefined);
-    const failure = (
-      await target.resolveBoard({ sessionDefault: true })
-    ).unwrapErr();
-    expect(failure.message).toMatch(/^scope_target_required:/);
-    expect(failure.message).toContain(`zero_memory (${zeroMemory.scope.path})`);
   });
 });

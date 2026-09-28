@@ -317,8 +317,9 @@ describe('sameSessionCollapseAction', () => {
   });
 
   it('collapses an authoritative same-session pair toward the newest side', () => {
+    // At the floor itself: the line is inclusive.
     expect(
-      sameSessionCollapseAction(side('mem_new'), side('mem_old'), 0.96, true)
+      sameSessionCollapseAction(side('mem_new'), side('mem_old'), 0.95, true)
     ).toEqual({ winner: 'mem_new', loser: 'mem_old' });
     expect(
       sameSessionCollapseAction(side('mem_a'), side('mem_b'), 0.99, false)
@@ -329,7 +330,7 @@ describe('sameSessionCollapseAction', () => {
     // Distinct same-session facts with shared phrasing reach 0.92+; only
     // near-verbatim restatements (>= 0.95) collapse deterministically.
     expect(
-      sameSessionCollapseAction(side('mem_a'), side('mem_b'), 0.94, true)
+      sameSessionCollapseAction(side('mem_a'), side('mem_b'), 0.949, true)
     ).toBeNull();
   });
 
@@ -454,7 +455,7 @@ describe('protectPromotedLoop', () => {
     expect(protectPromotedLoop(action, promoted)).toBe(action);
   });
 
-  it('leaves unpromoted losers, skips and queued rows alone', () => {
+  it('leaves unpromoted losers and skips alone', () => {
     const plain = {
       kind: 'supersede',
       winner: 'mem_a',

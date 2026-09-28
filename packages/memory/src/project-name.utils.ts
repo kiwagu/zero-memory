@@ -33,7 +33,7 @@ export type ProjectNameMatch =
  * `Zero Memory` are all `zm` — or null for a one-word name, whose single
  * letter would match far too much to mean anything.
  */
-export const projectNameInitials = (name: string): string | null => {
+const projectNameInitials = (name: string): string | null => {
   const words = name
     .trim()
     .replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, '$1 $2')

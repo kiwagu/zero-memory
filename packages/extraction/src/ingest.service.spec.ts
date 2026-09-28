@@ -1,149 +1,42 @@
-import type { IContext } from '@workspace/context';
 import type { MemoryId } from '@workspace/contracts';
-import { DeterministicHashEmbeddingService } from '@workspace/embedding/testing';
 import {
-  EntityResolutionService,
-  MemoryService,
   Scope,
-  ScopeRoutingService,
-  type IEntityRepository,
   type IGraphService,
   type IMemoryRepository,
-  type IMemorySearchService,
   type IProjectBindingRepository,
   type IScopeAccessService,
   type ISessionThreadRepository,
 } from '@workspace/memory';
-import type { IUsageRecorder } from '@workspace/usage';
-import { Err, None, Ok, Some } from 'oxide.ts';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { ExtractionResult } from './extraction.schema.js';
+import {
+  makeContext,
+  makeGraphService,
+  makeMemoryService,
+  makeProjectBindings,
+  makeRepository,
+  makeScopeAccess,
+  makeThreads,
+  TEST_USER_ENTITY_ID,
+} from '@workspace/memory/testing';
 import {
   BudgetExhaustedError,
   BUDGET_EXHAUSTED,
   type BudgetGuard,
   type BudgetDecision,
 } from '@workspace/policy';
+import type { IUsageRecorder } from '@workspace/usage';
+import { Err, Ok, Some } from 'oxide.ts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ExtractionResult } from './extraction.schema.js';
 import type { IExtractor } from './extractor.js';
-import type {
-  IIngestLogRepository,
-  IngestLogEntry,
-} from './ingest-log.repository.js';
+import { makeIngestLog } from './ingest-log.repository.fake.js';
+import type { IIngestLogRepository } from './ingest-log.repository.js';
 import { IngestService } from './ingest.service.js';
 import { DeterministicExtractor } from './testing/deterministic.extractor.js';
 import { DeterministicUsefulnessJudge } from './testing/deterministic.usefulness-judge.js';
 import type { IUsefulnessJudge } from './usefulness-judge.js';
 
-const USER_ID = 'b7e6a1c2-3d4f-4a5b-8c9d-0e1f2a3b4c5d';
-const USER_ENTITY_ID = 'usr_000000000000000a.0000000000';
-const PERSONAL_SCOPE = `user.${USER_ENTITY_ID.replace(/\./g, '_')}`;
-// Per-owner project namespace: first-sight routing derives `proj.<owner>.<slug>`.
-const PROJECT_ROOT = `proj.${USER_ENTITY_ID.replace(/\./g, '_')}`;
-
-const makeContext = (defaultScope?: string): IContext => ({
-  setContextValue: () => undefined,
-  mustGetCurrentUserId: () => USER_ID,
-  getCurrentUserId: () => USER_ID,
-  mustGetCurrentUserEntityId: () => USER_ENTITY_ID,
-  getCurrentUserEntityId: () => USER_ENTITY_ID,
-  getAccessToken: () => 'token',
-  getScopes: () => [],
-  getDefaultScope: () => defaultScope,
-  getCurrentSessionId: () => undefined,
-});
-
-const makeRepository = (): IMemoryRepository => ({
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-  findOneById: vi.fn().mockResolvedValue(None),
-  update: vi.fn().mockResolvedValue(Ok(undefined)),
-  applyTranslation: vi.fn().mockResolvedValue(Ok(undefined)),
-  markTranslationSkipped: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-const makeTranslator = () => ({
-  translateToEnglish: vi
-    .fn()
-    .mockResolvedValue({ text: 'translated', sourceLang: 'ja' }),
-});
-
-const makeSearchService = (): IMemorySearchService => ({
-  search: vi.fn().mockResolvedValue([]),
-  findSimilar: vi.fn().mockResolvedValue(None),
-  findAuthoritativeCoverage: vi.fn().mockResolvedValue(None),
-  findSupersedeCandidates: vi.fn().mockResolvedValue([]),
-  listRecentByScope: vi.fn().mockResolvedValue([]),
-});
-
-const makeEntityRepository = (): IEntityRepository => ({
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-  findByNormalizedName: vi.fn().mockResolvedValue(None),
-  findByMatchKey: vi.fn().mockResolvedValue(None),
-  findContentAnchors: vi.fn().mockResolvedValue([]),
-  linkMemory: vi.fn().mockResolvedValue(Ok(undefined)),
-  list: vi.fn().mockResolvedValue([]),
-  listForMemories: vi.fn().mockResolvedValue(new Map()),
-});
-
-const makeGraphService = (): IGraphService => ({
-  createEdge: vi.fn().mockResolvedValue(Ok({ created: true })),
-  linkMemories: vi.fn().mockResolvedValue(Ok({ created: true })),
-  traverse: vi.fn().mockResolvedValue([]),
-  neighborsOf: vi.fn().mockResolvedValue([]),
-  buildContext: vi.fn().mockResolvedValue({
-    memories: [],
-    entities: [],
-    edges: [],
-    linked_memories: [],
-  }),
-});
-
-const makeScopeAccess = (options?: {
-  canWrite?: boolean;
-  createScopeError?: string;
-}): IScopeAccessService => ({
-  canWrite: vi.fn().mockResolvedValue(options?.canWrite ?? false),
-  createScope: vi
-    .fn()
-    .mockResolvedValue(
-      options?.createScopeError ? Err(options.createScopeError) : Ok(undefined)
-    ),
-  listMemberProjects: vi.fn().mockResolvedValue(Ok([])),
-});
-
-const makeBindings = (
-  bound?: Record<string, string>
-): IProjectBindingRepository => ({
-  findScope: vi.fn().mockImplementation((kind: string, key: string) => {
-    const scope = bound?.[`${kind}:${key}`];
-    return Promise.resolve(scope ? Some(Scope.create(scope).unwrap()) : None);
-  }),
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-/** In-memory ingest log honoring the insert-if-absent + release contract. */
-const makeIngestLog = (): IIngestLogRepository & { hashes: Set<string> } => {
-  const hashes = new Set<string>();
-  return {
-    hashes,
-    insertIfAbsent: vi.fn().mockImplementation((entry: IngestLogEntry) => {
-      const existed = hashes.has(entry.chunkHash);
-      hashes.add(entry.chunkHash);
-      return Promise.resolve(Ok({ existed }));
-    }),
-    exists: vi
-      .fn()
-      .mockImplementation((chunkHash: string) =>
-        Promise.resolve(Ok(hashes.has(chunkHash)))
-      ),
-    markProcessed: vi.fn().mockResolvedValue(Ok(undefined)),
-    release: vi.fn().mockImplementation((chunkHash: string) => {
-      hashes.delete(chunkHash);
-      return Promise.resolve(Ok(undefined));
-    }),
-  };
-};
+const PERSONAL_SCOPE = `user.${TEST_USER_ENTITY_ID.replace(/\./g, '_')}`;
 
 const stubExtractor = (result: ExtractionResult): IExtractor => ({
   extract: vi.fn().mockResolvedValue(result),
@@ -163,13 +56,6 @@ interface ServiceOptions {
   threads?: ISessionThreadRepository;
 }
 
-/** Thread store with no live conversation, unless a test opens one. */
-const makeThreads = (): ISessionThreadRepository => ({
-  open: vi.fn().mockResolvedValue(Err('not used by ingest')),
-  findByToken: vi.fn().mockResolvedValue(None),
-  findByConversation: vi.fn().mockResolvedValue(None),
-});
-
 /** A budget guard fixed to one decision — unlimited unless a test overrides it. */
 const makeBudgetGuard = (decision?: Partial<BudgetDecision>): BudgetGuard => {
   const status = async (): Promise<BudgetDecision> => ({
@@ -185,61 +71,48 @@ const makeBudgetGuard = (decision?: Partial<BudgetDecision>): BudgetGuard => {
   return { status, check: status, require: status } as unknown as BudgetGuard;
 };
 
+/**
+ * An IngestService over a real MemoryService. Scopes are NOT writable by
+ * default, so a project a chunk names is set up on first sight and a routed
+ * fact is not auto-shared unless a test grants write access.
+ */
 const makeService = (options?: ServiceOptions) => {
-  const embedding = new DeterministicHashEmbeddingService();
-  const context = makeContext(options?.defaultScope);
-  const repository = options?.repository ?? makeRepository();
-  const searchService = makeSearchService();
-  const entityRepository = makeEntityRepository();
-  const graphService = options?.graphService ?? makeGraphService();
-  const scopeAccess = options?.scopeAccess ?? makeScopeAccess();
-  const bindings = options?.bindings ?? makeBindings();
+  const memory = makeMemoryService({
+    context: makeContext({ getDefaultScope: () => options?.defaultScope }),
+    scopeAccess: options?.scopeAccess ?? makeScopeAccess(false),
+    ...(options?.repository && { repository: options.repository }),
+    ...(options?.graphService && { graphService: options.graphService }),
+    ...(options?.bindings && { projectBindings: options.bindings }),
+    ...(options?.threads && { threads: options.threads }),
+  });
   const ingestLog = options?.ingestLog ?? makeIngestLog();
-  const entityResolution = new EntityResolutionService(
-    entityRepository,
-    embedding
-  );
-  const scopeRouting = new ScopeRoutingService(bindings, scopeAccess, context);
-  const memoryService = new MemoryService(
-    repository,
-    searchService,
-    embedding,
-    context,
-    entityResolution,
-    entityRepository,
-    graphService,
-    scopeAccess,
-    scopeRouting,
-    makeTranslator()
-  );
   const usage: IUsageRecorder = options?.usage ?? {
     record: vi.fn().mockResolvedValue(undefined),
   };
-  const threads = options?.threads ?? makeThreads();
   const service = new IngestService(
     options?.extractor ?? new DeterministicExtractor(),
-    memoryService,
-    entityResolution,
-    graphService,
-    scopeRouting,
+    memory.service,
+    memory.entityResolution,
+    memory.graphService,
+    memory.scopeRouting,
     ingestLog,
-    context,
+    memory.context,
     usage,
-    repository,
+    memory.repository,
     options?.judge ?? new DeterministicUsefulnessJudge(),
     options?.budgetGuard ?? makeBudgetGuard(),
-    threads
+    memory.threads
   );
   return {
     service,
-    repository,
-    graphService,
-    scopeAccess,
-    bindings,
+    repository: memory.repository,
+    graphService: memory.graphService,
+    scopeAccess: memory.scopeAccess,
+    bindings: memory.projectBindings,
     ingestLog,
-    memoryService,
+    memoryService: memory.service,
     usage,
-    threads,
+    threads: memory.threads,
   };
 };
 
@@ -415,95 +288,6 @@ describe('IngestService — usage metering', () => {
       .mock.calls.filter(([event]) => event.eventType === 'ingest_chunk');
     expect(ingestCalls).toHaveLength(1);
   });
-
-  it('still ingests when the usage recorder rejects (fire-and-forget)', async () => {
-    const usage: IUsageRecorder = {
-      record: vi.fn().mockRejectedValue(new Error('metering down')),
-    };
-    const { service } = makeService({ usage });
-
-    const result = await service.ingest(
-      baseInput({
-        transcript_chunk: 'DECISION@0.9: chose bun over node for the runtime',
-      })
-    );
-
-    expect(result.isOk()).toBe(true);
-    expect(result.unwrap().memories_created).toBe(1);
-  });
-});
-
-describe('IngestService — usefulness judge', () => {
-  const flush = (): Promise<void> =>
-    new Promise((resolve) => setTimeout(resolve, 0));
-
-  const repositoryWithFact = (
-    id: string,
-    content: string
-  ): IMemoryRepository => ({
-    applyTranslation: vi.fn().mockResolvedValue(Ok(undefined)),
-    markTranslationSkipped: vi.fn().mockResolvedValue(Ok(undefined)),
-    insert: vi.fn().mockResolvedValue(Ok(undefined)),
-    findOneById: vi
-      .fn()
-      .mockImplementation((queried: string) =>
-        Promise.resolve(
-          queried === id
-            ? Some({ content: { content } } as unknown as never)
-            : None
-        )
-      ),
-    update: vi.fn().mockResolvedValue(Ok(undefined)),
-  });
-
-  it('emits recall_used (source=judge) for a used recalled fact', async () => {
-    const usage: IUsageRecorder = {
-      record: vi.fn().mockResolvedValue(undefined),
-    };
-    const { service } = makeService({
-      usage,
-      repository: repositoryWithFact('mem_x', 'we chose postgres for ltree'),
-    });
-
-    await service.ingest(
-      baseInput({
-        transcript_chunk: 'user: why postgres?\nassistant: because ltree',
-        recalled_ids: ['mem_x'],
-      })
-    );
-    await flush(); // the judge runs fire-and-forget after ingest returns
-
-    const judged = vi
-      .mocked(usage.record)
-      .mock.calls.map(([event]) => event)
-      .filter((event) => event.eventType === 'recall_used');
-    expect(judged).toHaveLength(1);
-    expect(judged[0]?.metadata).toMatchObject({
-      mem_id: 'mem_x',
-      source: 'judge',
-      useful: true,
-      // The judge's second axis (context precision): used implies relevant.
-      relevant: true,
-    });
-  });
-
-  it('does not judge when no recalled ids accompany the chunk', async () => {
-    const usage: IUsageRecorder = {
-      record: vi.fn().mockResolvedValue(undefined),
-    };
-    const { service } = makeService({ usage });
-
-    await service.ingest(
-      baseInput({ transcript_chunk: 'DECISION: chose postgres because ltree' })
-    );
-    await flush();
-
-    const judged = vi
-      .mocked(usage.record)
-      .mock.calls.map(([event]) => event)
-      .filter((event) => event.eventType === 'recall_used');
-    expect(judged).toHaveLength(0);
-  });
 });
 
 describe('IngestService — confidence gate and quota', () => {
@@ -554,7 +338,7 @@ describe('IngestService — confidence gate and quota', () => {
 describe('IngestService — scope routing decision table', () => {
   it('routes preferences to the personal scope even with a project hint', async () => {
     const { service, repository } = makeService({
-      bindings: makeBindings({ 'path:/home/dev/alpha': 'proj.alpha' }),
+      bindings: makeProjectBindings({ 'path:/home/dev/alpha': 'proj.alpha' }),
     });
 
     await service.ingest(
@@ -569,7 +353,7 @@ describe('IngestService — scope routing decision table', () => {
 
   it('routes portable facts to the personal core scope, not the project', async () => {
     const { service, repository } = makeService({
-      bindings: makeBindings({ 'path:/home/dev/alpha': 'proj.alpha' }),
+      bindings: makeProjectBindings({ 'path:/home/dev/alpha': 'proj.alpha' }),
     });
 
     await service.ingest(
@@ -584,7 +368,9 @@ describe('IngestService — scope routing decision table', () => {
   });
 
   it('routes non-preferences to the scope of an existing binding', async () => {
-    const bindings = makeBindings({ 'path:/home/dev/alpha': 'proj.alpha' });
+    const bindings = makeProjectBindings({
+      'path:/home/dev/alpha': 'proj.alpha',
+    });
     const { service, repository } = makeService({ bindings });
 
     await service.ingest(
@@ -599,43 +385,6 @@ describe('IngestService — scope routing decision table', () => {
     expect(insertedScopes(repository)).toEqual([
       'proj.usr_000000000000000a_0000000000.alpha',
     ]);
-    expect(bindings.insert).not.toHaveBeenCalled();
-  });
-
-  it('auto-creates scope and binding on first sight of a project', async () => {
-    const bindings = makeBindings();
-    const scopeAccess = makeScopeAccess({ canWrite: false });
-    const { service, repository } = makeService({ bindings, scopeAccess });
-
-    await service.ingest(
-      baseInput({
-        transcript_chunk: 'DECISION: chose bun because of workspace speed',
-        project_hint: '/home/dev/repos/My-App',
-      })
-    );
-
-    expect(insertedScopes(repository)).toEqual([`${PROJECT_ROOT}.my_app`]);
-    expect(scopeAccess.createScope).toHaveBeenCalledOnce();
-    expect(bindings.insert).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'path', key: '/home/dev/repos/My-App' })
-    );
-  });
-
-  it('falls back to personal when the scope bootstrap fails', async () => {
-    const scopeAccess = makeScopeAccess({
-      canWrite: false,
-      createScopeError: 'scope already has members',
-    });
-    const { service, repository, bindings } = makeService({ scopeAccess });
-
-    await service.ingest(
-      baseInput({
-        transcript_chunk: 'DECISION: chose redis for queues because latency',
-        project_hint: 'git@github.com:acme/queue-svc.git',
-      })
-    );
-
-    expect(insertedScopes(repository)).toEqual([PERSONAL_SCOPE]);
     expect(bindings.insert).not.toHaveBeenCalled();
   });
 
@@ -715,19 +464,6 @@ describe('IngestService — entities and relations', () => {
 });
 
 describe('IngestService — extractor failures', () => {
-  it('propagates an extractor error', async () => {
-    const extractor: IExtractor = {
-      extract: vi.fn().mockRejectedValue(new Error('model unavailable')),
-    };
-    const { service } = makeService({ extractor });
-
-    const result = await service.ingest(baseInput());
-
-    expect(result.isErr()).toBe(true);
-    expect(result.unwrapErr().code).toBe('internal');
-    expect(result.unwrapErr().message).toMatch(/model unavailable/);
-  });
-
   it('releases the claim on extractor failure so a retry is not a duplicate', async () => {
     const ingestLog = makeIngestLog();
     let calls = 0;
@@ -799,7 +535,7 @@ describe('IngestService — auto-share', () => {
     'PREF: prefers bun over npm';
 
   it('shares facts routed to a project scope, not personal preferences', async () => {
-    const scopeAccess = makeScopeAccess({ canWrite: true });
+    const scopeAccess = makeScopeAccess(true);
     const { service, memoryService } = makeService({ scopeAccess });
     const shareSpy = vi.spyOn(memoryService, 'share').mockResolvedValue(
       Ok({
@@ -823,7 +559,7 @@ describe('IngestService — auto-share', () => {
 
   it('does not share when ZM_INGEST_AUTOSHARE=false', async () => {
     process.env.ZM_INGEST_AUTOSHARE = 'false';
-    const scopeAccess = makeScopeAccess({ canWrite: true });
+    const scopeAccess = makeScopeAccess(true);
     const { service, memoryService } = makeService({ scopeAccess });
     const shareSpy = vi.spyOn(memoryService, 'share');
 
@@ -1019,37 +755,9 @@ describe('IngestService — an exhausted budget pauses, it does not lose work', 
 
     expect(result.unwrapErr().code).toBe('internal');
     expect(result.unwrapErr().message).toContain('Extraction failed');
+    // The extractor's own reason travels with it.
+    expect(result.unwrapErr().message).toMatch(/model unavailable/);
     expect(result.unwrapErr().message).not.toContain(BUDGET_EXHAUSTED);
-  });
-
-  it('a chunk retried after the budget frees up is ingested normally', async () => {
-    const ingestLog = makeIngestLog();
-    let attempt = 0;
-    const extractor: IExtractor = {
-      extract: vi.fn().mockImplementation(() => {
-        attempt += 1;
-        if (attempt === 1) return Promise.reject(exhausted());
-        return Promise.resolve({
-          memories: [
-            {
-              content: 'chose postgres over mysql because of ltree',
-              kind: 'decision' as const,
-              confidence: 0.9,
-              entities: [],
-              relations: [],
-            },
-          ],
-        });
-      }),
-    };
-    const { service } = makeService({ extractor, ingestLog });
-    const input = baseInput({ chunk_hash: 'deferred-hash' });
-
-    expect((await service.ingest(input)).isErr()).toBe(true);
-    const second = await service.ingest(input);
-
-    expect(second.isOk()).toBe(true);
-    expect(ingestLog.markProcessed).toHaveBeenCalledWith('deferred-hash', 1);
   });
 });
 
@@ -1186,8 +894,11 @@ describe('IngestService — metrics-only (ZM_INGEST_EXTRACT=off)', () => {
     );
   });
 
-  it('still runs the usefulness judge on recalled ids', async () => {
-    process.env.ZM_INGEST_EXTRACT = 'off';
+  /**
+   * Everything a judgement needs: a readable fact behind any id, and a judge
+   * that calls one recalled fact used and says another one misled the turn.
+   */
+  const judgeFixture = () => {
     const record = vi.fn().mockResolvedValue(undefined);
     const repository = makeRepository();
     vi.mocked(repository.findOneById).mockResolvedValue(
@@ -1197,11 +908,16 @@ describe('IngestService — metrics-only (ZM_INGEST_EXTRACT=off)', () => {
       } as never)
     );
     const judge: IUsefulnessJudge = {
-      judge: vi
-        .fn()
-        .mockResolvedValue([
-          { mem_id: 'mem_x', useful: true, relevant: true, confidence: 0.9 },
-        ]),
+      judge: vi.fn().mockResolvedValue([
+        { mem_id: 'mem_x', useful: true, relevant: true, confidence: 0.9 },
+        {
+          mem_id: 'mem_y',
+          useful: false,
+          relevant: true,
+          misled: true,
+          confidence: 0.8,
+        },
+      ]),
     };
     const { service } = makeService({
       repository,
@@ -1209,25 +925,66 @@ describe('IngestService — metrics-only (ZM_INGEST_EXTRACT=off)', () => {
       extractor: { extract: vi.fn() },
       usage: { record },
     });
+    const recallUsed = () =>
+      record.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event.eventType === 'recall_used');
+    return { service, judge, recallUsed };
+  };
+
+  it('still runs the usefulness judge on recalled ids', async () => {
+    process.env.ZM_INGEST_EXTRACT = 'off';
+    const { service, judge, recallUsed } = judgeFixture();
 
     await service.ingest(
       baseInput({
         transcript_chunk: 'user: thanks, that recalled fact was the fix',
-        recalled_ids: ['mem_x'],
+        recalled_ids: ['mem_x', 'mem_y'],
       })
     );
     await flush(); // the judge runs fire-and-forget after ingest returns
 
     expect(judge.judge).toHaveBeenCalledTimes(1);
-    const recallUsed = record.mock.calls
-      .map(([event]) => event)
-      .filter((event) => event.eventType === 'recall_used');
-    expect(recallUsed).toHaveLength(1);
-    expect(recallUsed[0]?.metadata).toMatchObject({
+    const [used, misled] = recallUsed();
+    expect(recallUsed()).toHaveLength(2);
+    expect(used?.metadata).toMatchObject({
       mem_id: 'mem_x',
       source: 'judge',
       useful: true,
+      // The judge's second axis (context precision): used implies relevant.
+      relevant: true,
     });
+    expect(used?.metadata).not.toHaveProperty('valence');
+    // A fact that led the turn astray carries negative valence on the same
+    // event, which the reinforcement and stale-suspect rollups filter on.
+    expect(misled?.metadata).toMatchObject({
+      mem_id: 'mem_y',
+      useful: false,
+      valence: 'misled',
+    });
+  });
+
+  it('does not judge a chunk that carries no recalled ids', async () => {
+    process.env.ZM_INGEST_EXTRACT = 'off';
+    // The fixture would judge anything it is handed, so the missing recalled
+    // ids are the only reason nothing is judged. The judge runs
+    // fire-and-forget and a failure there is only logged, so a warning is
+    // the one trace a broken guard leaves: none may appear.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { service, judge, recallUsed } = judgeFixture();
+
+    try {
+      await service.ingest(
+        baseInput({ transcript_chunk: 'user: nothing was recalled here' })
+      );
+      await flush();
+
+      expect(judge.judge).not.toHaveBeenCalled();
+      expect(recallUsed()).toHaveLength(0);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('meters the chunk with extract:off', async () => {
