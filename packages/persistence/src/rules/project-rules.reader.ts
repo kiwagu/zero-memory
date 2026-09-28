@@ -2,8 +2,8 @@ import type { ContextRule } from '@workspace/contracts';
 import { injectContext, type IContext } from '@workspace/context';
 import {
   capUnpinnedRules,
+  deliverableRules,
   RULE_DELIVERY,
-  ruleDeliveryCutoff,
 } from '@workspace/db';
 import { singleton } from '@workspace/di';
 import { createLogger } from '@workspace/logger';
@@ -37,29 +37,25 @@ export class SupabaseProjectRulesReader implements IProjectRulesReader {
       return [];
     }
     const client = this.#client();
-    const cutoff = ruleDeliveryCutoff(Date.now());
-    // Every eligible row, paged: the effective-scope filter below runs in
-    // memory, so any bound before it — a row limit, or PostgREST's own
-    // max-rows cap on a single response — would let newer rules of OTHER
-    // projects crowd a project's own rules out of its briefing. The cap
-    // belongs to each briefing, after the filter (the /rules page counts
-    // delivery the same way).
+    // Every live row, paged: the effective-scope filter and the delivery TTL
+    // below run in memory, so any bound before them — a row limit, or
+    // PostgREST's own max-rows cap on a single response — would let newer
+    // rules of OTHER projects crowd a project's own rules out of its
+    // briefing. The cap belongs to each briefing, after the filter (the
+    // /rules page counts delivery the same way).
     const rows = await readAllPages(
       (from, to) =>
         client
           .from('rule_candidates')
-          .select('rule_text, pinned, applies_scope, memories!inner(scope)')
+          .select(
+            'rule_text, pinned, promoted_at, applies_scope, memories!inner(scope)'
+          )
           .eq('status', 'promoted')
           .eq('target_layer', 'project')
           .is('revoked_at', null)
           .not('rule_text', 'is', null)
-          // Soft-TTL: a rule older than the delivery TTL drops out of the
-          // briefing — unless it is PINNED, which exempts it (the pin is a
-          // standing decision, not something that expires by age).
-          .or(`pinned.eq.true,promoted_at.gte.${cutoff}`)
-          // Pinned first (never dropped by the cap), then newest-first: at
-          // the cap, freshly promoted rules win over older ones. The id
-          // breaks ties so no row lands on two pages or on none.
+          // A total order, so no row lands on two pages or on none; the
+          // delivery order itself is deliverableRules' to decide.
           .order('pinned', { ascending: false })
           .order('promoted_at', { ascending: false })
           .order('id', { ascending: true })
@@ -73,16 +69,24 @@ export class SupabaseProjectRulesReader implements IProjectRulesReader {
       );
     });
     const briefed = new Set(scopes.map((scope) => scope.path));
-    const eligible = rows
+    const inScope = rows
       .filter((row) => {
         const anchor = (row.memories as unknown as { scope: unknown }).scope;
         const effective = String(row.applies_scope ?? anchor ?? '');
         return briefed.has(effective);
       })
-      .flatMap((row): ContextRule[] => {
-        const text = row.rule_text?.trim();
-        return text ? [{ text, pinned: row.pinned === true }] : [];
-      });
+      .map((row) => ({
+        text: row.rule_text?.trim() ?? '',
+        pinned: row.pinned === true,
+        promotedAt: row.promoted_at,
+      }));
+    // Soft-TTL and delivery order: a rule older than the delivery TTL drops
+    // out of the briefing unless it is PINNED (the pin is a standing
+    // decision, not something that expires by age); pinned first, then
+    // newest first, so at the cap freshly promoted rules win.
+    const eligible = deliverableRules(inScope, Date.now()).flatMap(
+      ({ text, pinned }): ContextRule[] => (text ? [{ text, pinned }] : [])
+    );
     // Delivery is capped and the excess is dropped SILENTLY from the
     // briefing, so log it — "promoted but never delivered" has to be
     // diagnosable (the /rules page reports the same count to the owner).

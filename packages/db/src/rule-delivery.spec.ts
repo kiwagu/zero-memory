@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   capUnpinnedRules,
+  deliverableRules,
   deliveredRuleCount,
   deliveredRuleIds,
   RULE_DELIVERY,
@@ -60,10 +61,62 @@ describe('capUnpinnedRules', () => {
   });
 });
 
+const NOW = Date.parse('2026-09-28T12:00:00Z');
+const DAY = 86_400_000;
+const TTL = RULE_DELIVERY.deliveryTtlDays;
+const msAgo = (ms: number) => new Date(NOW - ms).toISOString();
+const daysAgo = (days: number) => msAgo(days * DAY);
+
+describe('deliverableRules', () => {
+  // The readers (briefing and instructions) and the /rules page all take
+  // their age rule from here, so this table is where the TTL is pinned.
+  it.each<[string, boolean, string | null, boolean]>([
+    ['delivers a fresh unpinned rule', false, daysAgo(1), true],
+    [
+      'delivers an unpinned rule promoted exactly at the cutoff',
+      false,
+      daysAgo(TTL),
+      true,
+    ],
+    [
+      'drops an unpinned rule one moment past the cutoff',
+      false,
+      msAgo(TTL * DAY + 1),
+      false,
+    ],
+    [
+      'delivers a pinned rule long past the cutoff',
+      true,
+      daysAgo(TTL + 30),
+      true,
+    ],
+    ['drops an unpinned rule with no promotion time', false, null, false],
+    ['delivers a pinned rule with no promotion time', true, null, true],
+  ])('%s', (_name, pinned, promotedAt, delivered) => {
+    const rule = { id: 'r', pinned, promotedAt };
+    expect(deliverableRules([rule], NOW)).toEqual(delivered ? [rule] : []);
+  });
+
+  it('orders pinned rules first, then newest first', () => {
+    const rules = [
+      { id: 'old', pinned: false, promotedAt: daysAgo(30) },
+      { id: 'pinned-old', pinned: true, promotedAt: daysAgo(200) },
+      { id: 'new', pinned: false, promotedAt: daysAgo(1) },
+      { id: 'pinned-new', pinned: true, promotedAt: daysAgo(2) },
+      // Where Postgres sorts a null in a descending order: first.
+      { id: 'pinned-undated', pinned: true, promotedAt: null },
+    ];
+    expect(deliverableRules(rules, NOW).map((rule) => rule.id)).toEqual([
+      'pinned-undated',
+      'pinned-new',
+      'pinned-old',
+      'new',
+      'old',
+    ]);
+  });
+});
+
 describe('deliveredRuleIds', () => {
-  const NOW = Date.parse('2026-09-28T12:00:00Z');
-  const daysAgo = (days: number) =>
-    new Date(NOW - days * 86_400_000).toISOString();
   const general = (id: string, promotedDaysAgo: number, pinned = false) => ({
     id,
     targetLayer: 'user' as const,
@@ -82,15 +135,6 @@ describe('deliveredRuleIds', () => {
     effectiveScope: scope,
     pinned,
     promotedAt: daysAgo(promotedDaysAgo),
-  });
-
-  it('delivers pinned rules past the TTL and drops unpinned ones', () => {
-    const ttl = RULE_DELIVERY.deliveryTtlDays;
-    const delivered = deliveredRuleIds(
-      [general('old-pinned', ttl + 30, true), general('old', ttl + 1)],
-      NOW
-    );
-    expect([...delivered]).toEqual(['old-pinned']);
   });
 
   it('caps the unpinned General rules newest first, pinned ones on top', () => {
