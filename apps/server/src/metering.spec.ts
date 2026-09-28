@@ -206,6 +206,44 @@ describe('recordToolInvocation — pre-execution volume metering', () => {
       expect(record).not.toHaveBeenCalled();
     }
   );
+
+  // Metering must never break the tool call it measures: whatever the store
+  // does, the caller returns normally and the failure is only logged.
+  it.each<[string, IUsageRecorder['record']]>([
+    [
+      'throws synchronously',
+      () => {
+        throw new Error('usage store down');
+      },
+    ],
+    ['rejects', () => Promise.reject(new Error('usage store down'))],
+  ])(
+    'survives a recorder that %s and logs the failure',
+    async (_how, record) => {
+      // Pin the sink the assertion reads: a warn line reaches console.warn
+      // only when the level lets it through and LOG_STDERR is not set.
+      vi.stubEnv('LOG_LEVEL', 'warn');
+      vi.stubEnv('LOG_STDERR', '');
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+
+      try {
+        expect(() => recordToolInvocation({ record }, 'forget')).not.toThrow();
+        await flush();
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(String(warn.mock.calls[0]?.[0]))).toMatchObject({
+          msg: 'failed to record usage event',
+          eventType: 'mcp_tool_call',
+          error: 'usage store down',
+        });
+      } finally {
+        warn.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    }
+  );
 });
 
 describe('recordRememberResult — post-result remember metering', () => {

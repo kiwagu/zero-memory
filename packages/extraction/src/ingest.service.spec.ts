@@ -969,7 +969,11 @@ describe('IngestService — metrics-only (ZM_INGEST_EXTRACT=off)', () => {
     // The fixture would judge anything it is handed, so the missing recalled
     // ids are the only reason nothing is judged. The judge runs
     // fire-and-forget and a failure there is only logged, so a warning is
-    // the one trace a broken guard leaves: none may appear.
+    // the one trace a broken guard leaves: none may appear. Pin the sink
+    // that trace would reach: LOG_STDERR=1 or a level above warn would route
+    // or drop it, and the negative would pass over nothing.
+    vi.stubEnv('LOG_LEVEL', 'warn');
+    vi.stubEnv('LOG_STDERR', '');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const { service, judge, recallUsed } = judgeFixture();
 
@@ -984,6 +988,7 @@ describe('IngestService — metrics-only (ZM_INGEST_EXTRACT=off)', () => {
       expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
+      vi.unstubAllEnvs();
     }
   });
 
