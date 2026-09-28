@@ -1,6 +1,8 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import {
+  loadStateRecord,
+  saveCappedStateRecord,
+  stateFilePath,
+} from './state-file.js';
 
 /**
  * Which squash commits this machine has already checked against the board,
@@ -28,23 +30,10 @@ const MAX_ENTRIES = 500;
 
 export const landingCheckStatePath = (
   env: NodeJS.ProcessEnv = process.env
-): string =>
-  join(
-    env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'landing-checks.json'
-  );
+): string => stateFilePath('landing-checks.json', env);
 
-const load = (path: string): Record<string, Entry> => {
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
-    return typeof parsed === 'object' && parsed !== null
-      ? (parsed as Record<string, Entry>)
-      : {};
-  } catch {
-    return {};
-  }
-};
+const load = (path: string): Record<string, Entry> =>
+  loadStateRecord<Entry>(path);
 
 /** Whether this squash/card pair still needs asking about. */
 export const landingCheckDue = (
@@ -79,11 +68,12 @@ export const recordLandingCheck = (
   try {
     const state = load(path);
     state[key] = { outcome, checked_at: now };
-    const kept = Object.entries(state)
-      .sort(([, a], [, b]) => b.checked_at - a.checked_at)
-      .slice(0, MAX_ENTRIES);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(Object.fromEntries(kept), null, 2));
+    saveCappedStateRecord(
+      path,
+      state,
+      MAX_ENTRIES,
+      (entry) => entry.checked_at
+    );
   } catch {
     // best-effort: losing it costs one repeated reminder.
   }

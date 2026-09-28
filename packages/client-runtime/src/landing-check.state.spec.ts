@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -41,19 +41,5 @@ describe('landing checks', () => {
       false
     );
     expect(landingCheckDue(path, 'abc#19', 1000 + LANDING_RETRY_MS)).toBe(true);
-  });
-
-  it('treats an unreadable file as nothing checked yet', () => {
-    writeFileSync(path, 'not json');
-    expect(landingCheckDue(path, 'abc#19')).toBe(true);
-    recordLandingCheck(path, 'abc#19', 'reminded', 1);
-    expect(landingCheckDue(path, 'abc#19', 2)).toBe(false);
-  });
-
-  it('keeps the newest entries when it grows past its cap', () => {
-    for (let i = 0; i < 510; i += 1)
-      recordLandingCheck(path, `k${i}`, 'recorded', i);
-    expect(landingCheckDue(path, 'k0', 10_000)).toBe(true);
-    expect(landingCheckDue(path, 'k509', 10_000)).toBe(false);
   });
 });

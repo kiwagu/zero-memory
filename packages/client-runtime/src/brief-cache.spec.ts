@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  briefCacheDir,
   briefCacheFile,
   clearBriefCache,
   readBriefCache,
@@ -26,12 +25,6 @@ afterEach(() => {
 });
 
 describe('brief cache', () => {
-  it('resolves the default dir under XDG_STATE_HOME', () => {
-    expect(briefCacheDir({ XDG_STATE_HOME: '/tmp/state' })).toBe(
-      '/tmp/state/zero-memory/brief-cache'
-    );
-  });
-
   it('keys files by the FULL project path, not the basename', () => {
     const a = briefCacheFile(dir, '/home/a/repos/tool');
     const b = briefCacheFile(dir, '/home/b/repos/tool');

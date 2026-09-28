@@ -1,9 +1,11 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-
 import type { DeployedVersion } from '@workspace/client-core';
 import type { ReleaseSettings } from '@workspace/contracts';
+
+import {
+  loadStateRecord,
+  stateFilePath,
+  writeStateFile,
+} from './state-file.js';
 
 /**
  * What this machine knows about each project's production state: the setting
@@ -62,25 +64,10 @@ const MAX_CHECKOUTS = 20;
 
 export const releaseCheckStatePath = (
   env: NodeJS.ProcessEnv = process.env
-): string =>
-  join(
-    env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'release-checks.json'
-  );
+): string => stateFilePath('release-checks.json', env);
 
-const load = (path: string): Record<string, ReleaseProjectState> => {
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
-    return parsed !== null &&
-      typeof parsed === 'object' &&
-      !Array.isArray(parsed)
-      ? (parsed as Record<string, ReleaseProjectState>)
-      : {};
-  } catch {
-    return {};
-  }
-};
+const load = (path: string): Record<string, ReleaseProjectState> =>
+  loadStateRecord<ReleaseProjectState>(path);
 
 export const readReleaseState = (
   path: string,
@@ -128,8 +115,7 @@ export const writeReleaseState = (
         ? { checkouts: Object.fromEntries(checkouts) }
         : {}),
     };
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(all));
+    writeStateFile(path, all);
   } catch {
     // Best-effort by design.
   }

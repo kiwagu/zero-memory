@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 
+import { stateFilePath } from '@workspace/client-runtime';
 import { createLogger } from '@workspace/logger';
 
 const logger = createLogger('update');
@@ -11,14 +10,11 @@ const logger = createLogger('update');
  * session start — cap the wait. */
 const SOURCE_READ_TIMEOUT_MS = 1500;
 
-const stateDir = (env: NodeJS.ProcessEnv = process.env): string =>
-  join(env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'), 'zero-memory');
-
 /** Written by the deploy scripts at install time — where this install came
  * from, which manifest to poll, and how the user updates. The env is
  * injectable so a test can point it at a state dir with no real install. */
 export const originPath = (env: NodeJS.ProcessEnv = process.env): string =>
-  join(stateDir(env), 'plugin-origin.json');
+  stateFilePath('plugin-origin.json', env);
 
 export interface PluginOrigin {
   source: string;

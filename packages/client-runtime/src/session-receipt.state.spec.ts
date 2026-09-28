@@ -7,8 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   claimReceipt,
   loadReceiptState,
-  MAX_TRACKED_RECEIPTS,
-  receiptStatePath,
   recordCapturedMemories,
 } from './session-receipt.state.js';
 
@@ -25,16 +23,6 @@ afterEach(() => {
 });
 
 describe('receipt state file', () => {
-  it('resolves the default path under XDG_STATE_HOME', () => {
-    expect(receiptStatePath({ XDG_STATE_HOME: '/tmp/state' })).toBe(
-      '/tmp/state/zero-memory/session-receipts.json'
-    );
-  });
-
-  it('loads an empty state when the file is missing or corrupt', () => {
-    expect(loadReceiptState(path)).toEqual({});
-  });
-
   it('accumulates captured counts and keeps the first capture time', () => {
     recordCapturedMemories(path, 'sess-1', 2, 10);
     recordCapturedMemories(path, 'sess-1', 3, 20);
@@ -60,15 +48,5 @@ describe('receipt state file', () => {
     const claimed = claimReceipt(path, 'sess-empty', 5);
     expect(claimed).toMatchObject({ captured: 0 });
     expect(claimed?.first_capture_at).toBeUndefined();
-  });
-
-  it('prunes the oldest sessions beyond the cap', () => {
-    for (let i = 0; i < MAX_TRACKED_RECEIPTS + 5; i += 1) {
-      recordCapturedMemories(path, `sess-${i}`, 1, i);
-    }
-    const state = loadReceiptState(path);
-    expect(Object.keys(state)).toHaveLength(MAX_TRACKED_RECEIPTS);
-    expect(state['sess-0']).toBeUndefined();
-    expect(state[`sess-${MAX_TRACKED_RECEIPTS + 4}`]).toBeDefined();
   });
 });

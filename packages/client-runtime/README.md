@@ -18,6 +18,14 @@ per-client differences (event map, output frame, transcript source) live in the
 
 ### State-store port (`$XDG_STATE_HOME/zero-memory/`)
 
+- `state-file.ts` — the one home and discipline every file below shares:
+  `stateFilePath(name)` (under `~/.local/state` without `XDG_STATE_HOME`),
+  `loadStateRecord` (a keyed file that is missing, torn mid-write or not a JSON
+  object reads as empty — never as an error, since a state problem must not
+  sink the hook reading it), `saveCappedStateRecord` (keeps the newest entries
+  past a cap, so a file that gains one per session never grows forever) and
+  `writeStateFile`. The watcher's own small state files use the same owner.
+  Each module keeps only its schema, its cap and what it records.
 - `task-brief.state.ts` — per-session briefing state (`session-briefs.json`):
   which `mem_` ids the session-start briefing injected (the dedup source),
   whether the session already got its one task briefing, the session-start

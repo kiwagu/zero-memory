@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 import { formatEntries } from '@workspace/client-core';
 import {
+  loadStateRecord,
   receiptStatePath,
   recordCapturedMemories,
+  stateFilePath,
+  writeStateFile,
 } from '@workspace/client-runtime';
 import { createLogger } from '@workspace/logger';
 
@@ -36,25 +37,13 @@ const logger = createLogger('ingest');
  * makes retries idempotent. Auth is OAuth (the same token store as `login`).
  * Never throws — a down memory server must not block the session.
  */
-const offsetStatePath = (): string =>
-  join(
-    process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'hook-offsets.json'
-  );
+const offsetStatePath = (): string => stateFilePath('hook-offsets.json');
 
-const loadOffsets = (path: string): Record<string, number> => {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as Record<string, number>;
-  } catch {
-    return {};
-  }
-};
+const loadOffsets = (path: string): Record<string, number> =>
+  loadStateRecord<number>(path);
 
-const saveOffsets = (path: string, offsets: Record<string, number>): void => {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(offsets, null, 2));
-};
+const saveOffsets = (path: string, offsets: Record<string, number>): void =>
+  writeStateFile(path, offsets, 2);
 
 /**
  * The `recalled_ids` half of an ingest payload — the "shown" set the usefulness

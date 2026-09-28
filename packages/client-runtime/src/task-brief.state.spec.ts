@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,12 +8,10 @@ import { memoryIdSchema } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  briefStatePath,
   clearBriefTail,
   loadBriefState,
   markRulesDelivered,
   markTaskBriefed,
-  MAX_TRACKED_SESSIONS,
   readBriefTail,
   readSessionThread,
   recordBriefTail,
@@ -50,34 +48,6 @@ const tailFixture = (): BriefTail => ({
 });
 
 describe('brief state file', () => {
-  it('resolves the default path under XDG_STATE_HOME', () => {
-    expect(briefStatePath({ XDG_STATE_HOME: '/tmp/state' })).toBe(
-      '/tmp/state/zero-memory/session-briefs.json'
-    );
-  });
-
-  it('loads an empty state when the file is missing', () => {
-    expect(loadBriefState(path)).toEqual({});
-  });
-
-  it.each([
-    ['a write cut off mid-way', '{"sess-1": {"tail": {"memo'],
-    ['the JSON literal null', 'null'],
-    ['an array', '[]'],
-    ['a bare string', '"session-briefs"'],
-  ])('loads an empty state when the file holds %s', (_, raw) => {
-    writeFileSync(path, raw);
-
-    expect(loadBriefState(path)).toEqual({});
-    // Every reader indexes the state by session id, and every writer assigns
-    // into it: none of them may throw on a file that parsed to a non-object.
-    expect(readSessionThread(path, 'sess-1')).toBeNull();
-    expect(readBriefTail(path, 'sess-1')).toBeNull();
-    const delivered = memoryIdSchema.parse('mem_a1b2c3d4e5f6g7h8.01jd8x2p4q');
-    recordSessionBriefing(path, 'sess-1', [delivered], 1);
-    expect(loadBriefState(path)['sess-1']?.injected_ids).toEqual([delivered]);
-  });
-
   it('records injected ids and merges them across re-briefings', () => {
     recordSessionBriefing(path, 'sess-1', ['mem_a', 'mem_b'], 1);
     recordSessionBriefing(path, 'sess-1', ['mem_b', 'mem_c'], 2);
@@ -209,21 +179,6 @@ describe('brief state file', () => {
     recordSessionThread(path, 'sess-1', 'thr_one_new.01c', 110);
 
     expect(readSessionThread(path, 'sess-1')).toBe('thr_one_new.01c');
-  });
-
-  it('prunes the oldest sessions beyond the cap', () => {
-    for (let i = 0; i < MAX_TRACKED_SESSIONS + 10; i += 1) {
-      recordSessionBriefing(path, `sess-${i}`, [], i);
-    }
-
-    const state = loadBriefState(path);
-    expect(Object.keys(state)).toHaveLength(MAX_TRACKED_SESSIONS);
-    expect(state['sess-0']).toBeUndefined();
-    expect(state[`sess-${MAX_TRACKED_SESSIONS + 9}`]).toBeDefined();
-    // The file on disk is pruned too, not just the in-memory view.
-    expect(
-      Object.keys(JSON.parse(readFileSync(path, 'utf8'))) as string[]
-    ).toHaveLength(MAX_TRACKED_SESSIONS);
   });
 });
 

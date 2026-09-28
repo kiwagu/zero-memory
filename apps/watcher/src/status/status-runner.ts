@@ -1,6 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 import { createLogger } from '@workspace/logger';
 
@@ -8,6 +6,8 @@ import {
   probeServer,
   resolveServerUrlOrNull,
   serverUrlOrigin,
+  stateFilePath,
+  writeStateFile,
   type ServerProbe,
   type ServerState,
 } from '@workspace/client-runtime';
@@ -32,12 +32,7 @@ const ttlMs = (): number => {
   return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_TTL_MS;
 };
 
-const cachePath = (): string =>
-  join(
-    process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'health.json'
-  );
+const cachePath = (): string => stateFilePath('health.json');
 
 interface HealthCache {
   ts: number;
@@ -59,8 +54,7 @@ const readCache = (path: string): HealthCache | null => {
 
 const writeCache = (path: string, cache: HealthCache): void => {
   try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(cache));
+    writeStateFile(path, cache);
   } catch {
     // best-effort: a failed cache write just means the next prompt re-probes.
   }
@@ -100,12 +94,7 @@ const updateTtlMs = (): number => {
   const raw = Number(process.env.ZM_UPDATE_CHECK_TTL_MS);
   return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_UPDATE_TTL_MS;
 };
-const updateCheckPath = (): string =>
-  join(
-    process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'update-check.json'
-  );
+const updateCheckPath = (): string => stateFilePath('update-check.json');
 const readUpdateCheckTs = (path: string): number => {
   try {
     const c = JSON.parse(readFileSync(path, 'utf8')) as { ts?: unknown };
@@ -116,8 +105,7 @@ const readUpdateCheckTs = (path: string): number => {
 };
 const writeUpdateCheckTs = (path: string, ts: number): void => {
   try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify({ ts }));
+    writeStateFile(path, { ts });
   } catch {
     // best-effort: a failed write just means the next prompt rechecks.
   }

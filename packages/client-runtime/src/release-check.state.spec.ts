@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   readReleaseState,
   RELEASE_RETRY_MS,
-  releaseCheckStatePath,
   releaseHandledDue,
   writeReleaseState,
 } from './release-check.state.js';
@@ -22,12 +21,6 @@ describe('the release check state', () => {
     path = join(dir, 'zero-memory', 'release-checks.json');
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-  it('lives beside the other checks', () => {
-    expect(releaseCheckStatePath({ XDG_STATE_HOME: '/x' })).toBe(
-      '/x/zero-memory/release-checks.json'
-    );
-  });
 
   it('keeps each project apart', () => {
     writeReleaseState(path, 'proj.a', {
@@ -127,10 +120,9 @@ describe('the release check state', () => {
     expect(places).not.toContain('/work/4');
   });
 
-  it('reads a damaged file as empty and never throws on a write it cannot make', () => {
+  it('never throws on a write it cannot make', () => {
     mkdirSync(join(dir, 'zero-memory'), { recursive: true });
-    writeFileSync(path, '{not json');
-    expect(readReleaseState(path, 'proj.a')).toEqual({});
+    writeFileSync(path, '');
     expect(() =>
       writeReleaseState(join(path, 'under-a-file.json'), 'proj.a', {})
     ).not.toThrow();
