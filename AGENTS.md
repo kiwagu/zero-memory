@@ -46,5 +46,5 @@ All rules live in `.cursor/rules/` (single source of truth for Cursor and Codex)
 
 ## Skills
 
-@.Codex/skills/supabase/SKILL.md
-@.Codex/skills/supabase-postgres-best-practices/SKILL.md
+@.claude/skills/supabase/SKILL.md
+@.claude/skills/supabase-postgres-best-practices/SKILL.md
