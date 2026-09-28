@@ -105,6 +105,14 @@ unbudgeted call briefs exactly as before. Loops attached to a card the summary
 names leave `open_loops`. A read failure costs the summary, never the
 briefing.
 
+`IRuleFateReader` / `RULE_FATE_READER` (optional, like the rules readers)
+reports what happened to a promoted rule when a write retired the memory it
+was anchored to. The database moves the rule to the successor on the
+retirement itself, on every path that records one; the service only reads the
+result back, so `remember` can list it under `rules` (carried, carried with a
+curated text kept for review, or not carried) and `forget` can say the rule
+stays live. A read failure costs the report, never the write.
+
 A write carries `PassageVectors` — a named `{ primary, overflow }` shape
 rather than a bare array, because the embedding model truncates its input to a
 fixed window without saying so and a long memory would otherwise be searchable

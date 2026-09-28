@@ -41,11 +41,24 @@ const fresh = (): string =>
 /** Rule rows this spec created, deleted at the end so briefings stay clean. */
 const createdRules: string[] = [];
 
-const remember = async (
+interface RuleFateReport {
+  memory_id: string;
+  outcome: string;
+  successor_id: string;
+  note: string;
+}
+
+interface RememberReply {
+  memory_id: string;
+  deduplicated?: boolean;
+  rules?: RuleFateReport[];
+}
+
+const rememberReply = async (
   token: string,
   content: string,
   extra: Record<string, unknown> = {}
-): Promise<string> => {
+): Promise<RememberReply> => {
   const mcp = await McpTestClient.connect(token);
   try {
     const write = await mcp.callTool('remember', {
@@ -55,11 +68,17 @@ const remember = async (
       ...extra,
     });
     expect(write.isError ?? false).toBe(false);
-    return firstJson<{ memory_id: string }>(write).memory_id;
+    return firstJson<RememberReply>(write);
   } finally {
     await mcp.close();
   }
 };
+
+const remember = async (
+  token: string,
+  content: string,
+  extra: Record<string, unknown> = {}
+): Promise<string> => (await rememberReply(token, content, extra)).memory_id;
 
 /** A promoted rule on `memoryId`, as the service role writes one. */
 const promote = async (
@@ -194,9 +213,18 @@ test.describe('A promoted rule follows its memory', () => {
       .update({ pinned: true })
       .eq('id', before.id);
 
-    const newId = await remember(token, newText, {
+    const reply = await rememberReply(token, newText, {
       links: [{ type: 'supersedes', dst: oldId }],
     });
+    const newId = reply.memory_id;
+    // The writer hears what happened to the rule.
+    expect(reply.rules).toEqual([
+      expect.objectContaining({
+        memory_id: oldId,
+        successor_id: newId,
+        outcome: 'carried',
+      }),
+    ]);
 
     expect(await ruleOn(oldId)).toBeNull();
     const after = await ruleById(before.id);
@@ -227,9 +255,17 @@ test.describe('A promoted rule follows its memory', () => {
     const rule = await promote(oldId, { rule_text: curated });
 
     const newText = `rule-follows ${run}: the owner lands every epic as one squash commit`;
-    const newId = await remember(token, newText, {
+    const reply = await rememberReply(token, newText, {
       links: [{ type: 'supersedes', dst: oldId }],
     });
+    const newId = reply.memory_id;
+    expect(reply.rules).toEqual([
+      expect.objectContaining({
+        memory_id: oldId,
+        outcome: 'carried_text_kept',
+        note: expect.stringContaining(`promote_rule(memory_id: "${newId}"`),
+      }),
+    ]);
 
     const after = await ruleById(rule.id);
     expect(after.memory_id).toBe(newId);
@@ -413,6 +449,73 @@ test.describe('A promoted rule follows its memory', () => {
     expect((await ruleById(curated.id)).rule_text).toBe(
       'Curated: one-line commit subjects.'
     );
+  });
+});
+
+test.describe('The writer hears what happened to a rule', () => {
+  test('a write absorbed into a memory that has its own rule leaves the old rule in place', async () => {
+    const run = fresh();
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userB);
+    const oldId = await remember(
+      token,
+      `rule-follows ${run}: tests run on the e2e contour`
+    );
+    const oldRule = await promote(oldId, {
+      rule_text: `rule-follows ${run}: run tests on the e2e contour`,
+    });
+    const absorbingText = `rule-follows ${run}: every test runs on the isolated e2e contour, never on live`;
+    const absorbingId = await remember(token, absorbingText);
+    await promote(absorbingId, { rule_text: absorbingText });
+
+    // The same words again: the write is absorbed into the memory that
+    // already has a rule, and its declared supersede still retires the old.
+    const reply = await rememberReply(token, absorbingText, {
+      links: [{ type: 'supersedes', dst: oldId }],
+    });
+
+    expect(reply.deduplicated).toBe(true);
+    expect(reply.memory_id).toBe(absorbingId);
+    expect(reply.rules).toEqual([
+      expect.objectContaining({
+        memory_id: oldId,
+        successor_id: absorbingId,
+        outcome: 'not_carried',
+        note: expect.stringContaining('(promoted)'),
+      }),
+    ]);
+    expect((await ruleById(oldRule.id)).memory_id).toBe(oldId);
+    expect(await briefedTexts(token)).toContain(oldRule.rule_text);
+  });
+
+  test('forgetting a memory leaves its rule live and says so', async () => {
+    const run = fresh();
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userB);
+    const memoryId = await remember(
+      token,
+      `rule-follows ${run}: review every migration twice`
+    );
+    const rule = await promote(memoryId, {
+      rule_text: `rule-follows ${run}: review every migration twice`,
+    });
+
+    const mcp = await McpTestClient.connect(token);
+    try {
+      const forgot = await mcp.callTool('forget', { memory_id: memoryId });
+      expect(forgot.isError ?? false).toBe(false);
+      expect(
+        firstJson<{ rule?: { outcome: string; note: string } }>(forgot).rule
+      ).toEqual({
+        outcome: 'kept_live',
+        note: expect.stringContaining('/rules'),
+      });
+    } finally {
+      await mcp.close();
+    }
+
+    expect((await ruleById(rule.id)).status).toBe('promoted');
+    expect(await briefedTexts(token)).toContain(rule.rule_text);
   });
 });
 

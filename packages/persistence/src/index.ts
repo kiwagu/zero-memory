@@ -22,6 +22,7 @@ export * from './policy/spend-meter.js';
 export * from './policy/stored.policy-provider.js';
 export * from './rules/project-rules.reader.js';
 export * from './rules/promoted-rules.reader.js';
+export * from './rules/rule-fate.reader.js';
 export * from './rules/user-rules.reader.js';
 export * from './supabase.auth.js';
 export * from './supabase.client.js';

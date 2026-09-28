@@ -172,6 +172,24 @@ export const sessionAttachmentSchema = z.object({
 });
 export type SessionAttachment = z.infer<typeof sessionAttachmentSchema>;
 
+/**
+ * What a supersede did to a promoted rule anchored to the memory it retired.
+ * A rule follows the successor of its memory: `carried` when it took the
+ * successor's text (its text was the memory's own words), `carried_text_kept`
+ * when it kept a curated text that is now flagged for review, `not_carried`
+ * when it stayed on the retired memory and is still delivered.
+ */
+export const ruleFateSchema = z.object({
+  /** The retired memory the rule was anchored to. */
+  memory_id: memoryIdSchema,
+  outcome: z.enum(['carried', 'carried_text_kept', 'not_carried']),
+  /** The memory that superseded it. */
+  successor_id: memoryIdSchema,
+  /** What happened, and what to do about it, in one sentence or two. */
+  note: z.string(),
+});
+export type RuleFate = z.infer<typeof ruleFateSchema>;
+
 export const rememberOutputSchema = z.object({
   memory_id: memoryIdSchema,
   /** True when an equivalent memory already existed and its id is returned. */
@@ -222,6 +240,11 @@ export const rememberOutputSchema = z.object({
    * not an error.
    */
   routed_to_project: z.string().optional(),
+  /**
+   * Present when this write superseded a memory a promoted rule was anchored
+   * to: one entry per such memory, saying whether the rule followed.
+   */
+  rules: z.array(ruleFateSchema).optional(),
   /** Session attachment state (absent only on older servers). */
   session: sessionAttachmentSchema.optional(),
 });
@@ -660,6 +683,17 @@ export type ForgetInput = z.infer<typeof forgetInputSchema>;
 export const forgetOutputSchema = z.object({
   memory_id: memoryIdSchema,
   invalidated: z.boolean(),
+  /**
+   * Present when the forgotten memory carries a promoted rule: forgetting a
+   * memory does not retire its rule, which stays live until the owner
+   * revokes it.
+   */
+  rule: z
+    .object({
+      outcome: z.literal('kept_live'),
+      note: z.string(),
+    })
+    .optional(),
 });
 export type ForgetOutput = z.infer<typeof forgetOutputSchema>;
 

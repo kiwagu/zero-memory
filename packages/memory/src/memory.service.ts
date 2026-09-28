@@ -33,6 +33,7 @@ import {
   type RememberInput,
   type UserId,
   type RememberOutput,
+  type RuleFate,
   type MoveMemoriesInput,
   type MoveMemoriesOutput,
   type ShareInput,
@@ -103,6 +104,9 @@ import type {
 } from './briefing-work.reader.js';
 import { injectBriefingWorkReader } from './briefing-work.reader.provider.js';
 import type { IProjectRulesReader } from './project-rules.reader.js';
+import { keptLiveRule, ruleFateReport } from './rule-fate.js';
+import { injectRuleFateReader } from './rule-fate.reader.provider.js';
+import type { IRuleFateReader } from './rule-fate.reader.js';
 import { injectUserRulesReader } from './user-rules.reader.provider.js';
 import type { IUserRulesReader } from './user-rules.reader.js';
 import { injectScopeAccessService } from './scope-access.provider.js';
@@ -236,7 +240,11 @@ export class MemoryService {
     // Optional like the rules readers: without the adapter a briefing simply
     // carries no work summary and displaces nothing for one.
     @injectBriefingWorkReader()
-    private readonly briefingWork?: IBriefingWorkReader
+    private readonly briefingWork?: IBriefingWorkReader,
+    // Optional like the rules readers: without the adapter a supersede or a
+    // forget simply does not report what happened to a promoted rule.
+    @injectRuleFateReader()
+    private readonly ruleFates?: IRuleFateReader
   ) {}
 
   async remember(
@@ -506,17 +514,24 @@ export class MemoryService {
         }
         // A declared supersede survives absorption: the absorbing memory
         // becomes the successor of the named old versions.
-        if (!isProvisionalAgentName(provenance?.agentName ?? null)) {
-          await this.#applyDeclaredSupersedes(
-            existing.id,
-            ownerId,
-            input.links
-          );
-        }
+        const absorbedRetired = isProvisionalAgentName(
+          provenance?.agentName ?? null
+        )
+          ? []
+          : await this.#applyDeclaredSupersedes(
+              existing.id,
+              ownerId,
+              input.links
+            );
+        const absorbedRules = await this.#ruleFates(
+          absorbedRetired,
+          existing.id
+        );
         return Ok({
           memory_id: existing.id,
           deduplicated: true,
           scope: scope.path,
+          ...(absorbedRules.length > 0 && { rules: absorbedRules }),
         });
       }
       // Same-session refinement BY CONSTRUCTION: the existing near-match was
@@ -601,9 +616,9 @@ export class MemoryService {
 
     // Declared supersede is an authoritative-writer affordance; a provisional
     // (watcher/bootstrap) extraction must never retire knowledge by naming it.
-    if (!isProvisionalAgentName(provenance?.agentName ?? null)) {
-      await this.#applyDeclaredSupersedes(fragment.id, ownerId, input.links);
-    }
+    const retired = isProvisionalAgentName(provenance?.agentName ?? null)
+      ? []
+      : await this.#applyDeclaredSupersedes(fragment.id, ownerId, input.links);
 
     // Write-triggered canonicalization: a non-English memory is canonicalized
     // to English right after it is stored, in the background (fire-and-forget) —
@@ -629,7 +644,8 @@ export class MemoryService {
       const collapsed = await this.#supersedeTargets(fragment.id, ownerId, [
         sessionRefined,
       ]);
-      if (collapsed > 0) {
+      retired.push(...collapsed);
+      if (collapsed.length > 0) {
         this.#logger.info('same-session refinement collapsed', {
           successor: fragment.id,
           target: sessionRefined,
@@ -659,9 +675,14 @@ export class MemoryService {
       new Set([fragment.id, ...(sessionRefined ? [sessionRefined] : [])])
     );
 
+    // A promoted rule anchored to a memory this write retired follows it to
+    // the new one (the store moves it); the writer hears whether it did.
+    const rules = await this.#ruleFates(retired, fragment.id);
+
     return Ok({
       memory_id: fragment.id,
       scope: scope.path,
+      ...(rules.length > 0 && { rules }),
       // The write outgrew one input window, so the writer is told — at the one
       // moment they can act on it. Reactive by construction: it fires on a real
       // miss rather than on every write, which is what lets it share a response
@@ -1073,7 +1094,16 @@ export class MemoryService {
     if (updated.isErr()) {
       return Err(internalFailure(updated.unwrapErr()));
     }
-    return Ok({ memory_id: fragment.id, invalidated: true });
+    // Forgetting a memory does not retire a rule promoted from it; the
+    // caller is told the rule stays live, and who can revoke it.
+    const rule = (await this.#holdsPromotedRule(fragment.id))
+      ? keptLiveRule(fragment.id)
+      : null;
+    return Ok({
+      memory_id: fragment.id,
+      invalidated: true,
+      ...(rule && { rule }),
+    });
   }
 
   /**
@@ -1870,15 +1900,55 @@ export class MemoryService {
    * log — a bad target must never fail the write. Capped to
    * MAX_DECLARED_SUPERSEDES per call.
    */
+  /**
+   * What happened to the promoted rules of the memories a write just retired.
+   * Only a report — the store has already moved the rules — so a failed read
+   * costs the report, never the write.
+   */
+  async #ruleFates(
+    retired: readonly string[],
+    successorId: string
+  ): Promise<RuleFate[]> {
+    if (!this.ruleFates || retired.length === 0) {
+      return [];
+    }
+    try {
+      const facts = await this.ruleFates.afterSupersede(retired, successorId);
+      return facts.map(ruleFateReport);
+    } catch (error) {
+      this.#logger.warn('rule fate lookup failed; supersede unreported', {
+        successor: successorId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /** Whether a memory carries a promoted rule; a failed read says no. */
+  async #holdsPromotedRule(memoryId: string): Promise<boolean> {
+    if (!this.ruleFates) {
+      return false;
+    }
+    try {
+      return await this.ruleFates.hasPromotedRule(memoryId);
+    } catch (error) {
+      this.#logger.warn('promoted rule lookup failed; forget unreported', {
+        memoryId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
   async #applyDeclaredSupersedes(
     successorId: string,
     byUserId: UserId,
     links: RememberInput['links']
-  ): Promise<void> {
+  ): Promise<string[]> {
     const targets = (links ?? [])
       .filter((link) => link.type === 'supersedes')
       .map((link) => link.dst);
-    await this.#supersedeTargets(successorId, byUserId, targets);
+    return this.#supersedeTargets(successorId, byUserId, targets);
   }
 
   /**
@@ -1889,23 +1959,23 @@ export class MemoryService {
    * lifecycle as forget. Best-effort per target: a missing, foreign,
    * already-invalidated, duplicate, or self target is skipped with a log — a
    * bad target must never fail the write. Capped to MAX_DECLARED_SUPERSEDES
-   * per call. Returns how many targets were actually retired.
+   * per call. Returns the targets that were actually retired.
    */
   async #supersedeTargets(
     successorId: string,
     byUserId: UserId,
     targetIds: string[]
-  ): Promise<number> {
+  ): Promise<string[]> {
     const targets = [
       ...new Set(
         targetIds.filter((dst) => isMemoryEndpoint(dst) && dst !== successorId)
       ),
     ].slice(0, MAX_DECLARED_SUPERSEDES);
     if (targets.length === 0) {
-      return 0;
+      return [];
     }
     const successor = memoryIdSchema.parse(successorId);
-    let applied = 0;
+    const applied: string[] = [];
 
     for (const target of targets) {
       const found = await this.repository.findOneById(target);
@@ -1938,7 +2008,7 @@ export class MemoryService {
         });
         continue;
       }
-      applied += 1;
+      applied.push(target);
       this.#logger.info('supersede applied', {
         target,
         successor: successorId,

@@ -42,6 +42,7 @@ import {
   MEMORY_SEARCH_SERVICE,
   SCOPE_META_REPOSITORY,
   PROJECT_RULES_READER,
+  RULE_FATE_READER,
   USER_RULES_READER,
   PORTABILITY_JUDGE,
   PROJECT_BINDING_REPOSITORY,
@@ -73,6 +74,7 @@ import {
   SupabaseMemorySearchService,
   SupabaseScopeMetaRepository,
   SupabaseProjectRulesReader,
+  SupabaseRuleFateReader,
   SupabaseUserRulesReader,
   SupabaseProjectBindingRepository,
   SupabaseSessionThreadRepository,
@@ -104,6 +106,7 @@ export const register = (c = container): void => {
   c.registerSingleton(SCOPE_META_REPOSITORY, SupabaseScopeMetaRepository);
   c.registerSingleton(PROJECT_RULES_READER, SupabaseProjectRulesReader);
   c.registerSingleton(USER_RULES_READER, SupabaseUserRulesReader);
+  c.registerSingleton(RULE_FATE_READER, SupabaseRuleFateReader);
   c.registerSingleton(ENTITY_REPOSITORY, SupabaseEntityRepository);
   c.registerSingleton(GRAPH_SERVICE, SupabaseGraphService);
   c.registerSingleton(SCOPE_ACCESS_SERVICE, SupabaseScopeAccessService);

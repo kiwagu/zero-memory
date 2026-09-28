@@ -36,6 +36,7 @@ import type { IMemoryRepository } from './memory.repository.js';
 import { MemoryService } from './memory.service.js';
 import type { IProjectBindingRepository } from './project-binding.repository.js';
 import type { IBriefingWorkReader } from './briefing-work.reader.js';
+import type { IRuleFateReader } from './rule-fate.reader.js';
 import type { IProjectRulesReader } from './project-rules.reader.js';
 import type { ProjectCandidate } from './project-name.utils.js';
 import type { IScopeAccessService } from './scope-access.service.js';
@@ -175,6 +176,7 @@ const makeService = (overrides?: {
   portabilityJudge?: IPortabilityJudge;
   threads?: ISessionThreadRepository;
   briefingWork?: IBriefingWorkReader;
+  ruleFates?: IRuleFateReader;
 }) => {
   const repository = overrides?.repository ?? makeRepository();
   const searchService = overrides?.searchService ?? makeSearchService();
@@ -204,7 +206,8 @@ const makeService = (overrides?: {
     undefined,
     portabilityJudge,
     threads,
-    overrides?.briefingWork
+    overrides?.briefingWork,
+    overrides?.ruleFates
   );
   return {
     service,
@@ -1473,6 +1476,57 @@ describe('MemoryService.forget', () => {
     });
     expect(result.isErr()).toBe(true);
   });
+
+  const makeRuled = () =>
+    MemoryFragment.create({
+      content: MemoryContent.create(
+        'always squash feature branches',
+        'convention'
+      ).unwrap(),
+      scope: Scope.user(USER_ENTITY_ID),
+      provenance: Provenance.create({ ownerId: USER_ENTITY_ID }),
+    }).unwrap();
+
+  const ruleFates = (holds: boolean | Error): IRuleFateReader => ({
+    afterSupersede: vi.fn().mockResolvedValue([]),
+    hasPromotedRule:
+      holds instanceof Error
+        ? vi.fn().mockRejectedValue(holds)
+        : vi.fn().mockResolvedValue(holds),
+  });
+
+  it('says a promoted rule on the forgotten memory stays live', async () => {
+    const repository = makeRepository();
+    const fragment = makeRuled();
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(fragment));
+    const { service } = makeService({
+      repository,
+      ruleFates: ruleFates(true),
+    });
+
+    const out = (await service.forget({ memory_id: fragment.id })).unwrap();
+
+    expect(out.invalidated).toBe(true);
+    expect(out.rule?.outcome).toBe('kept_live');
+    expect(out.rule?.note).toContain('/rules');
+  });
+
+  it('adds nothing when the memory carries no rule, or the read fails', async () => {
+    for (const holds of [false, new Error('db down')]) {
+      const repository = makeRepository();
+      const fragment = makeRuled();
+      vi.mocked(repository.findOneById).mockResolvedValue(Some(fragment));
+      const { service } = makeService({
+        repository,
+        ruleFates: ruleFates(holds),
+      });
+
+      const out = (await service.forget({ memory_id: fragment.id })).unwrap();
+
+      expect(out.invalidated).toBe(true);
+      expect(out).not.toHaveProperty('rule');
+    }
+  });
 });
 
 describe('MemoryService.closeLoop', () => {
@@ -1641,6 +1695,84 @@ describe('MemoryService.remember — declared supersede (write-side)', () => {
     expect(old.lifecycle.isInvalidated).toBe(true);
     expect(old.lifecycle.supersededBy).toBe(newId);
     expect(old.lifecycle.invalidatedBy).toBe(USER_ENTITY_ID);
+  });
+
+  it('reports what happened to a promoted rule on the retired memory', async () => {
+    const repository = makeRepository();
+    const old = makeOldFragment();
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(old));
+    const afterSupersede = vi.fn(
+      async (retired: readonly string[], successorId: string) =>
+        retired.map((memoryId) => ({
+          memoryId,
+          successorId,
+          outcome: 'carried_text_kept' as const,
+        }))
+    );
+    const { service } = makeService({
+      repository,
+      ruleFates: {
+        afterSupersede,
+        hasPromotedRule: vi.fn().mockResolvedValue(false),
+      },
+    });
+
+    const out = (
+      await service.remember({
+        content: 'deploy window moved to Friday',
+        links: [{ dst: old.id, type: 'supersedes' }],
+        scope: PERSONAL_SCOPE,
+      })
+    ).unwrap();
+
+    expect(afterSupersede).toHaveBeenCalledExactlyOnceWith(
+      [old.id],
+      out.memory_id
+    );
+    expect(out.rules).toEqual([
+      {
+        memory_id: old.id,
+        outcome: 'carried_text_kept',
+        successor_id: out.memory_id,
+        note: expect.stringContaining(
+          `promote_rule(memory_id: "${out.memory_id}"`
+        ),
+      },
+    ]);
+  });
+
+  it('asks nothing about rules when nothing was retired, and survives a failed read', async () => {
+    const repository = makeRepository();
+    const foreign = makeOldFragment(OTHER_USER_ENTITY_ID);
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(foreign));
+    const afterSupersede = vi.fn().mockRejectedValue(new Error('db down'));
+    const { service } = makeService({
+      repository,
+      ruleFates: {
+        afterSupersede,
+        hasPromotedRule: vi.fn().mockResolvedValue(false),
+      },
+    });
+
+    const skipped = (
+      await service.remember({
+        content: 'a new fact naming a memory that is not ours',
+        links: [{ dst: foreign.id, type: 'supersedes' }],
+        scope: PERSONAL_SCOPE,
+      })
+    ).unwrap();
+    expect(afterSupersede).not.toHaveBeenCalled();
+    expect(skipped).not.toHaveProperty('rules');
+
+    const old = makeOldFragment();
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(old));
+    const failed = await service.remember({
+      content: 'a successor whose rule report cannot be read',
+      links: [{ dst: old.id, type: 'supersedes' }],
+      scope: PERSONAL_SCOPE,
+    });
+    expect(failed.isOk()).toBe(true);
+    expect(failed.unwrap()).not.toHaveProperty('rules');
   });
 
   it('skips a foreign target without failing the write', async () => {
