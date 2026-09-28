@@ -858,7 +858,8 @@ describe('the briefing tail drains one memory per message', () => {
       }
       // The sweep proves something only if the composer actually dropped it.
       expect(drops).toBeGreaterThan(0);
-    }
+    },
+    SWEEP_TIMEOUT_MS
   );
 
   it.each(['session-start', 'task'] as const)(
@@ -1100,57 +1101,61 @@ describe('the briefing tail drains one memory per message', () => {
     expect(tailIds()).toEqual([queued.id]);
   });
 
-  it('never lets a draining message exceed the channel, across banner and memory sizes', async () => {
-    // Every banner size here leaves a different room for the chunk, and the
-    // memory sizes sweep one character at a time across the point where the
-    // memory stops arriving whole and falls back to a stub — the edge where a
-    // chunk budgeted without the banner or the composer's join runs over. The
-    // largest banner leaves too little room for even a stub.
-    const seen = { whole: 0, stub: 0, held: 0 };
-    let closest = 0;
-    for (const padding of [0, 2_000, 6_000, 8_000, 8_350]) {
-      recordProjectScope(
-        projectScopeStatePath(),
-        resolveProjectHint(dirs.work),
-        `proj.usr_x.${'d'.repeat(padding)}`
-      );
-      const banner = await runHook('task', {
-        sessionId: `drain-banner-${padding}`,
-      });
-      const room = DEFAULT_HOOK_BUDGET_CHARS - banner.length;
-      const from = Math.max(1, room - 450);
-      for (let content = from; content <= from + 300; content += 1) {
-        const queued = memory(781, content);
-        seedTail([queued]);
+  it(
+    'never lets a draining message exceed the channel, across banner and memory sizes',
+    async () => {
+      // Every banner size here leaves a different room for the chunk, and the
+      // memory sizes sweep one character at a time across the point where the
+      // memory stops arriving whole and falls back to a stub — the edge where a
+      // chunk budgeted without the banner or the composer's join runs over. The
+      // largest banner leaves too little room for even a stub.
+      const seen = { whole: 0, stub: 0, held: 0 };
+      let closest = 0;
+      for (const padding of [0, 2_000, 6_000, 8_000, 8_350]) {
+        recordProjectScope(
+          projectScopeStatePath(),
+          resolveProjectHint(dirs.work),
+          `proj.usr_x.${'d'.repeat(padding)}`
+        );
+        const banner = await runHook('task', {
+          sessionId: `drain-banner-${padding}`,
+        });
+        const room = DEFAULT_HOOK_BUDGET_CHARS - banner.length;
+        const from = Math.max(1, room - 450);
+        for (let content = from; content <= from + 300; content += 1) {
+          const queued = memory(781, content);
+          seedTail([queued]);
 
-        const briefing = await runHook('task');
+          const briefing = await runHook('task');
 
-        expect(
-          briefing.length,
-          `banner ${banner.length}, memory ${content}: ${briefing.length} chars`
-        ).toBeLessThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS);
-        if (!briefing.includes(CHUNK_FRAME)) {
-          // Nothing is lost at the edge: a chunk that could not be sent at
-          // all leaves the memory queued, untouched.
-          expect(tailIds(), `memory ${content} was dropped unsent`).toEqual([
-            queued.id,
-          ]);
-          seen.held += 1;
-        } else if (briefing.includes('"content":')) {
-          seen.whole += 1;
-        } else {
-          seen.stub += 1;
+          expect(
+            briefing.length,
+            `banner ${banner.length}, memory ${content}: ${briefing.length} chars`
+          ).toBeLessThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS);
+          if (!briefing.includes(CHUNK_FRAME)) {
+            // Nothing is lost at the edge: a chunk that could not be sent at
+            // all leaves the memory queued, untouched.
+            expect(tailIds(), `memory ${content} was dropped unsent`).toEqual([
+              queued.id,
+            ]);
+            seen.held += 1;
+          } else if (briefing.includes('"content":')) {
+            seen.whole += 1;
+          } else {
+            seen.stub += 1;
+          }
+          closest = Math.max(closest, briefing.length);
         }
-        closest = Math.max(closest, briefing.length);
       }
-    }
-    // The sweep proves something only if it reached every outcome and came
-    // right up to the edge of the channel.
-    expect(seen.whole).toBeGreaterThan(0);
-    expect(seen.stub).toBeGreaterThan(0);
-    expect(seen.held).toBeGreaterThan(0);
-    expect(closest).toBeGreaterThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS - 10);
-  });
+      // The sweep proves something only if it reached every outcome and came
+      // right up to the edge of the channel.
+      expect(seen.whole).toBeGreaterThan(0);
+      expect(seen.stub).toBeGreaterThan(0);
+      expect(seen.held).toBeGreaterThan(0);
+      expect(closest).toBeGreaterThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS - 10);
+    },
+    SWEEP_TIMEOUT_MS
+  );
 });
 
 /**
