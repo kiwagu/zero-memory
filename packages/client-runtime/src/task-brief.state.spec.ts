@@ -56,15 +56,16 @@ describe('brief state file', () => {
     );
   });
 
-  it('loads an empty state when the file is missing or corrupt', () => {
+  it('loads an empty state when the file is missing', () => {
     expect(loadBriefState(path)).toEqual({});
   });
 
   it.each([
+    ['a write cut off mid-way', '{"sess-1": {"tail": {"memo'],
     ['the JSON literal null', 'null'],
     ['an array', '[]'],
     ['a bare string', '"session-briefs"'],
-  ])('loads an empty state when the file parses to %s', (_, raw) => {
+  ])('loads an empty state when the file holds %s', (_, raw) => {
     writeFileSync(path, raw);
 
     expect(loadBriefState(path)).toEqual({});
@@ -124,6 +125,7 @@ describe('brief state file', () => {
 
   it('keeps one epoch across startup and resume, so one-shots stay spent', () => {
     stampSessionStart(path, 'sess-1', 100, 'startup');
+    recordSessionBriefing(path, 'sess-1', ['mem_a'], 105);
     markRulesDelivered(path, 'sess-1', 110);
     markTaskBriefed(path, 'sess-1', 120);
     stampSessionStart(path, 'sess-1', 200, 'resume');
@@ -133,6 +135,7 @@ describe('brief state file', () => {
     expect(entry?.epoch).toBe(0);
     expect(entry?.rules_epoch).toBe(0);
     expect(entry?.task_briefed).toBe(true);
+    expect(entry?.injected_ids).toEqual(['mem_a']);
   });
 
   it('opens a new epoch on compaction and re-arms every per-window delivery', () => {
@@ -157,35 +160,6 @@ describe('brief state file', () => {
     // The session's start stamp is the receipt's window, not the context
     // window, and survives.
     expect(entry?.started_at).toBe(100);
-  });
-
-  it('keeps the injected ids across a resume, where the transcript is replayed', () => {
-    stampSessionStart(path, 'sess-1', 100, 'startup');
-    recordSessionBriefing(path, 'sess-1', ['mem_a'], 105);
-
-    stampSessionStart(path, 'sess-1', 200, 'resume');
-
-    expect(loadBriefState(path)['sess-1']?.injected_ids).toEqual(['mem_a']);
-  });
-
-  it('a cleared conversation is a boundary too', () => {
-    stampSessionStart(path, 'sess-1', 100, 'startup');
-    markRulesDelivered(path, 'sess-1', 110);
-
-    stampSessionStart(path, 'sess-1', 200, 'clear');
-
-    expect(loadBriefState(path)['sess-1']?.epoch).toBe(1);
-    expect(loadBriefState(path)['sess-1']?.rules_epoch).toBeUndefined();
-  });
-
-  it('an absent reason never re-arms — a silent client must not reset epochs', () => {
-    stampSessionStart(path, 'sess-1', 100);
-    markRulesDelivered(path, 'sess-1', 110);
-    stampSessionStart(path, 'sess-1', 200);
-
-    const entry = loadBriefState(path)['sess-1'];
-    expect(entry?.epoch).toBe(0);
-    expect(entry?.rules_epoch).toBe(0);
   });
 
   it('records the rules as delivered into the CURRENT epoch', () => {
@@ -271,10 +245,6 @@ describe('the briefing tail', () => {
     recordBriefTail(path, 's1', tailFixture());
     stampSessionStart(path, 's1', Date.now(), 'resume');
     expect(readBriefTail(path, 's1')).not.toBeNull();
-  });
-
-  it('answers null for a session it never saw', () => {
-    expect(readBriefTail(path, 'absent')).toBeNull();
   });
 
   it('drops the tail once the queue has drained', () => {

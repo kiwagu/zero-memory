@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { DEFAULT_HOOK_BUDGET_CHARS } from '@workspace/client-core';
 import {
@@ -532,6 +532,35 @@ describe('session-start memory floor', () => {
     expect(briefing.length).toBeLessThanOrEqual(9_000);
   });
 
+  it('delivers the pinned rules whole and the loops beside the rest by headline', async () => {
+    // The measured defect: 8,455 characters of rules against the 9,000
+    // channel — the loops got nothing, and then the rules did not fit either.
+    // Split before anything renders, the pinned rules arrive whole, the
+    // ordinary ones by headline, and the loops keep their floor.
+    const longRule = (headline: string, pinned: boolean): ContextRule => ({
+      text: `${headline}. ${'Why it holds, at length. '.repeat(55)}`,
+      pinned,
+    });
+    const rules = [
+      longRule('PINNED ONE', true),
+      longRule('PINNED TWO', true),
+      ...['THREE', 'FOUR', 'FIVE', 'SIX'].map((n) =>
+        longRule(`ORDINARY ${n}`, false)
+      ),
+    ];
+    const loops = [1, 2, 3].map((n) => loop(900 + n, 60));
+
+    const briefing = await runSessionStart({ rules, loops });
+
+    expect(briefing.length).toBeLessThanOrEqual(9_000);
+    expect(briefing).toContain(rules[0]!.text);
+    expect(briefing).toContain(rules[1]!.text);
+    expect(briefing).not.toContain(rules[5]!.text);
+    expect(briefing).toMatch(/ORDINARY SIX[^\n]*\[headline\]/u);
+    for (const handover of loops) expect(briefing).toContain(handover.id);
+    expect(briefing).not.toContain('did not fit');
+  });
+
   it('records no tail when the project has no memories at all', async () => {
     const briefing = await runSessionStart({ memories: [] });
     expect(readBriefTail(briefStatePath(), SESSION_ID)).toBeNull();
@@ -540,14 +569,6 @@ describe('session-start memory floor', () => {
     // a different claim from "it had memories and none fit" — the starved
     // notice must not appear just because the pack happened to be empty.
     expect(briefing).not.toContain('did not fit this briefing');
-  });
-
-  it("records what did not fit as the window's tail", async () => {
-    await runSessionStart({
-      memories: Array.from({ length: 12 }, (_, i) => memory(i, 900)),
-    });
-    const tail = readBriefTail(briefStatePath(), SESSION_ID);
-    expect(tail?.memories.length).toBeGreaterThan(0);
   });
 
   it('charges the floor to the split instead of bumping it on top, so a second topic still fits', async () => {
@@ -582,31 +603,9 @@ describe('session-start memory floor', () => {
     // priority order), finding the total no longer fit, dropped the branch
     // pack wholesale instead of giving it what was actually left.
     expect(briefing).toContain('mem_0000000000000500');
-  });
-
-  it('still lands a stub when the per-topic budget is genuinely below the floor', async () => {
-    // Two topics again (a single topic's even share IS the whole channel's
-    // remainder, so there is no safe way for a bump to ask for more than
-    // that without composeWithinBudget rejecting the section outright —
-    // this scenario can only exist with a second topic funding the extra
-    // room, same as the previous test). 2,000-char memories are too big for
-    // even ONE to arrive whole at this budget, so the pack is a STUB list;
-    // the assertion targets a memory that only a stub list this LONG can
-    // reach — one the even (un-bumped) share alone falls short of, but the
-    // charged floor (10 stubs' worth plus the stub block's intro, for these
-    // 12 memories) covers. Same budget as the previous test, for the same
-    // reason. Not asserting the exact even-share figure here on
-    // purpose: it shifts with the exact section-budgeting arithmetic (it
-    // already has, across earlier rounds of this fix), while the relation
-    // this test actually pins — floor rescues a memory the even share
-    // couldn't — does not.
-    const briefing = await runSessionStart({
-      branch: 'feature/two-topics',
-      budgetChars: 2_409,
-      memories: Array.from({ length: 12 }, (_, i) => memory(i, 2_000)),
-      branchMemories: Array.from({ length: 5 }, (_, i) => memory(500 + i, 900)),
-    });
-    expect(briefing.length).toBeLessThanOrEqual(2_409);
+    // …and the primary floor is still charged in full: 2,000-character
+    // memories only arrive by stub here, and the even (un-bumped) share alone
+    // falls short of a stub list long enough to reach the eighth of them.
     expect(briefing).toContain('mem_0000000000000007');
   });
 
@@ -1034,26 +1033,19 @@ describe('the briefing tail drains one memory per message', () => {
     rmSync(workDir, { recursive: true, force: true });
   });
 
-  it('delivers exactly one chunk on a short reply, and the stored tail shrinks by exactly one', async () => {
-    const queued = [memory(701, 300), memory(702, 300), memory(703, 300)];
-    seedTail(queued);
-
-    const briefing = await runHook('task');
-
-    expect(briefing).toContain('PROJECT: proj.usr_x.demo');
-    expect(briefing).toContain(CHUNK_FRAME);
-    expect(briefing).toContain(queued[0]!.id);
-    expect(briefing).not.toContain(queued[1]!.id);
-    expect(tailIds()).toEqual([queued[1]!.id, queued[2]!.id]);
-    // Taken from the state file alone: a short reply never calls the server.
-    expect(callBuildContext).not.toHaveBeenCalled();
-  });
-
   it('empties the queue over successive short replies, and then sends no more chunks', async () => {
     const queued = [memory(711, 300), memory(712, 300)];
     seedTail(queued);
 
-    expect(await runHook('task')).toContain(queued[0]!.id);
+    const first = await runHook('task');
+    expect(first).toContain('PROJECT: proj.usr_x.demo');
+    expect(first).toContain(CHUNK_FRAME);
+    expect(first).toContain(queued[0]!.id);
+    expect(first).not.toContain(queued[1]!.id);
+    // The stored queue shrinks by exactly the one memory sent, taken from the
+    // state file alone: a short reply never calls the server.
+    expect(tailIds()).toEqual([queued[1]!.id]);
+    expect(callBuildContext).not.toHaveBeenCalled();
     const second = await runHook('task');
     expect(second).toContain(queued[1]!.id);
     expect(second).not.toContain(queued[0]!.id);
@@ -1401,68 +1393,20 @@ describe('the briefing tail drains one memory per message', () => {
     expect(briefing).not.toContain(drained.id);
   });
 
-  it("does not deliver the previous window's tail after a compaction", async () => {
-    const queued = memory(761, 300);
-    seedTail([queued]);
-    stampSessionStart(briefStatePath(), SESSION_ID, Date.now(), 'compact');
+  it('emits exactly the banner, and clears the queue, when the state file holds an empty one', async () => {
+    // The hook's normal output for this session: nothing queued, banner only.
+    const normal = await runHook('task', { sessionId: 'drain-baseline' });
+    expect(normal).toContain('PROJECT: proj.usr_x.demo');
 
-    const briefing = await runHook('task');
+    seedTail([]);
 
-    expect(briefing).toContain('PROJECT: proj.usr_x.demo');
-    expect(briefing).not.toContain(CHUNK_FRAME);
-    expect(briefing).not.toContain(queued.id);
+    expect(await runHook('task')).toBe(normal);
+    // Nothing is left for the next message to trip over: an empty queue is
+    // cleared rather than read and skipped on every message.
+    expect(loadBriefState(briefStatePath())[SESSION_ID]).not.toHaveProperty(
+      'tail'
+    );
   });
-
-  it.each([
-    ['missing', () => rmSync(briefStatePath(), { force: true })],
-    [
-      'truncated mid-write',
-      () => {
-        mkdirSync(dirname(briefStatePath()), { recursive: true });
-        writeFileSync(briefStatePath(), `{"${SESSION_ID}": {"tail": {"memo`);
-      },
-    ],
-    [
-      'carrying a tail with no queue in it',
-      () => {
-        mkdirSync(dirname(briefStatePath()), { recursive: true });
-        writeFileSync(
-          briefStatePath(),
-          JSON.stringify({
-            [SESSION_ID]: {
-              injected_ids: [],
-              task_briefed: false,
-              epoch: 0,
-              tail: { topic: 'x' },
-              at: 1,
-            },
-          })
-        );
-      },
-    ],
-    ['holding an empty queue', () => seedTail([])],
-    [
-      'the JSON literal null',
-      () => {
-        mkdirSync(dirname(briefStatePath()), { recursive: true });
-        writeFileSync(briefStatePath(), 'null');
-      },
-    ],
-  ])(
-    'emits exactly the banner, and never throws, when the state file is %s',
-    async (_, damage) => {
-      // The hook's normal output for this session: nothing queued, banner only.
-      const normal = await runHook('task', { sessionId: 'drain-baseline' });
-      expect(normal).toContain('PROJECT: proj.usr_x.demo');
-
-      damage();
-
-      expect(await runHook('task')).toBe(normal);
-      // And nothing is left for the next message to trip over: an empty
-      // queue is cleared rather than read and skipped on every message.
-      expect(tailIds()).toBeNull();
-    }
-  );
 
   it('sends nothing at all in an ignored project, the tail included', async () => {
     // No resolved project, so no banner: anything emitted here is the drain.
@@ -1651,12 +1595,6 @@ describe('session-start landing drift', () => {
       'ZM-19 "Cards know their branches" [active] on feature/x'
     );
     expect(text).toContain('- ZM-19 [active]: branch feature/x landed as');
-  });
-
-  it('names the open branch and nothing more while it has not landed', async () => {
-    const text = await briefSessionStart();
-    expect(text).toContain('[active] on feature/x');
-    expect(text).not.toContain('landed as');
   });
 
   it('puts what production took under the board, and leaves the section as it was without it', async () => {

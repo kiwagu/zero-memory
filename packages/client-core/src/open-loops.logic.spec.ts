@@ -101,7 +101,10 @@ describe('renderOpenLoopsSection', () => {
       5,
       now
     );
-    expect(section).toContain('Open loops recorded in persistent memory');
+    // Recorded data, not imperatives: the section opens by saying so.
+    expect(
+      section?.startsWith('Open loops recorded in persistent memory')
+    ).toBe(true);
     expect(section).toContain('(5 active');
     expect(section).toContain(
       `[task, open 3d] check the watcher log on machine 1 (id: ${memId(1)})`
@@ -109,11 +112,6 @@ describe('renderOpenLoopsSection', () => {
     // A loop younger than a day carries no staleness badge.
     expect(section).toContain(`[task] check the watcher log on machine 2`);
     expect(section).toContain('(+3 more active open loops)');
-  });
-
-  it('renders as recorded data, not imperatives', () => {
-    const section = renderOpenLoopsSection([loop(1)], 1, now)!;
-    expect(section.startsWith('Open loops recorded')).toBe(true);
   });
 
   it('shows a loop too long to fit as a one-line stub instead of losing the section', () => {

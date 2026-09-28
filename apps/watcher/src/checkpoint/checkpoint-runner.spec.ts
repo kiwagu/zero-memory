@@ -2,13 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import {
-  briefStatePath,
-  loadBriefState,
-  markRulesDelivered,
-  markTaskBriefed,
-  recordSessionThread,
-} from '@workspace/client-runtime';
+import { briefStatePath, loadBriefState } from '@workspace/client-runtime';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { HookClient } from '../hook-client.js';
@@ -33,12 +27,12 @@ describe('Codex PostCompact boundary', () => {
     rmSync(workDir, { recursive: true, force: true });
   });
 
-  it('re-arms task/rules, preserves thread, and writes no hook frame', async () => {
+  // What a boundary re-arms (task, rules, the window's tail) and keeps (the
+  // thread) is the state module's own contract; this pins the wiring alone:
+  // the hook opens a new epoch for its session, and prints nothing.
+  it('opens a new context epoch and writes no hook frame', async () => {
     const sessionId = 'sess-postcompact';
     const statePath = briefStatePath();
-    recordSessionThread(statePath, sessionId, 'thr_preserved.01a');
-    markTaskBriefed(statePath, sessionId);
-    markRulesDelivered(statePath, sessionId);
     let emissions = 0;
     const adapter: HookClient = {
       kind: 'codex',
@@ -66,13 +60,7 @@ describe('Codex PostCompact boundary', () => {
 
     await runPostCompact(adapter);
 
-    const state = loadBriefState(statePath)[sessionId];
-    expect(state).toMatchObject({
-      epoch: 1,
-      task_briefed: false,
-      thread: 'thr_preserved.01a',
-    });
-    expect(state?.rules_epoch).toBeUndefined();
+    expect(loadBriefState(statePath)[sessionId]?.epoch).toBe(1);
     expect(emissions).toBe(0);
   });
 

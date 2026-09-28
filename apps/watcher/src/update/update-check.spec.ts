@@ -88,18 +88,14 @@ describe('checkForUpdate compares against the RUNNING version', () => {
       expect(await checkForUpdate('0.14.0')).toBeNull();
     }));
 
-  it('announces an update the running version really is behind', () =>
-    withState(install('0.14.0', '0.15.0'), async () => {
+  it('announces an update the running version really is behind, naming the running version', () =>
+    // Recorded 0.1.0, running 0.14.0: the notice names what actually runs.
+    withState(install('0.1.0', '0.15.0'), async () => {
       expect(await checkForUpdate('0.14.0')).toEqual({
         installed: '0.14.0',
         latest: '0.15.0',
         command: 'bash deploy.sh',
       });
-    }));
-
-  it('reports the running version in the notice, not the recorded one', () =>
-    withState(install('0.1.0', '0.15.0'), async () => {
-      expect((await checkForUpdate('0.14.0'))?.installed).toBe('0.14.0');
     }));
 
   it('stays silent when the source manifest cannot be read', () =>

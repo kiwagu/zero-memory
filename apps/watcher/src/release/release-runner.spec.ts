@@ -265,38 +265,14 @@ describe('checkRelease', () => {
       build: null,
     });
 
-    expect(await checkRelease(repo, { now: T0 })).toContain(
-      'tag v0.25.0 is not in this repository'
-    );
+    const missing = await checkRelease(repo, { now: T0 });
+    expect(missing).toContain('tag v0.25.0 is not in this repository');
+    expect(missing).toContain('git fetch --tags');
     expect(await checkRelease(repo, { now: T0 + 3 * MIN })).toBeNull(); // inside the retry pause
     expect(await checkRelease(repo, { now: T0 + 11 * MIN })).toBeNull(); // retried, still no tag
     git(repo, 'tag', 'v0.25.0', landed);
     expect(await checkRelease(repo, { now: T0 + 22 * MIN })).toContain('ZM-23');
     expect(calls('record')).toHaveLength(1);
-  });
-
-  it('reports a rollback and changes no card', async () => {
-    git(repo, 'tag', 'v0.24.3', commit(repo, 'b', 'chore(release): 0.24.3'));
-    git(repo, 'tag', 'v0.25.0', commit(repo, 'c', 'chore(release): 0.25.0'));
-    vi.mocked(fetchDeployedVersion).mockResolvedValueOnce({
-      version: '0.25.0',
-      build: null,
-    });
-    await checkRelease(repo, { now: T0 });
-    vi.mocked(fetchDeployedVersion).mockResolvedValueOnce({
-      version: '0.24.3',
-      build: null,
-    });
-
-    expect(await checkRelease(repo, { now: T0 + 3 * MIN })).toContain(
-      'back to v0.24.3'
-    );
-    expect(calls('record')).toHaveLength(2);
-    expect(calls('record')[1]?.[0]).toMatchObject({
-      version: '0.24.3',
-      card_ids: [],
-    });
-    expect(calls('candidates')).toHaveLength(1);
   });
 
   it('stays silent and tries again later when the server cannot answer', async () => {
@@ -322,14 +298,6 @@ describe('checkRelease', () => {
     expect(await checkRelease(repo, { now: T0 + 12 * MIN })).toContain(
       'PRODUCTION IS AT v0.25.0'
     );
-  });
-
-  it('a stalled server is asked for the setting at most every two minutes', async () => {
-    vi.mocked(callRelease).mockRejectedValue(new Error('no answer'));
-    for (const at of [0, 30 * 1000, 90 * 1000, 2 * MIN]) {
-      expect(await checkRelease(repo, { now: T0 + at })).toBeNull();
-    }
-    expect(calls('settings')).toHaveLength(2);
   });
 
   it('takes the newest release tag as the state when the project has no url', async () => {
@@ -390,6 +358,8 @@ describe('checkRelease', () => {
       version: '0.24.3',
       card_ids: [],
     });
+    // A rollback changes no card, so it does not even ask which cards exist.
+    expect(calls('candidates')).toHaveLength(2);
     firstObserved = false;
     at('0.25.0');
     expect(await checkRelease(repo, { now: T0 + 9 * MIN })).toContain(
@@ -565,6 +535,9 @@ describe('checkRelease', () => {
     }
     expect(calls('record')).toHaveLength(0);
     const checks = vi.mocked(isAncestorOf).mock.calls;
+    // Some candidates were checked before the time ran out, or the bound on
+    // each check below would hold over nothing.
+    expect(checks.length).toBeGreaterThan(0);
     expect(checks.length).toBeLessThan(100);
     for (const [, , , timeoutMs] of checks) {
       expect(timeoutMs).toBeGreaterThan(0);

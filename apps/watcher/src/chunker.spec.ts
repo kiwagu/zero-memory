@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import { ConversationChunker } from './chunker.js';
-import { decodeProjectDir } from './watcher.js';
 
 describe('ConversationChunker', () => {
   it('flushes on the size cap with a stable sha256 hash', () => {
@@ -127,14 +126,5 @@ describe('ConversationChunker — overlap', () => {
     const [second] = chunker.append('c', 'NEXTPAYLOAD');
 
     expect(second!.text).toBe('NEXTPAYLOAD'); // no carried prefix
-  });
-});
-
-describe('decodeProjectDir', () => {
-  it('decodes flattened transcript directory names (best effort)', () => {
-    expect(decodeProjectDir('-home-dev-repos-alpha')).toBe(
-      '/home/dev/repos/alpha'
-    );
-    expect(decodeProjectDir('not-flattened')).toBeUndefined();
   });
 });

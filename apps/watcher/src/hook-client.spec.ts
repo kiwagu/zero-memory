@@ -28,60 +28,41 @@ describe('clientKindFromArgs', () => {
   });
 });
 
-describe('hookClient codex (reuses the Claude hook I/O)', () => {
-  it('has its own kind + provenance but Claude-style task-brief', () => {
-    const client = hookClient('codex');
-    expect(client.kind).toBe('codex');
-    expect(client.ingestProvenance).toBe('codex-stop-hook');
-    expect(client.canTaskBrief).toBe(true);
-  });
-
-  it('parses the Codex rollout format, not the Claude one', () => {
-    const codexLine = JSON.stringify({
+// Codex and Hermes reuse the Claude hook I/O wholesale and swap only their
+// transcript parser and provenance label — which is exactly what differs here.
+describe.each([
+  {
+    kind: 'codex' as const,
+    provenance: 'codex-stop-hook',
+    line: {
       type: 'event_msg',
       payload: { type: 'user_message', message: 'hi from codex' },
-    });
-    expect(hookClient('codex').parse(codexLine).entries).toEqual([
-      { role: 'user', text: 'hi from codex' },
+    },
+    text: 'hi from codex',
+  },
+  {
+    kind: 'hermes' as const,
+    provenance: 'hermes-stop-hook',
+    line: { type: 'message', role: 'user', text: 'hi from hermes' },
+    text: 'hi from hermes',
+  },
+])('hookClient $kind (reuses the Claude hook I/O)', (client) => {
+  it('labels its own ingest provenance', () => {
+    expect(hookClient(client.kind).kind).toBe(client.kind);
+    expect(hookClient(client.kind).ingestProvenance).toBe(client.provenance);
+  });
+
+  it('parses its own transcript format, not the Claude one', () => {
+    const line = JSON.stringify(client.line);
+    expect(hookClient(client.kind).parse(line).entries).toEqual([
+      { role: 'user', text: client.text },
     ]);
+    expect(hookClient('claude').parse(line).entries).toEqual([]);
   });
 
   it('emits the same hookSpecificOutput frame as Claude', () => {
     const out = captureStdout();
-    hookClient('codex').emitSessionBrief('brief');
-    expect(JSON.parse(out[0] ?? '')).toEqual({
-      hookSpecificOutput: {
-        hookEventName: 'SessionStart',
-        additionalContext: 'brief',
-      },
-    });
-  });
-});
-
-describe('hookClient hermes (reuses the Claude hook I/O)', () => {
-  it('has its own kind + provenance and can task-brief', () => {
-    const client = hookClient('hermes');
-    expect(client.kind).toBe('hermes');
-    expect(client.ingestProvenance).toBe('hermes-stop-hook');
-    expect(client.canTaskBrief).toBe(true);
-    // No measured channel into the summarizing model — capture only.
-    expect(client.canAnchorCompaction).toBe(false);
-  });
-
-  it('parses the Hermes mirror format, not the Claude one', () => {
-    const mirrorLine = JSON.stringify({
-      type: 'message',
-      role: 'user',
-      text: 'hi from hermes',
-    });
-    expect(hookClient('hermes').parse(mirrorLine).entries).toEqual([
-      { role: 'user', text: 'hi from hermes' },
-    ]);
-  });
-
-  it('emits the same hookSpecificOutput frame as Claude', () => {
-    const out = captureStdout();
-    hookClient('hermes').emitSessionBrief('brief');
+    hookClient(client.kind).emitSessionBrief('brief');
     expect(JSON.parse(out[0] ?? '')).toEqual({
       hookSpecificOutput: {
         hookEventName: 'SessionStart',

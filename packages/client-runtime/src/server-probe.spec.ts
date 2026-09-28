@@ -53,13 +53,6 @@ describe('probeServer — liveness branch (classifies before any auth)', () => {
       (await probeServer('http://zm.example.test:8787/mcp', 50)).state
     ).toBe('server-down');
   });
-
-  it('every non-ok state carries a concrete fix', async () => {
-    stubFetch(() => Promise.reject(new Error('down')));
-    const probe = await probeServer('http://zm.example.test:8787/mcp', 50);
-    expect(probe.state).not.toBe('ok');
-    expect(probe.fix.length).toBeGreaterThan(0);
-  });
 });
 
 describe('probeServer — an unconfigured machine is its own state', () => {

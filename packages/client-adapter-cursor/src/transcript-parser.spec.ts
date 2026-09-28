@@ -1,4 +1,4 @@
-import { formatEntries, isRecallTool } from '@workspace/client-core';
+import { isRecallTool } from '@workspace/client-core';
 import { describe, expect, it } from 'vitest';
 
 import { parseCursorTranscript } from './transcript-parser.js';
@@ -83,16 +83,17 @@ const TRANSCRIPT = [
 
 describe('parseCursorTranscript', () => {
   it('extracts user query and assistant text, unwrapping and stripping', () => {
-    const parsed = parseCursorTranscript(TRANSCRIPT);
-    expect(parsed.entries).toEqual([
-      { role: 'user', text: 'Which tasks are open in ZM?' },
-      { role: 'assistant', text: 'Checking zero-memory for open tasks.' },
-      { role: 'assistant', text: 'There are 3 open tasks.' },
-    ]);
-  });
-
-  it('never surfaces recalled ids (Cursor does not inline tool results)', () => {
-    expect(parseCursorTranscript(TRANSCRIPT).recalledIds).toEqual([]);
+    // The whole result: cwd comes from the hook payload, never the
+    // transcript, and Cursor does not inline tool results to mine ids from.
+    expect(parseCursorTranscript(TRANSCRIPT)).toEqual({
+      entries: [
+        { role: 'user', text: 'Which tasks are open in ZM?' },
+        { role: 'assistant', text: 'Checking zero-memory for open tasks.' },
+        { role: 'assistant', text: 'There are 3 open tasks.' },
+      ],
+      cwd: undefined,
+      recalledIds: [],
+    });
   });
 
   // Pins WHERE the judge channel breaks on Cursor, so a future attempt starts
@@ -129,20 +130,6 @@ describe('parseCursorTranscript', () => {
       ]);
       expect(parsed.recalledIds).toEqual([]);
     });
-  });
-
-  it('leaves cwd undefined (supplied by the hook payload, not the transcript)', () => {
-    expect(parseCursorTranscript(TRANSCRIPT).cwd).toBeUndefined();
-  });
-
-  it('renders into the role: text form the extractor consumes', () => {
-    expect(formatEntries(parseCursorTranscript(TRANSCRIPT).entries)).toBe(
-      [
-        'user: Which tasks are open in ZM?',
-        'assistant: Checking zero-memory for open tasks.',
-        'assistant: There are 3 open tasks.',
-      ].join('\n')
-    );
   });
 
   it('tolerates string content, blank lines, and torn JSON', () => {

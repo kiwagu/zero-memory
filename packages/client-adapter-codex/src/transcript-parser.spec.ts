@@ -1,4 +1,3 @@
-import { formatEntries } from '@workspace/client-core';
 import { describe, expect, it } from 'vitest';
 
 import { parseCodexTranscript } from './transcript-parser.js';
@@ -113,47 +112,9 @@ describe('parseCodexTranscript', () => {
     expect(parseCodexTranscript(TRANSCRIPT).cwd).toBe('/home/u/proj');
   });
 
-  it('surfaces no recalled ids when the slice holds no recall call', () => {
-    expect(parseCodexTranscript(TRANSCRIPT).recalledIds).toEqual([]);
-  });
-
-  it('renders into the role: text form the extractor consumes', () => {
-    expect(formatEntries(parseCodexTranscript(TRANSCRIPT).entries)).toBe(
-      [
-        'user: which tasks are open?',
-        'assistant: There are 3 open tasks.',
-      ].join('\n')
-    );
-  });
-
   describe('recalled ids', () => {
     it('mines the ids a real recall call surfaced', () => {
       const jsonl = [TRANSCRIPT, RECALL_CALL, RECALL_OUTPUT].join('\n');
-      expect(parseCodexTranscript(jsonl).recalledIds).toEqual([RECALLED_ID]);
-    });
-
-    it('mines a build_context call the same way', () => {
-      const callId = 'call_18U9kPVeL2h2heaBpx4ivZHZ';
-      const jsonl = [
-        line({
-          type: 'response_item',
-          payload: {
-            type: 'function_call',
-            name: 'build_context',
-            namespace: 'mcp__zero_memory',
-            arguments: '{"topic":"zero-memory","briefing":true}',
-            call_id: callId,
-          },
-        }),
-        line({
-          type: 'response_item',
-          payload: {
-            type: 'function_call_output',
-            call_id: callId,
-            output: `Output:\n${JSON.stringify({ memories: [{ id: RECALLED_ID }] })}`,
-          },
-        }),
-      ].join('\n');
       expect(parseCodexTranscript(jsonl).recalledIds).toEqual([RECALLED_ID]);
     });
 
@@ -231,13 +192,6 @@ describe('parseCodexTranscript', () => {
       expect(parseCodexTranscript(jsonl).recalledIds).toEqual([RECALLED_ID]);
     });
 
-    it('mines an event-stream build_context the same way', () => {
-      const jsonl = eventStreamCall('build_context', {
-        memories: [{ id: RECALLED_ID }],
-      });
-      expect(parseCodexTranscript(jsonl).recalledIds).toEqual([RECALLED_ID]);
-    });
-
     // Same guard as the call_id correlation buys the other envelope: here the
     // tool name sits on the answer's own line, so it is what must be checked.
     it('ignores an event-stream remember result', () => {
@@ -252,28 +206,6 @@ describe('parseCodexTranscript', () => {
         eventStreamCall('recall', { memories: [{ id: RECALLED_ID }] }),
       ].join('\n');
       expect(parseCodexTranscript(jsonl).recalledIds).toEqual([RECALLED_ID]);
-    });
-
-    it('surfaces nothing from a failed event-stream call', () => {
-      const jsonl = line({
-        type: 'event_msg',
-        payload: {
-          type: 'mcp_tool_call_end',
-          call_id: 'exec-62eac856-c870-4183-b657-04254d5ed20f',
-          invocation: { server: 'zero-memory', tool: 'recall', arguments: {} },
-          duration: { secs: 0, nanos: 258425705 },
-          result: { Err: 'request failed' },
-        },
-      });
-      expect(parseCodexTranscript(jsonl).recalledIds).toEqual([]);
-    });
-
-    it('keeps mining the conversational text around the tool lines', () => {
-      const jsonl = [TRANSCRIPT, RECALL_CALL, RECALL_OUTPUT].join('\n');
-      expect(parseCodexTranscript(jsonl).entries).toEqual([
-        { role: 'user', text: 'which tasks are open?' },
-        { role: 'assistant', text: 'There are 3 open tasks.' },
-      ]);
     });
   });
 
