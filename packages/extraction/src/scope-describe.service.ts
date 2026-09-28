@@ -69,7 +69,7 @@ export class ScopeDescribeService {
     @injectScopeMetaRepository()
     private readonly scopeMeta: IScopeMetaRepository,
     @injectUsageRecorder()
-    private readonly usage?: IUsageRecorder
+    private readonly usage: IUsageRecorder
   ) {}
 
   async describe(
@@ -120,21 +120,19 @@ export class ScopeDescribeService {
       purpose: 'scope_description',
       subjectId: ownerId,
     });
-    if (this.usage) {
-      recordUsage(this.usage, {
-        eventType: 'llm_extraction',
-        quantity: response.inputTokens + response.outputTokens,
-        unit: 'tokens',
-        subjectId: ownerId,
-        metadata: {
-          purpose: 'scope_description',
-          model,
-          input_tokens: response.inputTokens,
-          output_tokens: response.outputTokens,
-          ...(response.ranOnCallerKey ? { own_key: true } : {}),
-        },
-      });
-    }
+    recordUsage(this.usage, {
+      eventType: 'llm_extraction',
+      quantity: response.inputTokens + response.outputTokens,
+      unit: 'tokens',
+      subjectId: ownerId,
+      metadata: {
+        purpose: 'scope_description',
+        model,
+        input_tokens: response.inputTokens,
+        output_tokens: response.outputTokens,
+        ...(response.ranOnCallerKey ? { own_key: true } : {}),
+      },
+    });
 
     const raw = (response.input as { description?: unknown }).description;
     const description = typeof raw === 'string' ? raw.trim() : '';

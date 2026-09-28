@@ -1,29 +1,22 @@
-import type { IContext } from '@workspace/context';
 import { setLlmGateway, type ILlmGateway } from '@workspace/llm';
 import type {
   IMemorySearchService,
   IScopeMetaRepository,
 } from '@workspace/memory';
+import {
+  makeContext,
+  makeSearchService,
+  TEST_USER_ENTITY_ID,
+} from '@workspace/memory/testing';
 import type { IUsageRecorder, UsageEvent } from '@workspace/usage';
-import { None, Ok } from 'oxide.ts';
+import { Ok } from 'oxide.ts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ScopeDescribeService } from './scope-describe.service.js';
 
-const USER_ENTITY_ID = 'usr_000000000000000a.0000000000';
 const CANONICAL = 'proj.usr_000000000000000a_0000000000.zero_memory';
 
-const context: IContext = {
-  setContextValue: () => undefined,
-  mustGetCurrentUserId: () => 'uuid',
-  getCurrentUserId: () => 'uuid',
-  mustGetCurrentUserEntityId: () => USER_ENTITY_ID,
-  getCurrentUserEntityId: () => USER_ENTITY_ID,
-  getAccessToken: () => 'token',
-  getScopes: () => [],
-  getDefaultScope: () => undefined,
-  getCurrentSessionId: () => undefined,
-};
+const context = makeContext();
 
 const gateway = (description: string): ILlmGateway => ({
   callTool: () =>
@@ -37,15 +30,14 @@ const gateway = (description: string): ILlmGateway => ({
   searchWeb: () => Promise.reject(new Error('not used by scope describe')),
 });
 
+/** A scope whose most recent memories are `samples`. */
 const makeSearch = (
   samples: Array<{ content: string; kind: string }>
-): IMemorySearchService => ({
-  search: vi.fn().mockResolvedValue([]),
-  findSimilar: vi.fn().mockResolvedValue(None),
-  findAuthoritativeCoverage: vi.fn().mockResolvedValue(None),
-  findSupersedeCandidates: vi.fn().mockResolvedValue([]),
-  listRecentByScope: vi.fn().mockResolvedValue(samples),
-});
+): IMemorySearchService => {
+  const search = makeSearchService();
+  vi.mocked(search.listRecentByScope).mockResolvedValue(samples);
+  return search;
+};
 
 const makeMeta = (): IScopeMetaRepository => ({
   upsertModelDescription: vi.fn().mockResolvedValue(Ok(undefined)),
@@ -94,7 +86,7 @@ describe('ScopeDescribeService', () => {
     // Metered against the owner with the dedicated purpose.
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
-      subjectId: USER_ENTITY_ID,
+      subjectId: TEST_USER_ENTITY_ID,
       metadata: { purpose: 'scope_description' },
     });
   });
@@ -102,7 +94,12 @@ describe('ScopeDescribeService', () => {
   it('canonicalizes a legacy proj.<slug> before sampling and storing', async () => {
     const search = makeSearch([{ content: 'anything', kind: 'fact' }]);
     const meta = makeMeta();
-    const service = new ScopeDescribeService(context, search, meta);
+    const service = new ScopeDescribeService(
+      context,
+      search,
+      meta,
+      collectingRecorder().recorder
+    );
 
     const result = await service.describe({ scope: 'proj.zero_memory' });
 
@@ -115,7 +112,8 @@ describe('ScopeDescribeService', () => {
     const service = new ScopeDescribeService(
       context,
       makeSearch([]),
-      makeMeta()
+      makeMeta(),
+      collectingRecorder().recorder
     );
 
     const result = await service.describe({ scope: CANONICAL });
@@ -129,7 +127,12 @@ describe('ScopeDescribeService', () => {
     // The scope has memories to describe, so the path itself is the only
     // reason to refuse.
     const search = makeSearch([{ content: 'anything', kind: 'fact' }]);
-    const service = new ScopeDescribeService(context, search, makeMeta());
+    const service = new ScopeDescribeService(
+      context,
+      search,
+      makeMeta(),
+      collectingRecorder().recorder
+    );
 
     const result = await service.describe({ scope: 'acme' });
 

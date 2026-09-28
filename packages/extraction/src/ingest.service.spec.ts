@@ -1,147 +1,42 @@
-import type { IContext } from '@workspace/context';
 import type { MemoryId } from '@workspace/contracts';
-import { DeterministicHashEmbeddingService } from '@workspace/embedding/testing';
 import {
-  EntityResolutionService,
-  MemoryService,
   Scope,
-  ScopeRoutingService,
-  type IEntityRepository,
   type IGraphService,
   type IMemoryRepository,
-  type IMemorySearchService,
   type IProjectBindingRepository,
   type IScopeAccessService,
   type ISessionThreadRepository,
 } from '@workspace/memory';
-import type { IUsageRecorder } from '@workspace/usage';
-import { Err, None, Ok, Some } from 'oxide.ts';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { ExtractionResult } from './extraction.schema.js';
+import {
+  makeContext,
+  makeGraphService,
+  makeMemoryService,
+  makeProjectBindings,
+  makeRepository,
+  makeScopeAccess,
+  makeThreads,
+  TEST_USER_ENTITY_ID,
+} from '@workspace/memory/testing';
 import {
   BudgetExhaustedError,
   BUDGET_EXHAUSTED,
   type BudgetGuard,
   type BudgetDecision,
 } from '@workspace/policy';
+import type { IUsageRecorder } from '@workspace/usage';
+import { Err, Ok, Some } from 'oxide.ts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ExtractionResult } from './extraction.schema.js';
 import type { IExtractor } from './extractor.js';
-import type {
-  IIngestLogRepository,
-  IngestLogEntry,
-} from './ingest-log.repository.js';
+import { makeIngestLog } from './ingest-log.repository.fake.js';
+import type { IIngestLogRepository } from './ingest-log.repository.js';
 import { IngestService } from './ingest.service.js';
 import { DeterministicExtractor } from './testing/deterministic.extractor.js';
 import { DeterministicUsefulnessJudge } from './testing/deterministic.usefulness-judge.js';
 import type { IUsefulnessJudge } from './usefulness-judge.js';
 
-const USER_ID = 'b7e6a1c2-3d4f-4a5b-8c9d-0e1f2a3b4c5d';
-const USER_ENTITY_ID = 'usr_000000000000000a.0000000000';
-const PERSONAL_SCOPE = `user.${USER_ENTITY_ID.replace(/\./g, '_')}`;
-
-const makeContext = (defaultScope?: string): IContext => ({
-  setContextValue: () => undefined,
-  mustGetCurrentUserId: () => USER_ID,
-  getCurrentUserId: () => USER_ID,
-  mustGetCurrentUserEntityId: () => USER_ENTITY_ID,
-  getCurrentUserEntityId: () => USER_ENTITY_ID,
-  getAccessToken: () => 'token',
-  getScopes: () => [],
-  getDefaultScope: () => defaultScope,
-  getCurrentSessionId: () => undefined,
-});
-
-const makeRepository = (): IMemoryRepository => ({
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-  findOneById: vi.fn().mockResolvedValue(None),
-  update: vi.fn().mockResolvedValue(Ok(undefined)),
-  applyTranslation: vi.fn().mockResolvedValue(Ok(undefined)),
-  markTranslationSkipped: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-const makeTranslator = () => ({
-  translateToEnglish: vi
-    .fn()
-    .mockResolvedValue({ text: 'translated', sourceLang: 'ja' }),
-});
-
-const makeSearchService = (): IMemorySearchService => ({
-  search: vi.fn().mockResolvedValue([]),
-  findSimilar: vi.fn().mockResolvedValue(None),
-  findAuthoritativeCoverage: vi.fn().mockResolvedValue(None),
-  findSupersedeCandidates: vi.fn().mockResolvedValue([]),
-  listRecentByScope: vi.fn().mockResolvedValue([]),
-});
-
-const makeEntityRepository = (): IEntityRepository => ({
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-  findByNormalizedName: vi.fn().mockResolvedValue(None),
-  findByMatchKey: vi.fn().mockResolvedValue(None),
-  findContentAnchors: vi.fn().mockResolvedValue([]),
-  linkMemory: vi.fn().mockResolvedValue(Ok(undefined)),
-  list: vi.fn().mockResolvedValue([]),
-  listForMemories: vi.fn().mockResolvedValue(new Map()),
-});
-
-const makeGraphService = (): IGraphService => ({
-  createEdge: vi.fn().mockResolvedValue(Ok({ created: true })),
-  linkMemories: vi.fn().mockResolvedValue(Ok({ created: true })),
-  traverse: vi.fn().mockResolvedValue([]),
-  neighborsOf: vi.fn().mockResolvedValue([]),
-  buildContext: vi.fn().mockResolvedValue({
-    memories: [],
-    entities: [],
-    edges: [],
-    linked_memories: [],
-  }),
-});
-
-const makeScopeAccess = (options?: {
-  canWrite?: boolean;
-  createScopeError?: string;
-}): IScopeAccessService => ({
-  canWrite: vi.fn().mockResolvedValue(options?.canWrite ?? false),
-  createScope: vi
-    .fn()
-    .mockResolvedValue(
-      options?.createScopeError ? Err(options.createScopeError) : Ok(undefined)
-    ),
-  listMemberProjects: vi.fn().mockResolvedValue(Ok([])),
-});
-
-const makeBindings = (
-  bound?: Record<string, string>
-): IProjectBindingRepository => ({
-  findScope: vi.fn().mockImplementation((kind: string, key: string) => {
-    const scope = bound?.[`${kind}:${key}`];
-    return Promise.resolve(scope ? Some(Scope.create(scope).unwrap()) : None);
-  }),
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-/** In-memory ingest log honoring the insert-if-absent + release contract. */
-const makeIngestLog = (): IIngestLogRepository & { hashes: Set<string> } => {
-  const hashes = new Set<string>();
-  return {
-    hashes,
-    insertIfAbsent: vi.fn().mockImplementation((entry: IngestLogEntry) => {
-      const existed = hashes.has(entry.chunkHash);
-      hashes.add(entry.chunkHash);
-      return Promise.resolve(Ok({ existed }));
-    }),
-    exists: vi
-      .fn()
-      .mockImplementation((chunkHash: string) =>
-        Promise.resolve(Ok(hashes.has(chunkHash)))
-      ),
-    markProcessed: vi.fn().mockResolvedValue(Ok(undefined)),
-    release: vi.fn().mockImplementation((chunkHash: string) => {
-      hashes.delete(chunkHash);
-      return Promise.resolve(Ok(undefined));
-    }),
-  };
-};
+const PERSONAL_SCOPE = `user.${TEST_USER_ENTITY_ID.replace(/\./g, '_')}`;
 
 const stubExtractor = (result: ExtractionResult): IExtractor => ({
   extract: vi.fn().mockResolvedValue(result),
@@ -161,13 +56,6 @@ interface ServiceOptions {
   threads?: ISessionThreadRepository;
 }
 
-/** Thread store with no live conversation, unless a test opens one. */
-const makeThreads = (): ISessionThreadRepository => ({
-  open: vi.fn().mockResolvedValue(Err('not used by ingest')),
-  findByToken: vi.fn().mockResolvedValue(None),
-  findByConversation: vi.fn().mockResolvedValue(None),
-});
-
 /** A budget guard fixed to one decision — unlimited unless a test overrides it. */
 const makeBudgetGuard = (decision?: Partial<BudgetDecision>): BudgetGuard => {
   const status = async (): Promise<BudgetDecision> => ({
@@ -183,61 +71,48 @@ const makeBudgetGuard = (decision?: Partial<BudgetDecision>): BudgetGuard => {
   return { status, check: status, require: status } as unknown as BudgetGuard;
 };
 
+/**
+ * An IngestService over a real MemoryService. Scopes are NOT writable by
+ * default, so a project a chunk names is set up on first sight and a routed
+ * fact is not auto-shared unless a test grants write access.
+ */
 const makeService = (options?: ServiceOptions) => {
-  const embedding = new DeterministicHashEmbeddingService();
-  const context = makeContext(options?.defaultScope);
-  const repository = options?.repository ?? makeRepository();
-  const searchService = makeSearchService();
-  const entityRepository = makeEntityRepository();
-  const graphService = options?.graphService ?? makeGraphService();
-  const scopeAccess = options?.scopeAccess ?? makeScopeAccess();
-  const bindings = options?.bindings ?? makeBindings();
+  const memory = makeMemoryService({
+    context: makeContext({ getDefaultScope: () => options?.defaultScope }),
+    scopeAccess: options?.scopeAccess ?? makeScopeAccess(false),
+    ...(options?.repository && { repository: options.repository }),
+    ...(options?.graphService && { graphService: options.graphService }),
+    ...(options?.bindings && { projectBindings: options.bindings }),
+    ...(options?.threads && { threads: options.threads }),
+  });
   const ingestLog = options?.ingestLog ?? makeIngestLog();
-  const entityResolution = new EntityResolutionService(
-    entityRepository,
-    embedding
-  );
-  const scopeRouting = new ScopeRoutingService(bindings, scopeAccess, context);
-  const memoryService = new MemoryService(
-    repository,
-    searchService,
-    embedding,
-    context,
-    entityResolution,
-    entityRepository,
-    graphService,
-    scopeAccess,
-    scopeRouting,
-    makeTranslator()
-  );
   const usage: IUsageRecorder = options?.usage ?? {
     record: vi.fn().mockResolvedValue(undefined),
   };
-  const threads = options?.threads ?? makeThreads();
   const service = new IngestService(
     options?.extractor ?? new DeterministicExtractor(),
-    memoryService,
-    entityResolution,
-    graphService,
-    scopeRouting,
+    memory.service,
+    memory.entityResolution,
+    memory.graphService,
+    memory.scopeRouting,
     ingestLog,
-    context,
+    memory.context,
     usage,
-    repository,
+    memory.repository,
     options?.judge ?? new DeterministicUsefulnessJudge(),
     options?.budgetGuard ?? makeBudgetGuard(),
-    threads
+    memory.threads
   );
   return {
     service,
-    repository,
-    graphService,
-    scopeAccess,
-    bindings,
+    repository: memory.repository,
+    graphService: memory.graphService,
+    scopeAccess: memory.scopeAccess,
+    bindings: memory.projectBindings,
     ingestLog,
-    memoryService,
+    memoryService: memory.service,
     usage,
-    threads,
+    threads: memory.threads,
   };
 };
 
@@ -463,7 +338,7 @@ describe('IngestService — confidence gate and quota', () => {
 describe('IngestService — scope routing decision table', () => {
   it('routes preferences to the personal scope even with a project hint', async () => {
     const { service, repository } = makeService({
-      bindings: makeBindings({ 'path:/home/dev/alpha': 'proj.alpha' }),
+      bindings: makeProjectBindings({ 'path:/home/dev/alpha': 'proj.alpha' }),
     });
 
     await service.ingest(
@@ -478,7 +353,7 @@ describe('IngestService — scope routing decision table', () => {
 
   it('routes portable facts to the personal core scope, not the project', async () => {
     const { service, repository } = makeService({
-      bindings: makeBindings({ 'path:/home/dev/alpha': 'proj.alpha' }),
+      bindings: makeProjectBindings({ 'path:/home/dev/alpha': 'proj.alpha' }),
     });
 
     await service.ingest(
@@ -493,7 +368,9 @@ describe('IngestService — scope routing decision table', () => {
   });
 
   it('routes non-preferences to the scope of an existing binding', async () => {
-    const bindings = makeBindings({ 'path:/home/dev/alpha': 'proj.alpha' });
+    const bindings = makeProjectBindings({
+      'path:/home/dev/alpha': 'proj.alpha',
+    });
     const { service, repository } = makeService({ bindings });
 
     await service.ingest(
@@ -658,7 +535,7 @@ describe('IngestService — auto-share', () => {
     'PREF: prefers bun over npm';
 
   it('shares facts routed to a project scope, not personal preferences', async () => {
-    const scopeAccess = makeScopeAccess({ canWrite: true });
+    const scopeAccess = makeScopeAccess(true);
     const { service, memoryService } = makeService({ scopeAccess });
     const shareSpy = vi.spyOn(memoryService, 'share').mockResolvedValue(
       Ok({
@@ -682,7 +559,7 @@ describe('IngestService — auto-share', () => {
 
   it('does not share when ZM_INGEST_AUTOSHARE=false', async () => {
     process.env.ZM_INGEST_AUTOSHARE = 'false';
-    const scopeAccess = makeScopeAccess({ canWrite: true });
+    const scopeAccess = makeScopeAccess(true);
     const { service, memoryService } = makeService({ scopeAccess });
     const shareSpy = vi.spyOn(memoryService, 'share');
 

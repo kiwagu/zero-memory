@@ -9,220 +9,41 @@ import {
   type MemoryId,
   type UserId,
 } from '@workspace/contracts';
-import { DeterministicHashEmbeddingService } from '@workspace/embedding/testing';
-import { Err, None, Ok, Some, type Option } from 'oxide.ts';
+import { Err, None, Some } from 'oxide.ts';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { IBriefingWorkReader } from './briefing-work.reader.js';
 import { ANCHOR_HINT } from './entity-anchor.js';
-import { EntityResolutionService } from './entity-resolution.service.js';
+import type { ContentAnchor } from './entity.repository.js';
 import { MemoryContent } from './memory-content.vo.js';
 import { MemoryFragment } from './memory-fragment.do.js';
-import { Provenance } from './provenance.vo.js';
-import { Scope } from './scope.vo.js';
-import type { ContentAnchor, IEntityRepository } from './entity.repository.js';
-import type {
-  IPortabilityJudge,
-  PortabilityOpinion,
-} from './portability-judge.js';
-import type { ISessionThreadRepository } from './session-thread.repository.js';
-import type { IGraphService } from './graph.service.js';
-import type {
-  IMemorySearchService,
-  SimilarMemory,
-  SimilarMemoryWithProvenance,
-  SupersedeCandidateHit,
-} from './memory-search.service.js';
-import type { IMemoryRepository } from './memory.repository.js';
-import { MemoryService } from './memory.service.js';
-import type { IProjectBindingRepository } from './project-binding.repository.js';
-import type { IBriefingWorkReader } from './briefing-work.reader.js';
-import type { IRuleFateReader } from './rule-fate.reader.js';
+import type { SupersedeCandidateHit } from './memory-search.service.js';
 import type { IProjectRulesReader } from './project-rules.reader.js';
-import type { ProjectCandidate } from './project-name.utils.js';
-import type { IScopeAccessService } from './scope-access.service.js';
-import { ScopeRoutingService } from './scope-routing.service.js';
+import { Provenance } from './provenance.vo.js';
+import type { IRuleFateReader } from './rule-fate.reader.js';
+import { Scope } from './scope.vo.js';
+import type { ISessionThreadRepository } from './session-thread.repository.js';
+import {
+  makeContext,
+  makeEntityRepository,
+  makeGraphService,
+  makeMemoryService as makeService,
+  makePortabilityJudge,
+  makeRepository,
+  makeScopeAccess,
+  makeSearchService,
+  makeThreads,
+  TEST_THREAD,
+  TEST_USER_ENTITY_ID as USER_ENTITY_ID,
+} from './testing/index.js';
 import type { ITranslator } from './translator.js';
 
-const USER_ID = 'b7e6a1c2-3d4f-4a5b-8c9d-0e1f2a3b4c5d';
-const USER_ENTITY_ID = 'usr_000000000000000a.0000000000' as UserId;
 const OTHER_USER_ENTITY_ID = 'usr_000000000000000b.0000000000' as UserId;
 const MEMORY_A = 'mem_0000000000000001.0000000000' as MemoryId;
 const MEMORY_B = 'mem_0000000000000002.0000000000' as MemoryId;
 const ENTITY_PG = 'ent_0000000000000001.0000000000' as EntityId;
 
-const contextStub: IContext = {
-  setContextValue: () => undefined,
-  mustGetCurrentUserId: () => USER_ID,
-  getCurrentUserId: () => USER_ID,
-  mustGetCurrentUserEntityId: () => USER_ENTITY_ID,
-  getCurrentUserEntityId: () => USER_ENTITY_ID,
-  getAccessToken: () => 'token',
-  getScopes: () => [],
-  getDefaultScope: () => undefined,
-  getCurrentSessionId: () => undefined,
-};
-
-const makeRepository = (): IMemoryRepository => ({
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-  findOneById: vi.fn().mockResolvedValue(None),
-  update: vi.fn().mockResolvedValue(Ok(undefined)),
-  applyTranslation: vi.fn().mockResolvedValue(Ok(undefined)),
-  markTranslationSkipped: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-/** Fake translator: echoes English text back with a stub source language. */
-const makeTranslator = (): ITranslator => ({
-  translateToEnglish: vi
-    .fn()
-    .mockResolvedValue({ text: 'translated', sourceLang: 'ja' }),
-});
-
-const makeSearchService = (
-  similar: Option<SimilarMemoryWithProvenance> = None,
-  coverage: Option<SimilarMemory> = None,
-  supersedeCandidates: SupersedeCandidateHit[] = []
-): IMemorySearchService => ({
-  search: vi.fn().mockResolvedValue([]),
-  findSimilar: vi.fn().mockResolvedValue(similar),
-  findAuthoritativeCoverage: vi.fn().mockResolvedValue(coverage),
-  findSupersedeCandidates: vi.fn().mockResolvedValue(supersedeCandidates),
-  listRecentByScope: vi.fn().mockResolvedValue([]),
-});
-
-const makeEntityRepository = (
-  contentAnchors: ContentAnchor[] = []
-): IEntityRepository => ({
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-  findByNormalizedName: vi.fn().mockResolvedValue(None),
-  findByMatchKey: vi.fn().mockResolvedValue(None),
-  findContentAnchors: vi.fn().mockResolvedValue(contentAnchors),
-  linkMemory: vi.fn().mockResolvedValue(Ok(undefined)),
-  list: vi.fn().mockResolvedValue([]),
-  listForMemories: vi.fn().mockResolvedValue(new Map()),
-});
-
-const makeScopeAccess = (
-  canWrite = true,
-  projects: ProjectCandidate[] = []
-): IScopeAccessService => ({
-  canWrite: vi.fn().mockResolvedValue(canWrite),
-  createScope: vi.fn().mockResolvedValue(Ok(undefined)),
-  listMemberProjects: vi.fn().mockResolvedValue(Ok(projects)),
-});
-
-const makeProjectBindings = (): IProjectBindingRepository => ({
-  findScope: vi.fn().mockResolvedValue(None),
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-/**
- * Portability-judge stub. Grants by default so a test opts INTO denial —
- * the interesting assertions are about what happens when leaving the project
- * is not confirmed.
- */
-/** The token the session-thread stub hands back, asserted by the tests. */
-const TEST_THREAD = 'thr_test0000000000.0000000000';
-
-/**
- * Session-thread stub. `open` echoes a fixed token so a test can assert the
- * assertion reached the store; `findByToken` is empty by default so each test
- * opts into the inheritance path explicitly.
- */
-const makeThreads = (): ISessionThreadRepository => ({
-  open: vi
-    .fn()
-    .mockImplementation((conversationId: string, scope: Scope) =>
-      Promise.resolve(Ok({ token: TEST_THREAD, conversationId, scope }))
-    ),
-  findByToken: vi.fn().mockResolvedValue(None),
-  findByConversation: vi.fn().mockResolvedValue(None),
-});
-
-const makePortabilityJudge = (
-  opinion: PortabilityOpinion = {
-    portable: true,
-    confidence: 0.95,
-    rationale: '',
-  }
-): IPortabilityJudge => ({
-  judgePortability: vi.fn().mockResolvedValue(opinion),
-});
-
-const makeGraphService = (): IGraphService => ({
-  createEdge: vi.fn().mockResolvedValue(Ok({ created: true })),
-  linkMemories: vi.fn().mockResolvedValue(Ok({ created: true })),
-  traverse: vi.fn().mockResolvedValue([]),
-  neighborsOf: vi.fn().mockResolvedValue([]),
-  buildContext: vi.fn().mockResolvedValue({
-    memories: [],
-    entities: [],
-    edges: [],
-    linked_memories: [],
-    open_loops: [],
-    open_loops_total: 0,
-  }),
-});
-
-const makeService = (overrides?: {
-  repository?: IMemoryRepository;
-  searchService?: IMemorySearchService;
-  entityRepository?: IEntityRepository;
-  graphService?: IGraphService;
-  scopeAccess?: IScopeAccessService;
-  projectBindings?: IProjectBindingRepository;
-  translator?: ITranslator;
-  context?: IContext;
-  projectRules?: IProjectRulesReader;
-  portabilityJudge?: IPortabilityJudge;
-  threads?: ISessionThreadRepository;
-  briefingWork?: IBriefingWorkReader;
-  ruleFates?: IRuleFateReader;
-}) => {
-  const repository = overrides?.repository ?? makeRepository();
-  const searchService = overrides?.searchService ?? makeSearchService();
-  const entityRepository =
-    overrides?.entityRepository ?? makeEntityRepository();
-  const graphService = overrides?.graphService ?? makeGraphService();
-  const scopeAccess = overrides?.scopeAccess ?? makeScopeAccess();
-  const projectBindings = overrides?.projectBindings ?? makeProjectBindings();
-  const translator = overrides?.translator ?? makeTranslator();
-  const embeddingService = new DeterministicHashEmbeddingService();
-  const context = overrides?.context ?? contextStub;
-  const portabilityJudge =
-    overrides?.portabilityJudge ?? makePortabilityJudge();
-  const threads = overrides?.threads ?? makeThreads();
-  const service = new MemoryService(
-    repository,
-    searchService,
-    embeddingService,
-    context,
-    new EntityResolutionService(entityRepository, embeddingService),
-    entityRepository,
-    graphService,
-    scopeAccess,
-    new ScopeRoutingService(projectBindings, scopeAccess, context),
-    translator,
-    overrides?.projectRules,
-    undefined,
-    portabilityJudge,
-    threads,
-    overrides?.briefingWork,
-    overrides?.ruleFates
-  );
-  return {
-    service,
-    repository,
-    searchService,
-    entityRepository,
-    graphService,
-    scopeAccess,
-    projectBindings,
-    translator,
-    embeddingService,
-    portabilityJudge,
-    threads,
-  };
-};
+const contextStub = makeContext();
 
 describe('MemoryService.remember', () => {
   it('embeds, probes for duplicates, and inserts a new memory', async () => {
