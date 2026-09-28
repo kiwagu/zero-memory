@@ -27,7 +27,12 @@ describe('parseTranscript', () => {
         message: {
           role: 'user',
           content: [
-            { type: 'tool_result', tool_use_id: 't1', content: 'file.txt' },
+            {
+              type: 'tool_result',
+              tool_use_id: 't1',
+              // A real id in a non-recall result: grep output, a pasted note.
+              content: 'notes/mem_n15ez75g6j96h8bd.01kwwe5nzc.md',
+            },
           ],
         },
       }),
@@ -41,7 +46,8 @@ describe('parseTranscript', () => {
       { role: 'user', text: 'why did we pick postgres?' },
       { role: 'assistant', text: 'Because of ltree and pgvector.' },
     ]);
-    // A tool call that is not a recall surfaces nothing to the judge.
+    // A tool call that is not a recall surfaces nothing to the judge, even
+    // when its result happens to carry a memory id.
     expect(parsed.recalledIds).toEqual([]);
   });
 

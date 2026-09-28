@@ -86,7 +86,7 @@ describe('checkForUpdate compares against the RUNNING version', () => {
     ['a pre-release', '0.15.0-rc1', '0.14.0'],
     ['a truncated version', '0.15', '0.14.0'],
     ['garbage', 'latest', '0.14.0'],
-    ['a running version that does not parse', '0.15.0', 'dev'],
+    ['a running version that is not a plain release', '0.15.0', '0.14'],
   ])('stays silent on %s', (_, ships, running) =>
     withState(install('0.14.0', ships), async () => {
       expect(await checkForUpdate(running)).toBeNull();
