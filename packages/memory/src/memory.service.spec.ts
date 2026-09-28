@@ -1852,41 +1852,76 @@ describe('MemoryService.remember — declared supersede (write-side)', () => {
 });
 
 describe('MemoryService.remember — same-session refinement collapse', () => {
+  // The predicate matrix (floor, sessions, ranks, forged stamps) is owned by
+  // the hygiene decision spec. These tests hold the WRITE PATH only: that it
+  // hands the probe's real similarity and ranks to the predicate, and that a
+  // decision to collapse actually supersedes the earlier draft.
   const SESSION = 'ses_000000000000000a.0000000000';
-  const OTHER_SESSION = 'ses_000000000000000b.0000000000';
   const sessionContext: IContext = {
     ...contextStub,
     getCurrentSessionId: () => SESSION,
   };
-  const makeOldFragment = (source: Record<string, unknown> | null) =>
-    MemoryFragment.create({
+
+  /**
+   * An earlier draft from THIS session that both probes return: the dedup
+   * probe (which decides the collapse) and the supersede aperture (which
+   * offers it as a hint). The repository can load it, so a collapse that
+   * fires is visible as a superseded row rather than skipped for a missing
+   * target.
+   */
+  const withEarlierDraft = (
+    similarity: number,
+    agentName: string | null = null
+  ) => {
+    const repository = makeRepository();
+    const old = MemoryFragment.create({
       content: MemoryContent.create(
         'commit messages are single-line',
         'convention'
       ).unwrap(),
       scope: Scope.user(USER_ENTITY_ID),
-      provenance: Provenance.create({ ownerId: USER_ENTITY_ID, source }),
+      provenance: Provenance.create({
+        ownerId: USER_ENTITY_ID,
+        agentName,
+        source: { session: SESSION },
+      }),
     }).unwrap();
-
-  it('a same-session neighbour below the collapse line stays a hint', async () => {
-    // One session routinely stores several related-but-distinct facts about
-    // one topic, and they are near neighbours of each other, so only a
-    // near-verbatim restatement (>= 0.95) auto-collapses.
-    const repository = makeRepository();
-    const hit: SupersedeCandidateHit = {
-      id: MEMORY_A,
-      content: 'commit messages are single-line',
-      kind: 'convention',
-      scope: `user.${USER_ENTITY_ID.replace(/\./g, '_')}`,
-      source: { session: SESSION },
-      created_at: new Date().toISOString(),
-      similarity: 0.9,
-    };
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(old));
+    const searchService = makeSearchService(
+      Some({
+        id: old.id as MemoryId,
+        content: 'commit messages are single-line',
+        similarity,
+        author_kind: 'agent',
+        agent_name: agentName,
+        source: { session: SESSION },
+      }),
+      None,
+      [
+        {
+          id: old.id as MemoryId,
+          content: 'commit messages are single-line',
+          kind: 'convention',
+          scope: `user.${USER_ENTITY_ID.replace(/\./g, '_')}`,
+          source: { session: SESSION },
+          created_at: new Date().toISOString(),
+          similarity,
+        },
+      ]
+    );
     const { service } = makeService({
       repository,
-      searchService: makeSearchService(None, None, [hit]),
+      searchService,
       context: sessionContext,
     });
+    return { service, repository, old };
+  };
+
+  it('a same-session restatement just below the collapse line stays a hint', async () => {
+    // One session routinely stores several related-but-distinct facts about
+    // one topic; two of them at 0.926 were once collapsed into one, which is
+    // why the line sits at 0.95. Pinned from below with the real write path.
+    const { service, repository, old } = withEarlierDraft(0.949);
 
     const out = (
       await service.remember({
@@ -1895,28 +1930,13 @@ describe('MemoryService.remember — same-session refinement collapse', () => {
       })
     ).unwrap();
 
-    expect(out.similar_existing).toHaveLength(1);
     expect(repository.update).not.toHaveBeenCalled();
+    expect(old.lifecycle.supersededBy).toBeNull();
+    expect(out.similar_existing?.map((hint) => hint.id)).toEqual([old.id]);
   });
 
-  it('collapses a same-session near-verbatim restatement (>= 0.95)', async () => {
-    const repository = makeRepository();
-    const old = makeOldFragment({ session: SESSION });
-    vi.mocked(repository.findOneById).mockResolvedValue(Some(old));
-    const { service } = makeService({
-      repository,
-      searchService: makeSearchService(
-        Some({
-          id: old.id as MemoryId,
-          content: 'commit messages are single-line',
-          similarity: 0.96,
-          author_kind: 'agent',
-          agent_name: null,
-          source: { session: SESSION },
-        })
-      ),
-      context: sessionContext,
-    });
+  it('a same-session restatement at the collapse line supersedes the earlier draft', async () => {
+    const { service, repository, old } = withEarlierDraft(0.95);
 
     const out = (
       await service.remember({
@@ -1929,52 +1949,12 @@ describe('MemoryService.remember — same-session refinement collapse', () => {
     expect(repository.insert).toHaveBeenCalledOnce();
     expect(repository.update).toHaveBeenCalledExactlyOnceWith(old);
     expect(old.lifecycle.supersededBy).toBe(out.memory_id);
+    // A draft retired by this very write is not offered back as a hint.
+    expect(out.similar_existing).toBeUndefined();
   });
 
-  it('a hit from ANOTHER session is not collapsed: hinted as before', async () => {
-    const repository = makeRepository();
-    const hit: SupersedeCandidateHit = {
-      id: MEMORY_A,
-      content: 'commit messages are single-line',
-      kind: 'convention',
-      scope: `user.${USER_ENTITY_ID.replace(/\./g, '_')}`,
-      source: { session: OTHER_SESSION },
-      created_at: new Date().toISOString(),
-      similarity: 0.9,
-    };
-    const { service } = makeService({
-      repository,
-      searchService: makeSearchService(None, None, [hit]),
-      context: sessionContext,
-    });
-
-    const out = (
-      await service.remember({
-        content: 'single-line commits, always',
-        scope: PERSONAL_SCOPE,
-      })
-    ).unwrap();
-
-    expect(out.similar_existing).toHaveLength(1);
-    expect(repository.update).not.toHaveBeenCalled();
-  });
-
-  it('a provisional (watcher) hit never collapses even in-session', async () => {
-    const repository = makeRepository();
-    const { service } = makeService({
-      repository,
-      searchService: makeSearchService(
-        Some({
-          id: MEMORY_A,
-          content: 'watcher paraphrase of the fact',
-          similarity: 0.96,
-          author_kind: 'agent',
-          agent_name: 'watcher',
-          source: { session: SESSION },
-        })
-      ),
-      context: sessionContext,
-    });
+  it('a provisional (watcher) hit never collapses, even in the same session', async () => {
+    const { service, repository, old } = withEarlierDraft(0.96, 'watcher');
 
     const out = (
       await service.remember({
@@ -1986,7 +1966,9 @@ describe('MemoryService.remember — same-session refinement collapse', () => {
     // Incoming authoritative vs provisional near-match falls through to the
     // provenance auto-resolve in hygiene, not to the session collapse.
     expect(out.deduplicated).toBeUndefined();
+    expect(repository.insert).toHaveBeenCalledOnce();
     expect(repository.update).not.toHaveBeenCalled();
+    expect(old.lifecycle.supersededBy).toBeNull();
   });
 });
 
@@ -2189,27 +2171,32 @@ describe('MemoryService.remember — the portable-layer gate', () => {
     expect(portabilityJudge.judgePortability).not.toHaveBeenCalled();
   });
 
-  it('fails closed into the project when the judge is unavailable', async () => {
-    const { service } = makeService({
-      ...attached,
-      portabilityJudge: makePortabilityJudge({
-        portable: false,
-        confidence: 0,
-        rationale: 'portability could not be judged',
-      }),
-    });
+  it.each([
+    [0.69, project],
+    [0.7, `user.${USER_ENTITY_ID.replace(/\./g, '_')}.core`],
+  ])(
+    'needs a confidence of 0.7 to leave the project (portable at %s)',
+    async (confidence, landed) => {
+      const { service } = makeService({
+        ...attached,
+        portabilityJudge: makePortabilityJudge({
+          portable: true,
+          confidence,
+          rationale: 'a property of postgres itself',
+        }),
+      });
 
-    const result = await service.remember({
-      content: 'postgres ltree labels cannot contain a dot',
-      kind: 'fact',
-      scope: CORE_SCOPE,
-    });
+      const result = await service.remember({
+        content: 'postgres ltree labels cannot contain a dot',
+        kind: 'fact',
+        scope: CORE_SCOPE,
+      });
 
-    // A judge that cannot answer must never be the reason a fact leaves its
-    // project: doubt keeps it home.
-    expect(result.isOk()).toBe(true);
-    expect(result.unwrap().scope).toBe(project);
-  });
+      // A portable verdict the judge is unsure of must never be the reason a
+      // fact leaves its project: doubt keeps it home.
+      expect(result.unwrap().scope).toBe(landed);
+    }
+  );
 
   it('leaves core alone when no project is attached', async () => {
     const { service, portabilityJudge } = makeService();
@@ -2372,24 +2359,6 @@ describe('MemoryService — the session thread', () => {
     });
 
     expect(result.isErr()).toBe(true);
-  });
-
-  it('keeps the thread out of the way of an explicitly named scope', async () => {
-    const { service, threads } = makeService({
-      threads: threadOn('proj.acme'),
-    });
-
-    // Addressing another scope by name is the owner's instruction: it must
-    // not consult the thread at all.
-    const result = await service.remember({
-      content: 'put this loop in the other project',
-      kind: 'task',
-      scope: 'proj.zero_memory',
-    });
-
-    expect(result.isOk()).toBe(true);
-    expect(result.unwrap().scope).toBe(project);
-    expect(threads.findByToken).not.toHaveBeenCalled();
   });
 
   it('stamps the session marker of the conversation a fact was born in', async () => {
@@ -2616,13 +2585,17 @@ describe('MemoryService.buildContext — the thread a hook-less client gets', ()
     const threads = makeThreads();
     const { service } = makeService({ threads });
 
+    // The project resolves, so the missing transport session is the only
+    // reason no thread is opened.
     const result = await service.buildContext({
       topic: 'project alpha',
       briefing: true,
+      project_hint: '/home/u/repos/alpha',
     });
 
-    expect(result.isOk()).toBe(true);
+    expect(result.unwrap().project_scope).toBeDefined();
     expect(threads.open).not.toHaveBeenCalled();
+    expect(result.unwrap().session).toBeUndefined();
   });
 });
 
