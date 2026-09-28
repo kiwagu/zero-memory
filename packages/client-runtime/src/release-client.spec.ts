@@ -1,27 +1,9 @@
-import {
-  createServer,
-  type IncomingMessage,
-  type RequestListener,
-  type Server,
-} from 'node:http';
+import { createServer, type RequestListener, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { callRelease, fetchDeployedVersion } from './release-client.js';
-
-vi.mock('@workspace/mcp-oauth-client', () => ({
-  createAuthedTransport: (url: string) =>
-    new StreamableHTTPClientTransport(new URL(url)),
-}));
-
-const readBody = (req: IncomingMessage): Promise<string> =>
-  new Promise((resolve) => {
-    let body = '';
-    req.on('data', (chunk: Buffer) => (body += chunk.toString('utf8')));
-    req.on('end', () => resolve(body));
-  });
+import { fetchDeployedVersion } from './release-client.js';
 
 const servers: Server[] = [];
 const serve = async (handler: RequestListener): Promise<string> => {
@@ -127,48 +109,5 @@ describe('fetchDeployedVersion', () => {
       await fetchDeployedVersion(`${base}/healthz`, 'version', 1500)
     ).toBeNull();
     expect(Date.now() - started).toBeLessThan(1500 + 3000);
-  }, 15_000);
-});
-
-describe('callRelease', () => {
-  it('gives up at its deadline even while connecting, and lets go of the request', async () => {
-    let stalled = 0;
-    const base = await serve((req, res) => {
-      void readBody(req).then((raw) => {
-        const message = JSON.parse(raw || '{}') as {
-          id?: number;
-          method?: string;
-          params?: { protocolVersion?: string };
-        };
-        if (message.method === 'initialize') {
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: message.id,
-              result: {
-                protocolVersion: message.params?.protocolVersion,
-                capabilities: { tools: {} },
-                serverInfo: { name: 'stalled', version: '0' },
-              },
-            })
-          );
-          return;
-        }
-        stalled += 1; // every later request hangs
-      });
-    });
-    // Long enough to outlast a cold initialize round trip (see board-client.spec.ts).
-    const deadlineMs = 1500;
-    const started = Date.now();
-    await expect(
-      callRelease(
-        { action: 'settings', scope: 'proj.x' },
-        deadlineMs,
-        `${base}/mcp`
-      )
-    ).rejects.toThrow();
-    expect(Date.now() - started).toBeLessThan(deadlineMs + 3000);
-    expect(stalled).toBeGreaterThan(0);
   }, 15_000);
 });

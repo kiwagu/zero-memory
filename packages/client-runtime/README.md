@@ -107,6 +107,12 @@ touch the wire. Authentication is delegated to `@workspace/mcp-oauth-client`
 - `receipt-client.ts` — `callSessionReceipt` (the `session_receipt` tool).
 - `capture-client.ts` — `callRemember` (the `remember` tool).
 - `import-client.ts` — `ImportClient` (the `import_memory` tool).
+- `bounded-client.ts` — `withBoundedClient`: one authed exchange bounded as a
+  whole, for the calls a hook makes inside its client's own timeout — every
+  request carries the deadline, and the client is closed when it passes, which
+  aborts a stalled connect too.
+- `board-client.ts` — `callCardBranches` (a card by number, with its
+  branches: `board resolve`, then `board get`), within a deadline.
 - `release-client.ts` — `fetchDeployedVersion` (reads a project's version
   url — https, http only on localhost, no credentials, no redirects) and
   `callRelease` (the `release` tool), both within a deadline.
