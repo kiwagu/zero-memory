@@ -304,6 +304,7 @@
         "@workspace/typescript-config": "workspace:^",
         "eslint": "catalog:",
         "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/commands": {
