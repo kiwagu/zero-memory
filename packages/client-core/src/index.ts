@@ -3,7 +3,6 @@ export {
   DEFAULT_HOOK_BUDGET_CHARS,
   LOOPS_BUDGET_SHARE,
   MEMORY_FLOOR_STUBS,
-  MEMORY_STUB_CHARS,
   memoryFloorChars,
   planSectionBudgets,
   renderMemoryStub,
@@ -47,11 +46,9 @@ export {
   type StandingRulesSplit,
 } from './standing-rules.logic.js';
 export {
-  DEFAULT_ACKNOWLEDGEMENT_WORDS,
   filterBriefingPack,
   isEmptyPack,
   isSubstantivePrompt,
-  MIN_PROMPT_LENGTH,
   packMemoryIds,
   parseBriefingPack,
   resolveAcknowledgementWords,
@@ -68,13 +65,14 @@ export {
 } from './offline-briefing.js';
 export {
   formatEntries,
+  parseJsonLines,
+  type JsonLineSchema,
   type ParsedTranscript,
   type TranscriptEntry,
 } from './transcript.js';
 export {
   collectMemoryIds,
   isRecallTool,
-  RECALL_TOOLS,
   toolBaseName,
 } from './recall-tools.logic.js';
 export {
@@ -85,11 +83,7 @@ export {
   type HookEntry,
   type HookProfile,
 } from './hook-manifest.logic.js';
-export {
-  EPOCH_BOUNDARY_SOURCES,
-  rulesNeedDelivery,
-  startsNewEpoch,
-} from './context-epoch.logic.js';
+export { rulesNeedDelivery, startsNewEpoch } from './context-epoch.logic.js';
 export {
   mergeBriefTail,
   planTailChunk,
@@ -98,8 +92,6 @@ export {
 } from './brief-tail.logic.js';
 export {
   decideRecallGap,
-  recallGapTally,
-  recallGapTrigger,
   SEARCH_REMINDER,
   SURPRISE_REMINDER,
   turnEndReminder,

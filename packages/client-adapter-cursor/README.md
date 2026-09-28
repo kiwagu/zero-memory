@@ -19,13 +19,20 @@ not the VS Code extension host — so this adapter maps that lifecycle onto the
   here: top-level `role` (not `message.role`), user text wrapped in
   `<timestamp>`/`<user_query>`, assistant reasoning stripped to `[REDACTED]`,
   and no inlined tool results.
+- `hook-io.ts` — the Cursor hook wire protocol: `readCursorHookPayload` (the
+  stdin payload), `projectRoot` (the first workspace root, standing in for the
+  `cwd` Cursor transcripts do not carry), and one emitter per output channel —
+  `emitSessionContext` (`additional_context`), `emitPromptDecision`
+  (`user_message`) and `emitToolDecision` (`agent_message`). The last two
+  always let the prompt or tool through: a reminder informs, it never gates.
 
 ## Capability notes
 
 - `sessionStart` output `additional_context` is a clean model-context injection
   channel (the session brief), equivalent to Claude's SessionStart.
 - `beforeSubmitPrompt` has NO model-context channel (only a user-facing
-  `user_message` / a `continue:false` block), so per-prompt topical task-briefs
+  `user_message`, and a `continue:false` block this adapter never sends), so
+  per-prompt topical task-briefs
   cannot inject into the model on Cursor — an honest capability gap; rely on the
   sessionStart brief plus mid-session MCP `recall`.
 - `stop` carries the `transcript_path` for fire-and-forget ingest.

@@ -1,6 +1,7 @@
 import {
   collectMemoryIds,
   isRecallTool,
+  parseJsonLines,
   type ParsedTranscript,
   type TranscriptEntry,
 } from '@workspace/client-core';
@@ -98,23 +99,7 @@ export const parseCodexTranscript = (jsonl: string): ParsedTranscript => {
   const recallCallIds = new Set<string>();
   const recalledIds = new Set<string>();
 
-  for (const rawLine of jsonl.split('\n')) {
-    const trimmed = rawLine.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue; // torn or non-JSON line
-    }
-    const line = codexLineSchema.safeParse(parsed);
-    if (!line.success) {
-      continue;
-    }
-    const { type, payload } = line.data;
-
+  for (const { type, payload } of parseJsonLines(jsonl, codexLineSchema)) {
     if (type === 'session_meta') {
       cwd ??= payload?.cwd;
       continue;

@@ -23,7 +23,7 @@ const MEMORY_INDEX_FILE = 'MEMORY.md';
  * splits on the presence of a `**Why:**` marker (a decision-with-why) vs a
  * plain fact — the same heuristic the memory-file convention encodes.
  */
-export const mapKind = (type: string | undefined, body: string): MemoryKind => {
+const mapKind = (type: string | undefined, body: string): MemoryKind => {
   switch (type) {
     case 'user':
       return 'preference';
@@ -43,7 +43,7 @@ export const mapKind = (type: string | undefined, body: string): MemoryKind => {
  * (personal); project/reference (and anything untyped in a project's memory
  * dir) are ABOUT the project.
  */
-export const mapTarget = (type: string | undefined): ImportMemoryTarget =>
+const mapTarget = (type: string | undefined): ImportMemoryTarget =>
   type === 'user' || type === 'feedback' ? 'personal' : 'project';
 
 /**

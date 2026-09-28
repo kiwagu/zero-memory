@@ -32,9 +32,6 @@ export const resolveProjectHint = (rawCwd: string): string => {
   return resolved;
 };
 
-/** Clears the resolution cache — for tests. */
-export const clearProjectHintCache = (): void => cache.clear();
-
 /**
  * The repository root for one level, collapsing a LINKED WORKTREE onto its main
  * working tree: a worktree's common dir is the main repo's `.git`, so its parent

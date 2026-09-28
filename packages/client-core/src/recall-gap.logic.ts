@@ -20,7 +20,7 @@
  * disabled on the ones that have them.
  */
 
-import { toolBaseName } from './recall-tools.logic.js';
+import { isRecallTool, toolBaseName } from './recall-tools.logic.js';
 
 /** What a session has done with memory so far, and what it has been told. */
 export interface RecallGapCounters {
@@ -62,7 +62,7 @@ const TRIGGERS: Record<string, RecallGapTrigger> = {
  * would silently file every failure as a successful tool call and the reminder
  * would never fire.
  */
-export const recallGapTrigger = (event: string): RecallGapTrigger =>
+const recallGapTrigger = (event: string): RecallGapTrigger =>
   TRIGGERS[event.toLowerCase()] ?? 'none';
 
 /** Which counter a memory-tool call increments, if any. */
@@ -71,20 +71,18 @@ export type RecallGapTally = 'recall' | 'remember' | null;
 /**
  * Classifies a memory tool call for counting.
  *
- * Uses the shared tool-name helper rather than matching a literal prefix,
+ * Uses the shared tool-name helpers rather than matching a literal prefix,
  * because the prefix is a per-client mount artifact: one client records
  * `mcp__zero-memory__recall`, another the bare `recall`, and a bundled server a
  * third form. Matching the prefix is how a counter silently reads zero on a
  * client that spells it differently — and a zero read count makes every reminder
- * fire unconditionally, turning the gate inside out.
+ * fire unconditionally, turning the gate inside out. What counts as a read is
+ * the transcript parsers' own answer, so the two can never disagree.
  */
-export const recallGapTally = (
-  toolName: string | undefined
-): RecallGapTally => {
+const recallGapTally = (toolName: string | undefined): RecallGapTally => {
   if (toolName === undefined || toolName === '') return null;
-  const base = toolBaseName(toolName);
-  if (base === 'recall' || base === 'build_context') return 'recall';
-  if (base === 'remember') return 'remember';
+  if (isRecallTool(toolName)) return 'recall';
+  if (toolBaseName(toolName) === 'remember') return 'remember';
   return null;
 };
 

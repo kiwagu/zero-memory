@@ -235,7 +235,7 @@ const TASK_LOOKUP_INSTRUCTION =
  * lookup (detached HEAD, empty, or a trunk branch).
  * `feature/ui-extractor-settings` -> `ui extractor settings`.
  */
-export const branchNameToTopic = (branch: string): string | null => {
+const branchNameToTopic = (branch: string): string | null => {
   if (!branch || branch === 'HEAD') return null;
   if (TRUNK_BRANCHES.has(branch)) return null;
   const topic = branch

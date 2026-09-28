@@ -4,28 +4,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  checkForUpdate,
-  compareVersions,
-  parseOrigin,
-} from './update-check.js';
-
-describe('compareVersions', () => {
-  it('orders x.y.z versions numerically', () => {
-    expect(compareVersions('0.3.0', '0.2.0')).toBe(1);
-    expect(compareVersions('0.2.0', '0.3.0')).toBe(-1);
-    expect(compareVersions('0.2.0', '0.2.0')).toBe(0);
-    expect(compareVersions('0.10.0', '0.9.9')).toBe(1);
-    expect(compareVersions('1.0.0', '0.99.99')).toBe(1);
-  });
-
-  it('returns null (never notify) on unparseable input', () => {
-    expect(compareVersions('0.2', '0.2.0')).toBeNull();
-    expect(compareVersions('abc', '0.2.0')).toBeNull();
-    expect(compareVersions('0.2.0', '')).toBeNull();
-    expect(compareVersions('0.2.0-rc1', '0.2.0')).toBeNull();
-  });
-});
+import { checkForUpdate, parseOrigin } from './update-check.js';
 
 describe('parseOrigin', () => {
   const valid = {
@@ -88,8 +67,9 @@ describe('checkForUpdate compares against the RUNNING version', () => {
       expect(await checkForUpdate('0.14.0')).toBeNull();
     }));
 
-  it('announces an update the running version really is behind', () =>
-    withState(install('0.14.0', '0.15.0'), async () => {
+  it('announces an update the running version really is behind, naming the running version', () =>
+    // Recorded 0.1.0, running 0.14.0: the notice names what actually runs.
+    withState(install('0.1.0', '0.15.0'), async () => {
       expect(await checkForUpdate('0.14.0')).toEqual({
         installed: '0.14.0',
         latest: '0.15.0',
@@ -97,10 +77,21 @@ describe('checkForUpdate compares against the RUNNING version', () => {
       });
     }));
 
-  it('reports the running version in the notice, not the recorded one', () =>
-    withState(install('0.1.0', '0.15.0'), async () => {
-      expect((await checkForUpdate('0.14.0'))?.installed).toBe('0.14.0');
+  it('orders versions numerically, not as text', () =>
+    withState(install('0.9.9', '0.10.0'), async () => {
+      expect((await checkForUpdate('0.9.9'))?.latest).toBe('0.10.0');
     }));
+
+  it.each([
+    ['a pre-release', '0.15.0-rc1', '0.14.0'],
+    ['a truncated version', '0.15', '0.14.0'],
+    ['garbage', 'latest', '0.14.0'],
+    ['a running version that does not parse', '0.15.0', 'dev'],
+  ])('stays silent on %s', (_, ships, running) =>
+    withState(install('0.14.0', ships), async () => {
+      expect(await checkForUpdate(running)).toBeNull();
+    })
+  );
 
   it('stays silent when the source manifest cannot be read', () =>
     withState(install('0.14.0', '0.15.0'), async () => {

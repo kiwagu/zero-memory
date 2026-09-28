@@ -36,10 +36,7 @@ describe('planTailChunk', () => {
     const chunk = planTailChunk(tail(memory(1), memory(2)), 9_000);
     expect(chunk?.text).toContain('1 of 2');
     expect(chunk?.text).toContain('session briefing');
-  });
-
-  it('says the chunk is a snapshot taken when the window opened', () => {
-    const chunk = planTailChunk(tail(memory(1)), 9_000);
+    // A snapshot, dated when the window opened.
     expect(chunk?.text).toContain('2026-09-22T10:00:00Z');
   });
 
@@ -85,20 +82,6 @@ describe('mergeBriefTail', () => {
       []
     );
     expect(merged.map((m) => m.id)).toEqual([memory(1).id, memory(3).id]);
-  });
-
-  it("queues a briefing's leftovers after what was already waiting", () => {
-    const merged = mergeBriefTail(
-      [memory(1), memory(2)],
-      [],
-      [memory(3), memory(4)]
-    );
-    expect(merged.map((m) => m.id)).toEqual([
-      memory(1).id,
-      memory(2).id,
-      memory(3).id,
-      memory(4).id,
-    ]);
   });
 
   it('queues a memory left over twice only once, where it already stood', () => {

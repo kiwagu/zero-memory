@@ -1,6 +1,7 @@
 import {
   collectMemoryIds,
   isRecallTool,
+  parseJsonLines,
   type ParsedTranscript,
   type TranscriptEntry,
 } from '@workspace/client-core';
@@ -70,25 +71,11 @@ export const parseHermesTranscript = (jsonl: string): ParsedTranscript => {
   let cwd: string | undefined;
   const recalledIds = new Set<string>();
 
-  for (const rawLine of jsonl.split('\n')) {
-    const trimmed = rawLine.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue; // torn line at a slice boundary, or a partial write
-    }
-    const line = hermesLineSchema.safeParse(parsed);
-    if (!line.success) {
-      continue;
-    }
-    const { type, role, text, tool, result } = line.data;
+  for (const line of parseJsonLines(jsonl, hermesLineSchema)) {
+    const { type, role, text, tool, result } = line;
 
     if (type === 'session') {
-      cwd ??= line.data.cwd;
+      cwd ??= line.cwd;
       continue;
     }
     if (type === 'tool_result') {

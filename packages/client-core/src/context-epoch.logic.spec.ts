@@ -1,16 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  EPOCH_BOUNDARY_SOURCES,
-  rulesNeedDelivery,
-  startsNewEpoch,
-} from './context-epoch.logic.js';
+import { rulesNeedDelivery, startsNewEpoch } from './context-epoch.logic.js';
 
 describe('startsNewEpoch', () => {
   it('treats a compacted or cleared conversation as a lost window', () => {
-    for (const source of EPOCH_BOUNDARY_SOURCES) {
-      expect(startsNewEpoch(source)).toBe(true);
-    }
+    // Named here, not read from the module's own list: a boundary dropped
+    // from that list must turn this red, not just make the loop shorter.
+    expect(startsNewEpoch('compact')).toBe(true);
+    expect(startsNewEpoch('clear')).toBe(true);
   });
 
   it('does not treat startup or resume as a boundary', () => {
