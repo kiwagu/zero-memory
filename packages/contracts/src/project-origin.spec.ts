@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { crossProjectPair, type OriginSide } from './hygiene-origin.js';
+import { crossProjectPair, type OriginSide } from './project-origin.js';
 
 const USER_SCOPE = 'user.usr_abc_123';
 const proj = (name: string): OriginSide => ({
