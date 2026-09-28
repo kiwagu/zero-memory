@@ -213,6 +213,64 @@ test.describe('Standing rules over MCP', () => {
 });
 
 test.describe('Project-layer rules ride the briefing pack', () => {
+  test('a project rule past the delivery TTL drops out of its briefing — unless pinned', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userB);
+    const run = Date.now();
+    const STALE = `project-rules marker ${run}: stale project rule.`;
+    const STALE_PINNED = `project-rules marker ${run}: stale but pinned.`;
+    // Promoted 200 days ago — well past the 90-day soft-TTL.
+    const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
+
+    const mcp = await McpTestClient.connect(token);
+    try {
+      let projectScope = '';
+      // Anchors on unrelated subjects: two near-identical ones would be
+      // deduplicated into one memory, which holds one rule only.
+      for (const [text, pinned, anchor] of [
+        [STALE, false, 'the importer batches uploads in groups of fifty'],
+        [STALE_PINNED, true, 'deploys freeze on Friday afternoons'],
+      ] as const) {
+        const write = await mcp.callTool('remember', {
+          content: `project-rules marker ${run}: ${anchor}`,
+          kind: 'convention',
+          scope: 'proj.stale_rules_project',
+        });
+        expect(write.isError ?? false).toBe(false);
+        const out = firstJson<{ memory_id: string; scope: string }>(write);
+        projectScope = out.scope;
+        const { error } = await adminClient().from('rule_candidates').insert({
+          memory_id: out.memory_id,
+          status: 'promoted',
+          resolution: 'promoted',
+          promoted_at: old,
+          resolved_at: old,
+          rule_text: text,
+          target_layer: 'project',
+          pinned,
+          useful_sessions: 3,
+          window_days: 14,
+        });
+        expect(error).toBeNull();
+      }
+
+      const briefed = await mcp.callTool('build_context', {
+        topic: 'anything about the stale rules project',
+        briefing: true,
+        scopes: [projectScope],
+      });
+      expect(briefed.isError ?? false).toBe(false);
+      const texts = firstJson<{ rules: BriefedRule[] }>(briefed).rules.map(
+        (rule) => rule.text
+      );
+      expect(texts).not.toContain(STALE);
+      // The pin is a standing decision: it does not expire by age.
+      expect(texts).toContain(STALE_PINNED);
+    } finally {
+      await mcp.close();
+    }
+  });
+
   test('a promoted project rule reaches only its own project briefing', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userB);

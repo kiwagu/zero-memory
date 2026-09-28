@@ -188,13 +188,19 @@ test.describe('The cards I worked on', () => {
     expect(cards.find((c) => c.id === x.id)!.my_last!.text).toBe('keys first');
   });
 
-  test('work past the horizon stays listed and is marked', async () => {
-    const { create, note, mine, backdate } = await board('mine-horizon');
+  test('work past the horizon stays listed and is marked, by my own last work', async () => {
+    const { seed, scope, create, note, mine, backdate } =
+      await board('mine-horizon');
     const recent = await create('Relay keys', 'active');
     const stale = await create('Relay rollout', 'active');
     await note(stale, 'long ago');
     backdate(stale, 31);
     backdate(recent, 29);
+    // A teammate picks the stale card up today: the card is fresh on the
+    // board, but my own work on it is still a month old.
+    await makeMember(scope, seed.userB.id, 'writer');
+    const dbB = asUser(await passwordGrantToken(seed.userB));
+    await rpc(dbB, 'card_note', { p_card_id: stale.id, p_text: 'picked up' });
 
     const cards = await mine();
     const byId = new Map(cards.map((c) => [c.id, c]));

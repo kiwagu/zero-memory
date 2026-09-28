@@ -919,6 +919,7 @@ interface LinkView {
 
 interface CardGet {
   links: LinkView[];
+  refs: Array<{ kind: string; target: string; memory_kind: string | null }>;
   blocked: boolean;
   links_assessed: boolean;
   events: Array<{
@@ -945,7 +946,14 @@ const makeReader = (scope: string, authUserId: string): Promise<string> =>
 
 test.describe('Relations are read', () => {
   test("a card reads its relations with the other card's label, from its own side", async () => {
-    const { scope, db } = await board('read-sides');
+    const { token, scope, db } = await board('read-sides');
+    // The memory board() wrote to make this scope: something to attach.
+    const memoryId = markers.at(-1)!;
+    const other = await projectScope(
+      token,
+      `read-sides-other-${Date.now()}`,
+      markers
+    );
     const a = await newCard(db, scope, 'Relay keys');
     const b = await newCard(db, scope, 'Relay rollout');
     const c = await newCard(db, scope, 'Relay docs');
@@ -960,9 +968,20 @@ test.describe('Relations are read', () => {
     });
     await link(db, a.id, e.id, 'duplicates', 'same work');
     await unlink(db, a.id, e.id, 'duplicates', 'not the same after all');
+    // A card on another board, and one archived since it was linked.
+    const f = await newCard(db, other, 'Transport keys');
+    await link(db, a.id, f.id, 'depends_on', 'needs the transport keys');
+    const g = await newCard(db, scope, 'Relay spike');
+    await link(db, a.id, g.id, 'relates_to', 'the spike found it');
+    await rpc(db, 'card_archive', { p_card_id: g.id, p_reason: 'spike over' });
+    await rpc(db, 'card_attach', {
+      p_card_id: a.id,
+      p_kind: 'memory',
+      p_target: memoryId,
+    });
 
     const readA = await readCard(db, a.id);
-    expect(readA.links).toHaveLength(3);
+    expect(readA.links).toHaveLength(5);
     expect(readA.links).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -985,8 +1004,28 @@ test.describe('Relations are read', () => {
           relation: 'relates_to',
           declared: false,
         }),
+        expect.objectContaining({
+          card_id: f.id,
+          scope: other,
+          archived: false,
+          relation: 'depends_on',
+        }),
+        expect.objectContaining({
+          card_id: g.id,
+          scope,
+          archived: true,
+          relation: 'relates_to',
+        }),
       ])
     );
+    // A memory attachment carries the memory's own kind.
+    expect(readA.refs).toEqual([
+      expect.objectContaining({
+        kind: 'memory',
+        target: memoryId,
+        memory_kind: 'fact',
+      }),
+    ]);
     expect((await readCard(db, b.id)).links).toEqual([
       expect.objectContaining({ card_id: a.id, relation: 'blocked_by' }),
     ]);
