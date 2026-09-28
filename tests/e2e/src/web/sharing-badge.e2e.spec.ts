@@ -6,6 +6,7 @@
  */
 import { expect, test } from '@playwright/test';
 
+import { admin } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import {
@@ -47,6 +48,17 @@ test.describe('Memory sharing badge', () => {
       await mcp.close();
     }
 
+    // scope_members.user_id is the usr_ entity id, not the auth uuid.
+    const userBEntityId = await entityIdOf(seed.userB.id);
+    // A run leaves userB in the probe scope, so a retry on the persisted stack
+    // would open on an already-shared memory: start from owner-only.
+    const reset = await admin()
+      .from('scope_members')
+      .delete()
+      .eq('scope', scope)
+      .eq('user_id', userBEntityId);
+    expect(reset.error).toBeNull();
+
     await signInThroughForm(page, seed.userA);
 
     // Owner is the scope's only member: a capability to share, not the fact.
@@ -55,9 +67,6 @@ test.describe('Memory sharing badge', () => {
     await expect(badge).toHaveText('sharable');
 
     // Deliberately add userB to the scope -> the memory is now truly shared.
-    // scope_members.user_id is the usr_ entity id, not the auth uuid.
-    const userBEntityId = await entityIdOf(seed.userB.id);
-
     const grant = await userRestClient(tokenA).rpc('add_scope_member', {
       p_scope: scope,
       p_user: userBEntityId,
