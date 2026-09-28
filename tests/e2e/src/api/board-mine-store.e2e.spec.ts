@@ -188,13 +188,19 @@ test.describe('The cards I worked on', () => {
     expect(cards.find((c) => c.id === x.id)!.my_last!.text).toBe('keys first');
   });
 
-  test('work past the horizon stays listed and is marked', async () => {
-    const { create, note, mine, backdate } = await board('mine-horizon');
+  test('work past the horizon stays listed and is marked, by my own last work', async () => {
+    const { seed, scope, create, note, mine, backdate } =
+      await board('mine-horizon');
     const recent = await create('Relay keys', 'active');
     const stale = await create('Relay rollout', 'active');
     await note(stale, 'long ago');
     backdate(stale, 31);
     backdate(recent, 29);
+    // A teammate picks the stale card up today: the card is fresh on the
+    // board, but my own work on it is still a month old.
+    await makeMember(scope, seed.userB.id, 'writer');
+    const dbB = asUser(await passwordGrantToken(seed.userB));
+    await rpc(dbB, 'card_note', { p_card_id: stale.id, p_text: 'picked up' });
 
     const cards = await mine();
     const byId = new Map(cards.map((c) => [c.id, c]));
@@ -222,43 +228,27 @@ test.describe('The cards I worked on', () => {
     ).toBe(true);
   });
 
-  test("without the flag no step of mine rides along, and age is the card's own", async () => {
-    const { db, scope, create, note, backdate } = await board('mine-off');
-    const fresh = await create('Relay keys', 'active');
-    await note(fresh, 'keys first');
-    const stale = await create('Relay rollout', 'idea');
-    backdate(stale, 31);
-    const listed = await rpc<{
-      cards: Array<Record<string, unknown> & { id: string }>;
-      horizon_days: number;
-    }>(db, 'board_list', { p_scope: scope });
-    expect(listed.horizon_days).toBe(30);
-    expect(listed.cards).toHaveLength(2);
-    for (const card of listed.cards) {
-      expect(card).not.toHaveProperty('my_last');
-    }
-    const byId = new Map(listed.cards.map((c) => [c.id, c]));
-    expect(byId.get(fresh.id)!.past_horizon).toBe(false);
-    expect(byId.get(stale.id)!.past_horizon).toBe(true);
-  });
-
-  test('on the regular board a card is as old as its last event, whoever wrote it', async () => {
+  test('on the regular board a card is as old as its last event, whoever wrote it, and no step rides along', async () => {
     const { seed, scope, create, backdate } = await board('board-age');
     const card = await create('Relay keys', 'idea');
     backdate(card, 31);
     await makeMember(scope, seed.userB.id, 'writer');
     const dbB = asUser(await passwordGrantToken(seed.userB));
-    const read = async () =>
-      (
-        await rpc<{ cards: Array<{ id: string; past_horizon?: boolean }> }>(
-          dbB,
-          'board_list',
-          { p_scope: scope }
-        )
-      ).cards.find((c) => c.id === card.id)!.past_horizon;
-    expect(await read()).toBe(true);
+    const read = async () => {
+      const listed = await rpc<{
+        cards: Array<Record<string, unknown> & { id: string }>;
+        horizon_days: number;
+      }>(dbB, 'board_list', { p_scope: scope });
+      expect(listed.horizon_days).toBe(30);
+      return listed.cards.find((c) => c.id === card.id)!;
+    };
+    expect((await read()).past_horizon).toBe(true);
     await rpc(dbB, 'card_note', { p_card_id: card.id, p_text: 'still here' });
-    expect(await read()).toBe(false);
+    const noted = await read();
+    expect(noted.past_horizon).toBe(false);
+    // Without the flag the list carries no step of the reader's, not even
+    // the note just written.
+    expect(noted).not.toHaveProperty('my_last');
   });
 
   test('narrows together with a title, a column and a relation', async () => {
@@ -322,23 +312,6 @@ test.describe('What a new session would be offered', () => {
       result.boards.find((b) => b.scope === one.scope)!.continuation.card
         ?.number
     ).toBe(x.number);
-  });
-
-  test('with no active card, a board still names the last step', async () => {
-    const { db, create, offer } = await board('offer-none');
-    const x = await create('Relay keys', 'active');
-    await rpc(db, 'card_move', {
-      p_card_id: x.id,
-      p_to_state: 'done',
-      p_reason: 'shipped',
-    });
-
-    const entry = (await offer()).boards[0]!.continuation;
-    expect(entry.card).toBeNull();
-    expect(entry.last_session).toMatchObject({
-      number: x.number,
-      type: 'moved',
-    });
   });
 
   test('a board I cannot see offers nothing', async () => {

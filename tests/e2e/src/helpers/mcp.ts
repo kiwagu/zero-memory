@@ -57,17 +57,6 @@ export class McpTestClient {
     return this.#client.getInstructions() ?? '';
   }
 
-  /**
-   * Contract version announced on the initialize handshake, or undefined when
-   * the server declares no contract capability.
-   */
-  contractVersion(): string | undefined {
-    const experimental = this.#client.getServerCapabilities()?.experimental;
-    const declared = experimental?.['zero-memory/contract'] as
-      { version?: string } | undefined;
-    return declared?.version;
-  }
-
   async callTool(
     name: string,
     args: Record<string, unknown>
@@ -94,11 +83,6 @@ export class McpTestClient {
     const first = contents[0];
     const text = first && 'text' in first ? first.text : '{}';
     return JSON.parse(String(text)) as T;
-  }
-
-  async listPromptNames(): Promise<string[]> {
-    const { prompts } = await this.#client.listPrompts();
-    return prompts.map((prompt) => prompt.name);
   }
 
   /** Raw content blocks of a tool call — for resource_link assertions. */

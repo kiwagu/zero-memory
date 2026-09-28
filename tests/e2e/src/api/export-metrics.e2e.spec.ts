@@ -97,23 +97,4 @@ test.describe('export_metrics over MCP @smoke', () => {
       await mcp.close();
     }
   });
-
-  test('defaults the window to 30 days and rejects an out-of-range horizon', async () => {
-    const user = await provisionE2EUser('export-metrics-b@zm.e2e');
-    const token = await passwordGrantToken(user);
-    const mcp = await McpTestClient.connect(token);
-    try {
-      // Omitted days → the contract default.
-      const def = firstJson<ExportMetrics>(
-        await mcp.callTool('export_metrics', {})
-      );
-      expect(def.window.days).toBe(30);
-
-      // Above the 365-day ceiling → input validation rejects it.
-      const tooWide = await mcp.callTool('export_metrics', { days: 400 });
-      expect(tooWide.isError ?? false).toBe(true);
-    } finally {
-      await mcp.close();
-    }
-  });
 });

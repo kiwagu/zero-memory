@@ -3,13 +3,15 @@
  * records the git branches its work ran on, a branch is visible exactly where
  * its card is, and a malformed branch never reaches the table.
  */
-import { spawnSync } from 'node:child_process';
-
 import { expect, test } from '@playwright/test';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import { e2eEnv } from '../helpers/env.js';
-import { firstJson, McpTestClient } from '../helpers/mcp.js';
+import {
+  admin,
+  asUser,
+  projectScope,
+  psql,
+  rpc,
+} from '../helpers/board-store.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
 
@@ -57,45 +59,27 @@ interface CardGetJson {
   events: EventJson[];
 }
 
-const asUser = (token: string): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
-    auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
+/**
+ * The memories this file writes only to make a project scope, deleted when
+ * the file is done so they do not crowd later specs.
+ */
+const markers: string[] = [];
 
-/** A project scope the caller may write, made the way an agent makes one. */
-const projectScope = async (token: string, tag: string): Promise<string> => {
-  const agent = await McpTestClient.connect(token);
-  try {
-    const made = await agent.callTool('remember', {
-      content: `e2e branch store marker ${tag}: the ingest worker drops chunks under load`,
-      kind: 'fact',
-      project_hint: `/tmp/zm-e2e-${tag}`,
-    });
-    expect(made.isError ?? false).toBe(false);
-    return firstJson<{ scope: string }>(made).scope;
-  } finally {
-    await agent.close();
+test.afterAll(async () => {
+  if (markers.length > 0) {
+    await admin().from('memories').delete().in('id', markers);
   }
-};
-
-const rpc = async <T>(
-  client: SupabaseClient,
-  fn: string,
-  args: Record<string, unknown>
-): Promise<T> => {
-  const { data, error } = await client.rpc(fn, args);
-  if (error) {
-    throw new Error(`${fn}: ${error.message}`);
-  }
-  return data as T;
-};
+});
 
 test.describe('Card branches in the store', () => {
   test('a branch attaches once, reads back with its card, and detaches', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `branch-store-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `branch-store-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -183,7 +167,11 @@ test.describe('Card branches in the store', () => {
   test('a stranger sees no branch of a card they cannot see, and cannot add one', async () => {
     const seed = await readSeedState();
     const ownerToken = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(ownerToken, `branch-rls-${Date.now()}`);
+    const scope = await projectScope(
+      ownerToken,
+      `branch-rls-${Date.now()}`,
+      markers
+    );
     const owner = asUser(ownerToken);
     const { card } = await rpc<{ card: CardJson }>(owner, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -232,8 +220,12 @@ test.describe('A branch belongs to its card', () => {
     // Two projects this user may write: a row written in one must not
     // attach to a card of the other, or a writer of any scope could plant an
     // open branch on a card they may only read.
-    const own = await projectScope(token, `branch-own-${Date.now()}`);
-    const other = await projectScope(token, `branch-other-${Date.now()}`);
+    const own = await projectScope(token, `branch-own-${Date.now()}`, markers);
+    const other = await projectScope(
+      token,
+      `branch-other-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -272,38 +264,15 @@ test.describe('A branch belongs to its card', () => {
   });
 });
 
-/** One statement against the e2e database, as the migration tests run it. */
-const psql = (query: string): string => {
-  const result = spawnSync(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '--network',
-      'host',
-      '-i',
-      'supabase/postgres:17.6.1.136',
-      'psql',
-      'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-tA',
-      '-c',
-      query,
-    ],
-    { encoding: 'utf8' }
-  );
-  if (result.status !== 0) {
-    throw new Error(`psql failed: ${result.stderr}`);
-  }
-  return (result.stdout ?? '').trim();
-};
-
 test.describe('The branch rule in the store', () => {
   test('work enters active with its branch, a stated reason for none, or a branch already open', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `branch-enter-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `branch-enter-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
 
     // Opening straight into active needs the branch or a declaration.
@@ -428,7 +397,11 @@ test.describe('The branch rule in the store', () => {
   test('work leaves active only by landing its branch or saying why it has not', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `branch-leave-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `branch-leave-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -630,7 +603,11 @@ test.describe('The branch rule in the store', () => {
   test('a forgotten landing is recorded from any state but the archive', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `branch-late-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `branch-late-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -746,7 +723,11 @@ test.describe('The branch rule in the store', () => {
     // branch is squashed again — so one branch can land more than once.
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `branch-reland-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `branch-reland-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -820,7 +801,11 @@ test.describe('The branch rule in the store', () => {
   test('the old six-argument move still resolves, and each command keeps one signature', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `branch-compat-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `branch-compat-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -855,45 +840,14 @@ test.describe('The branch rule in the store', () => {
     );
   });
 
-  test('a briefing names the open branches of the project', async () => {
-    const seed = await readSeedState();
-    const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `branch-brief-${Date.now()}`);
-    const db = asUser(token);
-    const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
-      p_no_links: 'e2e fixture',
-      p_scope: scope,
-      p_title: 'Named in the briefing',
-      p_state: 'active',
-      p_branch_repo: REPO,
-      p_branch_name: 'feature/briefed',
-    });
-    const work = await rpc<{
-      open_branches: Array<{
-        card_id: string;
-        number: number;
-        state: string;
-        repo: string;
-        branch: string;
-        landings: Array<{ squash_sha: string }>;
-      }>;
-    }>(db, 'briefing_work', { p_scope: scope });
-    expect(work.open_branches).toEqual([
-      {
-        card_id: card.id,
-        number: card.number,
-        state: 'active',
-        repo: REPO,
-        branch: 'feature/briefed',
-        landings: [],
-      },
-    ]);
-  });
-
   test('another card may reopen a landed branch, and the briefing carries its landings', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `branch-reopen-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `branch-reopen-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
 
     const { card: first } = await rpc<{ card: CardJson }>(db, 'card_create', {
@@ -934,16 +888,22 @@ test.describe('The branch rule in the store', () => {
     const work = await rpc<{
       open_branches: Array<{
         card_id: string;
+        number: number;
+        state: string;
+        repo: string;
         branch: string;
         landings: Array<{ squash_sha: string }>;
       }>;
     }>(db, 'briefing_work', { p_scope: scope });
     expect(work.open_branches).toEqual([
-      expect.objectContaining({
+      {
         card_id: second.id,
+        number: second.number,
+        state: 'active',
+        repo: REPO,
         branch: 'feature/search',
         landings: [{ squash_sha: '1111111' }],
-      }),
+      },
     ]);
   });
 });

@@ -7,37 +7,15 @@
  * specs pin the two halves of the fix: an unaccepted grant is inert, and the
  * consented path still works.
  */
-import { createClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import {
+  entityIdOf,
   passwordGrantToken,
   provisionE2EUser,
   userRestClient,
 } from '../helpers/users.js';
-
-/**
- * The `usr_` entity id behind an auth uuid, read past RLS with the service
- * role. Deliberately NOT "the first row of profiles the caller can see": once
- * the caller has co-members that set holds several people, and picking the
- * first one silently attributes someone else's id to the caller.
- */
-const entityIdOf = async (authUserId: string): Promise<string> => {
-  const admin = createClient(
-    e2eEnv.supabaseUrl,
-    e2eEnv.supabaseServiceRoleKey,
-    { auth: { persistSession: false, autoRefreshToken: false } }
-  );
-  const { data, error } = await admin
-    .from('profiles')
-    .select('id')
-    .eq('user_id', authUserId)
-    .single();
-  expect(error).toBeNull();
-  return (data as { id: string }).id;
-};
 
 /** `proj.<owner with dots folded>.<slug>` — the per-owner project namespace. */
 const ownScope = (userEntityId: string, slug: string): string =>

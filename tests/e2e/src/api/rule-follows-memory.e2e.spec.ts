@@ -10,11 +10,15 @@
  * stays promoted. These specs pin that down at the database, the way every
  * path reaches it.
  */
-import { spawn, spawnSync } from 'node:child_process';
-
 import { expect, test } from '@playwright/test';
 
-import { admin, asUser, projectScope } from '../helpers/board-store.js';
+import {
+  admin,
+  asUser,
+  projectScope,
+  psql,
+  psqlInBackground,
+} from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { seedOwnedMemory } from '../helpers/rules.js';
 import { readSeedState } from '../helpers/runtime-state.js';
@@ -483,43 +487,6 @@ test.describe('A promoted rule follows its memory', () => {
   });
 });
 
-/** SQL as the database owner on the test contour, the statements in one go. */
-const sqlArgs = (statement: string): string[] => [
-  'exec',
-  '-i',
-  'supabase_db_zero-memory-e2e',
-  'psql',
-  '-U',
-  'postgres',
-  '-d',
-  'postgres',
-  '-v',
-  'ON_ERROR_STOP=1',
-  '-Atc',
-  statement,
-];
-
-/** Runs `statement` in the background; resolves with its exit status. */
-const sqlInBackground = (
-  statement: string
-): Promise<{ status: number | null; stderr: string }> =>
-  new Promise((resolve) => {
-    const child = spawn('docker', sqlArgs(statement));
-    let stderr = '';
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-    child.on('close', (status) => resolve({ status, stderr }));
-  });
-
-const sqlNow = (statement: string): string => {
-  const result = spawnSync('docker', sqlArgs(statement), { encoding: 'utf8' });
-  if (result.status !== 0) {
-    throw new Error(`psql: ${result.stderr}`);
-  }
-  return result.stdout.trim();
-};
-
 /** Polls `probe` until it holds, or fails the test after 20 s. */
 const until = async (what: string, probe: () => boolean): Promise<void> => {
   const deadline = Date.now() + 20_000;
@@ -534,7 +501,7 @@ const until = async (what: string, probe: () => boolean): Promise<void> => {
 
 /** Whether a backend running a statement tagged `marker` waits as `where`. */
 const waiting = (marker: string, where: string): boolean =>
-  sqlNow(
+  psql(
     `select count(*) from pg_stat_activity where ${where} ` +
       `and query like '%${marker}%' and pid <> pg_backend_pid()`
   ) === '1';
@@ -548,7 +515,7 @@ const waiting = (marker: string, where: string): boolean =>
 const barrier = async (tag: string) => {
   const key = Math.floor(Math.random() * 2_000_000_000);
   const marker = `gate-${tag}`;
-  const holder = sqlInBackground(
+  const holder = psqlInBackground(
     `/* ${marker} */ select pg_advisory_lock(${key}); select pg_sleep(60);`
   );
   await until(`${marker} to hold its lock`, () =>
@@ -558,7 +525,7 @@ const barrier = async (tag: string) => {
     /** The statement a transaction runs to wait at the barrier. */
     wait: `select pg_advisory_xact_lock(${key});`,
     release: async (): Promise<void> => {
-      sqlNow(
+      psql(
         `select pg_terminate_backend(pid) from pg_stat_activity ` +
           `where query like '%${marker}%' and pid <> pg_backend_pid()`
       );
@@ -673,7 +640,7 @@ test.describe('Delivery and concurrency', () => {
     // rule must end on the successor with its final text.
     const gate = await barrier(`race-${run}`);
     const marker = `race-${run}`;
-    const rewrite = sqlInBackground(
+    const rewrite = psqlInBackground(
       `/* ${marker} */ begin; update public.memories set content = ` +
         `'${rewritten}' where id = '${successorId}'; ${gate.wait} commit;`
     );
@@ -681,7 +648,7 @@ test.describe('Delivery and concurrency', () => {
       waiting(marker, "wait_event = 'advisory'")
     );
     const supersedeMarker = `race-move-${run}`;
-    const supersede = sqlInBackground(
+    const supersede = psqlInBackground(
       `/* ${supersedeMarker} */ update public.memories set superseded_by = ` +
         `'${successorId}', invalidated_at = now() where id = '${oldId}';`
     );
@@ -726,7 +693,7 @@ test.describe('Delivery and concurrency', () => {
     // conflict with them.
     const gate = await barrier(`pair-${run}`);
     const firstMarker = `pair-a-${run}`;
-    const firstTx = sqlInBackground(
+    const firstTx = psqlInBackground(
       `/* ${firstMarker} */ begin; select 1 from public.memories ` +
         `where id = '${successorId}' for key share; ${gate.wait} ` +
         `update public.memories set superseded_by = '${successorId}', ` +
@@ -736,7 +703,7 @@ test.describe('Delivery and concurrency', () => {
       waiting(firstMarker, "wait_event = 'advisory'")
     );
     const secondMarker = `pair-b-${run}`;
-    const secondTx = sqlInBackground(
+    const secondTx = psqlInBackground(
       `/* ${secondMarker} */ begin; select 1 from public.memories ` +
         `where id = '${successorId}' for key share; update public.memories ` +
         `set superseded_by = '${successorId}', invalidated_at = now() ` +
@@ -831,7 +798,7 @@ test.describe('The writer hears what happened to a rule', () => {
 });
 
 test.describe('promote_rule and a revoked rule', () => {
-  test('a forced re-promote of a revoked rule reaches the next briefing', async () => {
+  test('a re-promote of a revoked rule reaches the next briefing', async () => {
     const run = fresh();
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userB);
@@ -859,7 +826,6 @@ test.describe('promote_rule and a revoked rule', () => {
       const promoted = await mcp.callTool('promote_rule', {
         memory_id: memoryId,
         rule_text: text,
-        force: true,
       });
       expect(promoted.isError ?? false).toBe(false);
       expect(firstJson<{ status: string }>(promoted).status).toBe('promoted');
