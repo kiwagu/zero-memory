@@ -6,10 +6,13 @@
  */
 import { expect, test } from '@playwright/test';
 
-import { admin } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
-import { passwordGrantToken, userRestClient } from '../helpers/users.js';
+import {
+  entityIdOf,
+  passwordGrantToken,
+  userRestClient,
+} from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
 
 test.describe('Memory sharing badge', () => {
@@ -52,15 +55,8 @@ test.describe('Memory sharing badge', () => {
     await expect(badge).toHaveText('sharable');
 
     // Deliberately add userB to the scope -> the memory is now truly shared.
-    // scope_members.user_id is the usr_ entity id, not the auth uuid — resolve
-    // it from profiles (service role, keyed by the auth uuid).
-    const profile = await admin()
-      .from('profiles')
-      .select('id')
-      .eq('user_id', seed.userB.id)
-      .single();
-    expect(profile.error).toBeNull();
-    const userBEntityId = (profile.data as { id: string }).id;
+    // scope_members.user_id is the usr_ entity id, not the auth uuid.
+    const userBEntityId = await entityIdOf(seed.userB.id);
 
     const grant = await userRestClient(tokenA).rpc('add_scope_member', {
       p_scope: scope,

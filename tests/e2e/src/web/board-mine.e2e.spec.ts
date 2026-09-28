@@ -9,6 +9,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   admin,
   asUser,
+  type CardResult,
   makeMember,
   psql,
   rpc,
@@ -16,11 +17,7 @@ import {
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
-import { signInThroughForm } from '../helpers/web.js';
-
-interface CardResult {
-  card: { id: string; number: number; scope: string };
-}
+import { hintOf, signInThroughForm } from '../helpers/web.js';
 
 const markers: string[] = [];
 
@@ -70,24 +67,6 @@ const backdate = (id: string, days: number) =>
 
 const column = (page: Page, state: string): Locator =>
   page.getByTestId(`board-column-${state}`);
-
-/**
- * Hovers until the hint opens, and answers it: a hover that lands before the
- * page is interactive is lost, so each try moves away first.
- */
-const hintOf = async (
-  page: Page,
-  target: Locator,
-  hintTestId: string
-): Promise<Locator> => {
-  const tip = page.getByTestId(hintTestId);
-  await expect(async () => {
-    await page.mouse.move(0, 0);
-    await target.hover();
-    await expect(tip).toBeVisible({ timeout: 1000 });
-  }).toPass({ timeout: 20_000 });
-  return tip;
-};
 
 test.describe('The board folds what went quiet, and Mine is the same board', () => {
   test('Mine is the same board narrowed to my cards, with the card to continue marked', async ({
