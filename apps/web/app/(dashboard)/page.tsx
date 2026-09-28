@@ -342,6 +342,7 @@ export default async function InsightsPage({
             <Link
               key={option.value}
               href={option.href}
+              aria-current={option.value === period ? 'page' : undefined}
               className={cn(
                 'rounded-md px-3 py-1.5 text-sm',
                 option.value === period
