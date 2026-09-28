@@ -1,9 +1,11 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-
 import type { BriefTail } from '@workspace/client-core';
 import { startsNewEpoch } from '@workspace/client-core';
+
+import {
+  loadStateRecord,
+  saveCappedStateRecord,
+  stateFilePath,
+} from './state-file.js';
 
 /**
  * Per-session briefing state shared by the SessionStart and UserPromptSubmit
@@ -70,40 +72,17 @@ export interface SessionBriefState {
 export type BriefStateFile = Record<string, SessionBriefState>;
 
 /** Oldest entries beyond this are pruned on save (state must not grow forever). */
-export const MAX_TRACKED_SESSIONS = 200;
+const MAX_TRACKED_SESSIONS = 200;
 
 /** Default state-file location; tests pass their own path. */
 export const briefStatePath = (env: NodeJS.ProcessEnv = process.env): string =>
-  join(
-    env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'session-briefs.json'
-  );
+  stateFilePath('session-briefs.json', env);
 
-export const loadBriefState = (path: string): BriefStateFile => {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-    // Every reader indexes the result by session id and every writer assigns
-    // into it, so a file that parses to anything but a plain object — a
-    // literal `null`, an array, a string — would throw on every hook of every
-    // session. It is treated as the empty state it effectively is.
-    return typeof parsed === 'object' &&
-      parsed !== null &&
-      !Array.isArray(parsed)
-      ? (parsed as BriefStateFile)
-      : {};
-  } catch {
-    return {};
-  }
-};
+export const loadBriefState = (path: string): BriefStateFile =>
+  loadStateRecord<SessionBriefState>(path);
 
-const saveBriefState = (path: string, state: BriefStateFile): void => {
-  const entries = Object.entries(state)
-    .sort(([, a], [, b]) => b.at - a.at)
-    .slice(0, MAX_TRACKED_SESSIONS);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(Object.fromEntries(entries), null, 2));
-};
+const saveBriefState = (path: string, state: BriefStateFile): void =>
+  saveCappedStateRecord(path, state, MAX_TRACKED_SESSIONS, (entry) => entry.at);
 
 /**
  * The optional fields every writer must carry over, in ONE place. Each writer

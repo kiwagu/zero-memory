@@ -55,7 +55,7 @@ export const MEMORY_FLOOR_STUBS = 10;
  * Character cost per stub line: the memory kind, up to STUB_CONTENT_CHARS of
  * opening content, and the memory id.
  */
-export const MEMORY_STUB_CHARS = 140;
+const MEMORY_STUB_CHARS = 140;
 
 /**
  * The line that opens a pack's stub block. Shared with `memoryFloorChars` so

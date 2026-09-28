@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { callCardBranches } from './board-client.js';
+import { withBoundedClient } from './bounded-client.js';
 
 vi.mock('@workspace/mcp-oauth-client', () => ({
   createAuthedTransport: (url: string) =>
@@ -18,7 +18,7 @@ const readBody = (req: IncomingMessage): Promise<string> =>
     req.on('end', () => resolve(body));
   });
 
-describe('callCardBranches', () => {
+describe('withBoundedClient', () => {
   let server: Server | null = null;
 
   afterEach(async () => {
@@ -72,7 +72,13 @@ describe('callCardBranches', () => {
     const deadlineMs = 1500;
     const started = Date.now();
     await expect(
-      callCardBranches('proj.x', 19, deadlineMs, `http://127.0.0.1:${port}/mcp`)
+      withBoundedClient(
+        'zero-memory-test',
+        `http://127.0.0.1:${port}/mcp`,
+        deadlineMs,
+        (client, options) =>
+          client.callTool({ name: 'board', arguments: {} }, undefined, options)
+      )
     ).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(deadlineMs + 3000);
     expect(stalled).toBeGreaterThan(0);

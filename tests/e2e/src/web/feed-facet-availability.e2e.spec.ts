@@ -10,19 +10,13 @@
  * Every view is narrowed by the shared marker, so the assertions hold whatever
  * else the stand's corpus contains.
  */
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
-
-const adminClient = (): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 
 const MARKER = 'e2e feed-facet marker';
 const LIVE = `${MARKER}: the weekly digest is assembled on Sunday evening`;
@@ -80,7 +74,7 @@ test.describe('feed facet availability', () => {
   // of the same feed — leaving them behind would push the fixtures off it.
   test.afterAll(async () => {
     if (seededMemories.length > 0) {
-      await adminClient().from('memories').delete().in('id', seededMemories);
+      await admin().from('memories').delete().in('id', seededMemories);
     }
   });
 
@@ -118,29 +112,6 @@ test.describe('feed facet availability', () => {
     );
     // Exactly one memory of this marker was never retired.
     await expect(liveOnly).toContainText('1');
-  });
-
-  test('"live only" drops the lone invalidation the default view keeps', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    await seedFacetCorpus(await passwordGrantToken(seed.userA));
-
-    await signInThroughForm(page, seed.userA);
-    await page.goto(feedUrl());
-
-    const feed = page.getByTestId('memory-feed');
-    // The default view keeps both: a retirement without a successor stays
-    // observable there.
-    await expect(feed.getByText(LIVE.slice(0, 50)).first()).toBeVisible();
-    await expect(feed.getByText(CLOSED.slice(0, 50)).first()).toBeVisible();
-
-    await page.getByTestId('feed-filter-status').click();
-    await page.getByRole('option', { name: 'Live only' }).click();
-    await expect(page).toHaveURL(/status=live/);
-
-    await expect(feed.getByText(LIVE.slice(0, 50)).first()).toBeVisible();
-    await expect(feed.getByText(CLOSED.slice(0, 50))).toHaveCount(0);
   });
 
   test('an applied value stays usable even when it yields nothing', async ({

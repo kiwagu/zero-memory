@@ -1,5 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -7,6 +6,8 @@ import {
   DAY_MS,
   DEFAULT_BRIEF_CACHE_TTL_DAYS,
 } from '@workspace/client-core';
+
+import { stateFilePath, writeStateFile } from './state-file.js';
 
 /**
  * Offline briefing cache (state-store adapter): the SessionStart hook stores
@@ -19,11 +20,7 @@ import {
 
 /** Default cache directory; tests pass their own. */
 export const briefCacheDir = (env: NodeJS.ProcessEnv = process.env): string =>
-  join(
-    env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'brief-cache'
-  );
+  stateFilePath('brief-cache', env);
 
 /**
  * One file per project, keyed by the FULL cwd path (basenames collide across
@@ -40,9 +37,8 @@ export const writeBriefCache = (
   now: number = Date.now()
 ): void => {
   try {
-    mkdirSync(dir, { recursive: true });
     const entry: BriefCacheEntry = { cwd, context, cached_at: now };
-    writeFileSync(briefCacheFile(dir, cwd), JSON.stringify(entry, null, 2));
+    writeStateFile(briefCacheFile(dir, cwd), entry, 2);
   } catch {
     // best-effort: a failed cache write only costs offline resilience.
   }

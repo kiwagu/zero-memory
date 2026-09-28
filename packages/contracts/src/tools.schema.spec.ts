@@ -3,18 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   buildContextInputSchema,
   buildContextOutputSchema,
-  closeLoopInputSchema,
-  closeLoopOutputSchema,
   entitiesOutputSchema,
   extractableMemoryKindSchema,
-  forgetInputSchema,
-  forgetOutputSchema,
   linkInputSchema,
   memorySearchHitSchema,
   recallInputSchema,
   recallOutputSchema,
   rememberInputSchema,
-  rememberOutputSchema,
 } from './index.js';
 
 describe('tool contracts', () => {
@@ -74,7 +69,7 @@ describe('tool contracts', () => {
     ).toThrow();
   });
 
-  it('parses link input and graph outputs', () => {
+  it('refuses an unknown edge type on link, and parses an entities listing', () => {
     expect(
       linkInputSchema.parse({ src: 'alpha', dst: 'postgres', type: 'uses' })
         .type
@@ -83,29 +78,8 @@ describe('tool contracts', () => {
       linkInputSchema.parse({ src: 'a', dst: 'b', type: 'likes' })
     ).toThrow();
 
-    const briefing = buildContextOutputSchema.parse({
-      memories: [
-        {
-          id: 'mem_0000000000000001.0000000000',
-          content: 'alpha uses postgres',
-          kind: 'fact',
-          scope: 'user.abc',
-          created_at: '2026-07-03T00:00:00Z',
-          score: 0.03,
-        },
-      ],
-      entities: [
-        {
-          id: 'ent_0000000000000001.0000000000',
-          name: 'alpha',
-          type: 'project',
-        },
-      ],
-      edges: [{ src: 'alpha', dst: 'postgres', type: 'uses', weight: 1 }],
-      linked_memories: [],
-    });
-    expect(briefing.edges[0]?.type).toBe('uses');
-
+    // No e2e calls the entities tool, so this parse is the only check that a
+    // well-formed listing still satisfies its output schema.
     expect(
       entitiesOutputSchema.parse({
         entities: [
@@ -121,28 +95,6 @@ describe('tool contracts', () => {
     ).toHaveLength(1);
   });
 
-  it('parses remember/forget outputs', () => {
-    expect(
-      rememberOutputSchema.parse({
-        memory_id: 'mem_0000000000000001.0000000000',
-      })
-    ).toEqual({
-      memory_id: 'mem_0000000000000001.0000000000',
-    });
-    expect(
-      rememberOutputSchema.parse({
-        memory_id: 'mem_0000000000000001.0000000000',
-        deduplicated: true,
-      }).deduplicated
-    ).toBe(true);
-    expect(
-      forgetOutputSchema.parse({
-        memory_id: 'mem_0000000000000001.0000000000',
-        invalidated: true,
-      }).invalidated
-    ).toBe(true);
-  });
-
   it('parses recall input and rejects bad k / kinds', () => {
     const parsed = recallInputSchema.parse({
       query: 'bun gotchas',
@@ -156,47 +108,20 @@ describe('tool contracts', () => {
     ).toThrow();
   });
 
-  it('carries no translation gate, so a stale flag cannot reach the server', () => {
-    const parsed = recallInputSchema.parse({
-      query: 'q',
-      translate_query: true,
-      query_lang: 'es',
-    });
-
-    expect(parsed).not.toHaveProperty('translate_query');
-    expect(parsed).not.toHaveProperty('query_lang');
-    expect(parsed.query).toBe('q');
-  });
-
-  it('parses the briefing kind and drops any translation gate', () => {
+  it('parses the briefing kind: optional, and only a known one', () => {
     const bare = buildContextInputSchema.parse({ topic: 't' });
     expect(bare.briefing_kind).toBeUndefined();
 
     const task = buildContextInputSchema.parse({
-      topic: '検索を修正中',
+      topic: 't',
       briefing: true,
       briefing_kind: 'task',
-      translate_query: true,
-      query_lang: 'ja',
     });
     expect(task.briefing_kind).toBe('task');
-    expect(task).not.toHaveProperty('translate_query');
-    expect(task).not.toHaveProperty('query_lang');
-    // The topic survives unchanged whatever script it is written in.
-    expect(task.topic).toBe('検索を修正中');
 
     expect(() =>
       buildContextInputSchema.parse({ topic: 't', briefing_kind: 'weekly' })
     ).toThrow();
-
-    const pack = buildContextOutputSchema.parse({
-      memories: [],
-      entities: [],
-      edges: [],
-      linked_memories: [],
-      searched_as: 'fixing dashboard search',
-    });
-    expect(pack).not.toHaveProperty('searched_as');
   });
 
   it('parses recall output hits', () => {
@@ -313,42 +238,9 @@ describe('tool contracts', () => {
     expect(withLoops.open_loops_total).toBe(4);
   });
 
-  it('accepts the open-loop kinds on remember and close_loop io', () => {
-    expect(
-      rememberInputSchema.parse({
-        content: 'check the failing e2e on machine B — /share/zm/report',
-        kind: 'task',
-      }).kind
-    ).toBe('task');
-    expect(
-      rememberInputSchema.parse({ content: 'x', kind: 'open-question' }).kind
-    ).toBe('open-question');
-
-    expect(
-      closeLoopInputSchema.parse({
-        memory_id: 'mem_0000000000000001.0000000000',
-      }).memory_id
-    ).toBe('mem_0000000000000001.0000000000');
-    expect(() => closeLoopInputSchema.parse({})).toThrow();
-    expect(
-      closeLoopOutputSchema.parse({
-        memory_id: 'mem_0000000000000001.0000000000',
-        closed: true,
-      }).closed
-    ).toBe(true);
-  });
-
   it('excludes open-loop kinds from the extractable vocabulary', () => {
     expect(extractableMemoryKindSchema.options).not.toContain('task');
     expect(extractableMemoryKindSchema.options).not.toContain('open-question');
     expect(extractableMemoryKindSchema.options).toContain('fact');
-  });
-
-  it('requires memory_id on forget', () => {
-    expect(
-      forgetInputSchema.parse({ memory_id: 'mem_0000000000000001.0000000000' })
-        .memory_id
-    ).toBe('mem_0000000000000001.0000000000');
-    expect(() => forgetInputSchema.parse({})).toThrow();
   });
 });

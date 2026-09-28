@@ -9,10 +9,7 @@
 import { CROCKFORD_CLASS } from 'entity-id';
 
 /** Read tools whose result carries the `mem_` ids surfaced to the agent. */
-export const RECALL_TOOLS: ReadonlySet<string> = new Set([
-  'recall',
-  'build_context',
-]);
+const RECALL_TOOLS: ReadonlySet<string> = new Set(['recall', 'build_context']);
 
 /**
  * A tool's own name, with any namespace prefix stripped.

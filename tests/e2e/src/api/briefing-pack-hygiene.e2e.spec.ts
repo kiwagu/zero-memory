@@ -63,12 +63,18 @@ test.describe('Briefing pack hygiene over MCP', () => {
         return firstJson<{ memory_id: string }>(result).memory_id;
       };
 
-      // The direct topic hit…
-      const hitId = await remember(
-        `${ENTITY} renders the session briefing header for the dashboard`,
-        'fact'
-      );
-      // …an off-topic gotcha that can only arrive through the entity walk…
+      // The direct topic hits. A small budget (max_tokens 600 → three ranked
+      // rows) and three hits that match the topic outright fill the ranked
+      // leg, so everything below can only arrive through the entity walk.
+      const hits: string[] = [];
+      for (const detail of [
+        'renders the session briefing header for the dashboard',
+        'caches the session briefing header per project for a minute',
+        'localizes the session briefing header into the reader language',
+      ]) {
+        hits.push(await remember(`${ENTITY} ${detail}`, 'fact'));
+      }
+      // …an off-topic gotcha that shares only the entity…
       const linkedId = await remember(
         'the export scheduler retries five times before giving up on a stalled job',
         'gotcha'
@@ -79,49 +85,43 @@ test.describe('Briefing pack hygiene over MCP', () => {
         'current discussion is aimed at reworking the export scheduler retries',
         'episode'
       );
-      // …and an off-topic decision far above the content cap (default 600).
-      const longId = await remember(
-        `chose the queue-based importer over inline processing because ${'the batch window keeps the write path idle and the retry ledger stays small; '.repeat(12)}`,
-        'decision'
-      );
+      // …and an off-topic decision far above the linked leg's cap (600).
+      const longContent = `chose the queue-based importer over inline processing because ${'the batch window keeps the write path idle and the retry ledger stays small; '.repeat(12)}`;
+      const longId = await remember(longContent, 'decision');
 
       const pack = firstJson<BriefingPack>(
         await mcp.callTool('build_context', {
           topic: `${ENTITY} session briefing header`,
+          max_tokens: 600,
         })
       );
 
-      const packIds = [...pack.memories, ...pack.linked_memories].map(
-        (memory) => memory.id
+      // The premise: the ranked leg holds the topic hits and nothing else, so
+      // what the linked leg carries, or leaves out, is its own doing.
+      expect(pack.memories.map((memory) => memory.id).sort()).toEqual(
+        [...hits].sort()
       );
-      expect(packIds, 'the direct hit must be in the pack').toContain(hitId);
-      expect(packIds, 'entity-linked knowledge must be in the pack').toContain(
-        linkedId
+
+      const linked = pack.linked_memories.map((memory) => memory.id);
+      expect(linked, 'entity-linked knowledge must be in the pack').toEqual(
+        expect.arrayContaining([linkedId, longId])
       );
-      expect(
-        pack.linked_memories.map((memory) => memory.id),
-        'episodes must not ride the linked leg'
-      ).not.toContain(episodeId);
+      expect(linked, 'episodes must not ride the linked leg').not.toContain(
+        episodeId
+      );
 
       // Ranked leg: every linked entry carries a score, ordered descending.
       const scores = pack.linked_memories.map((memory) => memory.score);
       expect(scores.every((score) => typeof score === 'number')).toBe(true);
       expect([...scores].sort((a, b) => b! - a!)).toEqual(scores);
 
-      // Over-long content is capped under an explicit flag; the full text
-      // stays one recall away by id.
-      const longEntry = [...pack.memories, ...pack.linked_memories].find(
+      // Over-long content is capped under an explicit flag, verbatim from the
+      // head; the full text stays one recall away by id.
+      const longEntry = pack.linked_memories.find(
         (memory) => memory.id === longId
       );
-      if (longEntry && longEntry.truncated) {
-        expect(longEntry.content.length).toBeLessThanOrEqual(600);
-      }
-      const linkedLong = pack.linked_memories.find(
-        (memory) => memory.id === longId
-      );
-      if (linkedLong) {
-        expect(linkedLong.truncated).toBe(true);
-      }
+      expect(longEntry?.truncated).toBe(true);
+      expect(longEntry?.content).toBe(longContent.slice(0, 600));
     } finally {
       await mcp.close();
     }

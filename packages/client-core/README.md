@@ -112,6 +112,13 @@ total})`: the text a client emits just BEFORE its context is compacted, or
   stringified result using the canonical entity-id char class. The
   envelope-walking that finds those names and payloads stays in each adapter;
   only the judgement is domain.
+- `transcript.ts` — the `ParsedTranscript` shape every adapter's parser
+  produces, `formatEntries` (the `role: text` form the extractor consumes), and
+  `parseJsonLines(jsonl, schema)`, the one line reader those parsers share: a
+  slice read from a byte offset can start with a torn line and end with a
+  half-written one, and blank lines, non-JSON and records of another shape are
+  skipped rather than failing the slice. Each adapter keeps only its own line
+  schema and what it reads out of a record.
 - `offline-briefing.ts` — the `BriefCacheEntry` shape, the default TTL, and
   `renderOfflineBriefing(entry)` (the explicit OFFLINE staleness header ahead
   of a cached briefing). The file-backed cache IO that produces these entries

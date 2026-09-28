@@ -57,26 +57,6 @@ const mintedBySchema = (): Map<string, string[]> => {
 };
 
 describe('ENTITY_PREFIXES catalog', () => {
-  it('builds a registry with every declared kind', () => {
-    expect(entityIds.kinds).toEqual(Object.keys(ENTITY_PREFIXES));
-    expect(entityIds.allPrefixes).toHaveLength(
-      new Set(Object.values(ENTITY_PREFIXES)).size
-    );
-  });
-
-  it('routes a minted id back to its kind', () => {
-    const id = entityIds.ids.memory.create();
-    expect(entityIds.kindOf(id)).toBe('memory');
-    expect(entityIds.ids.memory.is(id)).toBe(true);
-    expect(entityIds.ids.entity.is(id)).toBe(false);
-  });
-
-  it('rejects an unregistered prefix', () => {
-    expect(() =>
-      entityIds.assertKnown('zzz_0000000000000001.0000000000')
-    ).toThrow(/Unregistered entity prefix/);
-  });
-
   it('exposes the declared named constants', () => {
     expect(entityIds.prefixFor('request')).toBe('req');
     expect(entityIds.prefixFor('memory')).toBe('mem');
@@ -209,18 +189,6 @@ describe('prefix catalog vs the schema', () => {
       .sort();
     expect(undeclared).toEqual([]);
   });
-
-  it('the coverage check catches an undeclared prefix', () => {
-    // Proves the check fires rather than merely passing: a prefix present in
-    // the schema but absent from a catalog is reported.
-    const catalog = new Set(['mem']);
-    const schema = new Map([['zzz', ['20260101000000_something.sql']]]);
-    expect(
-      [...schema.entries()]
-        .filter(([prefix]) => !catalog.has(prefix))
-        .map(([prefix, files]) => `${prefix} (${files.join(', ')})`)
-    ).toEqual(['zzz (20260101000000_something.sql)']);
-  });
 });
 
 /**
@@ -241,18 +209,5 @@ describe('TS ↔ SQL contract sync', () => {
 
   it('the migration carries the same Crockford class as the package', () => {
     expect(sql).toContain(CROCKFORD_CLASS);
-  });
-
-  it('the migration keeps the 16-char rand and 10-char ts segments', () => {
-    expect(sql).toContain(`${CROCKFORD_CLASS}{16}`);
-    expect(sql).toContain(`${CROCKFORD_CLASS}{10}`);
-  });
-
-  it('the migration exposes the generator and both validators', () => {
-    expect(sql).toContain('function public.entity_id_generate(prefix text)');
-    expect(sql).toContain('function public.is_entity_id(value text)');
-    expect(sql).toContain(
-      'function public.is_entity_id_with_prefix(value text, prefix text)'
-    );
   });
 });

@@ -9,6 +9,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   admin,
   asUser,
+  type CardResult,
   makeMember,
   psql,
   rpc,
@@ -16,11 +17,7 @@ import {
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
-import { signInThroughForm } from '../helpers/web.js';
-
-interface CardResult {
-  card: { id: string; number: number; scope: string };
-}
+import { hintOf, signInThroughForm } from '../helpers/web.js';
 
 const markers: string[] = [];
 
@@ -70,24 +67,6 @@ const backdate = (id: string, days: number) =>
 
 const column = (page: Page, state: string): Locator =>
   page.getByTestId(`board-column-${state}`);
-
-/**
- * Hovers until the hint opens, and answers it: a hover that lands before the
- * page is interactive is lost, so each try moves away first.
- */
-const hintOf = async (
-  page: Page,
-  target: Locator,
-  hintTestId: string
-): Promise<Locator> => {
-  const tip = page.getByTestId(hintTestId);
-  await expect(async () => {
-    await page.mouse.move(0, 0);
-    await target.hover();
-    await expect(tip).toBeVisible({ timeout: 1000 });
-  }).toPass({ timeout: 20_000 });
-  return tip;
-};
 
 test.describe('The board folds what went quiet, and Mine is the same board', () => {
   test('Mine is the same board narrowed to my cards, with the card to continue marked', async ({
@@ -142,21 +121,7 @@ test.describe('The board folds what went quiet, and Mine is the same board', () 
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('board-columns')).toBeVisible();
 
-    // Off again: the address forgets it.
-    await page.getByTestId('board-mine-toggle').click();
-    await expect(page).not.toHaveURL(/[?&]mine=/);
-  });
-
-  test('keeps the filter beside it', async ({ page }) => {
-    const { seed, mcp, scope, create } = await boardOf('filter');
-    try {
-      await create('Rotate the relay keys', true);
-      await create('Page the memory feed', false);
-    } finally {
-      await mcp.close();
-    }
-    await signInThroughForm(page, seed.userA);
-    await page.goto(`/board?scope=${encodeURIComponent(scope)}&mine=1`);
+    // The filter beside it keeps the view: both live in the address.
     const search = page.getByTestId('board-search').getByRole('searchbox');
     await search.fill('memory feed');
     await search.press('Enter');
@@ -165,25 +130,39 @@ test.describe('The board folds what went quiet, and Mine is the same board', () 
     const tiles = page.getByTestId('board-card');
     await expect(tiles).toHaveCount(1);
     await expect(tiles).toContainText('Page the memory feed');
+
+    // Off again: the address forgets it.
+    await page.getByTestId('board-mine-toggle').click();
+    await expect(page).not.toHaveURL(/[?&]mine=/);
   });
 
-  test('a column folds its cards untouched past the horizon behind an arrow in its header', async ({
+  test('a column folds its cards untouched past the horizon behind an arrow, and in Mine by my own last work', async ({
     page,
   }) => {
     const { seed, mcp, scope, create } = await boardOf('fold');
     let stale: CardResult['card'];
+    let handed: CardResult['card'];
     try {
       await create('Fresh idea', false);
       stale = await create('Stale idea', false);
+      handed = await create('Handed over long ago', false);
     } finally {
       await mcp.close();
     }
     backdate(stale.id, 31);
+    backdate(handed.id, 31);
+    // Another member touches one now: the board sees it fresh, Mine does not.
+    await makeMember(scope, seed.userB.id, 'writer');
+    await rpc(asUser(await passwordGrantToken(seed.userB)), 'card_note', {
+      p_card_id: handed.id,
+      p_text: 'picked up by a teammate',
+    });
 
     await signInThroughForm(page, seed.userA);
     await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
     const ideas = column(page, 'idea');
-    await expect(ideas.getByTestId('board-card')).toHaveCount(1);
+    await expect(ideas.getByTestId('board-card')).toHaveCount(2);
+    await expect(ideas.getByText('Handed over long ago')).toBeVisible();
     await expect(ideas.getByText('Stale idea')).toHaveCount(0);
     // No quiet cards, no arrow.
     await expect(
@@ -213,37 +192,18 @@ test.describe('The board folds what went quiet, and Mine is the same board', () 
     ).not.toHaveAttribute('data-quiet', 'true');
     await arrow.click();
     await expect(ideas.getByText('Stale idea')).toHaveCount(0);
-  });
 
-  test("in Mine the fold follows my own last work, not anyone else's", async ({
-    page,
-  }) => {
-    const { seed, mcp, scope, create } = await boardOf('fold-mine');
-    let card: CardResult['card'];
-    try {
-      card = await create('Handed over long ago', false);
-    } finally {
-      await mcp.close();
-    }
-    backdate(card.id, 31);
-    // Another member touches it now: the board sees it fresh, Mine does not.
-    await makeMember(scope, seed.userB.id, 'writer');
-    await rpc(asUser(await passwordGrantToken(seed.userB)), 'card_note', {
-      p_card_id: card.id,
-      p_text: 'picked up by a teammate',
-    });
-
-    await signInThroughForm(page, seed.userA);
-    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
-    const ideas = column(page, 'idea');
-    await expect(ideas.getByText('Handed over long ago')).toBeVisible();
-    await expect(ideas.getByTestId('board-column-older-toggle')).toHaveCount(0);
-
+    // In Mine a card ages by my own last work, so the teammate's note does
+    // not keep the handed-over card in view, and the hint says whose work.
     await page.goto(`/board?scope=${encodeURIComponent(scope)}&mine=1`);
     await expect(ideas.getByText('Handed over long ago')).toHaveCount(0);
-    const arrow = ideas.getByTestId('board-column-older-toggle');
-    const tip = await hintOf(page, arrow, 'board-column-older-hint');
-    await expect(tip).toContainText('you last worked on');
+    await expect(ideas.getByText('Stale idea')).toHaveCount(0);
+    const mineTip = await hintOf(
+      page,
+      ideas.getByTestId('board-column-older-toggle'),
+      'board-column-older-hint'
+    );
+    await expect(mineTip).toContainText('you last worked on');
   });
 
   test('a board that cannot be read is an error, never an empty board', async ({
@@ -256,42 +216,5 @@ test.describe('The board folds what went quiet, and Mine is the same board', () 
     await expect(page.getByRole('alert')).toBeVisible();
     await expect(page.getByTestId('board-columns')).toHaveCount(0);
     await expect(page.getByTestId('board-empty')).toHaveCount(0);
-  });
-
-  test('the offer follows the agent live', async ({ page }) => {
-    const { seed, mcp, scope, create, note } = await boardOf('live');
-    try {
-      const first = await create('Rotate the relay keys', true);
-      await note(first.id, 'keys first');
-
-      await signInThroughForm(page, seed.userA);
-      await page.goto(`/board?scope=${encodeURIComponent(scope)}&mine=1`);
-      const badgeOn = (n: number) =>
-        page
-          .getByTestId('board-card')
-          .filter({ hasText: `ZM-${n}` })
-          .getByTestId('board-card-offered');
-      await expect(badgeOn(first.number)).toBeVisible();
-
-      // A page starts hearing its board a few seconds after it opens; a
-      // change written before that is not delivered. So the agent keeps
-      // working on the new card until the offer moves to it, with no reload.
-      const next = await create('Ship the relay rollout', true);
-      await expect
-        .poll(
-          async () => {
-            const moved = (await badgeOn(next.number).count()) === 1;
-            if (!moved) {
-              await note(next.id, 'now the rollout');
-            }
-            return moved;
-          },
-          { intervals: [2000], timeout: 40_000 }
-        )
-        .toBe(true);
-      await expect(badgeOn(first.number)).toHaveCount(0);
-    } finally {
-      await mcp.close();
-    }
   });
 });

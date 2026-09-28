@@ -132,8 +132,8 @@ test.describe('The session marker in provenance', () => {
   });
 
   test('a transcript ingest carries the same marker', async () => {
-    // A dedicated user: extraction is a live LLM call writing unpredictable
-    // content, which the shared seed users' invariants must not absorb.
+    // A dedicated user: extraction writes into the caller's scopes, which
+    // the shared seed users' invariants must not absorb.
     const user = await provisionE2EUser('session-marker-ingest@zm.e2e');
     const token = await passwordGrantToken(user);
     const conversationId = 'e2e-session-marker-ingest-conversation';
@@ -185,8 +185,7 @@ test.describe('The session marker in provenance', () => {
         expect(JSON.stringify(source)).not.toContain(TRANSCRIPT_ONLY);
       }
 
-      // Cleanup: live-LLM extraction writes unpredictable content into the
-      // dataset; forget what this run created.
+      // Cleanup: forget what this run's extraction created.
       for (const row of watcherRows) {
         await mcp.callTool('forget', { memory_id: row.id });
       }

@@ -2,14 +2,15 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createLogger } from '@workspace/logger';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createLogger } from './index.js';
+
 /**
- * The watcher always mirrors its log lines to ZM_LOG_FILE, capped at
- * ZM_LOG_MAX_LINES, so a user can hand over recent diagnostics for the daemon
- * and the plugin's brief/ingest hooks. Exercises the logger's file sink through
- * the same public entrypoint the watcher uses.
+ * The logger mirrors its lines to ZM_LOG_FILE, capped at ZM_LOG_MAX_LINES, so
+ * a user can hand over recent diagnostics — the watcher daemon and the plugin's
+ * brief/ingest hooks rely on it. Exercises the file sink through the same
+ * public `createLogger` entrypoint every caller uses.
  */
 describe('rotating log file sink', () => {
   let dir: string;

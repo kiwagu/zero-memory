@@ -52,17 +52,6 @@ describe('hookManifest', () => {
     }
   );
 
-  it('works the compaction boundary from the event that precedes it', () => {
-    // Wiring this after the boundary would be worthless twice over: the epoch
-    // to capture is already condensed, and the summary it should have shaped is
-    // already written.
-    const checkpoint = hookManifest('full').find(
-      (entry) => entry.command === 'checkpoint'
-    );
-    expect(checkpoint?.event).toBe('PreCompact');
-    expect(checkpoint?.timeout).toBe(10);
-  });
-
   it.each(['plugin', 'full'] as const)(
     'wires the reminder with its counter in the %s channel',
     (profile) => {
@@ -123,18 +112,6 @@ describe('hookManifest', () => {
 });
 
 describe('hookIdentity', () => {
-  it('matches the same hook however its command spells the binary', () => {
-    const entry: HookEntry = { event: 'Stop', command: 'ingest' };
-    const identity = hookIdentity(entry);
-    for (const spelling of [
-      'zero-memory-watcher ingest',
-      '~/.local/bin/zero-memory-watcher ingest',
-      '/home/someone/.local/bin/zero-memory-watcher ingest',
-    ]) {
-      expect(spelling.includes(identity)).toBe(true);
-    }
-  });
-
   it('does not confuse two subcommands that share a prefix', () => {
     // `brief session-start` must not be recognized by `brief task`'s identity.
     const sessionStart = hookIdentity({

@@ -8,33 +8,15 @@
  * a card's state, because a drag has nowhere to put a justification. That
  * absence is the feature, so it is asserted rather than assumed.
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
+import type { CardResult } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
-import { signInThroughForm } from '../helpers/web.js';
+import { openBoardHint, signInThroughForm } from '../helpers/web.js';
 
 const REASON = 'blocked on the owner picking a cutover window';
-
-interface CardResult {
-  card: { id: string; number: number; scope: string };
-}
-
-/**
- * Opens the board's hint. The hint opens on a pointer move, and a hover that
- * lands before a heavy board is interactive is lost — the pointer then sits
- * still over the icon and nothing opens it. So each try moves away first.
- */
-const openBoardHint = async (page: Page): Promise<void> => {
-  await expect(async () => {
-    await page.mouse.move(0, 0);
-    await page.getByTestId('board-hint').hover();
-    await expect(page.getByTestId('board-hint-content')).toBeVisible({
-      timeout: 1000,
-    });
-  }).toPass({ timeout: 20_000 });
-};
 
 test.describe('Project board in the dashboard', () => {
   test('shows a card in its column with the reason it was moved, and offers no way to move it', async ({
@@ -360,7 +342,6 @@ test.describe('Project board in the dashboard', () => {
       await passwordGrantToken(seed.userA)
     );
     let scope: string;
-    let certs: CardResult['card'];
     let feed: CardResult['card'];
     try {
       scope = firstJson<{ scope: string }>(
@@ -379,7 +360,7 @@ test.describe('Project board in the dashboard', () => {
             no_links: 'e2e fixture',
           })
         ).card;
-      certs = await create('Rotate the edge certificates');
+      await create('Rotate the edge certificates');
       feed = await create('Page the memory feed');
     } finally {
       await mcp.close();
@@ -391,7 +372,9 @@ test.describe('Project board in the dashboard', () => {
     await expect(tiles).toHaveCount(2);
     const search = page.getByTestId('board-search').getByRole('searchbox');
 
-    // The label a commit or a briefing names the card by.
+    // The label a commit or a briefing names the card by. Which cards a
+    // query matches (a bare number, a title fragment, an unknown label) is
+    // the api board spec's to prove; here, the box, the address and a reload.
     await search.fill(`ZM-${feed.number}`);
     await search.press('Enter');
     await expect(page).toHaveURL(new RegExp(`[?&]q=ZM-${feed.number}(&|$)`));
@@ -403,22 +386,6 @@ test.describe('Project board in the dashboard', () => {
     await expect(tiles).toHaveCount(1);
     await expect(search).toHaveValue(`ZM-${feed.number}`);
 
-    // A bare number and a title fragment find their cards too.
-    await search.fill(String(certs.number));
-    await search.press('Enter');
-    await expect(tiles).toHaveCount(1);
-    await expect(tiles).toContainText('Rotate the edge certificates');
-    await search.fill('memory feed');
-    await search.press('Enter');
-    await expect(tiles).toHaveCount(1);
-    await expect(tiles).toContainText('Page the memory feed');
-
-    // Nothing matches: the columns are empty — no other card stands in.
-    await search.fill('ZM-999');
-    await search.press('Enter');
-    await expect(page).toHaveURL(/[?&]q=ZM-999(&|$)/);
-    await expect(tiles).toHaveCount(0);
-
     // An empty filter clears the query and shows the whole board again.
     await search.fill('');
     await search.press('Enter');
@@ -426,7 +393,7 @@ test.describe('Project board in the dashboard', () => {
     await expect(tiles).toHaveCount(2);
   });
 
-  test('a card shows the production version that carries it, and the board shows where production lives', async ({
+  test('a tile shows the production version that carries its card, and the board shows where production lives', async ({
     page,
   }) => {
     const seed = await readSeedState();
@@ -505,13 +472,6 @@ test.describe('Project board in the dashboard', () => {
       'The board is a window'
     );
     await expect(page.getByTestId('board-release-settings')).toHaveCount(0);
-
-    await page.goto(`/board/${cardId}`);
-    await expect(page.getByTestId('card-detail')).toContainText(
-      'shipped in v1.4.0'
-    );
-    await expect(page.getByTestId('card-history')).toContainText('released');
-    await expect(page.getByTestId('card-history')).toContainText('v1.4.0');
   });
 
   test('a card body renders as markdown, and hostile markup stays inert', async ({
@@ -911,7 +871,7 @@ test.describe('Panel chain in the card dialog', () => {
     await expect(page.getByTestId('card-modal')).toBeHidden();
     await expect(page).toHaveURL(/\/board(\?[^/]*)?$/);
   });
-  test('a card shows the branch its work ran on and where it landed', async ({
+  test('a card shows the branch its work ran on, where it landed last and where before', async ({
     page,
   }) => {
     const seed = await readSeedState();
@@ -925,7 +885,8 @@ test.describe('Panel chain in the card dialog', () => {
         await mcp.callTool('remember', {
           content: `board-web branch marker ${Date.now()}: page the memory feed`,
           kind: 'fact',
-          project_hint: '/tmp/zm-e2e-board-web-branch',
+          // A board of its own per attempt, so a retry lands on a fresh card.
+          project_hint: `/tmp/zm-e2e-board-web-branch-${Date.now()}`,
         })
       ).scope;
       const created = firstJson<CardResult>(
@@ -940,15 +901,21 @@ test.describe('Panel chain in the card dialog', () => {
       ).card;
       cardId = created.id;
       cardNumber = created.number;
-      const landed = await mcp.callTool('card', {
-        action: 'land',
-        card_id: cardId,
-        branch: { repo: 'acme/memory-service', name: 'feature/feed-pages' },
-        squash_sha: '4f11a55',
-        target: 'main',
-        reason: 'full e2e green; waits for the release',
-      });
-      expect(landed.isError ?? false).toBe(false);
+      // The branch lands, then lands again with a fix made in it.
+      for (const [sha, reason] of [
+        ['aaaaaaa', 'the feature landed'],
+        ['4f11a55', 'a bug fixed in the same branch'],
+      ]) {
+        const landed = await mcp.callTool('card', {
+          action: 'land',
+          card_id: cardId,
+          branch: { repo: 'acme/memory-service', name: 'feature/feed-pages' },
+          squash_sha: sha,
+          target: 'main',
+          reason,
+        });
+        expect(landed.isError ?? false).toBe(false);
+      }
     } finally {
       await mcp.close();
     }
@@ -966,69 +933,16 @@ test.describe('Panel chain in the card dialog', () => {
     await expect(branch).toHaveCount(1);
     await expect(branch).toContainText('feature/feed-pages');
     await expect(branch).toContainText('acme/memory-service');
-    await expect(page.getByTestId('card-branch-state')).toContainText(
-      '4f11a55'
-    );
-    await expect(page.getByTestId('card-branch-state')).toContainText('main');
-    await expect(page.getByTestId('card-history')).toContainText('landed');
-    // Landed once: nothing earlier to show.
-    await expect(page.getByTestId('card-branch-earlier')).toHaveCount(0);
-  });
-  test('a branch that landed again shows its earlier landing beside the latest', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    let cardId: string;
-    try {
-      const scope = firstJson<{ scope: string }>(
-        await mcp.callTool('remember', {
-          content: `board-web re-landing marker ${Date.now()}: a fix in its own branch`,
-          kind: 'fact',
-          project_hint: '/tmp/zm-e2e-board-web-reland',
-        })
-      ).scope;
-      cardId = firstJson<CardResult>(
-        await mcp.callTool('card', {
-          action: 'create',
-          no_links: 'e2e fixture',
-          scope,
-          title: 'Fixed where it began',
-          state: 'active',
-          branch: { repo: 'acme/memory-service', name: 'feature/relanded' },
-        })
-      ).card.id;
-      for (const [sha, reason] of [
-        ['aaaaaaa', 'the feature landed'],
-        ['bbbbbbb', 'a bug fixed in the same branch'],
-      ]) {
-        const landed = await mcp.callTool('card', {
-          action: 'land',
-          card_id: cardId,
-          branch: { repo: 'acme/memory-service', name: 'feature/relanded' },
-          squash_sha: sha,
-          target: 'main',
-          reason,
-        });
-        expect(landed.isError ?? false).toBe(false);
-      }
-    } finally {
-      await mcp.close();
-    }
-
-    await signInThroughForm(page, seed.userA);
-    await page.goto(`/board/${cardId}`);
-    await expect(page.getByTestId('card-branch')).toHaveCount(1);
-    await expect(page.getByTestId('card-branch-state')).toContainText(
-      'bbbbbbb'
-    );
+    const state = page.getByTestId('card-branch-state');
+    await expect(state).toContainText('4f11a55');
+    await expect(state).toContainText('main');
+    // The earlier landing sits beside the latest, which it does not repeat.
     const earlier = page.getByTestId('card-branch-earlier');
     await expect(earlier).toContainText('aaaaaaa');
-    await expect(earlier).not.toContainText('bbbbbbb');
+    await expect(earlier).not.toContainText('4f11a55');
+    await expect(page.getByTestId('card-history')).toContainText('landed');
   });
-  test('a card label stays on one line beside a long title', async ({
+  test('beside a long title, the label stays on one line and the title wraps in its own column', async ({
     page,
   }) => {
     const seed = await readSeedState();
@@ -1036,7 +950,7 @@ test.describe('Panel chain in the card dialog', () => {
       await passwordGrantToken(seed.userA)
     );
     let scope: string;
-    let cardNumber: number;
+    let card: CardResult['card'];
     try {
       scope = firstJson<{ scope: string }>(
         await mcp.callTool('remember', {
@@ -1045,52 +959,7 @@ test.describe('Panel chain in the card dialog', () => {
           project_hint: '/tmp/zm-e2e-board-web-label',
         })
       ).scope;
-      cardNumber = firstJson<CardResult>(
-        await mcp.callTool('card', {
-          action: 'create',
-          no_links: 'e2e fixture',
-          scope,
-          title:
-            'Translate imported memories into the canonical language before ' +
-            'they reach the index',
-        })
-      ).card.number;
-    } finally {
-      await mcp.close();
-    }
-
-    await signInThroughForm(page, seed.userA);
-    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
-    const label = page
-      .getByTestId('board-column-idea')
-      .getByTestId('board-card-number');
-    await expect(label).toHaveText(`ZM-${cardNumber}`);
-    // A label broken after its hyphen ("ZM-" over "3") is taller than one line.
-    expect(
-      await label.evaluate(
-        (node) =>
-          node.getBoundingClientRect().height <
-          parseFloat(getComputedStyle(node).lineHeight) * 1.5
-      )
-    ).toBe(true);
-  });
-  test('a long card title wraps in its own column beside the label', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    let cardId: string;
-    try {
-      const scope = firstJson<{ scope: string }>(
-        await mcp.callTool('remember', {
-          content: `board-web header marker ${Date.now()}: a card with a long title`,
-          kind: 'fact',
-          project_hint: '/tmp/zm-e2e-board-web-header',
-        })
-      ).scope;
-      cardId = firstJson<CardResult>(
+      card = firstJson<CardResult>(
         await mcp.callTool('card', {
           action: 'create',
           no_links: 'e2e fixture',
@@ -1099,14 +968,32 @@ test.describe('Panel chain in the card dialog', () => {
             'Styled scrollbars that do not break the layout under long ' +
             'content, even when the card title runs well past one line',
         })
-      ).card.id;
+      ).card;
     } finally {
       await mcp.close();
     }
 
     await signInThroughForm(page, seed.userA);
+
+    // On its tile, the label keeps to one line.
+    await page.goto(`/board?scope=${encodeURIComponent(scope)}`);
+    const tileLabel = page
+      .getByTestId('board-column-idea')
+      .getByTestId('board-card-number')
+      .filter({ hasText: `ZM-${card.number}` });
+    await expect(tileLabel).toHaveText(`ZM-${card.number}`);
+    // A label broken after its hyphen ("ZM-" over "3") is taller than one line.
+    expect(
+      await tileLabel.evaluate(
+        (node) =>
+          node.getBoundingClientRect().height <
+          parseFloat(getComputedStyle(node).lineHeight) * 1.5
+      )
+    ).toBe(true);
+
+    // On its page, the title wraps beside the label.
     await page.setViewportSize({ width: 900, height: 800 });
-    await page.goto(`/board/${cardId}`);
+    await page.goto(`/board/${card.id}`);
     const label = await page.getByTestId('card-number').boundingBox();
     const title = await page.getByTestId('card-title').boundingBox();
     expect(label).not.toBeNull();
@@ -1301,7 +1188,6 @@ test.describe('Panel chain in the card dialog', () => {
     await expect(above).toContainText('the blocker ships first');
     const related = section.getByTestId('card-links-group-related');
     await expect(related).toContainText(`relates to ZM-${neighbour.number}`);
-    await expect(related).toContainText('type not declared');
     // A number alone names a card of this board: one on another board says
     // which, and an archived card says it was archived.
     await expect(

@@ -39,6 +39,11 @@ test.describe('account display name', () => {
     await expect(chrome).toHaveAttribute('title', seed.userA.email);
 
     await page.goto('/settings');
+    // Settings shows the full address as read-only context — the name replaces
+    // it in the chrome, not everywhere.
+    await expect(page.getByTestId('profile-email')).toHaveValue(
+      seed.userA.email
+    );
     await page.getByTestId('profile-name').fill('Ada Lovelace');
     await page.getByTestId('profile-save').click();
     await expect(page.getByTestId('profile-saved')).toBeVisible();
@@ -66,19 +71,5 @@ test.describe('account display name', () => {
 
     await expect(page.getByTestId('profile-error')).toBeVisible();
     await expect(page.getByTestId('profile-saved')).toHaveCount(0);
-  });
-
-  test('the address stays visible where it is the subject', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    await signInThroughForm(page, seed.userA);
-    await page.goto('/settings');
-
-    // Settings shows the full address as read-only context — the name replaces
-    // it in the chrome, not everywhere.
-    await expect(page.getByTestId('profile-email')).toHaveValue(
-      seed.userA.email
-    );
   });
 });

@@ -1,4 +1,8 @@
-import { provenanceRank, type MemoryAuthorKind } from '@workspace/contracts';
+import {
+  crossProjectPair,
+  provenanceRank,
+  type MemoryAuthorKind,
+} from '@workspace/contracts';
 import { createLogger } from '@workspace/logger';
 import { RETRO_APERTURE_CAP, RETRO_APERTURE_FLOOR } from '@workspace/memory';
 import {
@@ -20,7 +24,6 @@ import {
   type HygieneJudgement,
   type MemorySnapshot,
 } from './hygiene-judge.js';
-import { crossProjectPair } from './hygiene-origin.js';
 import {
   KIND_AUDIT_SUBJECT_KINDS,
   isChangeNoteCandidate,

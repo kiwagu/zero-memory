@@ -1,4 +1,3 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   type DeployedVersion,
   isReleaseUrl,
@@ -9,8 +8,8 @@ import {
   type ReleaseOutput,
   releaseOutputSchema,
 } from '@workspace/contracts';
-import { createAuthedTransport } from '@workspace/mcp-oauth-client';
 
+import { withBoundedClient } from './bounded-client.js';
 import { resolveServerUrl } from './server-config.js';
 import { parseToolPayload, toolErrorMessage } from './tool-result.js';
 
@@ -46,35 +45,30 @@ export const fetchDeployedVersion = async (
 };
 
 /**
- * One call of the release tool. Bounded like `callCardBranches`: the whole
- * exchange, connecting included, ends at the deadline. A tool error throws,
- * so the caller can tell "the server said no" from an answer.
+ * One call of the release tool; the whole exchange, connecting included, ends
+ * at the deadline. A tool error throws, so the caller can tell "the server
+ * said no" from an answer.
  */
-export const callRelease = async (
+export const callRelease = (
   input: ReleaseInput,
   timeoutMs: number,
   serverUrl: string = resolveServerUrl()
-): Promise<ReleaseOutput> => {
-  const options = { timeout: timeoutMs };
-  const client = new Client({ name: 'zero-memory-release', version: '0.1.0' });
-  const deadline = setTimeout(() => {
-    void client.close().catch(() => undefined);
-  }, timeoutMs);
-  try {
-    await client.connect(createAuthedTransport(serverUrl), options);
-    const result = await client.callTool(
-      { name: 'release', arguments: input },
-      undefined,
-      options
-    );
-    if (result.isError) {
-      throw new Error(
-        `release ${input.action} failed: ${toolErrorMessage(result)}`
+): Promise<ReleaseOutput> =>
+  withBoundedClient(
+    'zero-memory-release',
+    serverUrl,
+    timeoutMs,
+    async (client, options) => {
+      const result = await client.callTool(
+        { name: 'release', arguments: input },
+        undefined,
+        options
       );
+      if (result.isError) {
+        throw new Error(
+          `release ${input.action} failed: ${toolErrorMessage(result)}`
+        );
+      }
+      return releaseOutputSchema.parse(parseToolPayload(result));
     }
-    return releaseOutputSchema.parse(parseToolPayload(result));
-  } finally {
-    clearTimeout(deadline);
-    await client.close().catch(() => undefined);
-  }
-};
+  );

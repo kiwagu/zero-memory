@@ -1,9 +1,10 @@
 /**
  * On-demand rule promotion, end-to-end: promote_rule turns one owned memory
- * into a PROMOTED rule immediately (bypassing earned usefulness) — General by
- * default, project-addressed with applies_scope — and refuses a memory the
- * caller does not own. Uses an explicit rule_text so the keyless e2e stack
- * never needs the distiller LLM.
+ * into a PROMOTED rule immediately (bypassing earned usefulness), General by
+ * default, and refuses a memory the caller does not own. The project-addressed
+ * form (applies_scope) is driven where its delivery is read, in the network
+ * rules spec. Uses an explicit rule_text so the keyless e2e stack never needs
+ * the distiller LLM.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
@@ -76,39 +77,6 @@ test.describe('promote_rule (on-demand) over MCP', () => {
       expect(brief.rules.map((rule) => rule.text)).toContain(
         'promote-rule marker: always prefer bun over npm.'
       );
-    } finally {
-      await mcp.close();
-    }
-  });
-
-  test('addresses a PROJECT rule when applies_scope is given', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
-    try {
-      // Anchor + a real project scope (canonicalized per-owner on write).
-      const anchor = await mcp.callTool('remember', {
-        content: 'promote-rule marker: project fact for addressed promotion',
-        kind: 'convention',
-        scope: 'proj.promote_probe',
-      });
-      const anchorOut = firstJson<{ memory_id: string; scope: string }>(anchor);
-
-      const promoted = await mcp.callTool('promote_rule', {
-        memory_id: anchorOut.memory_id,
-        applies_scope: anchorOut.scope,
-        rule_text: 'promote-rule marker: run the probe before edits.',
-      });
-      expect(promoted.isError ?? false).toBe(false);
-      const out = firstJson<{ target_layer: string; applies_scope: string }>(
-        promoted
-      );
-      expect(out.target_layer).toBe('project');
-      expect(out.applies_scope).toBe(anchorOut.scope);
-
-      const row = await ruleRow(anchorOut.memory_id);
-      expect(String(row?.applies_scope)).toBe(anchorOut.scope);
     } finally {
       await mcp.close();
     }

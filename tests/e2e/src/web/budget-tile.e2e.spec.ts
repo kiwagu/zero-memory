@@ -7,36 +7,13 @@
  * no tile announcing that it has no limits. A tile saying "unlimited" would
  * advertise a constraint that does not exist here.
  */
-import { createClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
 import { seedInsightsUsage } from '../helpers/insights.js';
+import { clearAllowance, setAllowance } from '../helpers/policy-allowance.js';
 import { readSeedState } from '../helpers/runtime-state.js';
+import { entityIdOf } from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
-
-const admin = () =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-const entityIdOf = async (authUserId: string): Promise<string> => {
-  const { data, error } = await admin()
-    .from('profiles')
-    .select('id')
-    .eq('user_id', authUserId)
-    .single();
-  if (error) throw new Error(`no profile for ${authUserId}: ${error.message}`);
-  return (data as { id: string }).id;
-};
-
-const clearAllowance = async (subjectId: string): Promise<void> => {
-  await admin()
-    .from('policy_allowances')
-    .delete()
-    .eq('subject_id', subjectId)
-    .eq('budget_id', 'extraction');
-};
 
 test.describe('dashboard budget tile', () => {
   test('is absent when no ceiling applies, and shows counters when one does', async ({
@@ -58,13 +35,7 @@ test.describe('dashboard budget tile', () => {
       await expect(page.getByTestId('insights-metric-budget')).toHaveCount(0);
 
       // A ceiling in force: counters, and nothing about what they cost.
-      const { error } = await admin().from('policy_allowances').upsert({
-        subject_id: subjectId,
-        budget_id: 'extraction',
-        limit_value: 5_000,
-      });
-      if (error)
-        throw new Error(`could not store an allowance: ${error.message}`);
+      await setAllowance(subjectId, 5_000);
 
       await page.reload();
       const tile = page.getByTestId('insights-metric-budget');

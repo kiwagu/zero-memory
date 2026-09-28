@@ -1,5 +1,5 @@
 import type { IContext } from '@workspace/context';
-import { None, Ok, Some } from 'oxide.ts';
+import { Err, None, Ok, Some } from 'oxide.ts';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { IProjectBindingRepository } from './project-binding.repository.js';
@@ -51,12 +51,11 @@ const makeRouting = (
 };
 
 describe('ScopeRoutingService — a project NAME', () => {
-  it('routes every spelling of an existing project to that project', async () => {
+  it('routes a name to the existing project it spells', async () => {
+    // Which spellings fit is the project-name matrix's job.
     const { routing } = makeRouting();
-    for (const hint of ['ZM', 'Zero Memory', 'zero-memory', 'ZeroMemory']) {
-      const scope = await routing.resolveProjectScope(hint);
-      expect(scope.path).toBe(zeroMemory.scope.path);
-    }
+    const scope = await routing.resolveProjectScope('Zero Memory');
+    expect(scope.path).toBe(zeroMemory.scope.path);
   });
 
   it('never creates a project or a binding for a name', async () => {
@@ -109,6 +108,22 @@ describe('ScopeRoutingService — a path or a git remote', () => {
     expect(scope.path).toBe(Scope.project(OWNER, 'new_app').path);
     expect(scopeAccess.createScope).toHaveBeenCalledOnce();
     expect(bindings.insert).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to the personal scope when the first-sight bootstrap fails', async () => {
+    const { routing, scopeAccess, bindings } = makeRouting();
+    vi.mocked(scopeAccess.createScope).mockResolvedValue(
+      Err('scope already has members')
+    );
+
+    const scope = await routing.resolveProjectScope(
+      'git@github.com:acme/queue-svc.git'
+    );
+
+    // Stored privately, never lost and never leaked; and no binding points a
+    // repository at a scope that was never set up.
+    expect(scope.isPersonal).toBe(true);
+    expect(bindings.insert).not.toHaveBeenCalled();
   });
 
   it('follows an existing binding', async () => {

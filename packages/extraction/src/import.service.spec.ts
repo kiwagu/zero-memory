@@ -1,151 +1,34 @@
-import type { IContext } from '@workspace/context';
-import { DeterministicHashEmbeddingService } from '@workspace/embedding/testing';
+import type { IMemoryRepository } from '@workspace/memory';
 import {
-  EntityResolutionService,
-  MemoryService,
-  ScopeRoutingService,
-  type IEntityRepository,
-  type IGraphService,
-  type IMemoryRepository,
-  type IMemorySearchService,
-  type IProjectBindingRepository,
-  type IScopeAccessService,
-} from '@workspace/memory';
-import { Err, None, Ok, type Result } from 'oxide.ts';
+  makeMemoryService,
+  makeRepository,
+  TEST_USER_ENTITY_ID,
+} from '@workspace/memory/testing';
+import { Err } from 'oxide.ts';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ImportService } from './import.service.js';
-import type {
-  IIngestLogRepository,
-  IngestLogEntry,
-} from './ingest-log.repository.js';
+import { makeIngestLog } from './ingest-log.repository.fake.js';
+import type { IIngestLogRepository } from './ingest-log.repository.js';
 
-const USER_ENTITY_ID = 'usr_000000000000000a.0000000000';
-const PERSONAL_SCOPE = `user.${USER_ENTITY_ID.replace(/\./g, '_')}`;
+const PERSONAL_SCOPE = `user.${TEST_USER_ENTITY_ID.replace(/\./g, '_')}`;
 const CORE_SCOPE = `${PERSONAL_SCOPE}.core`;
-
-const makeContext = (): IContext => ({
-  setContextValue: () => undefined,
-  mustGetCurrentUserId: () => 'b7e6a1c2-3d4f-4a5b-8c9d-0e1f2a3b4c5d',
-  getCurrentUserId: () => 'b7e6a1c2-3d4f-4a5b-8c9d-0e1f2a3b4c5d',
-  mustGetCurrentUserEntityId: () => USER_ENTITY_ID,
-  getCurrentUserEntityId: () => USER_ENTITY_ID,
-  getAccessToken: () => 'token',
-  getScopes: () => [],
-  getDefaultScope: () => undefined,
-  getCurrentSessionId: () => undefined,
-});
-
-const makeRepository = (
-  insertResult: Result<undefined, string> = Ok(undefined)
-): IMemoryRepository => ({
-  insert: vi.fn().mockResolvedValue(insertResult),
-  findOneById: vi.fn().mockResolvedValue(None),
-  update: vi.fn().mockResolvedValue(Ok(undefined)),
-  applyTranslation: vi.fn().mockResolvedValue(Ok(undefined)),
-  markTranslationSkipped: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-const makeSearchService = (): IMemorySearchService => ({
-  search: vi.fn().mockResolvedValue([]),
-  findSimilar: vi.fn().mockResolvedValue(None),
-  findAuthoritativeCoverage: vi.fn().mockResolvedValue(None),
-  findSupersedeCandidates: vi.fn().mockResolvedValue([]),
-  listRecentByScope: vi.fn().mockResolvedValue([]),
-});
-
-const makeEntityRepository = (): IEntityRepository => ({
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-  findByNormalizedName: vi.fn().mockResolvedValue(None),
-  findByMatchKey: vi.fn().mockResolvedValue(None),
-  findContentAnchors: vi.fn().mockResolvedValue([]),
-  linkMemory: vi.fn().mockResolvedValue(Ok(undefined)),
-  list: vi.fn().mockResolvedValue([]),
-  listForMemories: vi.fn().mockResolvedValue(new Map()),
-});
-
-const makeGraphService = (): IGraphService => ({
-  createEdge: vi.fn().mockResolvedValue(Ok({ created: true })),
-  linkMemories: vi.fn().mockResolvedValue(Ok({ created: true })),
-  traverse: vi.fn().mockResolvedValue([]),
-  neighborsOf: vi.fn().mockResolvedValue([]),
-  buildContext: vi.fn().mockResolvedValue({
-    memories: [],
-    entities: [],
-    edges: [],
-    linked_memories: [],
-  }),
-});
-
-const makeScopeAccess = (): IScopeAccessService => ({
-  canWrite: vi.fn().mockResolvedValue(true),
-  createScope: vi.fn().mockResolvedValue(Ok(undefined)),
-  listMemberProjects: vi.fn().mockResolvedValue(Ok([])),
-});
-
-const makeBindings = (): IProjectBindingRepository => ({
-  findScope: vi.fn().mockResolvedValue(None),
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-const makeIngestLog = (
-  seeded: string[] = []
-): IIngestLogRepository & { hashes: Set<string> } => {
-  const hashes = new Set<string>(seeded);
-  return {
-    hashes,
-    insertIfAbsent: vi.fn().mockImplementation((entry: IngestLogEntry) => {
-      const existed = hashes.has(entry.chunkHash);
-      hashes.add(entry.chunkHash);
-      return Promise.resolve(Ok({ existed }));
-    }),
-    exists: vi
-      .fn()
-      .mockImplementation((chunkHash: string) =>
-        Promise.resolve(Ok(hashes.has(chunkHash)))
-      ),
-    markProcessed: vi.fn().mockResolvedValue(Ok(undefined)),
-    release: vi.fn().mockImplementation((chunkHash: string) => {
-      hashes.delete(chunkHash);
-      return Promise.resolve(Ok(undefined));
-    }),
-  };
-};
 
 const makeService = (options?: {
   ingestLog?: IIngestLogRepository & { hashes: Set<string> };
   repository?: IMemoryRepository;
 }) => {
-  const embedding = new DeterministicHashEmbeddingService();
-  const context = makeContext();
-  const repository = options?.repository ?? makeRepository();
-  const entityRepository = makeEntityRepository();
-  const scopeAccess = makeScopeAccess();
-  const entityResolution = new EntityResolutionService(
-    entityRepository,
-    embedding
-  );
-  const scopeRouting = new ScopeRoutingService(
-    makeBindings(),
-    scopeAccess,
-    context
-  );
-  const memoryService = new MemoryService(
-    repository,
-    makeSearchService(),
-    embedding,
-    context,
-    entityResolution,
-    entityRepository,
-    makeGraphService(),
-    scopeAccess,
-    scopeRouting,
-    { translateToEnglish: vi.fn() }
+  const memory = makeMemoryService(
+    options?.repository ? { repository: options.repository } : {}
   );
   const ingestLog = options?.ingestLog ?? makeIngestLog();
-  const remember = vi.spyOn(memoryService, 'remember');
-  const service = new ImportService(memoryService, scopeRouting, ingestLog);
-  return { service, remember, ingestLog, repository };
+  const remember = vi.spyOn(memory.service, 'remember');
+  const service = new ImportService(
+    memory.service,
+    memory.scopeRouting,
+    ingestLog
+  );
+  return { service, remember, ingestLog, repository: memory.repository };
 };
 
 const baseInput = (overrides?: Record<string, unknown>) => ({
@@ -233,7 +116,8 @@ describe('ImportService', () => {
   });
 
   it('releases the claim when the underlying write fails', async () => {
-    const repository = makeRepository(Err('insert boom'));
+    const repository = makeRepository();
+    vi.mocked(repository.insert).mockResolvedValue(Err('insert boom'));
     const ingestLog = makeIngestLog();
     const { service } = makeService({ repository, ingestLog });
     const input = baseInput({ source_hash: 'h-fail' });

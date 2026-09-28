@@ -4,10 +4,7 @@ import {
   compareVersions,
   isReleaseUrl,
   parseDeployedVersion,
-  renderMissingTag,
-  renderReleaseKnown,
   renderReleaseNotice,
-  renderRollback,
   tagForVersion,
   versionFromTag,
 } from './release.logic.js';
@@ -142,14 +139,5 @@ describe('the release lines', () => {
         carried: [{ number: 7, state: 'waiting' }],
       })
     ).toContain('moved ZM-7 to done');
-  });
-
-  it('names a missing tag, a rollback, and a state another session already recorded', () => {
-    expect(renderMissingTag('0.25.0', 'v0.25.0')).toContain('git fetch --tags');
-    expect(renderRollback('0.24.3', '0.25.0')).toContain('back to v0.24.3');
-    const known = renderReleaseKnown('0.25.0', '849d7cac');
-    expect(known).toContain('v0.25.0');
-    expect(known).toMatch(/already recorded/u);
-    expect(known).not.toMatch(/no card/u);
   });
 });

@@ -188,33 +188,84 @@ test.describe('Graph expansion over MCP', () => {
   test('a briefing leg does not grow when relations join it', async () => {
     const user = await provisionE2EUser('graph-expansion-pack@zm.e2e');
     const mcp = await McpTestClient.connect(await passwordGrantToken(user));
+    const entity = 'wombat-settler';
+    const remember = async (
+      content: string,
+      extra: Record<string, unknown> = {}
+    ): Promise<string> => {
+      const stored = await mcp.callTool('remember', {
+        content,
+        kind: 'decision',
+        scope: 'personal',
+        ...extra,
+      });
+      expect(stored.isError ?? false).toBe(false);
+      return firstJson<{ memory_id: string }>(stored).memory_id;
+    };
     try {
-      const topic = 'freight settlement reconciliation';
-      let previous: string | null = null;
-      for (let index = 0; index < 6; index += 1) {
-        const stored = await mcp.callTool('remember', {
-          content:
-            `${topic}: stage ${index} settles the ledger against the ` +
-            `carrier statement and records variance ${index} for audit`,
-          kind: 'decision',
-          scope: 'personal',
-          ...(previous
-            ? { links: [{ type: 'relates_to', dst: previous }] }
-            : {}),
-        });
-        previous = firstJson<{ memory_id: string }>(stored).memory_id;
+      // A relation of a hit, in words the topic does not share.
+      const neighbour = await remember(
+        'the harbour crane logbook is reconciled by the dock supervisor ' +
+          'every second Tuesday'
+      );
+      // As many entity co-mentions as the leg has rows: on their own they
+      // would fill it.
+      const coMentions: string[] = [];
+      for (const detail of [
+        'pins its container image by digest in every environment',
+        'pages the on-call engineer only after two failed retries',
+        'keeps its audit export in cold storage for seven years',
+      ]) {
+        coMentions.push(
+          await remember(`${entity} ${detail}`, {
+            entities: [{ name: entity, type: 'service' }],
+          })
+        );
+      }
+      // The topic hits: they name the entity, and one of them is related to
+      // the neighbour.
+      const topic = 'freight settlement reconciliation variance';
+      const hits: string[] = [];
+      for (const [index, detail] of [
+        'matches each carrier statement line against the ledger',
+        'flags a variance above half a percent for manual review',
+        'closes the period once every variance has an owner',
+      ].entries()) {
+        hits.push(
+          await remember(`${topic}: ${detail}`, {
+            entities: [{ name: entity, type: 'service' }],
+            ...(index === 0
+              ? { links: [{ type: 'relates_to', dst: neighbour }] }
+              : {}),
+          })
+        );
       }
 
+      // max_tokens 600 → a leg of three rows, the same size as each set above.
       const pack = firstJson<{
         memories: Array<{ id: string }>;
         linked_memories: Array<{ id: string }>;
-      }>(await mcp.callTool('build_context', { topic, briefing: true }));
+      }>(
+        await mcp.callTool('build_context', {
+          topic,
+          briefing: true,
+          max_tokens: 600,
+        })
+      );
 
-      // The reservation lives INSIDE the leg's cap: with max_memories at its
-      // default the leg can never exceed it, however dense the graph is.
-      expect(pack.linked_memories.length).toBeLessThanOrEqual(12);
-      const ids = new Set(pack.linked_memories.map((row) => row.id));
-      expect(ids.size).toBe(pack.linked_memories.length);
+      // The premise: the ranked leg is the three hits, so the neighbour and
+      // the co-mentions compete for the linked leg alone.
+      expect(pack.memories.map((row) => row.id).sort()).toEqual(
+        [...hits].sort()
+      );
+
+      // The relation takes its reserved row, and the leg keeps its size: one
+      // co-mention gave its row up instead of the leg growing by one.
+      const linked = pack.linked_memories.map((row) => row.id);
+      expect(linked).toContain(neighbour);
+      expect(linked).toHaveLength(3);
+      expect(new Set(linked).size).toBe(3);
+      expect(linked.filter((id) => coMentions.includes(id))).toHaveLength(2);
     } finally {
       await mcp.close();
     }

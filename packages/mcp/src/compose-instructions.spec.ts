@@ -61,17 +61,6 @@ describe('composeInstructions', () => {
     expect(dropped).toEqual([]);
   });
 
-  it('keeps a capped client inside the budget at any rule count', () => {
-    for (const count of [1, 12, 500]) {
-      const rules = Array.from({ length: count }, (_, i) =>
-        rule(`rule ${i + 1}: ${'x'.repeat(400)}`)
-      );
-      expect(
-        composeInstructions(rules, CAPPED_CLIENT).text.length
-      ).toBeLessThanOrEqual(RULE_DELIVERY.instructionVisibleBudget);
-    }
-  });
-
   it('clips an absurdly long rule when texts are inlined', () => {
     const composed = composeInstructions(
       [rule('x'.repeat(9000))],

@@ -4,9 +4,8 @@
  * card it offered.
  */
 import { expect, test } from '@playwright/test';
-import { createClient } from '@supabase/supabase-js';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
@@ -27,11 +26,6 @@ interface Pack {
     } | null;
   };
 }
-
-const admin = () =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false },
-  });
 
 const markers: string[] = [];
 
@@ -104,30 +98,6 @@ test('a second conversation is offered the card the first one worked on last', a
     );
     expect(b1.work?.continuation?.thread).toBe(threadB);
 
-    // The first conversation starts Y, then parks X: Y is offered, and the
-    // last step names X.
-    const y = await card({
-      action: 'create',
-      scope,
-      title: 'Relay rollout',
-      state: 'active',
-      no_branch: 'e2e fixture',
-      no_links: 'e2e fixture',
-    });
-    await card({
-      action: 'move',
-      card_id: x.id,
-      to: 'waiting',
-      reason: 'waits for the key ceremony',
-    });
-    const b2 = await brief(second);
-    expect(b2.work?.continuation?.card?.number).toBe(y.number);
-    expect(b2.work?.continuation?.last_session).toMatchObject({
-      number: x.number,
-      type: 'moved',
-      to_state: 'waiting',
-    });
-
     // The briefing event records the offered card.
     await expect
       .poll(
@@ -136,7 +106,7 @@ test('a second conversation is offered the card the first one worked on last', a
             .from('usage_events')
             .select('id')
             .eq('event_type', 'session_briefing')
-            .eq('metadata->>continuation_card', y.id);
+            .eq('metadata->>continuation_card', x.id);
           return (data ?? []).length;
         },
         { timeout: 10_000 }

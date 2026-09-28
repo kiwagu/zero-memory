@@ -28,53 +28,7 @@ interface BriefingPack {
 }
 
 test.describe('Briefing recency leg over MCP', () => {
-  test('a week-old decision reaches a generic-topic briefing via recent[], but not a mid-session call', async () => {
-    const user = await provisionE2EUser('briefing-recency@zm.e2e');
-    const mcp = await McpTestClient.connect(await passwordGrantToken(user));
-    try {
-      const remembered = await mcp.callTool('remember', {
-        content:
-          'chose cursor-based pagination for the export feed because offset ' +
-          'scans degraded past one million rows',
-        kind: 'decision',
-        scope: 'personal',
-      });
-      expect(remembered.isError ?? false).toBe(false);
-      const { memory_id } = firstJson<{ memory_id: string }>(remembered);
-      // A week old: inside the 14-day recency window, but old enough to
-      // prove the leg is not just echoing this second's writes.
-      await backdateMemory(memory_id, 7);
-
-      // Generic topic, deliberately unrelated to the decision's content.
-      const briefing = firstJson<BriefingPack>(
-        await mcp.callTool('build_context', {
-          topic: 'team knowledge base overview',
-          briefing: true,
-        })
-      );
-      const ranked = [...briefing.memories, ...briefing.linked_memories].map(
-        (memory) => memory.id
-      );
-      if (!ranked.includes(memory_id)) {
-        expect(
-          (briefing.recent ?? []).map((memory) => memory.id),
-          'a fresh decision must reach the briefing through recent[]'
-        ).toContain(memory_id);
-      }
-
-      // The mid-session call (no briefing flag) has no recency leg.
-      const midSession = firstJson<BriefingPack>(
-        await mcp.callTool('build_context', {
-          topic: 'team knowledge base overview',
-        })
-      );
-      expect(midSession.recent ?? []).toEqual([]);
-    } finally {
-      await mcp.close();
-    }
-  });
-
-  test('recent[] keeps personal memories but drops a foreign project scope when no project is pinned', async () => {
+  test('recent[] keeps personal memories but drops a foreign project scope when no project is pinned, and a mid-session call has none', async () => {
     // A dedicated isolated user so the corpus is exactly what this spec seeds.
     const user = await provisionE2EUser('briefing-recency-scope@zm.e2e');
     const mcp = await McpTestClient.connect(await passwordGrantToken(user));
@@ -175,6 +129,15 @@ test.describe('Briefing recency leg over MCP', () => {
         recentIds,
         'a foreign project scope must not surface through recent[]'
       ).not.toContain(foreignId);
+
+      // The same call mid-session (no briefing flag) has no recency leg,
+      // although the leg above had something to deliver.
+      const midSession = firstJson<BriefingPack>(
+        await mcp.callTool('build_context', {
+          topic: 'quarterly board reporting metrics dashboard',
+        })
+      );
+      expect(midSession.recent ?? []).toEqual([]);
     } finally {
       await mcp.close();
     }

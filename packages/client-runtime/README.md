@@ -18,6 +18,14 @@ per-client differences (event map, output frame, transcript source) live in the
 
 ### State-store port (`$XDG_STATE_HOME/zero-memory/`)
 
+- `state-file.ts` — the one home and discipline every file below shares:
+  `stateFilePath(name)` (under `~/.local/state` without `XDG_STATE_HOME`),
+  `loadStateRecord` (a keyed file that is missing, torn mid-write or not a JSON
+  object reads as empty — never as an error, since a state problem must not
+  sink the hook reading it), `saveCappedStateRecord` (keeps the newest entries
+  past a cap, so a file that gains one per session never grows forever) and
+  `writeStateFile`. The watcher's own small state files use the same owner.
+  Each module keeps only its schema, its cap and what it records.
 - `task-brief.state.ts` — per-session briefing state (`session-briefs.json`):
   which `mem_` ids the session-start briefing injected (the dedup source),
   whether the session already got its one task briefing, the session-start
@@ -71,7 +79,7 @@ per-client differences (event map, output frame, transcript source) live in the
 ### Ingest consent (shared policy)
 
 - `project-consent.ts` — the per-project capture gate every client path shares
-  (`ingestAllowed` / `projectIgnored` / `ingestMode`). Reads
+  (`ingestAllowed` / `projectIgnored`). Reads
   `~/.config/zero-memory/ingest.json` (`ZM_INGEST_CONFIG`) — one of
   `allowlist` / `denylist` of path globs, default `off` — and honors
   `.zero-memory-ignore` / `.zero-memory-allow` markers. Lives here (not in the
@@ -99,6 +107,12 @@ touch the wire. Authentication is delegated to `@workspace/mcp-oauth-client`
 - `receipt-client.ts` — `callSessionReceipt` (the `session_receipt` tool).
 - `capture-client.ts` — `callRemember` (the `remember` tool).
 - `import-client.ts` — `ImportClient` (the `import_memory` tool).
+- `bounded-client.ts` — `withBoundedClient`: one authed exchange bounded as a
+  whole, for the calls a hook makes inside its client's own timeout — every
+  request carries the deadline, and the client is closed when it passes, which
+  aborts a stalled connect too.
+- `board-client.ts` — `callCardBranches` (a card by number, with its
+  branches: `board resolve`, then `board get`), within a deadline.
 - `release-client.ts` — `fetchDeployedVersion` (reads a project's version
   url — https, http only on localhost, no credentials, no redirects) and
   `callRelease` (the `release` tool), both within a deadline.

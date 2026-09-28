@@ -9,8 +9,8 @@ const repoRoot = resolve(new URL('.', import.meta.url).pathname, '../../..');
 // bun resolves the workspace globs against the filesystem. A manifest the
 // Dockerfile does not COPY makes `bun install --frozen-lockfile` refuse the
 // shared lockfile — and that failure surfaces only in the cloud image build,
-// after the change has already merged. Both Dockerfiles are asserted here
-// because the invariant is one: the lockfile they install from is shared.
+// after the change has already merged. Every image Dockerfile is asserted
+// here because the invariant is one: the lockfile they install from is shared.
 const workspaceDirs = ['apps', 'packages', 'tests'];
 
 const workspaceManifests = (): string[] =>
@@ -32,11 +32,12 @@ const copiedManifests = (dockerfile: string): string[] =>
     .map((match) => match[1]!)
     .sort();
 
-describe.each(['apps/server/Dockerfile', 'apps/web/Dockerfile'])(
-  'deps layer of %s',
-  (dockerfile) => {
-    it('copies exactly the workspace manifests the shared lockfile covers', () => {
-      expect(copiedManifests(dockerfile)).toEqual(workspaceManifests());
-    });
-  }
-);
+describe.each([
+  'apps/docs/Dockerfile',
+  'apps/server/Dockerfile',
+  'apps/web/Dockerfile',
+])('deps layer of %s', (dockerfile) => {
+  it('copies exactly the workspace manifests the shared lockfile covers', () => {
+    expect(copiedManifests(dockerfile)).toEqual(workspaceManifests());
+  });
+});

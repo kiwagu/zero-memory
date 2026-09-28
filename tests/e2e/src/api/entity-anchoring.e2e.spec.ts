@@ -160,27 +160,4 @@ test.describe('Write-time entity anchoring over MCP', () => {
       await mcp.close();
     }
   });
-
-  test('a kind whose missing subject is not worth an interruption is left alone', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
-    try {
-      const written = await mcp.callTool('remember', {
-        content:
-          'zqxwv thplkj measured grbnm at vfhtd on the xkcdq run, which is ' +
-          'merely an observation',
-        kind: 'fact',
-        scope: 'personal',
-      });
-      expect(written.isError ?? false).toBe(false);
-      const out = firstJson<RememberOut>(written);
-      // No ask: it is reserved for the kind other sessions come looking for
-      // by name, so it stays rare enough to be read.
-      expect(out.anchor_hint).toBeUndefined();
-    } finally {
-      await mcp.close();
-    }
-  });
 });

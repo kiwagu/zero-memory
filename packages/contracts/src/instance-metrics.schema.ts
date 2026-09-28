@@ -74,24 +74,6 @@ export const instanceMetricsSchema = z.object({
 
 export type InstanceMetrics = z.infer<typeof instanceMetricsSchema>;
 
-/**
- * The registry as a plain list — every key the operator surface may emit.
- * Derived from the schema so the two cannot drift. A test cross-checks this
- * against the actual `instance_metrics` output and against a deny-list of
- * content-bearing keys.
- */
-export const INSTANCE_METRICS_KEYS = Object.keys(
-  instanceMetricsSchema.shape
-) as (keyof InstanceMetrics)[];
-
-/**
- * Keys that must NEVER appear on the operator surface because they carry, or
- * could reconstruct, memory content. The negative test asserts the registry
- * intersects this set at zero. `top_facts` is the concrete one the vitrine
- * exposes and the operator surface must not.
- */
-export const FORBIDDEN_CONTENT_KEYS = ['top_facts', 'content'] as const;
-
 /** One per-day point of `instance_metrics_series`. */
 export const instanceMetricsSeriesPointSchema = z.object({
   date: z.string(),

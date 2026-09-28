@@ -304,6 +304,7 @@
         "@workspace/typescript-config": "workspace:^",
         "eslint": "catalog:",
         "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/commands": {
@@ -574,6 +575,7 @@
         "@workspace/typescript-config": "workspace:^",
         "eslint": "catalog:",
         "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/mcp": {
@@ -836,7 +838,6 @@
         "@workspace/typescript-config": "workspace:^",
         "eslint": "catalog:",
         "typescript": "catalog:",
-        "vitest": "catalog:",
       },
     },
     "tests/e2e": {

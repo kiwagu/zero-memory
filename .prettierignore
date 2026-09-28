@@ -21,3 +21,8 @@ next-env.d.ts
 
 # Vendored agent skills (installed via skills CLI, keep byte-exact)
 .agents/
+
+# Agent worktrees nested in this checkout: each is its own repository with its
+# own ignore rules, and the root-relative patterns above do not reach inside
+# them, so a root run would rewrite their vendored and generated trees.
+.claude/worktrees/

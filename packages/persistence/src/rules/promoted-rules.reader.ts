@@ -1,6 +1,7 @@
 import type { ContextRule } from '@workspace/contracts';
-import { ruleDeliveryCutoff } from '@workspace/db';
+import { deliverableRules } from '@workspace/db';
 
+import { readAllPages } from '../paged-read.js';
 import { createUserClient } from '../supabase.client.js';
 
 /**
@@ -18,26 +19,39 @@ import { createUserClient } from '../supabase.client.js';
  * Soft-TTL: rules older than the delivery TTL (by promoted_at) drop OUT of
  * delivery — they stay on /rules for the owner to re-promote or revoke.
  * Pinned rules are EXEMPT: the pin is a standing decision, so it never
- * expires silently by age.
+ * expires silently by age. The age rule and the order are applied here by
+ * `deliverableRules`, the same function the /rules page counts with.
+ *
+ * Every promoted row is read, paged: the age rule runs in memory, so expired
+ * rows arrive too and accumulate over time. A single response would hit
+ * PostgREST's max-rows cap and silently drop an arbitrary subset — pinned
+ * rules included.
  */
 export async function listPromotedUserRules(
   accessToken: string
 ): Promise<ContextRule[]> {
-  const { data, error } = await createUserClient(accessToken)
-    .from('rule_candidates')
-    .select('rule_text, pinned')
-    .eq('status', 'promoted')
-    .eq('target_layer', 'user')
-    .is('revoked_at', null)
-    .not('rule_text', 'is', null)
-    .or(`pinned.eq.true,promoted_at.gte.${ruleDeliveryCutoff(Date.now())}`)
-    .order('pinned', { ascending: false })
-    .order('promoted_at', { ascending: false });
-  if (error) {
-    throw new Error(`promoted rules lookup failed: ${error.message}`);
-  }
-  return (data ?? []).flatMap((row) => {
-    const text = row.rule_text?.trim();
-    return text ? [{ text, pinned: row.pinned === true }] : [];
-  });
+  const client = createUserClient(accessToken);
+  const data = await readAllPages(
+    (from, to) =>
+      client
+        .from('rule_candidates')
+        .select('rule_text, pinned, promoted_at')
+        .eq('status', 'promoted')
+        .eq('target_layer', 'user')
+        .is('revoked_at', null)
+        .not('rule_text', 'is', null)
+        // A total order, so no row lands on two pages or on none; the
+        // delivery order itself is deliverableRules' to decide.
+        .order('id', { ascending: true })
+        .range(from, to),
+    { label: 'promoted rules lookup' }
+  );
+  const rules = data.map((row) => ({
+    text: row.rule_text?.trim() ?? '',
+    pinned: row.pinned === true,
+    promotedAt: row.promoted_at,
+  }));
+  return deliverableRules(rules, Date.now()).flatMap(({ text, pinned }) =>
+    text ? [{ text, pinned }] : []
+  );
 }

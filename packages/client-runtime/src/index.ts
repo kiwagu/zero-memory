@@ -1,10 +1,16 @@
+// The one home and discipline every state file below shares.
+export {
+  loadStateRecord,
+  saveCappedStateRecord,
+  stateFilePath,
+  writeStateFile,
+} from './state-file.js';
 export {
   briefStatePath,
   clearBriefTail,
   loadBriefState,
   markRulesDelivered,
   markTaskBriefed,
-  MAX_TRACKED_SESSIONS,
   readBriefTail,
   readSessionThread,
   recordBriefTail,
@@ -16,7 +22,6 @@ export {
 } from './task-brief.state.js';
 export {
   countMemoryTool,
-  loadRecallGapState,
   markRecallGapReminded,
   readRecallGapCounters,
   recallGapStatePath,
@@ -26,7 +31,6 @@ export {
 export {
   claimReceipt,
   loadReceiptState,
-  MAX_TRACKED_RECEIPTS,
   receiptStatePath,
   recordCapturedMemories,
   type ReceiptStateFile,
@@ -80,7 +84,6 @@ export { ImportClient } from './import-client.js';
 // uniformly no matter which client or mode ships the transcript.
 export {
   ingestAllowed,
-  ingestMode,
   projectIgnored,
   type IngestMode,
 } from './project-consent.js';

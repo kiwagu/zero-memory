@@ -184,10 +184,6 @@ test.describe('Releases over MCP', () => {
       const looked = (await candidates())[0]?.landing_seq ?? -1;
       expect(looked).toBeGreaterThan(0);
 
-      const uneven = await record('2.0.0', []);
-      expect(uneven.isError ?? false).toBe(true);
-      expect(contentText(uneven)).toMatch(/landing_seqs/u);
-
       // Landed again after the observer looked: the record skips the card.
       await land('bbbbbbb');
       const stale = await record('2.0.0', [looked]);
@@ -205,7 +201,7 @@ test.describe('Releases over MCP', () => {
     }
   });
 
-  test('configure changes only the fields it is given', async () => {
+  test('configure clears a field given as null', async () => {
     const seed = await readSeedState();
     const agent = await McpTestClient.connect(
       await passwordGrantToken(seed.userA)
@@ -230,32 +226,19 @@ test.describe('Releases over MCP', () => {
           .settings.version_url
       ).toBe('https://api.example.com/healthz');
 
-      // Only on_release is given: the url must survive untouched.
-      const policyOnly = await agent.callTool('release', {
-        action: 'configure',
-        scope,
-        on_release: 'record_and_move_done',
-      });
-      expect(policyOnly.isError ?? false).toBe(false);
-      const afterPolicy = firstJson<{
-        settings: { version_url: string | null; on_release: string };
-      }>(policyOnly).settings;
-      expect(afterPolicy.version_url).toBe('https://api.example.com/healthz');
-      expect(afterPolicy.on_release).toBe('record_and_move_done');
-
-      // An explicit null clears the url.
+      // An explicit null reaches the handler as null, not as "not given",
+      // and clears the url. Which fields a call leaves alone is the release
+      // handler's unit tests' to pin.
       const cleared = await agent.callTool('release', {
         action: 'configure',
         scope,
         version_url: null,
       });
       expect(cleared.isError ?? false).toBe(false);
-      const afterClear = firstJson<{
-        settings: { version_url: string | null; on_release: string };
-      }>(cleared).settings;
-      expect(afterClear.version_url).toBeNull();
-      // The policy set by the previous call must still hold.
-      expect(afterClear.on_release).toBe('record_and_move_done');
+      expect(
+        firstJson<{ settings: { version_url: string | null } }>(cleared)
+          .settings.version_url
+      ).toBeNull();
     } finally {
       await agent.close();
     }

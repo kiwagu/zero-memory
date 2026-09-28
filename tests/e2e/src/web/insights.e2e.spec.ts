@@ -1,8 +1,9 @@
 /**
  * Value dashboard (/, the default page): owner sees their metric tiles + top facts
- * built from seeded usage_events, the period switch keeps the page rendering,
- * and top facts are owner-scoped (user B never sees user A's content). Each spec
- * seeds its own fuel so order and retries never matter.
+ * built from seeded usage_events, the period switch applies the period it names
+ * and keeps the default out of the address, and top facts are owner-scoped
+ * (user B never sees user A's content). Each spec seeds its own fuel so order
+ * and retries never matter.
  */
 import { expect, test } from '@playwright/test';
 
@@ -75,41 +76,49 @@ test.describe('value dashboard', () => {
     await expect(page.getByTestId('memory-detail-content')).toBeVisible();
   });
 
-  test('the period switch keeps the dashboard rendering', async ({ page }) => {
+  test('the period switch applies the period it names', async ({ page }) => {
     const seed = await readSeedState();
     await seedInsightsUsage(seed.userA);
     await signInThroughForm(page, seed.userA);
-
-    await page.goto('/?days=7');
-    await expect(page.getByTestId('insights-page')).toBeVisible();
-    await expect(page.getByTestId('insights-tokens-saved')).toBeVisible();
-  });
-
-  test('context precision shows a rate once a judge scored recalls', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    // User B (and only B) gets a judge relevance verdict, so this spec stays
-    // independent of A's placeholder assertion under parallel workers.
-    const seeded = await seedInsightsUsage(seed.userB);
-    await seedRelevanceVerdict(seeded.ownerId, seeded.memoryId);
-    await signInThroughForm(page, seed.userB);
     await page.goto('/');
 
-    const precision = page.getByTestId('insights-metric-precision');
-    await expect(precision).toBeVisible();
-    await expect(precision).toContainText('%');
+    const period = (name: string) =>
+      page
+        .getByTestId('insights-page')
+        .getByRole('link', { name, exact: true });
+    // Thirty days is the default, and the bare address means it.
+    await expect(period('30 days')).toHaveAttribute('aria-current', 'page');
+
+    await period('7 days').click();
+    await expect(page).toHaveURL(/\/\?days=7$/);
+    await expect(period('7 days')).toHaveAttribute('aria-current', 'page');
+    await expect(period('30 days')).not.toHaveAttribute('aria-current');
+    await expect(page.getByTestId('insights-tokens-saved')).toBeVisible();
+
+    await period('30 days').click();
+    await expect(page).not.toHaveURL(/days=/);
+    await expect(period('30 days')).toHaveAttribute('aria-current', 'page');
   });
 
-  test('the roi tile shows the exclusive rate after a benchmark run', async ({
+  test('the precision and roi tiles show a rate once there is data behind them', async ({
     page,
   }) => {
     const seed = await readSeedState();
+    // User B (and only B) gets a judge relevance verdict and a benchmark run,
+    // so this spec stays independent of A's placeholder assertions under
+    // parallel workers.
     const seeded = await seedInsightsUsage(seed.userB);
+    await seedRelevanceVerdict(seeded.ownerId, seeded.memoryId);
     await seedRoiRun(seeded.ownerId, seeded.memoryId);
     await signInThroughForm(page, seed.userB);
     await page.goto('/');
 
+    // A judge scored B's recalls: context precision is a rate, not the
+    // connect placeholder.
+    const precision = page.getByTestId('insights-metric-precision');
+    await expect(precision).toBeVisible();
+    await expect(precision).toContainText('%');
+    // A benchmark ran: the roi tile shows the exclusive rate.
     const roi = page.getByTestId('insights-metric-roi');
     await expect(roi).toBeVisible();
     await expect(roi).toContainText('%');

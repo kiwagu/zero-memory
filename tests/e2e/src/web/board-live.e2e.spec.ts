@@ -5,15 +5,11 @@
  */
 import { expect, test, type Page } from '@playwright/test';
 
-import { admin } from '../helpers/board-store.js';
+import { admin, type CardResult } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
-
-interface CardResult {
-  card: { id: string; number: number; scope: string };
-}
 
 const markers: string[] = [];
 

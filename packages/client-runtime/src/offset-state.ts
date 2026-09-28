@@ -1,8 +1,8 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 import { z } from 'zod';
+
+import { stateFilePath, writeStateFile } from './state-file.js';
 
 const stateSchema = z.object({
   /** Byte offset already processed per transcript file. */
@@ -10,12 +10,9 @@ const stateSchema = z.object({
 });
 export type WatcherStateData = z.infer<typeof stateSchema>;
 
-export const defaultStatePath = (): string =>
-  join(
-    process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'watcher.json'
-  );
+export const defaultStatePath = (
+  env: NodeJS.ProcessEnv = process.env
+): string => stateFilePath('watcher.json', env);
 
 /**
  * Persisted per-file byte offsets so a restarted watcher resumes where it
@@ -48,7 +45,6 @@ export class OffsetState {
   }
 
   #save(): void {
-    mkdirSync(dirname(this.path), { recursive: true });
-    writeFileSync(this.path, JSON.stringify(this.#data, null, 2));
+    writeStateFile(this.path, this.#data, 2);
   }
 }

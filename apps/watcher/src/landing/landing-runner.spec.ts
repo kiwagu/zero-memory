@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,9 +12,11 @@ import {
 import { cardIdSchema } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { HookClient, HookInput } from '../hook-client.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
 import { checkRelease } from '../release/release-runner.js';
+import { commit, git, initRepo } from '../testing/git-repo.fixture.js';
+import { fakeHookClient } from '../testing/hook-client.fake.js';
+import { useStateDirs } from '../testing/state-dir.fixture.js';
 import { landingDriftFor, runLanding } from './landing-runner.js';
 
 vi.mock('@workspace/client-runtime', async (importOriginal) => ({
@@ -24,25 +25,6 @@ vi.mock('@workspace/client-runtime', async (importOriginal) => ({
 }));
 vi.mock('../release/release-runner.js', () => ({ checkRelease: vi.fn() }));
 
-const env = {
-  GIT_AUTHOR_NAME: 't',
-  GIT_AUTHOR_EMAIL: 't@t',
-  GIT_COMMITTER_NAME: 't',
-  GIT_COMMITTER_EMAIL: 't@t',
-};
-const git = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', args, {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, ...env },
-  }).trim();
-const commit = (cwd: string, file: string, ...messages: string[]): string => {
-  writeFileSync(join(cwd, file), file);
-  git(cwd, 'add', file);
-  git(cwd, 'commit', '-q', ...messages.flatMap((m) => ['-m', m]));
-  return git(cwd, 'rev-parse', 'HEAD');
-};
-
 const CARD = {
   id: cardIdSchema.parse('crd_0000000000000019.0000000000'),
   number: 19,
@@ -50,53 +32,28 @@ const CARD = {
 };
 
 describe('runLanding', () => {
-  let state: string;
+  const dirs = useStateDirs('zm-landing');
   let repo: string;
-  let previous: string | undefined;
   let said: string[];
 
-  const adapter = (cwd?: string): HookClient => ({
-    kind: 'claude',
-    ingestProvenance: 'test',
-    canTaskBrief: true,
-    canAnchorCompaction: false,
-    readInput: async (): Promise<HookInput> => ({
-      sessionId: 's1',
-      cwd: cwd ?? repo,
-      prompt: '',
-      transcriptPath: '',
-      hookEventName: 'PostToolUse',
-      toolName: 'Bash',
-      alreadyContinued: false,
-      source: '',
-      trigger: '',
-    }),
-    parse: () => {
-      throw new Error('unused');
-    },
-    emitSessionBrief: () => {},
-    emitTaskBrief: () => {},
-    emitTurnContext: (_event, text) => {
-      said.push(text);
-    },
-    emitReceipt: () => {},
-    emitCompactionAnchor: () => {},
-  });
+  /** A command just ran in `cwd`; what the hook said lands in `said`. */
+  const adapter = (cwd?: string) =>
+    fakeHookClient(
+      {
+        sessionId: 's1',
+        cwd: cwd ?? repo,
+        hookEventName: 'PostToolUse',
+        toolName: 'Bash',
+      },
+      {
+        kind: 'claude',
+        emitTurnContext: (_event, text) => void said.push(text),
+      }
+    );
 
   beforeEach(() => {
-    previous = process.env.XDG_STATE_HOME;
-    state = mkdtempSync(join(tmpdir(), 'zm-landing-state-'));
-    process.env.XDG_STATE_HOME = state;
-    repo = mkdtempSync(join(tmpdir(), 'zm-landing-repo-'));
-    git(repo, 'init', '-q', '-b', 'main');
-    git(
-      repo,
-      'remote',
-      'add',
-      'origin',
-      'git@github.com:acme/memory-service.git'
-    );
-    commit(repo, 'a', 'chore: start');
+    repo = dirs.work;
+    initRepo(repo, { origin: 'git@github.com:acme/memory-service.git' });
     recordProjectScope(
       projectScopeStatePath(),
       resolveProjectHint(repo),
@@ -106,12 +63,6 @@ describe('runLanding', () => {
     vi.mocked(callCardBranches).mockReset();
     vi.mocked(checkRelease).mockReset().mockResolvedValue(null);
   });
-  afterEach(() => {
-    process.env.XDG_STATE_HOME = previous;
-    rmSync(state, { recursive: true, force: true });
-    rmSync(repo, { recursive: true, force: true });
-  });
-
   it('stays silent and asks nobody after an ordinary commit', async () => {
     commit(repo, 'b', 'fix: a typo');
     await runLanding(adapter());
@@ -160,73 +111,6 @@ describe('runLanding', () => {
           landed_at: 'x',
           attached_at: 'x',
           landings: [],
-        },
-      ],
-    });
-    await runLanding(adapter());
-    expect(said).toEqual([]);
-  });
-
-  it('stays silent about the earlier squash of a branch that landed again', async () => {
-    // A bug fixed in the branch that brought it: the branch lands twice, and
-    // its row names only the second squash.
-    const first = commit(
-      repo,
-      'b',
-      'feat: the work',
-      'Squashed-from: feature/x (abcdef1) ZM-19'
-    );
-    const second = commit(
-      repo,
-      'c',
-      'fix: the bug, in the same branch',
-      'Squashed-from: feature/x (abcdef2) ZM-19'
-    );
-    vi.mocked(callCardBranches).mockResolvedValue({
-      card: CARD,
-      branches: [
-        {
-          repo: 'acme/memory-service',
-          branch: 'feature/x',
-          state: 'landed',
-          squash_sha: second.slice(0, 7),
-          target: 'main',
-          landed_at: 'x',
-          attached_at: 'x',
-          landings: [
-            { squash_sha: first.slice(0, 7), target: 'main', landed_at: 'x' },
-            { squash_sha: second.slice(0, 7), target: 'main', landed_at: 'x' },
-          ],
-        },
-      ],
-    });
-    await runLanding(adapter());
-    expect(said).toEqual([]);
-  });
-
-  it('stays silent about the squash of a branch its card reopened', async () => {
-    // The card lands the branch, then reopens it to fix its landed code: the
-    // row is open again, and the earlier squash is on record in landings.
-    const landed = commit(
-      repo,
-      'b',
-      'feat: the work',
-      'Squashed-from: feature/x (abcdef1) ZM-19'
-    );
-    vi.mocked(callCardBranches).mockResolvedValue({
-      card: CARD,
-      branches: [
-        {
-          repo: 'acme/memory-service',
-          branch: 'feature/x',
-          state: 'open',
-          squash_sha: null,
-          target: null,
-          landed_at: null,
-          attached_at: 'x',
-          landings: [
-            { squash_sha: landed.slice(0, 7), target: 'main', landed_at: 'x' },
-          ],
         },
       ],
     });
@@ -459,15 +343,7 @@ describe('landingDriftFor', () => {
 
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), 'zm-drift-repo-'));
-    git(repo, 'init', '-q', '-b', 'main');
-    git(
-      repo,
-      'remote',
-      'add',
-      'origin',
-      'git@github.com:acme/memory-service.git'
-    );
-    commit(repo, 'a', 'chore: start');
+    initRepo(repo, { origin: 'git@github.com:acme/memory-service.git' });
   });
   afterEach(() => rmSync(repo, { recursive: true, force: true }));
 

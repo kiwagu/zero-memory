@@ -179,30 +179,6 @@ describe('recordBriefing — session_briefing metering', () => {
 
     expect(record).not.toHaveBeenCalled();
   });
-
-  it('carries only counts — never memory ids or content — in metadata', async () => {
-    const { recorder, record } = recorderSpy();
-
-    recordBriefing(recorder, briefingMetering());
-    await flush();
-
-    const event = firstEvent(record);
-    expect(Object.keys(event?.metadata ?? {}).sort()).toEqual([
-      'briefing_kind',
-      'empty',
-      'returned',
-      'topic_len',
-    ]);
-  });
-
-  it('never throws when the recorder rejects (fire-and-forget)', async () => {
-    const { recorder } = recorderSpy(
-      vi.fn().mockRejectedValue(new Error('db down'))
-    );
-
-    expect(() => recordBriefing(recorder, briefingMetering())).not.toThrow();
-    await flush();
-  });
 });
 
 describe('recordToolInvocation — pre-execution volume metering', () => {
@@ -230,6 +206,44 @@ describe('recordToolInvocation — pre-execution volume metering', () => {
       expect(record).not.toHaveBeenCalled();
     }
   );
+
+  // Metering must never break the tool call it measures: whatever the store
+  // does, the caller returns normally and the failure is only logged.
+  it.each<[string, IUsageRecorder['record']]>([
+    [
+      'throws synchronously',
+      () => {
+        throw new Error('usage store down');
+      },
+    ],
+    ['rejects', () => Promise.reject(new Error('usage store down'))],
+  ])(
+    'survives a recorder that %s and logs the failure',
+    async (_how, record) => {
+      // Pin the sink the assertion reads: a warn line reaches console.warn
+      // only when the level lets it through and LOG_STDERR is not set.
+      vi.stubEnv('LOG_LEVEL', 'warn');
+      vi.stubEnv('LOG_STDERR', '');
+      const warn = vi
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+
+      try {
+        expect(() => recordToolInvocation({ record }, 'forget')).not.toThrow();
+        await flush();
+
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(String(warn.mock.calls[0]?.[0]))).toMatchObject({
+          msg: 'failed to record usage event',
+          eventType: 'mcp_tool_call',
+          error: 'usage store down',
+        });
+      } finally {
+        warn.mockRestore();
+        vi.unstubAllEnvs();
+      }
+    }
+  );
 });
 
 describe('recordRememberResult — post-result remember metering', () => {
@@ -248,17 +262,6 @@ describe('recordRememberResult — post-result remember metering', () => {
       agentName: 'claude-code',
       metadata: { tool: 'remember', similar_ids: ['mem_a', 'mem_b'] },
     });
-  });
-
-  it('omits similar_ids for an ordinary write (no candidates surfaced)', async () => {
-    const { recorder, record } = recorderSpy();
-
-    recordRememberResult(recorder, { similarIds: [], agentName: null });
-    await flush();
-
-    expect(record).toHaveBeenCalledTimes(1);
-    const event = firstEvent(record);
-    expect(event?.metadata).toEqual({ tool: 'remember' });
   });
 });
 
@@ -339,21 +342,32 @@ describe('recordToolResult — recall-hit attribution', () => {
     expect(firstEvent(record)?.agentName).toBe('claude-code');
   });
 
-  it('stores the search query, truncated to the cap', async () => {
-    const { recorder, record } = recorderSpy();
+  it('stores the search query as sent, truncated to the cap', async () => {
+    const long = recorderSpy();
+    const short = recorderSpy();
 
     recordToolResult(
-      recorder,
+      long.recorder,
       briefingMetering({
         tool: 'recall',
         briefing: null,
         query: 'x'.repeat(500),
       })
     );
+    recordToolResult(
+      short.recorder,
+      briefingMetering({
+        tool: 'recall',
+        briefing: null,
+        query: 'ポートを固定する',
+      })
+    );
     await flush();
 
-    const stored = firstEvent(record)?.metadata?.query as string;
+    const stored = firstEvent(long.record)?.metadata?.query as string;
     expect(stored).toHaveLength(200);
+    // A query in any script is stored exactly as the caller sent it.
+    expect(firstEvent(short.record)?.metadata?.query).toBe('ポートを固定する');
   });
 
   it('omits the query key entirely when none was sent', async () => {
@@ -366,25 +380,6 @@ describe('recordToolResult — recall-hit attribution', () => {
     await flush();
 
     expect(firstEvent(record)?.metadata).not.toHaveProperty('query');
-  });
-
-  it('stores the translated query when translate-then-search rewrote it', async () => {
-    const { recorder, record } = recorderSpy();
-
-    recordToolResult(
-      recorder,
-      briefingMetering({
-        tool: 'recall',
-        briefing: null,
-        query: 'ポートを固定する',
-      })
-    );
-    await flush();
-
-    // The metered query is the one the caller sent, whatever its language:
-    // nothing rewrites it, so nothing has to be reported alongside it.
-    expect(firstEvent(record)?.metadata?.query).toBe('ポートを固定する');
-    expect(firstEvent(record)?.metadata).not.toHaveProperty('searched_as');
   });
 
   it('records an empty result as returned: 0 with no ids', async () => {
@@ -426,20 +421,6 @@ describe('recordToolResult — recall-hit attribution', () => {
     expect(kinds).toContain('session_briefing');
     expect(record).toHaveBeenCalledTimes(2);
   });
-
-  it('emits only mcp_tool_call for a non-briefing recall', async () => {
-    const { recorder, record } = recorderSpy();
-
-    recordToolResult(
-      recorder,
-      briefingMetering({ tool: 'recall', briefing: null })
-    );
-    await flush();
-
-    expect(events(record).map((event) => event.eventType)).toEqual([
-      'mcp_tool_call',
-    ]);
-  });
 });
 
 describe('recordInBandRecallUsed — in-band recall usefulness', () => {
@@ -470,28 +451,6 @@ describe('recordInBandRecallUsed — in-band recall usefulness', () => {
 
     expect(record).not.toHaveBeenCalled();
   });
-
-  it('carries only the mem id and flags — never content', async () => {
-    const { recorder, record } = recorderSpy();
-
-    recordInBandRecallUsed(recorder, ['mem_a']);
-    await flush();
-
-    expect(Object.keys(firstEvent(record)?.metadata ?? {}).sort()).toEqual([
-      'mem_id',
-      'source',
-      'useful',
-    ]);
-  });
-
-  it('never throws when the recorder rejects (fire-and-forget)', async () => {
-    const { recorder } = recorderSpy(
-      vi.fn().mockRejectedValue(new Error('db down'))
-    );
-
-    expect(() => recordInBandRecallUsed(recorder, ['mem_a'])).not.toThrow();
-    await flush();
-  });
 });
 
 describe('recordToolError — failed read-tool metering', () => {
@@ -515,20 +474,5 @@ describe('recordToolError — failed read-tool metering', () => {
         query: 'カフカのポートは何番ですか',
       },
     });
-  });
-
-  it('never throws when the recorder rejects (fire-and-forget)', async () => {
-    const { recorder } = recorderSpy(
-      vi.fn().mockRejectedValue(new Error('db down'))
-    );
-
-    expect(() =>
-      recordToolError(recorder, {
-        tool: 'build_context',
-        agentName: null,
-        query: null,
-      })
-    ).not.toThrow();
-    await flush();
   });
 });

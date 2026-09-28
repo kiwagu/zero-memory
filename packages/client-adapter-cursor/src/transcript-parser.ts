@@ -1,4 +1,5 @@
 import {
+  parseJsonLines,
   type ParsedTranscript,
   type TranscriptEntry,
 } from '@workspace/client-core';
@@ -83,27 +84,13 @@ const stripRedacted = (text: string): string => text.split(REDACTED).join('');
 export const parseCursorTranscript = (jsonl: string): ParsedTranscript => {
   const entries: TranscriptEntry[] = [];
 
-  for (const rawLine of jsonl.split('\n')) {
-    const trimmed = rawLine.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue; // torn or non-JSON line
-    }
-    const line = cursorLineSchema.safeParse(parsed);
-    if (!line.success) {
-      continue;
-    }
-    const role = line.data.role;
+  for (const line of parseJsonLines(jsonl, cursorLineSchema)) {
+    const role = line.role;
     // Skips control lines (turn_ended, …) and anything not a chat turn.
     if (role !== 'user' && role !== 'assistant') {
       continue;
     }
-    const content = line.data.message?.content;
+    const content = line.message?.content;
     if (content === undefined) {
       continue;
     }

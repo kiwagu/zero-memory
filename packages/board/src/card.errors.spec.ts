@@ -13,6 +13,9 @@ describe('toCardFailure', () => {
       code: 'same_state',
       message: 'already active',
     });
+    expect(
+      toCardFailure('branch_open', 'Branch o/n:x is still open').message
+    ).toContain('o/n:x');
   });
 
   it('falls back to a sentence the caller can act on', () => {
@@ -32,56 +35,30 @@ describe('toCardFailure', () => {
 });
 
 describe('cardFailureToErrorCode', () => {
-  it('maps the caller-fixable classes onto the transport vocabulary', () => {
-    expect(cardFailureToErrorCode(toCardFailure('invalid'))).toBe(
-      'validation_failed'
-    );
-    expect(cardFailureToErrorCode(toCardFailure('not_found'))).toBe(
-      'not_found'
-    );
-    expect(cardFailureToErrorCode(toCardFailure('forbidden'))).toBe(
-      'forbidden'
-    );
-  });
-
-  it('calls every state refusal a conflict, whatever its reason', () => {
-    for (const code of [
-      'archived',
-      'same_state',
-      'conflict',
-      'not_attached',
-      'already_promoted',
-    ] as const) {
-      expect(cardFailureToErrorCode(toCardFailure(code))).toBe('conflict');
-    }
-  });
-});
-
-describe('the branch rule', () => {
-  it('maps the branch rule onto the transport vocabulary', () => {
-    expect(cardFailureToErrorCode(toCardFailure('branch_required'))).toBe(
-      'validation_failed'
-    );
-    expect(cardFailureToErrorCode(toCardFailure('branch_open'))).toBe(
-      'conflict'
-    );
-    expect(
-      toCardFailure('branch_open', 'Branch o/n:x is still open').message
-    ).toContain('o/n:x');
+  // Every state refusal is a `conflict`, whatever its reason: the card exists
+  // and the caller may touch it, but its current state refuses this call.
+  it.each([
+    ['not_found', 'not_found', 'not_found'],
+    ['forbidden', 'forbidden', 'forbidden'],
+    ['invalid', 'invalid', 'validation_failed'],
+    ['kaboom', 'invalid', 'validation_failed'],
+    ['branch_required', 'branch_required', 'validation_failed'],
+    ['links_required', 'links_required', 'validation_failed'],
+    ['archived', 'archived', 'conflict'],
+    ['same_state', 'same_state', 'conflict'],
+    ['conflict', 'conflict', 'conflict'],
+    ['not_attached', 'not_attached', 'conflict'],
+    ['already_promoted', 'already_promoted', 'conflict'],
+    ['branch_open', 'branch_open', 'conflict'],
+    ['not_linked', 'not_linked', 'conflict'],
+  ] as const)('reads %s as %s and answers %s', (sent, code, transport) => {
+    const failure = toCardFailure(sent);
+    expect(failure.code).toBe(code);
+    expect(cardFailureToErrorCode(failure)).toBe(transport);
   });
 });
 
 describe('the relation rule', () => {
-  it('maps the relation rule onto the transport vocabulary', () => {
-    expect(isCardFailureCode('links_required')).toBe(true);
-    expect(cardFailureToErrorCode(toCardFailure('links_required'))).toBe(
-      'validation_failed'
-    );
-    expect(cardFailureToErrorCode(toCardFailure('not_linked'))).toBe(
-      'conflict'
-    );
-  });
-
   it('names the candidates the store offered, in its order', () => {
     expect(
       withLinkCandidates('Say how this card relates.', [

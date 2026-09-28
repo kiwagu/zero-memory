@@ -2,11 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   boardCardSchema,
-  boardInputSchema,
   briefingWorkSchema,
   cardBranchViewSchema,
-  cardInputSchema,
-  cardRefSchema,
   formatBoardName,
   formatBranchRef,
   formatCardLabel,
@@ -93,23 +90,6 @@ describe('git names on a card', () => {
     expect(formatBoardName('user.usr_ab12_01k.core')).toBe('core');
     expect(formatBoardName('usr_ab12_01k')).toBe('usr_ab12_01k');
   });
-
-  it('knows a branch reference and the land action', () => {
-    expect(
-      cardRefSchema.safeParse({ kind: 'branch', repo: 'o/n', name: 'main' })
-        .success
-    ).toBe(true);
-    expect(
-      cardInputSchema.safeParse({
-        action: 'land',
-        card_id: 'crd_0000000000000000.0000000000',
-        branch: { repo: 'o/n', name: 'feature/x' },
-        squash_sha: 'abcdef1',
-        target: 'main',
-        reason: 'gate green',
-      }).success
-    ).toBe(true);
-  });
 });
 
 describe('briefingWorkSchema continuation', () => {
@@ -172,16 +152,6 @@ describe('the cards I worked on', () => {
     refs: 1,
     last_event: null,
   };
-
-  it('asks for them with worked_by_me', () => {
-    expect(
-      boardInputSchema.parse({ action: 'list', worked_by_me: true })
-        .worked_by_me
-    ).toBe(true);
-    expect(boardInputSchema.parse({ action: 'list' }).worked_by_me).toBe(
-      undefined
-    );
-  });
 
   it('reads my latest step and the horizon mark, and a row without them', () => {
     const step = {

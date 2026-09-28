@@ -66,9 +66,8 @@ export function parseFeedStatus(raw: string | undefined): FeedStatus {
 }
 
 /**
- * Does a memory belong in the feed under this status? The twin of the SQL
- * filter the feed query applies (see the memories page) — kept pure so the
- * realtime insert path can reuse it client-side.
+ * Does a memory belong in the feed under this status? The client-side twin of
+ * filterFeedStatus, for the realtime insert path, which has no query to narrow.
  */
 export function matchesFeedStatus(
   memory: Pick<MemoryRow, 'invalidated_at' | 'superseded_by'>,
@@ -88,6 +87,41 @@ export function matchesFeedStatus(
       return retired && !replaced;
     case 'all':
       return true;
+  }
+}
+
+/** The two columns a memory's lifecycle status is read from. */
+type LifecycleColumn = 'invalidated_at' | 'superseded_by';
+
+/** The part of a PostgREST filter builder the status filter needs. */
+interface FeedStatusQuery<Q> {
+  or(filters: string): Q;
+  is(column: LifecycleColumn, value: null): Q;
+  not(column: LifecycleColumn, operator: 'is', value: null): Q;
+}
+
+/**
+ * Narrows the feed query to a status: the SQL twin of matchesFeedStatus,
+ * selecting exactly the memories it admits. `all` adds nothing.
+ */
+export function filterFeedStatus<Q extends FeedStatusQuery<Q>>(
+  query: Q,
+  status: FeedStatus
+): Q {
+  switch (status) {
+    case 'active':
+      // Everything except a historical version (retired AND replaced).
+      return query.or('invalidated_at.is.null,superseded_by.is.null');
+    case 'live':
+      return query.is('invalidated_at', null);
+    case 'superseded':
+      return query
+        .not('invalidated_at', 'is', null)
+        .not('superseded_by', 'is', null);
+    case 'invalidated':
+      return query.not('invalidated_at', 'is', null).is('superseded_by', null);
+    case 'all':
+      return query;
   }
 }
 

@@ -3,13 +3,17 @@
  * caller's own latest work, never the calling conversation's, still active,
  * within the horizon — and the caller's last step when it was on another card.
  */
-import { spawnSync } from 'node:child_process';
-
 import { expect, test } from '@playwright/test';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import { e2eEnv } from '../helpers/env.js';
-import { firstJson, McpTestClient } from '../helpers/mcp.js';
+import {
+  admin,
+  asUser,
+  makeMember,
+  projectScope,
+  psql,
+  rpc,
+  thread,
+} from '../helpers/board-store.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
 
@@ -49,17 +53,6 @@ interface Work {
   continuation?: Continuation | null;
 }
 
-const asUser = (token: string): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
-    auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-
-const admin = (): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false },
-  });
-
 /**
  * The memories this file writes only to make a project scope, deleted when
  * the file is done so they do not crowd later specs.
@@ -72,102 +65,10 @@ test.afterAll(async () => {
   }
 });
 
-/** A project scope the caller may write, made the way an agent makes one. */
-const projectScope = async (token: string, tag: string): Promise<string> => {
-  const agent = await McpTestClient.connect(token);
-  try {
-    const made = await agent.callTool('remember', {
-      content: `e2e continuation marker ${tag}: the relay drops frames under load`,
-      kind: 'fact',
-      project_hint: `/tmp/zm-e2e-${tag}`,
-    });
-    expect(made.isError ?? false).toBe(false);
-    const { scope, memory_id } = firstJson<{
-      scope: string;
-      memory_id: string;
-    }>(made);
-    markers.push(memory_id);
-    return scope;
-  } finally {
-    await agent.close();
-  }
-};
-
-const rpc = async <T>(
-  client: SupabaseClient,
-  fn: string,
-  args: Record<string, unknown>
-): Promise<T> => {
-  const { data, error } = await client.rpc(fn, args);
-  if (error) {
-    throw new Error(`${fn}: ${error.message}`);
-  }
-  return data as T;
-};
-
-/** SQL as the database owner, for fixtures no role may write through the API. */
-const psql = (query: string): string => {
-  const result = spawnSync(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '--network',
-      'host',
-      '-i',
-      'supabase/postgres:17.6.1.136',
-      'psql',
-      'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-Atc',
-      query,
-    ],
-    { encoding: 'utf8' }
-  );
-  if (result.status !== 0) {
-    throw new Error(`psql: ${result.stderr}`);
-  }
-  return result.stdout.trim();
-};
-
-/** Adds a user to a board with a role, and answers their profile id. */
-async function makeMember(
-  scope: string,
-  authUserId: string,
-  role: 'reader' | 'writer'
-): Promise<string> {
-  const { data: profile } = await admin()
-    .from('profiles')
-    .select('id')
-    .eq('user_id', authUserId)
-    .single();
-  const joined = await admin()
-    .from('scope_members')
-    .upsert(
-      {
-        scope,
-        user_id: (profile as { id: string }).id,
-        role,
-        accepted_at: new Date().toISOString(),
-      },
-      { onConflict: 'scope,user_id' }
-    );
-  expect(joined.error).toBeNull();
-  return (profile as { id: string }).id;
-}
-
-/**
- * A conversation of its own; `tag` is one letter of the id alphabet
- * (Crockford base32 has no i, l, o or u).
- */
-const thread = (tag: string): string =>
-  `thr_e2ecnt${tag}${String(Date.now()).slice(-9)}.0000000000`;
-
 const board = async (tag: string) => {
   const seed = await readSeedState();
   const token = await passwordGrantToken(seed.userA);
-  const scope = await projectScope(token, `${tag}-${Date.now()}`);
+  const scope = await projectScope(token, `${tag}-${Date.now()}`, markers);
   const db = asUser(token);
   const create = async (
     title: string,
@@ -301,51 +202,39 @@ test.describe('A new session is offered where it left off', () => {
     expect(cont.last[0]!.text).toBe('noted from a client without a thread');
   });
 
-  test('released entries and another member are not your work', async () => {
+  test('a release, and another member, are not your work', async () => {
     const { seed, scope, db, create, note, work } = await board('cont-others');
     const t = thread('a');
-    const other = await create('Relay rollout', 'active', t);
-    const mine = await create('Relay keys', 'active', t);
-    await note(mine, 'mine', t);
-    // After my note: a release recorded as me on the other card, and another
-    // member's note on it.
-    const released = await rpc<{ recorded: string[] }>(db, 'release_record', {
-      p_scope: scope,
-      p_version: '9.9.9',
-      p_build: null,
-      p_release_commit: 'bbbbbbb',
-      p_source: 'url',
-      p_card_ids: [other.id],
-    });
-    expect(released.recorded).toEqual([other.id]);
-    await makeMember(scope, seed.userB.id, 'writer');
-    const dbB = asUser(await passwordGrantToken(seed.userB));
-    await rpc(dbB, 'card_note', { p_card_id: other.id, p_text: 'not yours' });
-
-    const cont = (await work(thread('b'))).continuation!;
-    expect(cont.card?.number).toBe(mine.number);
-    expect(cont.last_session).toBeNull();
-  });
-
-  test('a release that closes a card is not your last step', async () => {
-    const { scope, db, create, note, work } = await board('cont-release');
-    const t = thread('a');
     const shipped = await create('Relay rollout', 'waiting', t);
+    const other = await create('Relay docs', 'active', t);
     const mine = await create('Relay keys', 'active', t);
     await note(mine, 'mine', t);
+    // After my note, as me: a release that closes one card and is only
+    // recorded on the other. Then another member's note on the one still
+    // active. None of it is my last step.
     await rpc(db, 'release_configure', {
       p_scope: scope,
       p_on_release: 'record_and_move_done',
     });
-    const released = await rpc<{ moved: string[] }>(db, 'release_record', {
-      p_scope: scope,
-      p_version: '9.9.9',
-      p_build: null,
-      p_release_commit: 'bbbbbbb',
-      p_source: 'url',
-      p_card_ids: [shipped.id],
-    });
+    const released = await rpc<{ recorded: string[]; moved: string[] }>(
+      db,
+      'release_record',
+      {
+        p_scope: scope,
+        p_version: '9.9.9',
+        p_build: null,
+        p_release_commit: 'bbbbbbb',
+        p_source: 'url',
+        p_card_ids: [shipped.id, other.id],
+      }
+    );
+    expect([...released.recorded].sort()).toEqual(
+      [shipped.id, other.id].sort()
+    );
     expect(released.moved).toEqual([shipped.id]);
+    await makeMember(scope, seed.userB.id, 'writer');
+    const dbB = asUser(await passwordGrantToken(seed.userB));
+    await rpc(dbB, 'card_note', { p_card_id: other.id, p_text: 'not yours' });
 
     const cont = (await work(thread('b'))).continuation!;
     expect(cont.card?.number).toBe(mine.number);

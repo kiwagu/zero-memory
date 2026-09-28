@@ -51,7 +51,7 @@ export function remarkHtmlAsText() {
   };
 }
 
-export function splitMemoryIds(text: string): MdNode[] {
+function splitMemoryIds(text: string): MdNode[] {
   const parts: MdNode[] = [];
   let last = 0;
   for (const match of text.matchAll(MEMORY_ID_PATTERN)) {
@@ -140,7 +140,7 @@ export function cardLabelNumbers(texts: readonly string[]): number[] {
  * number. A label of a card it was not given stays text: a card that does not
  * exist, or one the reader may not see, looks exactly like prose.
  */
-export function splitCardLabels(
+function splitCardLabels(
   text: string,
   links: Readonly<Record<string, string>>
 ): MdNode[] {

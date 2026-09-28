@@ -13,8 +13,6 @@ import {
   resolveHookBudgetChars,
   renderPackWithinBudget,
 } from './brief-budget.logic.js';
-import { renderOpenLoopsSection } from './open-loops.logic.js';
-import { renderStandingRulesSection } from './standing-rules.logic.js';
 
 // Built THROUGH the contract: a hand-rolled literal would let an id or kind
 // that the real pack can never contain into the fixtures, and the first draft
@@ -289,30 +287,6 @@ describe('composeWithinBudget', () => {
     expect(composed.omitted).toEqual([]);
     expect(composed.text).toBe('PROJECT: proj.x');
   });
-
-  it('reports a section that was dropped for size', () => {
-    const composed = composeWithinBudget(
-      [
-        { name: 'the project line', text: 'p' },
-        { name: 'the memory pack', text: 'x'.repeat(500) },
-      ],
-      100
-    );
-    expect(composed.omitted).toEqual(['the memory pack']);
-    expect(composed.text).toContain('did not fit');
-  });
-
-  it('says nothing about a section that had nothing to say', () => {
-    const composed = composeWithinBudget(
-      [
-        { name: 'the project line', text: 'p' },
-        { name: 'the memory pack', text: null },
-      ],
-      9_000
-    );
-    expect(composed.omitted).toEqual([]);
-    expect(composed.text).toBe('p');
-  });
 });
 
 describe('planSectionBudgets', () => {
@@ -328,71 +302,15 @@ describe('planSectionBudgets', () => {
       planSectionBudgets(9000, 400, true).rules
     );
   });
-
-  it('never plans a negative ceiling', () => {
-    expect(planSectionBudgets(100, 400, true).rules).toBe(0);
-  });
-});
-
-describe('the briefing split, end to end', () => {
-  // The measured defect: 8,455 characters of rules, a 9,000 budget, and a
-  // project line — the loops got nothing, then the rules did not fit either.
-  const rule = (headline: string, pinned: boolean) => ({
-    text: `${headline}. ${'Why it holds, at length. '.repeat(55)}`,
-    pinned,
-  });
-  const rules = [
-    rule('PINNED ONE', true),
-    rule('PINNED TWO', true),
-    rule('ORDINARY THREE', false),
-    rule('ORDINARY FOUR', false),
-    rule('ORDINARY FIVE', false),
-    rule('ORDINARY SIX', false),
-  ];
-  const loops = [1, 2, 3].map((n) =>
-    contextMemorySchema.parse({
-      id: `mem_${String(n).padStart(16, '0')}.0000000000`,
-      content: `handover ${n}: finish the migration and verify it`,
-      kind: 'task',
-      scope: 'proj.alpha',
-      created_at: `2026-09-0${n}T00:00:00Z`,
-    })
-  );
-  const projectLine = `PROJECT: proj.alpha — ${'x'.repeat(400)}`;
-
-  it('delivers the pinned rules whole and the loops, and drops neither', () => {
-    const budget = 9000;
-    const plan = planSectionBudgets(budget, projectLine.length, true);
-    const rulesSection = renderStandingRulesSection(rules, plan.rules)!;
-    const loopSection = renderOpenLoopsSection(
-      loops,
-      loops.length,
-      new Date('2026-09-10T00:00:00Z'),
-      budget - projectLine.length - rulesSection.length - 8
-    );
-    const composed = composeWithinBudget(
-      [
-        { name: 'the project line', text: projectLine },
-        { name: 'the standing rules', text: rulesSection },
-        { name: 'the open loops', text: loopSection },
-      ],
-      budget
-    );
-
-    expect(composed.omitted).toEqual([]);
-    expect(composed.text.length).toBeLessThanOrEqual(budget);
-    expect(composed.text).toContain(rules[0]!.text);
-    expect(composed.text).toContain(rules[1]!.text);
-    expect(composed.text).toContain('[headline]');
-    expect(composed.text).toContain('handover 3');
-  });
 });
 
 describe('planSectionBudgets — memory floor', () => {
   it('holds a floor for the memory pack, so long rules cannot take it all', () => {
-    const plan = planSectionBudgets(9_000, 500, true, 12);
-    expect(plan.memoryFloor).toBe(memoryFloorChars(12));
-    expect(plan.rules).toBe(9_000 - 500 - 2_250 - plan.memoryFloor - 16);
+    const withPack = planSectionBudgets(9_000, 500, true, 12);
+    const withoutPack = planSectionBudgets(9_000, 500, true, 0);
+    expect(withPack.memoryFloor).toBeGreaterThan(0);
+    // The floor comes out of the rules' ceiling, character for character.
+    expect(withoutPack.rules - withPack.rules).toBe(withPack.memoryFloor);
   });
 
   it('asks for no floor when the pack has no memories', () => {

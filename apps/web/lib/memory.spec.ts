@@ -6,6 +6,8 @@ import {
   annotateFacetOptions,
   facetCountIndex,
   facetTotal,
+  FEED_STATUSES,
+  filterFeedStatus,
   matchesFeedStatus,
   MEM_ID_QUERY_RE,
   memoryBadges,
@@ -13,6 +15,7 @@ import {
   memoryIdSearchPrefix,
   parseFeedStatus,
   sharingBadge,
+  type FeedStatus,
   type MemoryRow,
 } from './memory';
 
@@ -115,48 +118,88 @@ describe('parseFeedStatus', () => {
   });
 });
 
-describe('matchesFeedStatus', () => {
-  const live = { invalidated_at: null, superseded_by: null };
-  // Retired WITH a successor: a historical version, its content lives on.
-  const historical = {
-    invalidated_at: '2026-07-27T10:00:00Z',
-    superseded_by: 'mem_new',
+type Lifecycle = Pick<MemoryRow, 'invalidated_at' | 'superseded_by'>;
+type LifecycleColumn = keyof Lifecycle;
+
+/**
+ * Stands in for the PostgREST builder: it evaluates the conditions the feed
+ * query is given against one row, with the database's null semantics. A
+ * condition it does not recognise fails the test instead of passing it.
+ */
+class RowQuery {
+  admitted = true;
+
+  constructor(private readonly row: Lifecycle) {}
+
+  or(filters: string): RowQuery {
+    const any = filters.split(',').map((filter) => {
+      const match = /^(invalidated_at|superseded_by)\.(not\.)?is\.null$/.exec(
+        filter
+      );
+      if (!match) {
+        throw new Error(`unexpected or() filter: ${filter}`);
+      }
+      const isNull = this.row[match[1] as LifecycleColumn] === null;
+      return match[2] ? !isNull : isNull;
+    });
+    this.admitted = this.admitted && any.some(Boolean);
+    return this;
+  }
+
+  is(column: LifecycleColumn, value: null): RowQuery {
+    this.admitted = this.admitted && this.row[column] === value;
+    return this;
+  }
+
+  not(column: LifecycleColumn, operator: 'is', value: null): RowQuery {
+    expect(operator).toBe('is');
+    this.admitted = this.admitted && this.row[column] !== value;
+    return this;
+  }
+}
+
+describe('the feed status filter', () => {
+  const memories = {
+    live: { invalidated_at: null, superseded_by: null },
+    // Retired WITH a successor: a historical version, its content lives on.
+    historical: {
+      invalidated_at: '2026-07-27T10:00:00Z',
+      superseded_by: 'mem_new',
+    },
+    // Retired with NOTHING replacing it: a forget, a conflict resolution, or
+    // a hygiene auto-invalidation — possibly a false one.
+    lone: { invalidated_at: '2026-07-27T10:00:00Z', superseded_by: null },
+  } satisfies Record<string, Lifecycle>;
+
+  /** What each status shows: the one table the query and the live feed answer to. */
+  const shows: Record<FeedStatus, (keyof typeof memories)[]> = {
+    // The default hides historical versions only: a disappearance without a
+    // successor stays observable, so a false invalidation cannot hide
+    // behind "history".
+    active: ['live', 'lone'],
+    // The open-loop reading drops the lone invalidations too.
+    live: ['live'],
+    superseded: ['historical'],
+    invalidated: ['lone'],
+    all: ['live', 'historical', 'lone'],
   };
-  // Retired with NOTHING replacing it: a forget, a conflict resolution, or a
-  // hygiene auto-invalidation — possibly a false one.
-  const lone = { invalidated_at: '2026-07-27T10:00:00Z', superseded_by: null };
 
-  it('the default view hides historical versions only', () => {
-    expect(matchesFeedStatus(live, 'active')).toBe(true);
-    expect(matchesFeedStatus(historical, 'active')).toBe(false);
-    // The point of the whole filter: a disappearance without a successor stays
-    // observable, so a false invalidation cannot hide behind "history".
-    expect(matchesFeedStatus(lone, 'active')).toBe(true);
-  });
-
-  it('"superseded" is exactly the hidden set', () => {
-    expect(matchesFeedStatus(historical, 'superseded')).toBe(true);
-    expect(matchesFeedStatus(live, 'superseded')).toBe(false);
-    expect(matchesFeedStatus(lone, 'superseded')).toBe(false);
-  });
-
-  it('"invalidated" is the lone retirements, without the version history', () => {
-    expect(matchesFeedStatus(lone, 'invalidated')).toBe(true);
-    expect(matchesFeedStatus(historical, 'invalidated')).toBe(false);
-    expect(matchesFeedStatus(live, 'invalidated')).toBe(false);
-  });
-
-  it('"live" drops the lone invalidations too — the open-loop reading', () => {
-    expect(matchesFeedStatus(live, 'live')).toBe(true);
-    expect(matchesFeedStatus(lone, 'live')).toBe(false);
-    expect(matchesFeedStatus(historical, 'live')).toBe(false);
-  });
-
-  it('"all" hides nothing', () => {
-    for (const memory of [live, historical, lone]) {
-      expect(matchesFeedStatus(memory, 'all')).toBe(true);
+  it.each(FEED_STATUSES)(
+    '"%s" shows the same memories in the feed query and in the live feed',
+    (status) => {
+      for (const [name, memory] of Object.entries(memories)) {
+        const expected = shows[status].includes(name as keyof typeof memories);
+        expect(
+          filterFeedStatus(new RowQuery(memory), status).admitted,
+          `${name} in the feed query`
+        ).toBe(expected);
+        expect(
+          matchesFeedStatus(memory, status),
+          `${name} in the live feed`
+        ).toBe(expected);
+      }
     }
-  });
+  );
 });
 
 describe('facet availability', () => {

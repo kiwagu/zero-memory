@@ -19,15 +19,12 @@ const BOARDS = [board('proj.usr_a.alpha'), board('proj.usr_a.beta')];
 
 describe('resolveBoardScope', () => {
   it('opens the board that moved last when the address says nothing', () => {
-    // The rows arrive newest-activity-first, so the first one IS the default.
+    // The rows arrive newest-activity-first, so the first one IS the default,
+    // and its empty value keeps it out of the URL: a bare link means "latest".
     expect(resolveBoardScope(undefined, BOARDS)).toEqual({
       selected: 'proj.usr_a.alpha',
       value: '',
     });
-  });
-
-  it('keeps the default out of the URL so a bare link still means "latest"', () => {
-    expect(resolveBoardScope(undefined, BOARDS).value).toBe('');
   });
 
   it('honours an explicit board', () => {

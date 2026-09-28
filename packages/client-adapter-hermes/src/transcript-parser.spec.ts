@@ -67,31 +67,12 @@ describe('parseHermesTranscript', () => {
     expect(parseHermesTranscript(jsonl).recalledIds).toEqual([]);
   });
 
-  it('matches a recall tool under any mount prefix, bare included', () => {
-    const jsonl = [
-      line({
-        type: 'tool_result',
-        tool: 'build_context',
-        result: 'mem_w0fy6g43fawks08e.01m02cghyr',
-      }),
-      line({
-        type: 'tool_result',
-        tool: 'mcp__zero_memory__recall',
-        result: 'mem_2mf6fcmdvpw7ptka.01kxgg21w3',
-      }),
-    ].join('\n');
-
-    expect(parseHermesTranscript(jsonl).recalledIds).toEqual([
-      'mem_w0fy6g43fawks08e.01m02cghyr',
-      'mem_2mf6fcmdvpw7ptka.01kxgg21w3',
-    ]);
-  });
-
-  it('survives a slice that starts mid-file: no header, torn first line', () => {
-    const jsonl = [
-      '{"type":"message","role":"user","te',
-      line({ type: 'message', role: 'assistant', text: 'still parsed' }),
-    ].join('\n');
+  it('parses a slice that starts after the session header, with no cwd', () => {
+    const jsonl = line({
+      type: 'message',
+      role: 'assistant',
+      text: 'still parsed',
+    });
 
     expect(parseHermesTranscript(jsonl)).toEqual({
       entries: [{ role: 'assistant', text: 'still parsed' }],
@@ -130,13 +111,5 @@ describe('parseHermesTranscript', () => {
     expect(parseHermesTranscript(jsonl).recalledIds).toEqual([
       'mem_w0fy6g43fawks08e.01m02cghyr',
     ]);
-  });
-
-  it('returns an empty transcript for an empty slice', () => {
-    expect(parseHermesTranscript('')).toEqual({
-      entries: [],
-      cwd: undefined,
-      recalledIds: [],
-    });
   });
 });

@@ -97,36 +97,7 @@ const untilLive = async (
 };
 
 test.describe('A board tells its readers when its cards change', () => {
-  test('a member hears a card made, moved and noted on their board', async () => {
-    const seed = await readSeedState();
-    const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `live-${Date.now()}`, markers);
-    const ear = await listen(token, scope);
-    try {
-      expect(ear.status).toBe('SUBSCRIBED');
-      await untilLive(ear, token, scope);
-      const db = asUser(token);
-      const { card } = await rpc<{ card: { id: string } }>(db, 'card_create', {
-        p_scope: scope,
-        p_title: 'Relay keys',
-        p_state: 'idea',
-        p_no_links: 'e2e fixture',
-      });
-      await rpc(db, 'card_note', { p_card_id: card.id, p_text: 'keys first' });
-
-      await expect
-        .poll(() => ear.heard.map((h) => `${h.event}:${h.payload.table}`), {
-          timeout: 15_000,
-        })
-        .toEqual(
-          expect.arrayContaining(['INSERT:cards', 'INSERT:card_events'])
-        );
-    } finally {
-      await ear.close();
-    }
-  });
-
-  test('a reader of another board hears nothing of it', async () => {
+  test('a member hears a card made and noted on their board; a reader of another board hears nothing', async () => {
     const seed = await readSeedState();
     const tokenA = await passwordGrantToken(seed.userA);
     const tokenB = await passwordGrantToken(seed.userB);
@@ -136,15 +107,22 @@ test.describe('A board tells its readers when its cards change', () => {
     try {
       expect(owner.status).toBe('SUBSCRIBED');
       await untilLive(owner, tokenA, scope);
-      await rpc(asUser(tokenA), 'card_create', {
+      const db = asUser(tokenA);
+      const { card } = await rpc<{ card: { id: string } }>(db, 'card_create', {
         p_scope: scope,
         p_title: 'Relay keys',
         p_state: 'idea',
         p_no_links: 'e2e fixture',
       });
+      await rpc(db, 'card_note', { p_card_id: card.id, p_text: 'keys first' });
+      // Both tables reach the channel: the card, and its stream.
       await expect
-        .poll(() => owner.heard.length, { timeout: 15_000 })
-        .toBeGreaterThan(0);
+        .poll(() => owner.heard.map((h) => `${h.event}:${h.payload.table}`), {
+          timeout: 15_000,
+        })
+        .toEqual(
+          expect.arrayContaining(['INSERT:cards', 'INSERT:card_events'])
+        );
       expect(stranger.status).not.toBe('SUBSCRIBED');
       expect(stranger.heard).toEqual([]);
     } finally {

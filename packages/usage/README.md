@@ -20,7 +20,8 @@ request id from the ambient context.
 - `recordUsage(recorder, event)` — fire-and-forget emit: deliberately not
   awaited and never throws into the caller (a synchronous throw or a rejected
   write is logged at warn and dropped), so metering can never break — or slow —
-  the operation it measures.
+  the operation it measures. Built on `runDetached` from `@workspace/logger`,
+  which owns that contract and its test.
 - `UsageEvent`, `UsageEventType`, `UsageUnit` — the event shape and enums
   (`llm_extraction` / `embedding` / `mcp_tool_call` / `ingest_chunk` /
   `session_briefing` / `recall_used`; unit `count` / `tokens`).
