@@ -278,7 +278,8 @@ test.describe('Project-layer rules ride the briefing pack', () => {
 
       // ADDRESSED rule: anchored in the PERSONAL scope but explicitly
       // addressed to the ruled project via applies_scope — it must arrive in
-      // that project's briefing (the addressing tactic's whole point).
+      // that project's briefing (the addressing tactic's whole point). Made
+      // the way an agent makes it: promote_rule with the address.
       const ADDRESSED_RULE =
         'project-rules marker: addressed rule from a personal anchor.';
       const personal = await mcp.callTool('remember', {
@@ -287,21 +288,15 @@ test.describe('Project-layer rules ride the briefing pack', () => {
         scope: 'personal',
       });
       const personalId = firstJson<{ memory_id: string }>(personal).memory_id;
-      const { error: addressedErr } = await adminClient()
-        .from('rule_candidates')
-        .insert({
-          memory_id: personalId,
-          status: 'promoted',
-          resolution: 'promoted',
-          promoted_at: new Date().toISOString(),
-          resolved_at: new Date().toISOString(),
-          rule_text: ADDRESSED_RULE,
-          target_layer: 'project',
-          applies_scope: projectScope,
-          useful_sessions: 3,
-          window_days: 14,
-        });
-      expect(addressedErr).toBeNull();
+      const addressed = await mcp.callTool('promote_rule', {
+        memory_id: personalId,
+        applies_scope: projectScope,
+        rule_text: ADDRESSED_RULE,
+      });
+      expect(addressed.isError ?? false).toBe(false);
+      expect(
+        firstJson<{ target_layer: string; applies_scope: string }>(addressed)
+      ).toMatchObject({ target_layer: 'project', applies_scope: projectScope });
 
       const rebriefed = await mcp.callTool('build_context', {
         topic: 'anything about the ruled project again',

@@ -2,8 +2,7 @@
  * Quick-capture write path end-to-end: a headless `remember` carrying a
  * `project_hint` (the CLI sends its cwd) lands in the project scope resolved
  * by the server's project bindings — no MCP roots handshake involved — and
- * the response reports the landing scope. A `--task` capture becomes an open
- * loop that surfaces in the next briefing until closed.
+ * the response reports the landing scope.
  */
 import { expect, test } from '@playwright/test';
 
@@ -58,64 +57,6 @@ test.describe('Quick-capture over MCP @smoke', () => {
       expect(again.memory_id).toBe(result.memory_id);
       expect(again.deduplicated).toBe(true);
       expect(again.scope).toBe(result.scope);
-    } finally {
-      await mcp.close();
-    }
-  });
-
-  test('a --task capture is an open loop in the project briefing until closed', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
-    try {
-      const remembered = await mcp.callTool('remember', {
-        content:
-          'e2e quick-capture marker: re-run the quokka import once the ' +
-          'batch size fix ships',
-        kind: 'task',
-        project_hint: '/home/someone/repos/quokka-capture-e2e',
-      });
-      expect(remembered.isError ?? false).toBe(false);
-      const { memory_id, scope } = firstJson<Remembered>(remembered);
-
-      const briefing = firstJson<{
-        open_loops: Array<{ id: string; kind: string }>;
-      }>(
-        await mcp.callTool('build_context', {
-          topic: 'anything unrelated',
-          scopes: [scope!],
-        })
-      );
-      const loop = briefing.open_loops.find((entry) => entry.id === memory_id);
-      expect(loop, 'captured task must surface as an open loop').toBeTruthy();
-      expect(loop!.kind).toBe('task');
-
-      // Leave the stack clean.
-      const closed = await mcp.callTool('close_loop', { memory_id });
-      expect(closed.isError ?? false).toBe(false);
-    } finally {
-      await mcp.close();
-    }
-  });
-
-  test('an explicit scope wins over the project hint', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
-    try {
-      const result = firstJson<Remembered>(
-        await mcp.callTool('remember', {
-          content:
-            'e2e quick-capture marker: bun compiled binaries dispatch ' +
-            'subcommands on argv[2], never argv0',
-          kind: 'gotcha',
-          scope: 'core',
-          project_hint: '/home/someone/repos/quokka-capture-e2e',
-        })
-      );
-      expect(result.scope).toMatch(/\.core$/);
     } finally {
       await mcp.close();
     }

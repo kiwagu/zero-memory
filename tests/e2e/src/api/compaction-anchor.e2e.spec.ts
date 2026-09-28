@@ -46,10 +46,11 @@ test.describe('Compaction anchor source over MCP', () => {
       const { memory_id } = firstJson<{ memory_id: string }>(remembered);
 
       // The anchor's dialect: a conversation id (the hook always has one), a
-      // project hint, a small budget — and NO briefing flag.
+      // project hint, a small budget — and NO briefing flag. The topic is not
+      // the loop's: loops are assembled apart from the ranked legs.
       const pack = firstJson<AnchorSource>(
         await mcp.callTool('build_context', {
-          topic: 'harbour-dredging-e2e',
+          topic: 'something entirely unrelated to dredging',
           conversation_id: 'e2e-compaction-anchor-session',
           project_hint: PROJECT_HINT,
           max_tokens: 400,
@@ -67,41 +68,6 @@ test.describe('Compaction anchor source over MCP', () => {
       // either value once it has been condensed away.
       expect(pack.session?.thread).toMatch(/^thr_/u);
       expect(pack.project_scope).toBeTruthy();
-
-      await mcp.callTool('close_loop', { memory_id });
-    } finally {
-      await mcp.close();
-    }
-  });
-
-  test('a budget small enough to drop the pack still carries the loops', async () => {
-    // The anchor asks for almost no pack on purpose: it re-delivers no
-    // memories, and every character it spends competes with the conversation
-    // being summarized. That trade only holds while loops are assembled
-    // independently of the ranked legs.
-    const user = await provisionE2EUser('compaction-anchor-budget@zm.e2e');
-    const mcp = await McpTestClient.connect(await passwordGrantToken(user));
-    try {
-      const remembered = await mcp.callTool('remember', {
-        content:
-          'e2e compaction-anchor marker: the spoil-ground survey is still ' +
-          'waiting on the tide tables for next quarter',
-        kind: 'open-question',
-        project_hint: PROJECT_HINT,
-      });
-      expect(remembered.isError ?? false).toBe(false);
-      const { memory_id } = firstJson<{ memory_id: string }>(remembered);
-
-      const pack = firstJson<AnchorSource>(
-        await mcp.callTool('build_context', {
-          topic: 'something entirely unrelated to dredging',
-          conversation_id: 'e2e-compaction-anchor-budget-session',
-          project_hint: PROJECT_HINT,
-          max_tokens: 400,
-        })
-      );
-
-      expect(pack.open_loops.map((loop) => loop.id)).toContain(memory_id);
 
       await mcp.callTool('close_loop', { memory_id });
     } finally {

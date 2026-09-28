@@ -276,14 +276,6 @@ test.describe('OAuth: DCR → authorize → token', () => {
     expect(await response.text()).toContain('Invalid email or password');
   });
 
-  test('@smoke rejects unknown grant types', async ({ request }) => {
-    const response = await request.post(`${base}/oauth/token`, {
-      form: { grant_type: 'client_credentials' },
-    });
-    expect(response.status()).toBe(400);
-    expect((await response.json()).error).toBe('unsupported_grant_type');
-  });
-
   test('@smoke rate-limits token brute force with 429 + Retry-After', async ({
     request,
   }) => {

@@ -41,31 +41,6 @@ const sourceOf = async (memoryId: string): Promise<Record<string, unknown>> => {
 };
 
 test.describe('Hook-free thread over MCP', () => {
-  test('a briefing with no conversation id still returns a thread', async () => {
-    const user = await provisionE2EUser('hook-free-thread@zm.e2e');
-    const mcp = await McpTestClient.connect(await passwordGrantToken(user));
-    try {
-      const pack = firstJson<Pack>(
-        await mcp.callTool('build_context', {
-          topic: 'tidal gauge calibration schedule',
-          briefing: true,
-          // A project hint but NO conversation id — the bare-client shape. The
-          // project is required by design: a thread states where the work is,
-          // and the server refuses to guess that.
-          project_hint: '/home/someone/repos/tidal-gauge-e2e',
-        })
-      );
-
-      expect(
-        pack.session?.thread,
-        'a bare client must get a token'
-      ).toBeTruthy();
-      expect(pack.session?.thread).toMatch(/^thr_/u);
-    } finally {
-      await mcp.close();
-    }
-  });
-
   test('a write with no echoed token is still attributed to the conversation', async () => {
     const user = await provisionE2EUser('hook-free-write@zm.e2e');
     const mcp = await McpTestClient.connect(await passwordGrantToken(user));
@@ -79,8 +54,9 @@ test.describe('Hook-free thread over MCP', () => {
           project_hint: '/home/someone/repos/tidal-gauge-e2e',
         })
       );
+      // A bare client — a hint, no conversation id — still gets a token.
       const thread = pack.session?.thread;
-      expect(thread).toBeTruthy();
+      expect(thread, 'a bare client must get a token').toMatch(/^thr_/u);
 
       // Deliberately NO `thread` parameter: this is the case that used to
       // store a memory with no birth conversation at all.
