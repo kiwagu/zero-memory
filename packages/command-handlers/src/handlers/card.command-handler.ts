@@ -50,6 +50,7 @@ export class CardCommandHandler implements ICommandHandler<
           title: command.title ?? missing('title', 'open'),
           body: command.body,
           state: command.state,
+          severity: command.severity,
           branch: command.branch,
           noBranch: command.no_branch,
           links: command.links,
@@ -63,6 +64,7 @@ export class CardCommandHandler implements ICommandHandler<
           title: command.title ?? missing('title', 'promote into'),
           body: command.body,
           state: command.state,
+          severity: command.severity,
           branch: command.branch,
           noBranch: command.no_branch,
           links: command.links,
@@ -75,6 +77,7 @@ export class CardCommandHandler implements ICommandHandler<
           cardId: command.card_id ?? missing('card_id', 'edit'),
           title: command.title,
           body: command.body,
+          severity: command.severity,
           expectedRevision: command.expected_revision,
         });
         break;

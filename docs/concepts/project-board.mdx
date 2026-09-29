@@ -49,6 +49,27 @@ States are `idea`, `active`, `waiting`, `done` and `parked`. Any state may
 follow any other: a finished card reopens, an idea is parked without ever
 running. The vocabulary orders the columns; it does not gate anything.
 
+## A card says how much it matters
+
+A card carries a **severity** from 1 to 5, the way an issue tracker carries a
+priority: 1 minimal, 2 low, 3 normal, 4 high, 5 urgent. A card sits at 3
+unless the call that opens it says otherwise; a level is a deliberate step
+away from normal in either direction.
+
+Like the state, the severity is a declaration for readers. The board never
+sorts, gates or dispatches by it, and its one order stays the last change: an
+urgent card is marked, not moved. `create` and `promote_loop` take `severity`;
+`edit` changes it beside the title and the body, and the card's history records
+the level it moved from and the level it moved to. No reason is asked for,
+unlike a move: a level is a marker, not a transition. A level outside 1 to 5
+is refused.
+
+The dashboard draws the level as five ticks under the card's label, on the
+board and on the open card, at every level, so the scale reads the same on
+every card. A briefing names the level only when it is not normal — `sev 5`
+beside the card — so an urgent card reaches a new session without a word
+spent on every ordinary one.
+
 ## Every move carries a reason
 
 A card cannot change state without a stated reason. The tool refuses a blank

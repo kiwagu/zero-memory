@@ -19,6 +19,8 @@ import {
   cardLinkRelationLabel,
   cardRefHref,
   cardRelationLabel,
+  cardSeverityHint,
+  cardSeverityLabel,
   cardStateLabel,
   cardStateVariant,
   type CardFeed,
@@ -222,13 +224,20 @@ export function toCardViewData(
       id: event.id,
       seqLabel: String(event.seq),
       typeLabel: cardEventLabel(event.type, t),
+      // A move names the states it went between; an edit that changed the
+      // severity names the levels, in the same place.
       transitionLabel:
         event.from_state && event.to_state
           ? `${cardStateLabel(event.from_state, t)} → ${cardStateLabel(
               event.to_state,
               t
             )}`
-          : undefined,
+          : event.from_severity !== null && event.to_severity !== null
+            ? t('board.severity.change', {
+                from: cardSeverityLabel(event.from_severity, t),
+                to: cardSeverityLabel(event.to_severity, t),
+              })
+            : undefined,
       actorLabel: event.agent_label ?? event.actor_id,
       timeLabel: formatTimestamp(event.created_at),
       reason: event.reason ?? undefined,
@@ -281,6 +290,10 @@ export function toCardViewData(
         copiedLabel: t('board.linkCopied'),
       },
       title: card.title,
+      severity: {
+        level: card.severity,
+        hint: cardSeverityHint(card.severity, t),
+      },
       badges,
       updatedLabel: `${t('board.updated')} ${formatTimestamp(card.updated_at)}`,
       originLoop: card.origin_loop_id

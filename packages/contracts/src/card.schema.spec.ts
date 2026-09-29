@@ -4,6 +4,9 @@ import {
   boardCardSchema,
   briefingWorkSchema,
   cardBranchViewSchema,
+  cardEventSchema,
+  cardSeveritySchema,
+  CARD_SEVERITY_DEFAULT,
   formatBoardName,
   formatBranchRef,
   formatCardLabel,
@@ -171,5 +174,64 @@ describe('the cards I worked on', () => {
     const plain = boardCardSchema.parse(row);
     expect(plain.my_last).toBeUndefined();
     expect(plain.past_horizon).toBeUndefined();
+  });
+});
+
+describe('a card carries a severity', () => {
+  it('reads one level from 1 to 5, and refuses anything else', () => {
+    expect(cardSeveritySchema.parse(1)).toBe(1);
+    expect(cardSeveritySchema.parse(5)).toBe(5);
+    for (const level of [0, 6, 2.5, '3', null]) {
+      expect(cardSeveritySchema.safeParse(level).success).toBe(false);
+    }
+    expect(CARD_SEVERITY_DEFAULT).toBe(3);
+  });
+
+  it('reads a board row from a server that predates severity as normal', () => {
+    const row = {
+      id: 'crd_0000000000000044.0000000000',
+      scope: 'proj.usr_0000000000000001_0000000000.acme',
+      number: 44,
+      title: 'Hotfix',
+      state: 'active',
+      updated_at: '2026-09-29T17:00:00+00:00',
+      archived_at: null,
+      refs: 0,
+      last_event: null,
+    };
+    expect(boardCardSchema.parse(row).severity).toBe(3);
+    expect(boardCardSchema.parse({ ...row, severity: 5 }).severity).toBe(5);
+    expect(boardCardSchema.safeParse({ ...row, severity: 9 }).success).toBe(
+      false
+    );
+  });
+
+  it('reads which levels an edit moved between, and an edit that moved none', () => {
+    const event = {
+      id: 'cev_0000000000000002.0000000000',
+      seq: 2,
+      type: 'edited',
+      actor_id: 'usr_0000000000000001.0000000000',
+      agent_label: null,
+      thread: null,
+      from_state: null,
+      to_state: null,
+      reason: null,
+      revision: 2,
+      text: null,
+      reply_to: null,
+      relation: null,
+      ref_kind: null,
+      ref_target: null,
+      created_at: '2026-09-29T17:00:00+00:00',
+    };
+    const moved = cardEventSchema.parse({
+      ...event,
+      from_severity: 3,
+      to_severity: 5,
+    });
+    expect([moved.from_severity, moved.to_severity]).toEqual([3, 5]);
+    const plain = cardEventSchema.parse(event);
+    expect([plain.from_severity, plain.to_severity]).toEqual([null, null]);
   });
 });

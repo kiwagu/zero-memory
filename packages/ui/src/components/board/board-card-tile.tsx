@@ -1,5 +1,9 @@
 import * as React from 'react';
 
+import {
+  CardSeverity,
+  type CardSeverityProps,
+} from '@workspace/ui/components/board/card-severity';
 import { Card, CardContent } from '@workspace/ui/components/card';
 import {
   BadgeList,
@@ -19,6 +23,8 @@ interface BoardColumnCard {
   /** The project-local address, already formatted (e.g. `ZM-42`). */
   numberLabel: string;
   title: string;
+  /** How much it matters, drawn under the label. */
+  severity?: Pick<CardSeverityProps, 'level' | 'hint'>;
   badges: BadgeListItem[];
   /** What last happened and when, in one line. */
   lastEventLabel?: string;
@@ -52,14 +58,23 @@ function BoardCardTile({
         }
       >
         <CardContent className="flex flex-col gap-2 p-3">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-start gap-2">
             {/* The label never breaks: `ZM-12` split after its hyphen reads
-                as two things. The title wraps. */}
-            <span
-              className="text-muted-foreground shrink-0 text-xs whitespace-nowrap tabular-nums"
-              data-testid="board-card-number"
-            >
-              {card.numberLabel}
+                as two things. The title wraps beside it, and the severity
+                sits under the label, in the room a wrapped title leaves. */}
+            <span className="flex shrink-0 flex-col items-start gap-1 pt-0.5">
+              <span
+                className="text-muted-foreground text-xs whitespace-nowrap tabular-nums"
+                data-testid="board-card-number"
+              >
+                {card.numberLabel}
+              </span>
+              {card.severity ? (
+                <CardSeverity
+                  level={card.severity.level}
+                  hint={card.severity.hint}
+                />
+              ) : null}
             </span>
             <span className="text-sm leading-snug font-medium">
               {card.title}

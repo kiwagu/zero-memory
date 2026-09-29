@@ -71,4 +71,28 @@ describe('BoardColumns', () => {
     expect(html).not.toContain('board-empty');
     expect(html).toContain('board-column-older-toggle');
   });
+
+  it('draws the severity meter under the label of a tile that carries one, before its title', () => {
+    const html = renderToStaticMarkup(
+      <BoardColumns
+        columns={[
+          {
+            key: 'active',
+            label: 'Active',
+            cards: [
+              {
+                ...tile(44),
+                severity: { level: 5, hint: 'Severity 5 of 5: urgent' },
+              },
+            ],
+          },
+        ]}
+        emptyLabel="none"
+      />
+    );
+    const meter = html.indexOf('data-testid="card-severity"');
+    expect(meter).toBeGreaterThan(html.indexOf('ZM-44'));
+    expect(meter).toBeLessThan(html.indexOf('Card 44'));
+    expect(html).toContain('data-severity="5"');
+  });
 });

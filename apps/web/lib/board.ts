@@ -36,6 +36,8 @@ export const boardCardSchema = z.object({
   number: z.number(),
   title: z.string(),
   state: cardStateSchema,
+  /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
+  severity: z.number().int().min(1).max(5).default(3),
   updated_at: z.string(),
   archived_at: z.string().nullable(),
   refs: z.number(),
@@ -150,6 +152,8 @@ export const cardSchema = z.object({
   title: z.string(),
   body: z.string(),
   state: cardStateSchema,
+  /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
+  severity: z.number().int().min(1).max(5).default(3),
   revision: z.number(),
   origin_loop_id: z.string().nullable(),
   created_by: z.string(),
@@ -202,6 +206,9 @@ export const cardEventSchema = z.object({
   links_note: z.string().nullable().default(null),
   /** For an event naming another card: that card's number. */
   ref_number: z.number().nullable().default(null),
+  /** For an edit that moved the severity: the levels it moved between. */
+  from_severity: z.number().nullable().default(null),
+  to_severity: z.number().nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
@@ -362,6 +369,32 @@ export function cardEventLabel(type: string, t: WebTranslator): string {
     default:
       return type;
   }
+}
+
+/** A severity level in words. Literal keys only (lint-enforced). */
+export function cardSeverityLabel(level: number, t: WebTranslator): string {
+  switch (level) {
+    case 1:
+      return t('board.severity.1');
+    case 2:
+      return t('board.severity.2');
+    case 3:
+      return t('board.severity.3');
+    case 4:
+      return t('board.severity.4');
+    case 5:
+      return t('board.severity.5');
+    default:
+      return String(level);
+  }
+}
+
+/** What the severity meter says on hover: the level, the scale, the name. */
+export function cardSeverityHint(level: number, t: WebTranslator): string {
+  return t('board.severity.hint', {
+    level,
+    label: cardSeverityLabel(level, t),
+  });
 }
 
 /** How a card stands to another, in words, from the reading card's side. */

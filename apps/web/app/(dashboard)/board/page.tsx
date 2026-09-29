@@ -14,19 +14,20 @@ import { LiveRefresh } from '@/components/live-refresh';
 import { BoardMineToggle } from '@/components/board-mine-toggle.client';
 import {
   ALL_BOARDS,
-  CARD_STATES,
-  readableBoard,
+  type BoardCard,
   boardContinuationsSchema,
   boardListSchema,
   boardScopesSchema,
+  CARD_STATES,
   cardEventLabel,
   cardLabel,
+  cardSeverityHint,
   cardStateLabel,
   cardStateVariant,
+  readableBoard,
   releasePolicyLabel,
   releaseSettingsSchema,
   resolveBoardScope,
-  type BoardCard,
 } from '@/lib/board';
 import { scopeOptionLabel } from '@workspace/ui/lib/scope-format';
 
@@ -142,6 +143,10 @@ export default async function BoardPage({
     href: `/board/${card.id}`,
     numberLabel: cardLabel(card.number),
     title: card.title,
+    severity: {
+      level: card.severity,
+      hint: cardSeverityHint(card.severity, t),
+    },
     badges: [
       { label: scopeLabel(card.scope), variant: 'outline' as const },
       ...(card.released_in

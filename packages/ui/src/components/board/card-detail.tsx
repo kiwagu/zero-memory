@@ -6,6 +6,10 @@ import {
 } from '@workspace/ui/components/board/card-branches';
 import { CardLabelLink } from '@workspace/ui/components/board/card-label-link';
 import {
+  CardSeverity,
+  type CardSeverityProps,
+} from '@workspace/ui/components/board/card-severity';
+import {
   CardLinks,
   type CardLinkGroup,
 } from '@workspace/ui/components/board/card-links';
@@ -44,6 +48,8 @@ interface CardDetailData {
   /** The label is the card's link: where it points, and what a click says. */
   link: { href: string; copyHint: string; copiedLabel: string };
   title: string;
+  /** How much it matters, drawn under the label. */
+  severity?: Pick<CardSeverityProps, 'level' | 'hint'>;
   badges: BadgeListItem[];
   /** "Updated <time>", already formatted. */
   updatedLabel: string;
@@ -87,6 +93,7 @@ function CardDetail({
   numberLabel,
   link,
   title,
+  severity,
   badges,
   updatedLabel,
   originLoop,
@@ -110,14 +117,20 @@ function CardDetail({
       <header className="flex flex-col gap-2">
         {/* The label and the title share one line; a long title wraps in its
             own column, indented past the label, the way a board tile does.
-            The label is the card's link, and a click copies it. */}
-        <div className="flex items-baseline gap-2">
-          <CardLabelLink
-            label={numberLabel}
-            href={link.href}
-            copyHint={link.copyHint}
-            copiedLabel={link.copiedLabel}
-          />
+            The label is the card's link, and a click copies it; the severity
+            sits under the label. */}
+        <div className="flex items-start gap-2">
+          <span className="flex shrink-0 flex-col items-start gap-1 pt-1">
+            <CardLabelLink
+              label={numberLabel}
+              href={link.href}
+              copyHint={link.copyHint}
+              copiedLabel={link.copiedLabel}
+            />
+            {severity ? (
+              <CardSeverity level={severity.level} hint={severity.hint} />
+            ) : null}
+          </span>
           <h1
             className="min-w-0 text-2xl font-semibold"
             data-testid="card-title"

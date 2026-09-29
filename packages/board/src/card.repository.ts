@@ -8,6 +8,7 @@ import type {
   CardNoteRelation,
   CardRef,
   CardRelease,
+  CardSeverity,
   CardState,
 } from '@workspace/contracts';
 import type { Result } from 'oxide.ts';
@@ -43,6 +44,8 @@ export interface CreateCardParams extends CardAuthorship, EnterActiveParams {
   title: string;
   body?: string;
   state?: CardState;
+  /** 1 (minimal) to 5 (urgent); the store defaults to normal. */
+  severity?: CardSeverity;
 }
 
 export interface PromoteLoopParams extends CardAuthorship, EnterActiveParams {
@@ -50,6 +53,7 @@ export interface PromoteLoopParams extends CardAuthorship, EnterActiveParams {
   title: string;
   body?: string;
   state?: CardState;
+  severity?: CardSeverity;
 }
 
 export interface MoveCardParams extends CardAuthorship, EnterActiveParams {
@@ -86,6 +90,8 @@ export interface EditCardParams extends CardAuthorship {
   cardId: string;
   title?: string;
   body?: string;
+  /** A new level; the history records the one it moved from. */
+  severity?: CardSeverity;
   expectedRevision?: number;
 }
 
@@ -175,6 +181,9 @@ export interface CardEventView {
   link_direction?: 'out' | 'in' | null;
   links_note?: string | null;
   ref_number?: number | null;
+  /** For an edit that moved the severity: the levels it moved between. */
+  from_severity?: CardSeverity | null;
+  to_severity?: CardSeverity | null;
   created_at: string;
 }
 
@@ -241,6 +250,7 @@ export interface BoardCardView {
   number: number;
   title: string;
   state: CardState;
+  severity: CardSeverity;
   updated_at: string;
   archived_at: string | null;
   refs: number;

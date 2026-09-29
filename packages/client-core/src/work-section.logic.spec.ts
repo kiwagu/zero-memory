@@ -427,4 +427,19 @@ describe('renderBoardSummary', () => {
     expect(block).not.toContain('Continue where');
     expect(block).not.toContain('Last session');
   });
+
+  it('names a severity that is not normal, and says nothing about a normal one', () => {
+    const block = renderBoardSummary({
+      bound_card: null,
+      active: 2,
+      waiting: 0,
+      lead: [
+        { ...card(9, 'Hotfix', 'active'), severity: 5 },
+        { ...card(10, 'Tidy', 'active'), severity: 3 },
+      ],
+    })!;
+    expect(block).toContain('ZM-9 "Hotfix" [active] sev 5');
+    expect(block).toContain('ZM-10 "Tidy" [active]');
+    expect(block).not.toContain('sev 3');
+  });
 });
