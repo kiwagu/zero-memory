@@ -360,6 +360,7 @@ The manual walkthrough above is also captured as idempotent scripts in
 | `db-restore.sh`       | load such a backup into a schema-only target, and prove it                             | operator machine               |
 | `upgrade.sh`          | pull checkout + images, recreate what changed                                          | on the host, every deploy      |
 | `db-forward-apply.sh` | apply the pending migration tail, strictly forward (opt-in via `ZM_MIGRATE_ON_DEPLOY`) | on the host, from `upgrade.sh` |
+| `prune-images.sh`     | drop older release images, keeping the one deployed and the one it replaces            | on the host, from `upgrade.sh` |
 | `verify-instance.sh`  | external acceptance: health, OAuth issuer, TLS, callback origin                        | anywhere                       |
 | `deploy-hook.sh`      | forced command that lets a CI key deploy one version                                   | on the host, over ssh          |
 

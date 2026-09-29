@@ -58,6 +58,23 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
+# --- room on the disk, before anything writes to it ---------------------------
+# Every release pulls its images onto this disk and nothing else takes them
+# away. A full disk fails the pre-schema dump, or worse the pull, which comes
+# AFTER the schema has already moved on. So the older release images go first,
+# keeping the release being deployed and the one it replaces. Unused build
+# cache and dangling layers go too. This is housekeeping: a failure here is
+# reported and the deploy goes ahead.
+image_tag="$(grep -E '^ZM_IMAGE_TAG=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+if [ -n "$image_tag" ]; then
+  echo "→ making room for ${image_tag}"
+  image_prefix="$(grep -E '^ZM_IMAGE_PREFIX=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  ZM_IMAGE_PREFIX="$image_prefix" infra/prod/scripts/prune-images.sh "$image_tag" \
+    || echo "  pruning release images failed; the deploy goes ahead" >&2
+  docker image prune -f >/dev/null || true
+  docker builder prune -af >/dev/null || true
+fi
+
 # --- schema, before code ------------------------------------------------------
 # Opt-in (ZM_MIGRATE_ON_DEPLOY=1 in infra/prod/.env): the host applies the
 # pending migration tail itself, AFTER the release passed CI and BEFORE the
