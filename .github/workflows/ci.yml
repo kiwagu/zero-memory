@@ -28,6 +28,7 @@ jobs:
       - run: bun run check
       - run: bun run test
       - run: bun run test:installers
+      - run: bun run test:prune-actions
 
   deployment-artifacts:
     name: production compose + edge config
@@ -378,6 +379,29 @@ jobs:
             gh release create "$TAG" dist/bundles/* \
               --title "$TAG" --generate-notes
           fi
+
+  # Every run leaves caches and artifacts behind. A tag run restores caches
+  # saved under its own tag or the default branch only, so an earlier release's
+  # caches are never read again, and its artifacts outlive their use. Each
+  # release clears what the earlier ones left, after this run's bundles are on
+  # the release page. Housekeeping: a failure shows on the job without failing
+  # the release.
+  prune-actions-storage:
+    name: prune caches and artifacts of earlier runs
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/prune-actions-storage.sh "$GITHUB_REF"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
 
   # A published release lands on the instance by itself. The job exists only
   # where a deployment target is configured (repository variable
