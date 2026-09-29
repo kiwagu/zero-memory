@@ -10,7 +10,7 @@ import { Skeleton } from '@workspace/ui/components/skeleton';
 import { AdvancedSearch } from '@/components/advanced-search';
 import { FeedFilters } from '@/components/feed-filters';
 import { RankedResults } from '@/components/ranked-results';
-import { RealtimeFeed } from '@/components/realtime-feed';
+import { LiveRefresh } from '@/components/live-refresh';
 import { getRequestMessages } from '@/lib/i18n';
 import { clampTopK, parseKindsParam } from '@/lib/recall';
 import {
@@ -93,7 +93,7 @@ export default async function FeedPage({
   const status = parseFeedStatus(params.status);
   const page = Math.max(1, Number.parseInt(params.page ?? '1', 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
-  const { messages, t } = await getRequestMessages();
+  const { t } = await getRequestMessages();
 
   const supabase = await createServerSupabaseClient();
 
@@ -336,12 +336,7 @@ export default async function FeedPage({
         </Alert>
       ) : null}
 
-      <RealtimeFeed
-        messages={messages}
-        memberCounts={Object.fromEntries(memberCounts)}
-        backTo={backTo}
-        status={status}
-      />
+      <LiveRefresh event="memories" />
 
       <div className="space-y-3" data-testid="memory-feed">
         {memories.map((memory) => (

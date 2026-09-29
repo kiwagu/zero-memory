@@ -10,7 +10,7 @@ import {
 
 import { BoardFilter } from '@/components/board-filter.client';
 import { BoardSearch } from '@/components/board-search.client';
-import { BoardLive } from '@/components/board-live.client';
+import { LiveRefresh } from '@/components/live-refresh';
 import { BoardMineToggle } from '@/components/board-mine-toggle.client';
 import {
   ALL_BOARDS,
@@ -315,9 +315,7 @@ export default async function BoardPage({
         />
       ) : null}
 
-      <BoardLive
-        scopes={selected ? [selected] : boards.map((board) => board.scope)}
-      />
+      <LiveRefresh event="board" />
     </div>
   );
 }

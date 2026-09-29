@@ -78,44 +78,6 @@ export type BoardScope = z.infer<typeof boardScopeSchema>;
 export const boardScopesSchema = z.array(boardScopeSchema);
 
 /**
- * Which board to show, given what the address says and what exists.
- *
- * No parameter means "the one that moved last" — a reader who arrives with no
- * opinion gets the work in motion rather than the alphabetical first. The
- * sentinel `all` is the deliberate choice to see every board at once, and it
- * IS in the URL because it is not the default.
- *
- * A parameter naming a board with nothing on it is HONOURED, not corrected.
- * An empty board is a true answer — the work there is done or has not started
- * — and quietly showing a different board instead would tell the reader the
- * address they are looking at holds something it does not.
- */
-/**
- * The boards a page listens to, named the same way whatever order they arrive
- * in: activity reorders the boards on every refresh, and that alone must not
- * make the page leave and rejoin their channels.
- */
-export function boardScopesKey(scopes: string[]): string {
-  return [...new Set(scopes)].sort().join('\n');
-}
-
-/**
- * Which board channels to join and which to leave, going from the boards a
- * page listens to now to the boards it should listen to. A board that stays
- * keeps its channel, so no change is missed while a channel rejoins.
- */
-export function boardChannelChanges(
-  current: ReadonlySet<string>,
-  wanted: string[]
-): { join: string[]; leave: string[] } {
-  const next = new Set(wanted);
-  return {
-    join: [...next].filter((scope) => !current.has(scope)).sort(),
-    leave: [...current].filter((scope) => !next.has(scope)).sort(),
-  };
-}
-
-/**
  * The board to show, or null when it must not show at all: both the listing
  * and the offer have to be read. A board without its offer would read as "no
  * card to continue", and a listing that failed would read as an empty board;
@@ -130,6 +92,19 @@ export function readableBoard<T>(
 
 export const ALL_BOARDS = 'all';
 
+/**
+ * Which board to show, given what the address says and what exists.
+ *
+ * No parameter means "the one that moved last" — a reader who arrives with no
+ * opinion gets the work in motion rather than the alphabetical first. The
+ * sentinel `all` is the deliberate choice to see every board at once, and it
+ * IS in the URL because it is not the default.
+ *
+ * A parameter naming a board with nothing on it is HONOURED, not corrected.
+ * An empty board is a true answer — the work there is done or has not started
+ * — and quietly showing a different board instead would tell the reader the
+ * address they are looking at holds something it does not.
+ */
 export function resolveBoardScope(
   requested: string | undefined,
   boards: BoardScope[]

@@ -213,7 +213,6 @@
   "feed.filterHint": "Applies filters and refreshes the feed",
   "feed.empty": "No memories visible for these filters.",
   "feed.loadError": "Failed to load memories: {message}",
-  "feed.justAdded": "Just added",
   "feed.advanced.toggle": "Advanced search",
   "feed.advanced.placeholder": "Semantic search across your memories — Enter to search, Shift+Enter for a new line…",
   "feed.advanced.search": "Search",
