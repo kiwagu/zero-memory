@@ -168,6 +168,8 @@ const BOARD: Array<{
    */
   links?: Array<{ title: string; relation: string; reason: string }>;
   noLinks?: string;
+  /** How much the card matters, 1 to 5; a card without one sits at normal. */
+  severity?: number;
 }> = [
   {
     title: 'Weekly decision digest per project',
@@ -178,6 +180,7 @@ const BOARD: Array<{
     moves: [],
     noLinks:
       'A summary over memories already stored; no other card here touches it.',
+    severity: 2,
   },
   {
     title: 'Translate imported memories into the canonical language',
@@ -197,6 +200,7 @@ const BOARD: Array<{
     ],
     note: 'The translator already records the source language; import only needs to call it.',
     attachAnchor: true,
+    severity: 4,
     links: [
       {
         title: 'Weekly decision digest per project',
@@ -265,6 +269,7 @@ const BOARD: Array<{
   {
     title: 'Browser extension that captures decisions from web chats',
     body: 'Goal: decisions made in a browser chat reach memory without copy and paste.',
+    severity: 1,
     links: [
       {
         title: 'Translate imported memories into the canonical language',
@@ -570,6 +575,7 @@ try {
       scope: anchor.scope,
       title: spec.title,
       body: spec.body,
+      ...(spec.severity ? { severity: spec.severity } : {}),
       ...(links.length > 0 ? { links } : { no_links: spec.noLinks }),
     });
     idByTitle.set(spec.title, card.id);
