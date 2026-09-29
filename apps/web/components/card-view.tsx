@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 
 import { CardDetail } from '@workspace/ui/components/board/card-detail';
 
-import { BoardLive } from '@/components/board-live.client';
+import { LiveRefresh } from '@/components/live-refresh';
 import { getRequestMessages } from '@/lib/i18n';
 import { loadCardView } from '@/lib/views/card.view';
 
@@ -43,7 +43,7 @@ export async function CardView({
           </Link>
         ) : null
       }
-      footer={variant === 'page' ? <BoardLive scopes={[view.scope]} /> : null}
+      footer={variant === 'page' ? <LiveRefresh event="board" /> : null}
     />
   );
 }

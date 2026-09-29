@@ -117,4 +117,85 @@ test.describe('The board follows the agents while it is open', () => {
       await mcp.close();
     }
   });
+
+  test('the board still follows the agents after moving to it from another page in the app', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const mcp = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    try {
+      const made = firstJson<{ scope: string; memory_id: string }>(
+        await mcp.callTool('remember', {
+          content: `board-live nav marker ${Date.now()}: the relay drops frames`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-board-nav-${Date.now()}`,
+        })
+      );
+      markers.push(made.memory_id);
+      const create = async (title: string) =>
+        firstJson<CardResult>(
+          await mcp.callTool('card', {
+            action: 'create',
+            scope: made.scope,
+            title,
+            no_links: 'e2e fixture',
+          })
+        ).card;
+      await create('Rotate the relay keys');
+
+      // The feed is opened with a full load, and its channel is given time to
+      // join. Then the reader moves to the board inside the app: the page is
+      // swapped without a load, and the board takes over the feed's channel
+      // while the feed lets go of it. On localhost the server answers a leave
+      // at once, which would hide a page that joins a channel still being
+      // left; so every message from the realtime server is held back as a
+      // real network would.
+      await page.routeWebSocket(/\/realtime\/v1\/websocket/, (socket) => {
+        const server = socket.connectToServer();
+        socket.onMessage((message) => server.send(message));
+        server.onMessage((message) => {
+          setTimeout(() => socket.send(message), 300);
+        });
+      });
+      await signInThroughForm(page, seed.userA);
+      await page.goto('/memories');
+      await expect(page.getByTestId('memory-feed')).toBeVisible();
+      await page.waitForTimeout(5000);
+      await markPage(page);
+      await page.getByRole('link', { name: 'Board', exact: true }).click();
+      await expect(page).toHaveURL(/\/board/);
+      await expect(
+        page
+          .getByTestId('board-card')
+          .filter({ hasText: 'Rotate the relay keys' })
+      ).toHaveCount(1);
+
+      const arrived = await create('Arrived after moving back');
+      await expect
+        .poll(
+          async () => {
+            const shown = await page
+              .getByTestId('board-card')
+              .filter({ hasText: 'Arrived after moving back' })
+              .count();
+            if (shown === 0) {
+              const noted = await mcp.callTool('card_log', {
+                action: 'note',
+                card_id: arrived.id,
+                text: 'still here',
+              });
+              expect(noted.isError ?? false).toBe(false);
+            }
+            return shown;
+          },
+          { intervals: [2000], timeout: 40_000 }
+        )
+        .toBe(1);
+      expect(await stillSamePage(page)).toBe(true);
+    } finally {
+      await mcp.close();
+    }
+  });
 });

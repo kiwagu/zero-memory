@@ -65,31 +65,6 @@ export function parseFeedStatus(raw: string | undefined): FeedStatus {
   return FEED_STATUSES.find((status) => status === raw) ?? DEFAULT_FEED_STATUS;
 }
 
-/**
- * Does a memory belong in the feed under this status? The client-side twin of
- * filterFeedStatus, for the realtime insert path, which has no query to narrow.
- */
-export function matchesFeedStatus(
-  memory: Pick<MemoryRow, 'invalidated_at' | 'superseded_by'>,
-  status: FeedStatus
-): boolean {
-  const retired = Boolean(memory.invalidated_at);
-  const replaced = Boolean(memory.superseded_by);
-  switch (status) {
-    case 'active':
-      // Everything except a historical version (retired AND replaced).
-      return !retired || !replaced;
-    case 'live':
-      return !retired;
-    case 'superseded':
-      return retired && replaced;
-    case 'invalidated':
-      return retired && !replaced;
-    case 'all':
-      return true;
-  }
-}
-
 /** The two columns a memory's lifecycle status is read from. */
 type LifecycleColumn = 'invalidated_at' | 'superseded_by';
 
@@ -101,8 +76,8 @@ interface FeedStatusQuery<Q> {
 }
 
 /**
- * Narrows the feed query to a status: the SQL twin of matchesFeedStatus,
- * selecting exactly the memories it admits. `all` adds nothing.
+ * Narrows the feed query to a status, selecting exactly the memories it
+ * admits. `all` adds nothing.
  */
 export function filterFeedStatus<Q extends FeedStatusQuery<Q>>(
   query: Q,

@@ -213,7 +213,6 @@
   "feed.filterHint": "Aplica los filtros y actualiza la lista",
   "feed.empty": "No hay memorias visibles con estos filtros.",
   "feed.loadError": "No se pudieron cargar las memorias: {message}",
-  "feed.justAdded": "Recién añadidas",
   "feed.advanced.toggle": "Búsqueda avanzada",
   "feed.advanced.placeholder": "Búsqueda semántica en tus memorias — Enter para buscar, Shift+Enter para nueva línea…",
   "feed.advanced.search": "Buscar",

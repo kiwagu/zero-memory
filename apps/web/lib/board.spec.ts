@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ALL_BOARDS,
-  boardChannelChanges,
-  boardScopesKey,
   readableBoard,
   resolveBoardScope,
   type BoardScope,
@@ -55,26 +53,6 @@ describe('resolveBoardScope', () => {
       selected: null,
       value: '',
     });
-  });
-});
-
-describe('the channels a board page keeps', () => {
-  it('names the same boards the same way, whatever order activity puts them in', () => {
-    expect(boardScopesKey(['proj.b', 'proj.a', 'proj.a'])).toBe(
-      boardScopesKey(['proj.a', 'proj.b'])
-    );
-  });
-
-  it('keeps every channel when only the order of the boards changes', () => {
-    expect(
-      boardChannelChanges(new Set(['proj.a', 'proj.b']), ['proj.b', 'proj.a'])
-    ).toEqual({ join: [], leave: [] });
-  });
-
-  it('joins the boards that came on screen and leaves the ones that went', () => {
-    expect(
-      boardChannelChanges(new Set(['proj.a', 'proj.b']), ['proj.b', 'proj.c'])
-    ).toEqual({ join: ['proj.c'], leave: ['proj.a'] });
   });
 });
 

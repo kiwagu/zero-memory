@@ -42,7 +42,7 @@ schema_paths = []
 [db.seed]
 enabled = false
 
-# Kept: the dashboard subscribes to it (RealtimeFeed), so switching it off would
+# Kept: the dashboard's live refresh listens on it, so switching it off would
 # offer a degraded product for acceptance.
 [realtime]
 enabled = true
