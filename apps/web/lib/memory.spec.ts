@@ -8,7 +8,6 @@ import {
   facetTotal,
   FEED_STATUSES,
   filterFeedStatus,
-  matchesFeedStatus,
   MEM_ID_QUERY_RE,
   memoryBadges,
   memoryClient,
@@ -185,17 +184,13 @@ describe('the feed status filter', () => {
   };
 
   it.each(FEED_STATUSES)(
-    '"%s" shows the same memories in the feed query and in the live feed',
+    '"%s" shows exactly its memories in the feed query',
     (status) => {
       for (const [name, memory] of Object.entries(memories)) {
         const expected = shows[status].includes(name as keyof typeof memories);
         expect(
           filterFeedStatus(new RowQuery(memory), status).admitted,
           `${name} in the feed query`
-        ).toBe(expected);
-        expect(
-          matchesFeedStatus(memory, status),
-          `${name} in the live feed`
         ).toBe(expected);
       }
     }

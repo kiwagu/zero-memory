@@ -3,16 +3,15 @@
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 
+import { refreshScheduler } from '@/lib/live-refresh';
 import { createClient } from '@/lib/supabase/client';
 
 /** What a reader's channel names: the surface whose data changed. */
 export type LiveRefreshEvent = 'memories' | 'board';
 
-/**
- * A burst of changes (an agent writing several memories, a card and its
- * stream entry) lands as one refresh.
- */
+/** A burst lands as one refresh; a stream refreshes at least this often. */
 const SETTLE_MS = 300;
+const MAX_WAIT_MS = 2000;
 
 /**
  * Listens on the reader's private channel, `reader:<readerId>`, and refreshes
@@ -38,26 +37,32 @@ export function LiveRefreshListener({
   useEffect(() => {
     const supabase = createClient();
     let channel: ReturnType<typeof supabase.channel> | null = null;
-    let settle: ReturnType<typeof setTimeout> | undefined;
     let cancelled = false;
-    const refresh = () => {
-      clearTimeout(settle);
-      settle = setTimeout(() => router.refresh(), SETTLE_MS);
-    };
+    const refresh = refreshScheduler(
+      () => {
+        if (!cancelled) {
+          router.refresh();
+        }
+      },
+      { settleMs: SETTLE_MS, maxWaitMs: MAX_WAIT_MS }
+    );
     // A private channel is authorized by the reader's token, so the socket
-    // must carry it before the join.
-    void supabase.realtime.setAuth().then(() => {
-      if (cancelled) {
-        return;
-      }
-      channel = supabase
-        .channel(`reader:${readerId}`, { config: { private: true } })
-        .on('broadcast', { event }, refresh)
-        .subscribe();
-    });
+    // must carry it before the join. Live refresh is an addition to a page
+    // that works without it: a failure here leaves the page as it is.
+    supabase.realtime
+      .setAuth()
+      .then(() => {
+        if (cancelled) {
+          return;
+        }
+        channel = supabase
+          .channel(`reader:${readerId}`, { config: { private: true } })
+          .on('broadcast', { event }, refresh)
+          .subscribe();
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
-      clearTimeout(settle);
       if (channel) {
         void supabase.removeChannel(channel);
       }

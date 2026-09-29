@@ -28,8 +28,8 @@
 --
 --   Nudges are sent per statement, one per reader, so a bulk change (a scope
 --   rename, a batch move, a hygiene pass) nudges each reader once. An update
---   that changes only what a page never shows (a memory's embedding) nudges
---   no one.
+--   that changes only what a page never shows (a memory's embedding, the
+--   translation worker's bookkeeping) nudges no one.
 --
 -- Affected objects:
 --   - function private.scope_readers(text[]) (new)
@@ -133,8 +133,16 @@ security definer
 set search_path = ''
 as $$
 declare
-  -- What a page never shows: a change to these alone nudges no one.
-  v_unseen constant text[] := array['embedding', 'embedding_model', 'fts'];
+  -- What a page never shows: a change to these alone nudges no one. The
+  -- translation worker's bookkeeping is here too: it sweeps rows one by one.
+  v_unseen constant text[] := array[
+    'embedding',
+    'embedding_model',
+    'fts',
+    'translation_status',
+    'translation_attempts',
+    'translation_error'
+  ];
   v_owners text[];
   v_shared text[];
 begin
