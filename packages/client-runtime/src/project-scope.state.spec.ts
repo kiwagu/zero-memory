@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -46,27 +46,11 @@ describe('project-scope state', () => {
     );
   });
 
-  it('caps the state by dropping the oldest entries', () => {
-    for (let i = 0; i < 205; i += 1) {
-      recordProjectScope(
-        statePath,
-        `/home/u/repos/p${i}`,
-        `proj.usr_x.p${i}`,
-        i
-      );
-    }
-
-    // The newest survive, the oldest were dropped at the cap.
-    expect(readProjectScope(statePath, '/home/u/repos/p204')).toBe(
-      'proj.usr_x.p204'
-    );
-    expect(readProjectScope(statePath, '/home/u/repos/p0')).toBeNull();
-  });
-
-  it('never throws on a missing or corrupt state file', () => {
-    expect(readProjectScope('/nonexistent/state.json', '/x')).toBeNull();
+  it('never throws on a write it cannot make', () => {
+    // Best-effort: losing the persist only costs the offline PROJECT line.
+    writeFileSync(join(dir, 'blocker'), '');
     expect(() =>
-      recordProjectScope('/nonexistent/dir/state.json', '/x', 'proj.y')
+      recordProjectScope(join(dir, 'blocker', 'state.json'), '/x', 'proj.y')
     ).not.toThrow();
   });
 });

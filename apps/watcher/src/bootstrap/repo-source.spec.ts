@@ -1,18 +1,18 @@
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import {
-  MAX_CHUNK_CHARS,
-  MAX_COMMITS_PER_BATCH,
-  collectDocChunks,
-  collectHistoryChunks,
-  discoverDocFiles,
-  splitText,
-} from './repo-source.js';
+import { git } from '../testing/git-repo.fixture.js';
+import { collectDocChunks, collectHistoryChunks } from './repo-source.js';
+
+/** The chunk-size cap a bootstrap holds every chunk to (~6k tokens). */
+const CHUNK_CAP = 24_000;
+/** The most commits one history chunk carries. */
+const COMMITS_PER_BATCH = 100;
+
+const HEADER = (path: string): string => `# Document: ${path}\n\n`;
 
 let repoDir: string | null = null;
 
@@ -28,21 +28,8 @@ afterEach(() => {
   }
 });
 
-const git = (dir: string, ...args: string[]): void => {
-  execFileSync('git', ['-C', dir, ...args], {
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'spec',
-      GIT_AUTHOR_EMAIL: 'spec@example.invalid',
-      GIT_COMMITTER_NAME: 'spec',
-      GIT_COMMITTER_EMAIL: 'spec@example.invalid',
-    },
-  });
-};
-
-describe('discoverDocFiles', () => {
-  it('finds root READMEs and docs/**/*.md, skipping hidden and build dirs', () => {
+describe('collectDocChunks', () => {
+  it('reads root READMEs and docs/**/*.md, skipping hidden and build dirs', () => {
     const dir = makeRepo();
     writeFileSync(join(dir, 'README.md'), '# root');
     writeFileSync(join(dir, 'CHANGELOG.md'), 'not a readme');
@@ -55,36 +42,13 @@ describe('discoverDocFiles', () => {
     mkdirSync(join(dir, 'docs', '.hidden'), { recursive: true });
     writeFileSync(join(dir, 'docs', '.hidden', 'x.md'), 'hidden');
 
-    const files = discoverDocFiles(dir).map((file) =>
-      file.slice(dir.length + 1)
-    );
-    expect(files).toEqual([
+    expect(collectDocChunks(dir).map((chunk) => chunk.sourcePath)).toEqual([
       'README.md',
       'docs/guides/setup.md',
       'docs/intro.md',
     ]);
   });
-});
 
-describe('splitText', () => {
-  it('returns small text as a single part', () => {
-    expect(splitText('hello', 100)).toEqual(['hello']);
-  });
-
-  it('splits on paragraph boundaries under the cap', () => {
-    const parts = splitText(`${'a'.repeat(60)}\n\n${'b'.repeat(60)}`, 80);
-    expect(parts).toEqual(['a'.repeat(60), 'b'.repeat(60)]);
-  });
-
-  it('hard-splits a single oversized paragraph', () => {
-    const parts = splitText('x'.repeat(250), 100);
-    expect(parts.length).toBe(3);
-    expect(parts.every((part) => part.length <= 100)).toBe(true);
-    expect(parts.join('')).toBe('x'.repeat(250));
-  });
-});
-
-describe('collectDocChunks', () => {
   it('labels chunks with repo-relative paths and skips empty files', () => {
     const dir = makeRepo();
     writeFileSync(join(dir, 'README.md'), '# proj\n\ninteresting');
@@ -99,20 +63,37 @@ describe('collectDocChunks', () => {
     expect(chunks[0]!.content).toContain('interesting');
   });
 
-  it('suffixes the parts of a split oversized file', () => {
+  it('splits an oversized file on paragraph boundaries, suffixing its parts', () => {
     const dir = makeRepo();
-    const paragraphs = Array.from(
-      { length: 40 },
-      (_, index) => `paragraph ${index} ${'x'.repeat(1000)}`
-    ).join('\n\n');
-    writeFileSync(join(dir, 'README.md'), paragraphs);
-    expect(paragraphs.length).toBeGreaterThan(MAX_CHUNK_CHARS);
+    const first = 'a'.repeat(15_000);
+    const second = 'b'.repeat(15_000);
+    writeFileSync(join(dir, 'README.md'), `${first}\n\n${second}`);
 
-    const chunks = collectDocChunks(dir);
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks.map((chunk) => chunk.sourcePath)).toEqual(
-      chunks.map((_, index) => `README.md#${index}`)
+    expect(collectDocChunks(dir)).toEqual([
+      {
+        content: `${HEADER('README.md')}${first}`,
+        sourceKind: 'document',
+        sourcePath: 'README.md#0',
+      },
+      {
+        content: `${HEADER('README.md')}${second}`,
+        sourceKind: 'document',
+        sourcePath: 'README.md#1',
+      },
+    ]);
+  });
+
+  it('hard-splits a single paragraph past the cap, never emitting an over-cap part', () => {
+    const dir = makeRepo();
+    const paragraph = 'x'.repeat(2 * CHUNK_CAP + 1_000);
+    writeFileSync(join(dir, 'README.md'), paragraph);
+
+    const parts = collectDocChunks(dir).map((chunk) =>
+      chunk.content.slice(HEADER('README.md').length)
     );
+    expect(parts).toHaveLength(3);
+    expect(parts.every((part) => part.length <= CHUNK_CAP)).toBe(true);
+    expect(parts.join('')).toBe(paragraph);
   });
 });
 
@@ -149,7 +130,7 @@ describe('collectHistoryChunks', () => {
     git(dir, 'init', '-q');
     // History collection reads only commit messages, so empty commits keep
     // this hundred-commit fixture within slow CI runners' spawn budget.
-    for (let index = 0; index < MAX_COMMITS_PER_BATCH + 5; index += 1) {
+    for (let index = 0; index < COMMITS_PER_BATCH + 5; index += 1) {
       git(dir, 'commit', '-q', '--allow-empty', '-m', `chore: commit ${index}`);
     }
 
@@ -157,7 +138,7 @@ describe('collectHistoryChunks', () => {
     expect(shallow.length).toBe(1);
     expect(shallow[0]!.content).not.toContain('chore: commit 0\n');
 
-    const deep = collectHistoryChunks(dir, MAX_COMMITS_PER_BATCH + 5);
+    const deep = collectHistoryChunks(dir, COMMITS_PER_BATCH + 5);
     expect(deep.length).toBe(2);
     expect(deep[1]!.sourcePath).toBe('git-log#1');
   }, 30_000);

@@ -1,6 +1,8 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import {
+  loadStateRecord,
+  saveCappedStateRecord,
+  stateFilePath,
+} from './state-file.js';
 
 /**
  * Cross-session persistence of the RESOLVED project scope per repo root — the
@@ -28,21 +30,10 @@ const MAX_ENTRIES = 200;
 /** Default state file; tests pass their own. */
 export const projectScopeStatePath = (
   env: NodeJS.ProcessEnv = process.env
-): string =>
-  join(
-    env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'project-scopes.json'
-  );
+): string => stateFilePath('project-scopes.json', env);
 
-const load = (path: string): ProjectScopeState => {
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as ProjectScopeState;
-    return typeof parsed === 'object' && parsed !== null ? parsed : {};
-  } catch {
-    return {};
-  }
-};
+const load = (path: string): ProjectScopeState =>
+  loadStateRecord<ProjectScopeEntry>(path);
 
 /**
  * Records the server-resolved scope for a repo root. Best-effort.
@@ -64,11 +55,12 @@ export const recordProjectScope = (
   try {
     const state = load(path);
     state[rootPath] = { scope, updated_at: now };
-    const entries = Object.entries(state)
-      .sort(([, a], [, b]) => b.updated_at - a.updated_at)
-      .slice(0, MAX_ENTRIES);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(Object.fromEntries(entries), null, 2));
+    saveCappedStateRecord(
+      path,
+      state,
+      MAX_ENTRIES,
+      (entry) => entry.updated_at
+    );
   } catch {
     // best-effort: losing the persist only costs the offline PROJECT line.
   }

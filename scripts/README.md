@@ -40,6 +40,12 @@ platform means adding one row there and building on it — no other file changes
 
 ## Build & release
 
+- `prune-actions-storage.sh` — delete the Actions caches and artifacts a
+  repository can no longer use: caches saved under any ref other than the given
+  one and the default branch, and artifacts of finished runs plus the current
+  run's `bundle-*` artifacts. The release workflow runs it after publishing;
+  `--dry-run` lists what would go. `prune-actions-storage.test.sh` checks the
+  selection against a stub `gh`.
 - `build-watcher.sh` — compile `apps/watcher` into a single self-contained
   binary (`bun --compile`); `TARGET=bun-linux-arm64` cross-compiles.
 - `wire-hooks.sh` — apply the hook set a machine needs to a client's settings

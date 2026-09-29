@@ -1,6 +1,6 @@
 {
   "name": "zero-memory",
-  "version": "0.30.0",
+  "version": "0.32.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -20,6 +20,7 @@
     "db:types": "bun run --cwd packages/db gen-types",
     "test": "CI=1 turbo run test:vitest",
     "test:installers": "bash scripts/installers.test.sh",
+    "test:prune-actions": "bash scripts/prune-actions-storage.test.sh",
     "test:integration": "CI=1 turbo run test:integration",
     "test:e2e": "CI=1 turbo run test:e2e",
     "test:e2e:smoke": "CI=1 turbo run test:e2e:smoke",

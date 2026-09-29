@@ -13,7 +13,7 @@ import { expect, test } from '@playwright/test';
 import { e2eEnv } from '../helpers/env.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
-import { passwordGrantToken } from '../helpers/users.js';
+import { entityIdOf, passwordGrantToken } from '../helpers/users.js';
 
 const adminClient = (): SupabaseClient =>
   createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
@@ -47,19 +47,6 @@ interface QueueRow {
   winner: string | null;
   similarity: number | null;
 }
-
-/** Profile (owner) id of an e2e account — what the pass scopes on. */
-const ownerIdOf = async (userId: string): Promise<string> => {
-  const { data, error } = await adminClient()
-    .from('profiles')
-    .select('id')
-    .eq('user_id', userId)
-    .single();
-  if (error || !data) {
-    throw new Error(`profile lookup failed: ${error?.message}`);
-  }
-  return (data as { id: string }).id;
-};
 
 const pairRow = async (a: string, b: string): Promise<QueueRow | null> => {
   const [memoryA, memoryB] = [a, b].sort();
@@ -126,7 +113,7 @@ test.describe('Retro aperture over the backlog', () => {
       '--after',
       markBefore,
       '--owner',
-      await ownerIdOf(seed.userB.id),
+      await entityIdOf(seed.userB.id),
     ]);
     expect(report).toContain('agent judges');
     // No model was asked anything: the pass judges nothing.

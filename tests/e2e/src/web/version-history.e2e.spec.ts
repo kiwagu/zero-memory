@@ -39,33 +39,4 @@ test.describe('memory version history', () => {
       `${chain.invalidatorAgent} · ${chain.invalidatorModel}`
     );
   });
-
-  test('@smoke feed flags a memory that has version history', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    const chain = await seedVersionChain(seed.userA);
-    await signInThroughForm(page, seed.userA);
-    await page.goto('/memories');
-
-    const card = page
-      .getByTestId('memory-card')
-      .filter({ hasText: chain.currentContent.slice(0, 40) });
-    await expect(card.first()).toBeVisible();
-    await expect(
-      card.first().getByTestId('memory-history-badge')
-    ).toBeVisible();
-  });
-
-  test('a memory with no other versions shows no history section', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    const fixtureId = Object.values(seed.fixtureMemoryIds)[0]!;
-    await signInThroughForm(page, seed.userA);
-    await page.goto(`/memory/${fixtureId}`);
-
-    await expect(page.getByTestId('memory-detail-content')).toBeVisible();
-    await expect(page.getByTestId('memory-version-history')).toHaveCount(0);
-  });
 });

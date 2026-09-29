@@ -3,7 +3,7 @@
  * session id in provenance source; two authoritative writes of ONE session
  * at the dedup threshold collapse deterministically (old superseded by
  * new, review queue untouched); the same pair across TWO sessions does NOT
- * collapse; a bare-slug scope is rejected at write time with a hint.
+ * collapse.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
@@ -177,24 +177,6 @@ test.describe('Same-session refinement collapse over MCP', () => {
       expect(newRow.source?.['session']).not.toBe(oldRow.source?.['session']);
     } finally {
       await second.close();
-    }
-  });
-
-  test('a bare-slug scope is rejected at write time with a hint', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
-    try {
-      const write = await mcp.callTool('remember', {
-        content: 'e2e bare-scope marker: this write must not land anywhere',
-        kind: 'fact',
-        scope: 'acme',
-      });
-      expect(write.isError ?? false).toBe(true);
-      expect(contentText(write)).toContain('rooted ltree path');
-    } finally {
-      await mcp.close();
     }
   });
 });

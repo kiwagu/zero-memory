@@ -33,13 +33,13 @@ import { isAncestorOf, latestTag, tagCommit } from './git-release.js';
 const logger = createLogger('release');
 
 /** Each network step's own deadline. */
-export const RELEASE_LOOKUP_TIMEOUT_MS = 5000;
+const RELEASE_LOOKUP_TIMEOUT_MS = 5000;
 /**
  * The whole check's budget. After a command it rides in the landing hook's
  * process, whose slowest host (Hermes) allows 20 s for landing and release
  * together; at session start it shares the briefing's time.
  */
-export const RELEASE_CHECK_BUDGET_MS = 8000;
+const RELEASE_CHECK_BUDGET_MS = 8000;
 /** The most cards one record takes (the release tool's own limit). */
 const RECORD_BATCH = 500;
 
@@ -72,7 +72,6 @@ const QUIET_LINES: Record<Quiet, string> = {
 
 interface ReleaseCheckOptions {
   now?: number;
-  lookupTimeoutMs?: number;
   budgetMs?: number;
   /**
    * A manual run: the setting and the url are asked now, the state is tried
@@ -115,13 +114,7 @@ const inspectRelease = async (
   const now = options.now ?? Date.now();
   const deadline = Date.now() + (options.budgetMs ?? RELEASE_CHECK_BUDGET_MS);
   const left = (): number =>
-    Math.max(
-      0,
-      Math.min(
-        options.lookupTimeoutMs ?? RELEASE_LOOKUP_TIMEOUT_MS,
-        deadline - Date.now()
-      )
-    );
+    Math.max(0, Math.min(RELEASE_LOOKUP_TIMEOUT_MS, deadline - Date.now()));
   // Git gets what is left of the budget, at most its usual deadline; with
   // nothing left it is not run at all.
   const gitLeft = (): number => Math.min(GIT_TIMEOUT_MS, deadline - Date.now());

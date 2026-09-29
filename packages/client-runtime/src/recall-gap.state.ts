@@ -1,8 +1,10 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-
 import type { RecallGapCounters } from '@workspace/client-core';
+
+import {
+  loadStateRecord,
+  saveCappedStateRecord,
+  stateFilePath,
+} from './state-file.js';
 
 /**
  * Per-session memory-usage counters for the recall reminder, persisted in the
@@ -29,33 +31,18 @@ export interface RecallGapSession {
 export type RecallGapStateFile = Record<string, RecallGapSession>;
 
 /** Oldest entries beyond this are pruned on save (state must not grow forever). */
-export const MAX_TRACKED_SESSIONS = 200;
+const MAX_TRACKED_SESSIONS = 200;
 
 /** Default state-file location; tests pass their own path. */
 export const recallGapStatePath = (
   env: NodeJS.ProcessEnv = process.env
-): string =>
-  join(
-    env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'recall-gap.json'
-  );
+): string => stateFilePath('recall-gap.json', env);
 
-export const loadRecallGapState = (path: string): RecallGapStateFile => {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as RecallGapStateFile;
-  } catch {
-    return {};
-  }
-};
+const loadRecallGapState = (path: string): RecallGapStateFile =>
+  loadStateRecord<RecallGapSession>(path);
 
-const save = (path: string, state: RecallGapStateFile): void => {
-  const entries = Object.entries(state)
-    .sort(([, a], [, b]) => b.at - a.at)
-    .slice(0, MAX_TRACKED_SESSIONS);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(Object.fromEntries(entries), null, 2));
-};
+const save = (path: string, state: RecallGapStateFile): void =>
+  saveCappedStateRecord(path, state, MAX_TRACKED_SESSIONS, (entry) => entry.at);
 
 const blank = (now: number): RecallGapSession => ({
   recalls: 0,

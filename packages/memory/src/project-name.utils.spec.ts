@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   matchProjectName,
-  projectNameInitials,
   type ProjectCandidate,
 } from './project-name.utils.js';
 import { Scope } from './scope.vo.js';
@@ -67,6 +66,9 @@ describe('matchProjectName', () => {
     const aliased = project('workbench', 'Author App');
     expect(matchedSlug('author-app', [...projects, aliased])).toBe('workbench');
     expect(matchedSlug('AA', [...projects, aliased])).toBe('workbench');
+    // A camelCase alias splits into words for its initials too.
+    const camel = project('workbench', 'AuthorApp');
+    expect(matchedSlug('AA', [...projects, camel])).toBe('workbench');
   });
 
   it('prefers a spelling match over another project whose initials fit', () => {
@@ -120,18 +122,5 @@ describe('matchProjectName', () => {
 
   it('matches nothing when the caller has no projects', () => {
     expect(matchedSlug('zero-memory', [])).toBe('unknown');
-  });
-});
-
-describe('projectNameInitials', () => {
-  it('takes the first letter of each word, camelCase included', () => {
-    expect(projectNameInitials('zero_memory')).toBe('zm');
-    expect(projectNameInitials('ZeroMemory')).toBe('zm');
-    expect(projectNameInitials('Zero Memory')).toBe('zm');
-    expect(projectNameInitials('ai-fleet')).toBe('af');
-  });
-
-  it('has no initials for a one-word name', () => {
-    expect(projectNameInitials('harbor')).toBeNull();
   });
 });

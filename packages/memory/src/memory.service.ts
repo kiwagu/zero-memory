@@ -225,26 +225,17 @@ export class MemoryService {
     @injectTranslator()
     private readonly translator: ITranslator,
     @injectProjectRulesReader()
-    private readonly projectRules?: IProjectRulesReader,
+    private readonly projectRules: IProjectRulesReader,
     @injectUserRulesReader()
-    private readonly userRules?: IUserRulesReader,
-    // Optional like the rules readers: without the adapter the gate denies
-    // every un-prefiltered request, which is the safe direction (the write
-    // lands in the project) rather than a boot failure.
+    private readonly userRules: IUserRulesReader,
     @injectPortabilityJudge()
-    private readonly portabilityJudge?: IPortabilityJudge,
-    // Optional like the rules readers: without the adapter the server behaves
-    // as it did before threads — per-call hints — rather than failing to boot.
+    private readonly portabilityJudge: IPortabilityJudge,
     @injectSessionThreadRepository()
-    private readonly threads?: ISessionThreadRepository,
-    // Optional like the rules readers: without the adapter a briefing simply
-    // carries no work summary and displaces nothing for one.
+    private readonly threads: ISessionThreadRepository,
     @injectBriefingWorkReader()
-    private readonly briefingWork?: IBriefingWorkReader,
-    // Optional like the rules readers: without the adapter a supersede or a
-    // forget simply does not report what happened to a promoted rule.
+    private readonly briefingWork: IBriefingWorkReader,
     @injectRuleFateReader()
-    private readonly ruleFates?: IRuleFateReader
+    private readonly ruleFates: IRuleFateReader
   ) {}
 
   async remember(
@@ -1301,8 +1292,7 @@ export class MemoryService {
     if (
       input.briefing === true &&
       pinnedScope &&
-      budgets.maxMemories !== undefined &&
-      this.briefingWork
+      budgets.maxMemories !== undefined
     ) {
       try {
         work = await this.briefingWork.forBriefing(pinnedScope, threadToken);
@@ -1352,16 +1342,14 @@ export class MemoryService {
     let generalRules: ContextRule[] = [];
     let projectRules: ContextRule[] = [];
     if (input.briefing === true) {
-      if (this.userRules) {
-        try {
-          generalRules = await this.userRules.listPromoted();
-        } catch (error) {
-          this.#logger.warn('user rules lookup failed; briefing unruled', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+      try {
+        generalRules = await this.userRules.listPromoted();
+      } catch (error) {
+        this.#logger.warn('user rules lookup failed; briefing unruled', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-      if (this.projectRules && scopes) {
+      if (scopes) {
         const projectScopes = scopes.filter((scope) => scope.isShareable);
         try {
           projectRules = await this.projectRules.listForScopes(projectScopes);
@@ -1496,16 +1484,6 @@ export class MemoryService {
         opinion: { portable: true, confidence: 1, rationale: '' },
       };
     }
-    if (!this.portabilityJudge) {
-      return {
-        granted: false,
-        opinion: {
-          portable: false,
-          confidence: 0,
-          rationale: 'no portability judge is configured',
-        },
-      };
-    }
     const opinion = await this.portabilityJudge.judgePortability(
       effectiveKind,
       content,
@@ -1533,7 +1511,7 @@ export class MemoryService {
    * `null` and the call behaves exactly as it would have without it.
    */
   async #liveThread(token: string | undefined): Promise<SessionThread | null> {
-    if (!token || !this.threads) {
+    if (!token) {
       return null;
     }
     try {
@@ -1635,7 +1613,7 @@ export class MemoryService {
       conversationId ??
       (await this.#liveThread(echoedToken))?.conversationId ??
       this.#transportConversationId();
-    if (!identity || !scopePath || !this.threads) {
+    if (!identity || !scopePath) {
       return undefined;
     }
     const scope = Scope.fromStored(scopePath);
@@ -1709,7 +1687,7 @@ export class MemoryService {
    */
   async #transportThread(): Promise<SessionThread | null> {
     const conversationId = this.#transportConversationId();
-    if (!conversationId || !this.threads) {
+    if (!conversationId) {
       return null;
     }
     try {
@@ -1909,7 +1887,7 @@ export class MemoryService {
     retired: readonly string[],
     successorId: string
   ): Promise<RuleFate[]> {
-    if (!this.ruleFates || retired.length === 0) {
+    if (retired.length === 0) {
       return [];
     }
     try {
@@ -1926,9 +1904,6 @@ export class MemoryService {
 
   /** Whether a memory carries a promoted rule; a failed read says no. */
   async #holdsPromotedRule(memoryId: string): Promise<boolean> {
-    if (!this.ruleFates) {
-      return false;
-    }
     try {
       return await this.ruleFates.hasPromotedRule(memoryId);
     } catch (error) {

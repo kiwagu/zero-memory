@@ -1,8 +1,9 @@
 /**
- * The published contract surface: the version a client can read off the
- * initialize handshake, and the error taxonomy every tool and owned route
- * answers in. These are the guarantees external clients build against, so the
- * assertions here are deliberately about SHAPE, not prose.
+ * The published contract surface: the error taxonomy every tool and owned
+ * route answers in. These are the guarantees external clients build against,
+ * so the assertions here are deliberately about SHAPE, not prose. (The
+ * contract version a client reads off the initialize handshake is pinned by
+ * the MCP package's own tests, through a real client.)
  *
  * The two shapes this suite does NOT unify are asserted elsewhere on purpose:
  * the RFC 6750 Bearer challenge (mcp-tools spec) and the RFC 6749 rate-limit
@@ -11,7 +12,9 @@
 import { expect, test } from '@playwright/test';
 
 import { e2eEnv } from '../helpers/env.js';
+import { FIXTURE_MEMORIES } from '../helpers/fixture-memories.js';
 import {
+  contentText,
   firstJson,
   McpTestClient,
   type McpToolResult,
@@ -28,22 +31,6 @@ const errorOf = (result: McpToolResult): ErrorBody['error'] => {
   expect(result.isError, 'expected a failed tool result').toBe(true);
   return firstJson<ErrorBody>(result).error;
 };
-
-test.describe('contract version', () => {
-  test('@smoke initialize announces the contract version', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    try {
-      const version = mcp.contractVersion();
-      expect(version, 'no contract version on the handshake').toBeDefined();
-      expect(version).toMatch(/^\d+\.\d+\.\d+$/);
-    } finally {
-      await mcp.close();
-    }
-  });
-});
 
 test.describe('tool error taxonomy', () => {
   test('@smoke a missing resource is not_found', async () => {
@@ -145,20 +132,18 @@ test.describe('write-path error taxonomy', () => {
       await passwordGrantToken(seed.userA)
     );
     try {
-      const error = errorOf(
-        await mcp.callTool('remember', {
-          content:
-            'deploy runs with ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA on the runner',
-          scope: 'personal',
-        })
-      );
+      const secret = 'ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      const result = await mcp.callTool('remember', {
+        content: `deploy runs with ${secret} on the runner`,
+        scope: 'personal',
+      });
+      const error = errorOf(result);
       expect(error.code).toBe('validation_failed');
       // The message is the agent's course-correction and must survive the
-      // throw — and must never echo the secret back.
+      // throw — and nothing in the answer may echo the secret back: not the
+      // message, not its details, not any other block.
       expect(error.message).toContain('secret_content_rejected');
-      expect(error.message).not.toContain(
-        'ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-      );
+      expect(contentText(result)).not.toContain(secret);
     } finally {
       await mcp.close();
     }
@@ -170,7 +155,8 @@ test.describe('write-path error taxonomy', () => {
       await passwordGrantToken(seed.userA)
     );
     try {
-      const regularMemoryId = Object.values(seed.fixtureMemoryIds)[0];
+      const fixture = FIXTURE_MEMORIES[0]!;
+      const regularMemoryId = seed.fixtureMemoryIds[fixture.content];
       expect(regularMemoryId, 'no seeded fixture memory').toBeDefined();
 
       const error = errorOf(
@@ -178,6 +164,13 @@ test.describe('write-path error taxonomy', () => {
       );
       expect(error.code).toBe('validation_failed');
       expect(error.message).toContain('not an open loop');
+
+      // Still recallable: the refusal must not have touched the memory.
+      const recalled = await mcp.callTool('recall', {
+        query: fixture.content,
+        k: 10,
+      });
+      expect(contentText(recalled)).toContain(regularMemoryId);
     } finally {
       await mcp.close();
     }

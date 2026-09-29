@@ -1,4 +1,3 @@
-import { formatEntries } from '@workspace/client-core';
 import { describe, expect, it } from 'vitest';
 
 import { parseTranscript } from './transcript-parser.js';
@@ -28,7 +27,12 @@ describe('parseTranscript', () => {
         message: {
           role: 'user',
           content: [
-            { type: 'tool_result', tool_use_id: 't1', content: 'file.txt' },
+            {
+              type: 'tool_result',
+              tool_use_id: 't1',
+              // A real id in a non-recall result: grep output, a pasted note.
+              content: 'notes/mem_n15ez75g6j96h8bd.01kwwe5nzc.md',
+            },
           ],
         },
       }),
@@ -42,64 +46,21 @@ describe('parseTranscript', () => {
       { role: 'user', text: 'why did we pick postgres?' },
       { role: 'assistant', text: 'Because of ltree and pgvector.' },
     ]);
-  });
-
-  it('extracts recalled ids from recall/build_context results, not from remember', () => {
-    const hitA = 'mem_n15ez75g6j96h8bd.01kwwe5nzc';
-    const hitB = 'mem_yhq467atdvt2v227.01kwpehs1a';
-    const createdByRemember = 'mem_1m2dc6apve6x6j0j.01kx3d6d1q';
-    const jsonl = [
-      line({
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [
-            {
-              type: 'tool_use',
-              id: 'r1',
-              name: 'recall',
-              input: { query: 'x' },
-            },
-            { type: 'tool_use', id: 'w1', name: 'remember', input: {} },
-          ],
-        },
-      }),
-      line({
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'r1',
-              content: `{"memories":[{"id":"${hitA}"},{"id":"${hitB}"}]}`,
-            },
-            {
-              // remember's freshly-created id must NOT count as a recall hit.
-              type: 'tool_result',
-              tool_use_id: 'w1',
-              content: `{"memory_id":"${createdByRemember}"}`,
-            },
-          ],
-        },
-      }),
-    ].join('\n');
-
-    const parsed = parseTranscript(jsonl);
-
-    expect(parsed.recalledIds.sort()).toEqual([hitB, hitA].sort());
-    expect(parsed.recalledIds).not.toContain(createdByRemember);
+    // A tool call that is not a recall surfaces nothing to the judge, even
+    // when its result happens to carry a memory id.
+    expect(parsed.recalledIds).toEqual([]);
   });
 
   // Regression anchor for the channel that never fired: a client records MCP
-  // tools under their NAMESPACED names, so the bare names used above are a
-  // shape real transcripts never contain. Matching only those left
+  // tools under their NAMESPACED names, so bare names are a shape real
+  // transcripts never contain. Matching only those left
   // `recalledIds` permanently empty and the usefulness judge never ran.
   it.each([
     ['plain mcp namespace', 'mcp__zero-memory__'],
     ['plugin-bundled namespace', 'mcp__plugin_zero-memory_zero-memory__'],
   ])('extracts recalled ids under the %s', (_label, prefix) => {
     const hit = 'mem_n15ez75g6j96h8bd.01kwwe5nzc';
+    const secondHit = 'mem_yhq467atdvt2v227.01kwpehs1a';
     const createdByRemember = 'mem_1m2dc6apve6x6j0j.01kx3d6d1q';
     const jsonl = [
       line({
@@ -136,7 +97,7 @@ describe('parseTranscript', () => {
             {
               type: 'tool_result',
               tool_use_id: 'r1',
-              content: `{"memories":[{"id":"${hit}"}]}`,
+              content: `{"memories":[{"id":"${hit}"},{"id":"${secondHit}"}]}`,
             },
             {
               type: 'tool_result',
@@ -150,26 +111,17 @@ describe('parseTranscript', () => {
 
     const parsed = parseTranscript(jsonl);
 
-    expect(parsed.recalledIds).toEqual([hit]);
+    expect(parsed.recalledIds).toEqual([hit, secondHit]);
     expect(parsed.recalledIds).not.toContain(createdByRemember);
   });
 
-  it('reports no recalled ids for a transcript without recall traffic', () => {
-    const jsonl = line({
-      type: 'assistant',
-      message: { role: 'assistant', content: 'plain answer' },
-    });
-    expect(parseTranscript(jsonl).recalledIds).toEqual([]);
-  });
-
-  it('skips meta lines, torn JSON, and empty text', () => {
+  it('skips meta lines and empty text', () => {
     const jsonl = [
       line({
         type: 'user',
         isMeta: true,
         message: { role: 'user', content: 'injected context' },
       }),
-      '{"type":"assistant","message":{"role":"assistant","content":"tor', // torn
       line({
         type: 'assistant',
         message: { role: 'assistant', content: '  ' },
@@ -224,16 +176,5 @@ describe('parseTranscript', () => {
       { role: 'user', text: 'why did we pick postgres?' },
       { role: 'assistant', text: 'Picking up where we left off.' },
     ]);
-  });
-});
-
-describe('formatEntries', () => {
-  it('renders role-prefixed lines', () => {
-    expect(
-      formatEntries([
-        { role: 'user', text: 'hi' },
-        { role: 'assistant', text: 'hello' },
-      ])
-    ).toBe('user: hi\nassistant: hello');
   });
 });

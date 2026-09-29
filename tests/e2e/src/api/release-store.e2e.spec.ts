@@ -5,13 +5,15 @@
  * recorded once per card and version, and reads back on the card, the board
  * and the briefing.
  */
-import { spawnSync } from 'node:child_process';
-
 import { expect, test } from '@playwright/test';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import { e2eEnv } from '../helpers/env.js';
-import { firstJson, McpTestClient } from '../helpers/mcp.js';
+import {
+  admin,
+  asUser,
+  projectScope,
+  psql,
+  rpc,
+} from '../helpers/board-store.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
 
@@ -59,72 +61,27 @@ interface CardGetJson {
   events: EventJson[];
 }
 
-const asUser = (token: string): SupabaseClient =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
-    auth: { persistSession: false },
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
+/**
+ * The memories this file writes only to make a project scope, deleted when
+ * the file is done so they do not crowd later specs.
+ */
+const markers: string[] = [];
 
-/** A project scope the caller may write, made the way an agent makes one. */
-const projectScope = async (token: string, tag: string): Promise<string> => {
-  const agent = await McpTestClient.connect(token);
-  try {
-    const made = await agent.callTool('remember', {
-      content: `e2e release store marker ${tag}: the ingest worker drops chunks under load`,
-      kind: 'fact',
-      project_hint: `/tmp/zm-e2e-${tag}`,
-    });
-    expect(made.isError ?? false).toBe(false);
-    return firstJson<{ scope: string }>(made).scope;
-  } finally {
-    await agent.close();
+test.afterAll(async () => {
+  if (markers.length > 0) {
+    await admin().from('memories').delete().in('id', markers);
   }
-};
-
-const rpc = async <T>(
-  client: SupabaseClient,
-  fn: string,
-  args: Record<string, unknown>
-): Promise<T> => {
-  const { data, error } = await client.rpc(fn, args);
-  if (error) {
-    throw new Error(`${fn}: ${error.message}`);
-  }
-  return data as T;
-};
-
-/** One statement against the e2e database, as the migration tests run it. */
-const psql = (query: string): string => {
-  const result = spawnSync(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '--network',
-      'host',
-      '-i',
-      'supabase/postgres:17.6.1.136',
-      'psql',
-      'postgresql://postgres:postgres@127.0.0.1:55332/postgres',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-tA',
-      '-c',
-      query,
-    ],
-    { encoding: 'utf8' }
-  );
-  if (result.status !== 0) {
-    throw new Error(`psql failed: ${result.stderr}`);
-  }
-  return (result.stdout ?? '').trim();
-};
+});
 
 test.describe('Release settings in the store', () => {
   test('only a scope admin writes the setting; members read it; a bad url never lands', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `release-settings-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `release-settings-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
 
     const empty = await db
@@ -147,26 +104,31 @@ test.describe('Release settings in the store', () => {
       .insert({ scope, version_url: 'https://user:pw@example.com/healthz' });
     expect(leaky.error?.message).toMatch(/check constraint/u);
 
-    for (const bad of [
-      "select private.is_release_url('https://user:pw@example.com/healthz')",
-      "select private.is_release_url('http://example.com/healthz')",
-      "select private.is_release_url('ftp://example.com')",
-    ]) {
-      expect(psql(bad)).toBe('f');
-    }
-    for (const good of [
-      "select private.is_release_url('https://api.example.com/healthz')",
-      "select private.is_release_url('http://localhost:8788/healthz')",
-      "select private.is_release_url('http://127.0.0.1:8788/healthz')",
-    ]) {
-      expect(psql(good)).toBe('t');
-    }
+    const urls = {
+      'https://user:pw@example.com/healthz': 'f',
+      'http://example.com/healthz': 'f',
+      'ftp://example.com': 'f',
+      'https://api.example.com/healthz': 't',
+      'http://localhost:8788/healthz': 't',
+      'http://127.0.0.1:8788/healthz': 't',
+    };
+    const verdicts = psql(
+      'select ' +
+        Object.keys(urls)
+          .map((url) => `private.is_release_url('${url}')`)
+          .join(', ')
+    ).split('|');
+    expect(verdicts).toEqual(Object.values(urls));
   });
 
   test('a tag template holds only what a git ref may, however it is written', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `release-template-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `release-template-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
 
     // Written directly, the table refuses it.
@@ -223,7 +185,11 @@ test.describe('Release commands in the store', () => {
   test('configure is the admin’s; settings read back; a bad field is refused whole', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `release-config-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `release-config-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
 
     const none = await rpc<{ settings: unknown }>(db, 'release_settings', {
@@ -298,7 +264,11 @@ test.describe('Release commands in the store', () => {
   test('a release is recorded once per card and version, and the first observer is kept', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `release-record-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `release-record-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -379,7 +349,11 @@ test.describe('Release commands in the store', () => {
   test('the policy switch moves carried waiting cards to done, and only them', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `release-policy-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `release-policy-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     await rpc(db, 'release_configure', {
       p_scope: scope,
@@ -429,8 +403,16 @@ test.describe('Release commands in the store', () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
     const db = asUser(token);
-    const mine = await projectScope(token, `release-own-${Date.now()}`);
-    const other = await projectScope(token, `release-other-${Date.now()}`);
+    const mine = await projectScope(
+      token,
+      `release-own-${Date.now()}`,
+      markers
+    );
+    const other = await projectScope(
+      token,
+      `release-other-${Date.now()}`,
+      markers
+    );
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
       p_scope: other,
@@ -466,7 +448,11 @@ test.describe('Release commands in the store', () => {
   test('a briefing names the production state and the release of its cards', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `release-brief-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `release-brief-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -500,7 +486,11 @@ test.describe('Release commands in the store', () => {
   test('a production state that returns is current again, and its first observation stands', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `release-return-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `release-return-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const record = (version: string, commit: string) =>
       rpc<{
@@ -549,7 +539,11 @@ test.describe('Release commands in the store', () => {
   test('a release marks what landed since the last one, and a card that lands again is a candidate again', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `release-since-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `release-since-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     const { card } = await rpc<{ card: CardJson }>(db, 'card_create', {
       p_no_links: 'e2e fixture',
@@ -605,7 +599,11 @@ test.describe('Release commands in the store', () => {
   test('a card that lands again while an observer looks keeps its candidacy', async () => {
     const seed = await readSeedState();
     const token = await passwordGrantToken(seed.userA);
-    const scope = await projectScope(token, `release-race-${Date.now()}`);
+    const scope = await projectScope(
+      token,
+      `release-race-${Date.now()}`,
+      markers
+    );
     const db = asUser(token);
     await rpc(db, 'release_configure', {
       p_scope: scope,

@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,6 +35,15 @@ describe('OAuthStateStore', () => {
     expect(entry?.redirectUri).toBe('http://127.0.0.1:1234/callback');
     expect(entry?.codeVerifier).toBe('verifier-1');
     expect(entry?.tokens?.access_token).toBe('a-token');
+  });
+
+  it('writes the token file readable by its owner only', () => {
+    const path = tempFile();
+    new OAuthStateStore(path).update('http://zm.local:8787/mcp', {
+      tokens: { access_token: 'a-token', token_type: 'Bearer' },
+    });
+    // The file holds bearer tokens: no group or other access bits.
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it('keeps entries for different servers isolated', () => {

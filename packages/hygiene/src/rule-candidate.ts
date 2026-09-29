@@ -11,18 +11,11 @@ import { z } from 'zod';
  * (`find_rule_candidates`), then the LLM distiller turns each qualifying
  * memory into an imperative rule draft for the OWNER to approve — the system
  * never writes the user's rules files itself.
+ *
+ * The rollup proposes standing instructions (conventions, preferences) and
+ * repeat traps (gotchas) only. Decisions are observed but not proposed:
+ * their imperative core is usually context-bound.
  */
-
-/**
- * Kinds eligible for candidacy: standing instructions (conventions,
- * preferences) and repeat traps (gotchas). Decisions are observed but not
- * proposed: their imperative core is usually context-bound.
- */
-export const RULE_CANDIDATE_KINDS = [
-  'convention',
-  'preference',
-  'gotcha',
-] as const;
 
 /** Which always-on layer the rule belongs to, derived from the memory scope. */
 export type RuleTargetLayer = 'user' | 'project';

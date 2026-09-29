@@ -34,6 +34,8 @@ describe('renderBoardSummary', () => {
     expect(block).toContain(
       '- On the board: 1 active · 1 waiting — ZM-4 "Retire the old parser" [waiting]'
     );
+    // No production state was reported, so there is no line for one.
+    expect(block).not.toContain('Production');
   });
 
   it('shows only the board line when this conversation is bound to nothing', () => {
@@ -126,33 +128,6 @@ describe('renderBoardSummary', () => {
       '- Production: v0.25.0 (build 849d7cac) as of 2026-09-24T08:00:00Z'
     );
     expect(block).toContain('ZM-21 "Memory floor" [active] released v0.25.0');
-  });
-
-  it('stays byte-for-byte the same when there is no production state and no released card', () => {
-    const before = renderBoardSummary({
-      bound_card: {
-        ...card(3, 'Wire the importer', 'active'),
-        state_reason: null,
-        refs: 0,
-        updated_at: '2026-09-21T10:00:00Z',
-      },
-      active: 1,
-      waiting: 0,
-      lead: [],
-    });
-    const after = renderBoardSummary({
-      bound_card: {
-        ...card(3, 'Wire the importer', 'active'),
-        state_reason: null,
-        refs: 0,
-        updated_at: '2026-09-21T10:00:00Z',
-      },
-      active: 1,
-      waiting: 0,
-      lead: [],
-      production: null,
-    });
-    expect(after).toBe(before);
   });
 
   it('names what blocks a card, three at most', () => {

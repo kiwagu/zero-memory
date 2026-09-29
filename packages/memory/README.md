@@ -94,24 +94,29 @@ adapters live in `@workspace/persistence` and are bound in the app host.
 `MEMORY_SEARCH_SERVICE`, `IEntityRepository` / `ENTITY_REPOSITORY`,
 `IGraphService` / `GRAPH_SERVICE`, `IScopeAccessService` /
 `SCOPE_ACCESS_SERVICE`, `IProjectBindingRepository` /
-`PROJECT_BINDING_REPOSITORY` — each with an `injectX()` decorator helper.
+`PROJECT_BINDING_REPOSITORY`, `IProjectRulesReader` / `PROJECT_RULES_READER`,
+`IUserRulesReader` / `USER_RULES_READER`, `IPortabilityJudge` /
+`PORTABILITY_JUDGE`, `ISessionThreadRepository` /
+`SESSION_THREAD_REPOSITORY` — each with an `injectX()` decorator helper.
+`MemoryService` needs every port it names, the two below included: the host
+registers an adapter for each, and a missing one fails at resolution rather
+than quietly switching a feature off.
 
-`IBriefingWorkReader` / `BRIEFING_WORK_READER` (optional, like the rules
-readers) supplies the project board's work summary for a briefing. The
-service asks for it only on a BUDGETED briefing pinned to a project, and pays
-for it with one row of the ranked memories leg: on a production clone, six →
-five rows kept every brief probe while twelve → eleven lost two, so an
-unbudgeted call briefs exactly as before. Loops attached to a card the summary
-names leave `open_loops`. A read failure costs the summary, never the
-briefing.
+`IBriefingWorkReader` / `BRIEFING_WORK_READER` supplies the project board's
+work summary for a briefing. The service asks for it only on a BUDGETED
+briefing pinned to a project, and pays for it with one row of the ranked
+memories leg: on a production clone, six → five rows kept every brief probe
+while twelve → eleven lost two, so an unbudgeted call briefs exactly as
+before. Loops attached to a card the summary names leave `open_loops`. A read
+failure costs the summary, never the briefing.
 
-`IRuleFateReader` / `RULE_FATE_READER` (optional, like the rules readers)
-reports what happened to a promoted rule when a write retired the memory it
-was anchored to. The database moves the rule to the successor on the
-retirement itself, on every path that records one; the service only reads the
-result back, so `remember` can list it under `rules` (carried, carried with a
-curated text kept for review, or not carried) and `forget` can say the rule
-stays live. A read failure costs the report, never the write.
+`IRuleFateReader` / `RULE_FATE_READER` reports what happened to a promoted
+rule when a write retired the memory it was anchored to. The database moves
+the rule to the successor on the retirement itself, on every path that records
+one; the service only reads the result back, so `remember` can list it under
+`rules` (carried, carried with a curated text kept for review, or not carried)
+and `forget` can say the rule stays live. A read failure costs the report,
+never the write.
 
 A write carries `PassageVectors` — a named `{ primary, overflow }` shape
 rather than a bare array, because the embedding model truncates its input to a
@@ -126,3 +131,9 @@ duplicate of it.
 ## Testing
 
 `bun run test:vitest` — specs live next to the sources.
+
+`@workspace/memory/testing` exports vitest fakes of every `MemoryService`
+port and `makeMemoryService`, which wires a real service over them (inert by
+default: empty stores, a writable scope, a granting portability judge). It is
+spec support shared with the packages built on this one — it imports vitest,
+so nothing outside a spec may import it.

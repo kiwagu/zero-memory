@@ -10,14 +10,16 @@ const MEMORY = 'mem_0000000000000001.0000000000';
  * Minimal chainable fake of the service-role Supabase client covering exactly
  * the calls promoteOnDemand makes: a memories select→eq→maybeSingle, a
  * rule_candidates status probe (select→eq→maybeSingle, no prior candidacy by
- * default), a rule_candidates upsert, and an audit_log insert. `upserts`
- * captures the row; `existingStatus` seeds the guard probe.
+ * default), a rule_candidates upsert, and the usage_events / audit_log
+ * inserts. `upserts` captures the candidacy row, `inserts` every other write;
+ * `existing` seeds the status probe.
  */
 function fakeClient(
   memory: Record<string, unknown> | null,
   existing: Record<string, unknown> | null = null
 ) {
   const upserts: Array<{ row: Record<string, unknown>; opts: unknown }> = [];
+  const inserts: Array<{ table: string; row: Record<string, unknown> }> = [];
   const client = {
     from(table: string) {
       if (table === 'memories') {
@@ -43,10 +45,15 @@ function fakeClient(
           },
         };
       }
-      return { insert: () => Promise.resolve({ error: null }) };
+      return {
+        insert: (row: Record<string, unknown>) => {
+          inserts.push({ table, row });
+          return Promise.resolve({ error: null });
+        },
+      };
     },
   };
-  return { client, upserts };
+  return { client, upserts, inserts };
 }
 
 const distillerReturning = (ruleText: string): RuleDistiller =>
@@ -60,6 +67,9 @@ const distillerReturning = (ruleText: string): RuleDistiller =>
         scope_suggestions: [],
       },
       model: 'a-model',
+      inputTokens: 120,
+      outputTokens: 30,
+      ranOnCallerKey: false,
     }),
   }) as unknown as RuleDistiller;
 
@@ -68,12 +78,15 @@ const make = (
   distillText = 'distilled rule',
   existing: Record<string, unknown> | null = null
 ) => {
-  const { client, upserts } = fakeClient(memory, existing);
+  const { client, upserts, inserts } = fakeClient(memory, existing);
   const distiller = distillerReturning(distillText);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const detector = new RuleCandidateDetector(client as any, distiller);
-  return { detector, upserts, distiller };
+  return { detector, upserts, inserts, distiller };
 };
+
+const metered = (inserts: Array<{ table: string }>) =>
+  inserts.filter((insert) => insert.table === 'usage_events');
 
 const personalMemory = {
   id: MEMORY,
@@ -114,6 +127,23 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect(opts).toEqual({ onConflict: 'memory_id' });
   });
 
+  it("meters the distiller's tokens on the owner's ledger", async () => {
+    const { detector, inserts } = make(personalMemory);
+
+    await detector.promoteOnDemand({ memoryId: MEMORY, ownerId: OWNER });
+
+    // The on-demand distill spends tokens on the owner's behalf, so it lands
+    // on their allowance under its own purpose, like the incubator run.
+    expect(metered(inserts)).toHaveLength(1);
+    expect(metered(inserts)[0]).toMatchObject({
+      row: {
+        user_id: OWNER,
+        quantity: 150,
+        metadata: { purpose: 'rule_distiller' },
+      },
+    });
+  });
+
   it('addresses a PROJECT rule when applies_scope is given', async () => {
     const { detector, upserts } = make(personalMemory);
 
@@ -130,8 +160,8 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect(upserts[0]!.row.target_layer).toBe('project');
   });
 
-  it('uses an explicit rule_text without calling the distiller', async () => {
-    const { detector, upserts, distiller } = make(personalMemory);
+  it('uses an explicit rule_text without calling or metering the distiller', async () => {
+    const { detector, upserts, inserts, distiller } = make(personalMemory);
 
     const out = await detector.promoteOnDemand({
       memoryId: MEMORY,
@@ -140,6 +170,7 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     });
 
     expect(distiller.distill).not.toHaveBeenCalled();
+    expect(metered(inserts)).toEqual([]);
     expect(out.rule_text).toBe('always run the e2e suite before review');
     expect(upserts[0]!.row.rule_text).toBe(
       'always run the e2e suite before review'
@@ -151,6 +182,39 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     await expect(
       detector.promoteOnDemand({ memoryId: MEMORY, ownerId: OWNER })
     ).rejects.toThrow(/not found or not owned/);
+  });
+
+  it('refuses to revive a dismissed candidacy without force', async () => {
+    const { detector, upserts } = make(personalMemory, 'unused', {
+      status: 'dismissed',
+    });
+
+    // The owner turned this rule down on purpose; promoting it again takes
+    // an explicit override.
+    await expect(
+      detector.promoteOnDemand({
+        memoryId: MEMORY,
+        ownerId: OWNER,
+        ruleText: 'x',
+      })
+    ).rejects.toThrow(/dismissed/);
+    expect(upserts).toEqual([]);
+  });
+
+  it('promotes a dismissed candidacy when force is set', async () => {
+    const { detector, upserts } = make(personalMemory, 'unused', {
+      status: 'dismissed',
+    });
+
+    const out = await detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'x',
+      force: true,
+    });
+
+    expect(out.status).toBe('promoted');
+    expect(upserts).toHaveLength(1);
   });
 
   it('refuses an invalidated memory', async () => {

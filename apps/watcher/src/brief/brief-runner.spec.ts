@@ -1,7 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
 import { DEFAULT_HOOK_BUDGET_CHARS } from '@workspace/client-core';
 import {
@@ -18,14 +16,21 @@ import {
   recordSessionThread,
   stampSessionStart,
 } from '@workspace/client-runtime';
-import type { ContextMemory, ContextRule } from '@workspace/contracts';
-import { memoryIdSchema } from '@workspace/contracts';
+import type {
+  BriefingWork,
+  ContextMemory,
+  ContextRule,
+} from '@workspace/contracts';
+import { cardIdSchema, memoryIdSchema } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { branchNameToTopic, runBrief } from './brief-runner.js';
-import type { HookClient } from '../hook-client.js';
+import { runBrief } from './brief-runner.js';
+import { hookClient, type HookInput } from '../hook-client.js';
 import { resolveProjectHint } from '../project-hint-resolver.js';
 import { checkRelease } from '../release/release-runner.js';
+import { git, initRepo } from '../testing/git-repo.fixture.js';
+import { fakeHookClient } from '../testing/hook-client.fake.js';
+import { useStateDirs, withEnv } from '../testing/state-dir.fixture.js';
 
 vi.mock('@workspace/client-runtime', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@workspace/client-runtime')>()),
@@ -38,39 +43,96 @@ vi.mock('../release/release-runner.js', () => ({ checkRelease: vi.fn() }));
 beforeEach(() => {
   vi.mocked(checkRelease).mockReset().mockResolvedValue(null);
 });
+afterEach(() => {
+  vi.mocked(callBuildContext).mockReset();
+});
 
 // A sweep drives the whole briefing once per channel size — a hundred or more
 // runs in one test. That takes seconds on a workstation and several times
 // longer on a shared CI runner, past the default five-second limit.
 const SWEEP_TIMEOUT_MS = 60_000;
 
-describe('branchNameToTopic', () => {
-  it('turns a feature branch into a space-separated topic', () => {
-    expect(branchNameToTopic('feature/ui-extractor-settings')).toBe(
-      'ui extractor settings'
-    );
-  });
+/** A substantive prompt: long enough, and not an acknowledgement. */
+const SUBSTANTIVE =
+  'add a retry with backoff to the ingest worker, it drops chunks';
 
-  it('normalizes slashes and dashes to single spaces', () => {
-    expect(branchNameToTopic('feature/watcher-brief/hooks')).toBe(
-      'watcher brief hooks'
-    );
-  });
+/** This project's build_context answer: empty but for what a test fills in. */
+const briefingPack = (
+  fill: {
+    memories?: ContextMemory[];
+    rules?: ContextRule[];
+    loops?: ContextMemory[];
+    work?: BriefingWork;
+  } = {}
+) => ({
+  memories: fill.memories ?? [],
+  entities: [],
+  edges: [],
+  linked_memories: [],
+  recent: [],
+  rules: fill.rules ?? [],
+  open_loops: fill.loops ?? [],
+  open_loops_total: fill.loops?.length ?? 0,
+  project_scope: 'proj.usr_x.demo',
+  ...(fill.work ? { work: fill.work } : {}),
+});
 
-  it('keeps a non-feature branch name as its topic', () => {
-    expect(branchNameToTopic('spike-oauth')).toBe('spike oauth');
+/** One briefing hook run; returns everything it put into the model's context. */
+const brief = async (
+  mode: 'task' | 'session-start',
+  input: Partial<HookInput>
+): Promise<string> => {
+  const client = fakeHookClient({
+    hookEventName: mode === 'task' ? 'UserPromptSubmit' : 'SessionStart',
+    ...input,
+  });
+  await runBrief(mode, client);
+  return client.emitted.join('\n');
+};
+
+/** `dir` as a project this machine already resolved to its scope. */
+const resolvedProject = (dir: string): void =>
+  recordProjectScope(
+    projectScopeStatePath(),
+    resolveProjectHint(dir),
+    'proj.usr_x.demo'
+  );
+
+/**
+ * Session start briefs the project and, on a branch worth a second lookup,
+ * the branch as a topic of its own: which topic a real checkout yields is the
+ * contract, read off the lookups the runner makes.
+ */
+describe('session-start branch topic', () => {
+  const dirs = useStateDirs('zm-topic');
+
+  const topicsOn = async (...checkout: string[]): Promise<string[]> => {
+    initRepo(dirs.work, { branch: 'trunk-placeholder' });
+    git(dirs.work, 'checkout', '-q', ...checkout);
+    vi.mocked(callBuildContext).mockResolvedValue(briefingPack());
+    await brief('session-start', { sessionId: 'sess-topic', cwd: dirs.work });
+    return vi
+      .mocked(callBuildContext)
+      .mock.calls.map(([args]) => String(args.topic));
+  };
+
+  it.each([
+    ['feature/ui-extractor-settings', 'ui extractor settings'],
+    ['feature/watcher-brief/hooks', 'watcher brief hooks'],
+    ['spike-oauth', 'spike oauth'],
+  ])('briefs the branch %s as the topic "%s"', async (branch, topic) => {
+    expect(await topicsOn('-b', branch)).toEqual([basename(dirs.work), topic]);
   });
 
   it.each(['main', 'dev', 'stage', 'master'])(
-    'skips the trunk branch %s (briefing == project briefing)',
-    (branch) => {
-      expect(branchNameToTopic(branch)).toBeNull();
+    'briefs the project alone on the trunk branch %s',
+    async (branch) => {
+      expect(await topicsOn('-b', branch)).toEqual([basename(dirs.work)]);
     }
   );
 
-  it('skips a detached HEAD and empty names', () => {
-    expect(branchNameToTopic('HEAD')).toBeNull();
-    expect(branchNameToTopic('')).toBeNull();
+  it('briefs the project alone on a detached HEAD', async () => {
+    expect(await topicsOn('--detach')).toEqual([basename(dirs.work)]);
   });
 });
 
@@ -82,62 +144,12 @@ describe('branchNameToTopic', () => {
  * which state the banner reads — with no network and no stubs in between.
  */
 describe('per-message project/thread banner', () => {
-  let stateDir: string;
-  let workDir: string;
-  let previousState: string | undefined;
+  const dirs = useStateDirs('zm-banner');
 
-  const bannerFor = async (sessionId: string): Promise<string | null> => {
-    let emitted: string | null = null;
-    const adapter: HookClient = {
-      kind: 'claude',
-      ingestProvenance: 'test',
-      canTaskBrief: true,
-      readInput: async () => ({
-        sessionId,
-        cwd: workDir,
-        prompt: 'ok',
-        transcriptPath: '',
-        hookEventName: 'UserPromptSubmit',
-        toolName: '',
-        alreadyContinued: false,
-        source: '',
-        trigger: '',
-      }),
-      parse: () => {
-        throw new Error('the banner path never parses a transcript');
-      },
-      emitSessionBrief: () => {},
-      emitTaskBrief: (context) => {
-        emitted = context;
-      },
-      emitTurnContext: () => {},
-      emitReceipt: () => {},
-      emitCompactionAnchor: () => {},
-      canAnchorCompaction: false,
-    };
-    await runBrief('task', adapter);
-    return emitted;
-  };
+  const bannerFor = (sessionId: string): Promise<string> =>
+    brief('task', { sessionId, cwd: dirs.work, prompt: 'ok' });
 
-  beforeEach(() => {
-    stateDir = mkdtempSync(join(tmpdir(), 'zm-banner-state-'));
-    workDir = mkdtempSync(join(tmpdir(), 'zm-banner-work-'));
-    previousState = process.env.XDG_STATE_HOME;
-    process.env.XDG_STATE_HOME = stateDir;
-    recordProjectScope(
-      projectScopeStatePath(),
-      resolveProjectHint(workDir),
-      'proj.usr_x.demo'
-    );
-  });
-
-  afterEach(() => {
-    vi.mocked(callBuildContext).mockReset();
-    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
-    else process.env.XDG_STATE_HOME = previousState;
-    rmSync(stateDir, { recursive: true, force: true });
-    rmSync(workDir, { recursive: true, force: true });
-  });
+  beforeEach(() => resolvedProject(dirs.work));
 
   it('gives each conversation in one repo its own token', async () => {
     recordSessionThread(briefStatePath(), 'sess-1', 'thr_one.01a');
@@ -161,7 +173,7 @@ describe('per-message project/thread banner', () => {
   it('says nothing at all until the repo has a resolved project', async () => {
     rmSync(projectScopeStatePath(), { force: true });
 
-    expect(await bannerFor('sess-1')).toBeNull();
+    expect(await bannerFor('sess-1')).toBe('');
   });
 
   it('tells the agent to make the task lookup itself', async () => {
@@ -170,64 +182,57 @@ describe('per-message project/thread banner', () => {
     // has to survive, which is why it sits ahead of the droppable sections.
     const sessionId = 'sess-instruct';
     recordSessionThread(briefStatePath(), sessionId, 'thr_instruct.01e');
-    vi.mocked(callBuildContext).mockResolvedValue({
-      memories: [
-        {
-          id: 'mem_0000000000000002.0000000000',
-          content: 'a project-level fact',
-          kind: 'fact',
-          scope: 'proj.usr_x.demo',
-          created_at: '2026-08-18T00:00:00Z',
-          score: 0.5,
-        },
-      ],
-      entities: [],
-      edges: [],
-      linked_memories: [],
-      project_scope: 'proj.usr_x.demo',
+    vi.mocked(callBuildContext).mockResolvedValue(
+      briefingPack({
+        memories: [
+          {
+            id: memoryIdSchema.parse('mem_0000000000000002.0000000000'),
+            content: 'a project-level fact',
+            kind: 'fact',
+            scope: 'proj.usr_x.demo',
+            created_at: '2026-08-18T00:00:00Z',
+            score: 0.5,
+          },
+        ],
+      })
+    );
+
+    const text = await brief('task', {
+      sessionId,
+      cwd: dirs.work,
+      prompt: SUBSTANTIVE,
     });
 
-    let emitted: string | null = null;
-    const adapter: HookClient = {
-      kind: 'claude',
-      ingestProvenance: 'test',
-      canTaskBrief: true,
-      canAnchorCompaction: false,
-      readInput: async () => ({
-        sessionId,
-        cwd: workDir,
-        prompt:
-          'add a retry with backoff to the ingest worker, it drops chunks',
-        transcriptPath: '',
-        hookEventName: 'UserPromptSubmit',
-        toolName: '',
-        alreadyContinued: false,
-        source: '',
-        trigger: '',
-      }),
-      parse: () => {
-        throw new Error('the task path never parses a transcript');
-      },
-      emitSessionBrief: () => {},
-      emitTaskBrief: (context) => {
-        emitted = context;
-      },
-      emitTurnContext: () => {},
-      emitReceipt: () => {},
-      emitCompactionAnchor: () => {},
-    };
-
-    await runBrief('task', adapter);
-
-    const text = emitted as string | null;
     expect(text).toContain('call build_context yourself');
     expect(text).toContain('English topic');
     // And the pack is labelled for what it actually is — the project — rather
     // than for a task nobody looked up.
-    expect(text).toContain(basename(workDir));
+    expect(text).toContain(basename(dirs.work));
     // The prompt itself never reaches the server.
     const sent = vi.mocked(callBuildContext).mock.calls[0]?.[0];
-    expect(sent?.topic).toBe(basename(workDir));
+    expect(sent?.topic).toBe(basename(dirs.work));
+  });
+
+  it('sends nothing and asks the server nothing on a client with no task-brief channel', async () => {
+    // Cursor's prompt event has no model-context channel, so its task
+    // briefing is skipped outright rather than built for nowhere: not the
+    // banner, not a drained chunk, not a server call.
+    recordSessionThread(briefStatePath(), 'sess-cursor', 'thr_cursor.01f');
+    const cursor = hookClient('cursor');
+    const client = fakeHookClient(
+      {
+        sessionId: 'sess-cursor',
+        cwd: dirs.work,
+        prompt: SUBSTANTIVE,
+        hookEventName: 'beforeSubmitPrompt',
+      },
+      { kind: cursor.kind, canTaskBrief: cursor.canTaskBrief }
+    );
+
+    await runBrief('task', client);
+
+    expect(client.emitted).toEqual([]);
+    expect(callBuildContext).not.toHaveBeenCalled();
   });
 
   it('rebriefs after compaction and emits one Codex frame with the same thread', async () => {
@@ -237,56 +242,35 @@ describe('per-message project/thread banner', () => {
     markRulesDelivered(briefStatePath(), sessionId);
     stampSessionStart(briefStatePath(), sessionId, 200, 'compact');
     vi.mocked(callBuildContext).mockResolvedValue({
-      memories: [
-        {
-          id: 'mem_0000000000000001.0000000000',
-          content: 'context restored after compaction',
-          kind: 'fact',
-          scope: 'proj.usr_x.demo',
-          created_at: '2026-08-17T00:00:00Z',
-          score: 0.5,
-        },
-      ],
-      entities: [],
-      edges: [],
-      linked_memories: [],
-      project_scope: 'proj.usr_x.demo',
+      ...briefingPack({
+        memories: [
+          {
+            id: memoryIdSchema.parse('mem_0000000000000001.0000000000'),
+            content: 'context restored after compaction',
+            kind: 'fact',
+            scope: 'proj.usr_x.demo',
+            created_at: '2026-08-17T00:00:00Z',
+            score: 0.5,
+          },
+        ],
+      }),
       session: {
         attached_project: 'proj.usr_x.demo',
         thread: 'thr_compact.01d',
       },
     });
+    const client = fakeHookClient({
+      sessionId,
+      cwd: dirs.work,
+      prompt: 'restore the exact working context after compaction',
+      hookEventName: 'UserPromptSubmit',
+    });
 
-    const emitted: string[] = [];
-    const adapter: HookClient = {
-      kind: 'codex',
-      ingestProvenance: 'test',
-      canTaskBrief: true,
-      canAnchorCompaction: false,
-      readInput: async () => ({
-        sessionId,
-        cwd: workDir,
-        prompt: 'restore the exact working context after compaction',
-        transcriptPath: '',
-        hookEventName: 'UserPromptSubmit',
-        toolName: '',
-        alreadyContinued: false,
-        source: '',
-        trigger: '',
-      }),
-      parse: () => ({ entries: [], recalledIds: [] }),
-      emitSessionBrief: () => {},
-      emitTaskBrief: (context) => void emitted.push(context),
-      emitTurnContext: () => {},
-      emitReceipt: () => {},
-      emitCompactionAnchor: () => {},
-    };
+    await runBrief('task', client);
 
-    await runBrief('task', adapter);
-
-    expect(emitted).toHaveLength(1);
-    expect(emitted[0]).toContain('THREAD: thr_compact.01d');
-    expect(emitted[0]).toContain('context restored after compaction');
+    expect(client.emitted).toHaveLength(1);
+    expect(client.emitted[0]).toContain('THREAD: thr_compact.01d');
+    expect(client.emitted[0]).toContain('context restored after compaction');
     expect(loadBriefState(briefStatePath())[sessionId]?.task_briefed).toBe(
       true
     );
@@ -338,48 +322,18 @@ const rule = (textChars: number): ContextRule => ({
 });
 
 describe('session-start memory floor', () => {
-  let stateDir: string;
-  let workDir: string;
-  let previousState: string | undefined;
+  const dirs = useStateDirs('zm-floor');
   const SESSION_ID = 'session-1';
-
-  // Turns `workDir` into a real (if minimal) git repo on a non-trunk branch,
-  // so `branchTopic()` resolves and `runSessionStart` briefs TWO topics
-  // (project + branch) instead of one — needed to exercise anything about
-  // how the channel is split ACROSS topics, which a single-topic workDir
-  // can never reach (`branchTopic()` throws on "not a git repository" and
-  // is caught to null). `rev-parse --abbrev-ref HEAD` needs a real commit —
-  // an unborn branch (no commits yet) makes it fail — so this commits once,
-  // empty, before returning.
-  const initGitBranch = (branch: string): void => {
-    execFileSync('git', ['init', '-q'], { cwd: workDir });
-    execFileSync('git', ['checkout', '-q', '-b', branch], { cwd: workDir });
-    execFileSync(
-      'git',
-      [
-        '-c',
-        'user.email=test@example.com',
-        '-c',
-        'user.name=test',
-        'commit',
-        '-q',
-        '--allow-empty',
-        '-m',
-        'init',
-      ],
-      { cwd: workDir }
-    );
-  };
 
   const runSessionStart = async (fixture: {
     rules?: ContextRule[];
     loops?: ContextMemory[];
     memories?: ContextMemory[];
     /**
-     * When set, `workDir` becomes a real git repo on this branch BEFORE the
-     * hook runs, so `callBuildContext` is called twice (project, then
-     * branch) and `splits.length === 2` — the only way to reach the
-     * cross-topic channel math at all.
+     * When set, the work directory becomes a real git repo on this branch
+     * BEFORE the hook runs, so `callBuildContext` is called twice (project,
+     * then branch) — the only way to reach the cross-topic channel math at
+     * all: outside a repository there is no branch and one topic.
      */
     branch?: string;
     /** The SECOND (branch) topic's memories, only used with `branch`. */
@@ -387,106 +341,27 @@ describe('session-start memory floor', () => {
     /** Overrides `ZM_BRIEF_HOOK_BUDGET_CHARS` for this call, restored after. */
     budgetChars?: number;
   }): Promise<string> => {
-    const projectResponse = {
-      memories: fixture.memories ?? [],
-      entities: [],
-      edges: [],
-      linked_memories: [],
-      recent: [],
-      rules: fixture.rules ?? [],
-      open_loops: fixture.loops ?? [],
-      open_loops_total: fixture.loops?.length ?? 0,
-      project_scope: 'proj.usr_x.demo',
-    };
+    const project = briefingPack(fixture);
     if (fixture.branch) {
-      initGitBranch(fixture.branch);
+      initRepo(dirs.work, { branch: fixture.branch });
       // The branch call carries no rules/loops of its own — this suite's
       // two-topic test is about how the PACK budget splits, and reusing the
       // project's rules/loops here would just dedupe back to the same
       // numbers via mergeStandingRules/mergeOpenLoops, adding nothing.
-      const branchResponse = {
-        memories: fixture.branchMemories ?? [],
-        entities: [],
-        edges: [],
-        linked_memories: [],
-        recent: [],
-        rules: [],
-        open_loops: [],
-        open_loops_total: 0,
-        project_scope: 'proj.usr_x.demo',
-      };
       vi.mocked(callBuildContext)
-        .mockResolvedValueOnce(projectResponse)
-        .mockResolvedValueOnce(branchResponse);
+        .mockResolvedValueOnce(project)
+        .mockResolvedValueOnce(
+          briefingPack({ memories: fixture.branchMemories })
+        );
     } else {
-      vi.mocked(callBuildContext).mockResolvedValue(projectResponse);
+      vi.mocked(callBuildContext).mockResolvedValue(project);
     }
-
-    const previousBudget = process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
-    if (fixture.budgetChars !== undefined) {
-      process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = String(fixture.budgetChars);
-    }
-
-    let emitted: string | null = null;
-    const adapter: HookClient = {
-      // 'codex' (not 'claude') so runSessionStart never reaches the
-      // Claude-plugin-only checkForUpdate() call — this suite is about the
-      // budget split, not the update notice.
-      kind: 'codex',
-      ingestProvenance: 'test',
-      canTaskBrief: true,
-      canAnchorCompaction: false,
-      readInput: async () => ({
-        sessionId: SESSION_ID,
-        cwd: workDir,
-        prompt: '',
-        transcriptPath: '',
-        hookEventName: 'SessionStart',
-        toolName: '',
-        alreadyContinued: false,
-        source: '',
-        trigger: '',
-      }),
-      parse: () => {
-        throw new Error('session-start never parses a transcript');
-      },
-      emitSessionBrief: (context) => {
-        emitted = context;
-      },
-      emitTaskBrief: () => {},
-      emitTurnContext: () => {},
-      emitReceipt: () => {},
-      emitCompactionAnchor: () => {},
-    };
-
-    try {
-      await runBrief('session-start', adapter);
-      return emitted ?? '';
-    } finally {
-      if (fixture.budgetChars !== undefined) {
-        if (previousBudget === undefined) {
-          delete process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
-        } else {
-          process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = previousBudget;
-        }
-      }
-    }
+    const run = () =>
+      brief('session-start', { sessionId: SESSION_ID, cwd: dirs.work });
+    return fixture.budgetChars === undefined
+      ? run()
+      : withEnv('ZM_BRIEF_HOOK_BUDGET_CHARS', String(fixture.budgetChars), run);
   };
-
-  beforeEach(() => {
-    stateDir = mkdtempSync(join(tmpdir(), 'zm-floor-state-'));
-    workDir = mkdtempSync(join(tmpdir(), 'zm-floor-work-'));
-    previousState = process.env.XDG_STATE_HOME;
-    process.env.XDG_STATE_HOME = stateDir;
-  });
-
-  afterEach(() => {
-    vi.mocked(callBuildContext).mockReset();
-    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
-    else process.env.XDG_STATE_HOME = previousState;
-    rmSync(stateDir, { recursive: true, force: true });
-    rmSync(workDir, { recursive: true, force: true });
-  });
 
   it('keeps room for the memory pack even when the rules are long', async () => {
     // Sized so the rules alone (one pinned, one long enough to survive the
@@ -504,6 +379,35 @@ describe('session-start memory floor', () => {
     expect(briefing.length).toBeLessThanOrEqual(9_000);
   });
 
+  it('delivers the pinned rules whole and the loops beside the rest by headline', async () => {
+    // The measured defect: 8,455 characters of rules against the 9,000
+    // channel — the loops got nothing, and then the rules did not fit either.
+    // Split before anything renders, the pinned rules arrive whole, the
+    // ordinary ones by headline, and the loops keep their floor.
+    const longRule = (headline: string, pinned: boolean): ContextRule => ({
+      text: `${headline}. ${'Why it holds, at length. '.repeat(55)}`,
+      pinned,
+    });
+    const rules = [
+      longRule('PINNED ONE', true),
+      longRule('PINNED TWO', true),
+      ...['THREE', 'FOUR', 'FIVE', 'SIX'].map((n) =>
+        longRule(`ORDINARY ${n}`, false)
+      ),
+    ];
+    const loops = [1, 2, 3].map((n) => loop(900 + n, 60));
+
+    const briefing = await runSessionStart({ rules, loops });
+
+    expect(briefing.length).toBeLessThanOrEqual(9_000);
+    expect(briefing).toContain(rules[0]!.text);
+    expect(briefing).toContain(rules[1]!.text);
+    expect(briefing).not.toContain(rules[5]!.text);
+    expect(briefing).toMatch(/ORDINARY SIX[^\n]*\[headline\]/u);
+    for (const handover of loops) expect(briefing).toContain(handover.id);
+    expect(briefing).not.toContain('did not fit');
+  });
+
   it('records no tail when the project has no memories at all', async () => {
     const briefing = await runSessionStart({ memories: [] });
     expect(readBriefTail(briefStatePath(), SESSION_ID)).toBeNull();
@@ -512,14 +416,6 @@ describe('session-start memory floor', () => {
     // a different claim from "it had memories and none fit" — the starved
     // notice must not appear just because the pack happened to be empty.
     expect(briefing).not.toContain('did not fit this briefing');
-  });
-
-  it("records what did not fit as the window's tail", async () => {
-    await runSessionStart({
-      memories: Array.from({ length: 12 }, (_, i) => memory(i, 900)),
-    });
-    const tail = readBriefTail(briefStatePath(), SESSION_ID);
-    expect(tail?.memories.length).toBeGreaterThan(0);
   });
 
   it('charges the floor to the split instead of bumping it on top, so a second topic still fits', async () => {
@@ -554,31 +450,9 @@ describe('session-start memory floor', () => {
     // priority order), finding the total no longer fit, dropped the branch
     // pack wholesale instead of giving it what was actually left.
     expect(briefing).toContain('mem_0000000000000500');
-  });
-
-  it('still lands a stub when the per-topic budget is genuinely below the floor', async () => {
-    // Two topics again (a single topic's even share IS the whole channel's
-    // remainder, so there is no safe way for a bump to ask for more than
-    // that without composeWithinBudget rejecting the section outright —
-    // this scenario can only exist with a second topic funding the extra
-    // room, same as the previous test). 2,000-char memories are too big for
-    // even ONE to arrive whole at this budget, so the pack is a STUB list;
-    // the assertion targets a memory that only a stub list this LONG can
-    // reach — one the even (un-bumped) share alone falls short of, but the
-    // charged floor (10 stubs' worth plus the stub block's intro, for these
-    // 12 memories) covers. Same budget as the previous test, for the same
-    // reason. Not asserting the exact even-share figure here on
-    // purpose: it shifts with the exact section-budgeting arithmetic (it
-    // already has, across earlier rounds of this fix), while the relation
-    // this test actually pins — floor rescues a memory the even share
-    // couldn't — does not.
-    const briefing = await runSessionStart({
-      branch: 'feature/two-topics',
-      budgetChars: 2_409,
-      memories: Array.from({ length: 12 }, (_, i) => memory(i, 2_000)),
-      branchMemories: Array.from({ length: 5 }, (_, i) => memory(500 + i, 900)),
-    });
-    expect(briefing.length).toBeLessThanOrEqual(2_409);
+    // …and the primary floor is still charged in full: 2,000-character
+    // memories only arrive by stub here, and the even (un-bumped) share alone
+    // falls short of a stub list long enough to reach the eighth of them.
     expect(briefing).toContain('mem_0000000000000007');
   });
 
@@ -614,14 +488,10 @@ describe('session-start memory floor', () => {
       memories: Array.from({ length: 12 }, (_, i) => memory(i, 900)),
     });
     expect(briefing.length).toBeLessThanOrEqual(9_000);
-    // Either a stub survives, or — if the pack were still squeezed past
-    // even the floor — the honest starved notice does. What must NOT
-    // happen is neither: the loops silently taking the room the floor
-    // was supposed to hold for the pack.
-    const hasMemorySection =
-      briefing.includes('mem_0000000000000000') ||
-      briefing.includes('they arrive in the next messages');
-    expect(hasMemorySection).toBe(true);
+    // Nothing here outranks the floor (no pinned rules), so the pack must
+    // still NAME its lead memory: the starved notice alone would mean the
+    // loops took the room the floor was supposed to hold.
+    expect(briefing).toContain('mem_0000000000000000');
   });
 
   it(
@@ -636,8 +506,9 @@ describe('session-start memory floor', () => {
       // its own allotted budget, which is exactly the margin an unreserved
       // composer join cost eats. Swept rather than a single hand-picked
       // number because the exact margin depends on the project line's own
-      // length, which this suite does not control (it comes from `workDir`'s
-      // real, environment-chosen tmp path) — sweeping finds it regardless.
+      // length, which this suite does not control (it comes from the work
+      // directory's real, environment-chosen tmp path) — sweeping finds it
+      // regardless.
       //
       // The range starts comfortably above `projectLine.length + memoryFloor`
       // (the floor is ten stubs plus the stub block's intro — 1,601 for 60
@@ -674,9 +545,10 @@ describe('session-start memory floor', () => {
  * in only some windows.
  */
 describe('task briefing memory floor', () => {
-  let stateDir: string;
-  let workDir: string;
-  let previousState: string | undefined;
+  // The topic this briefing is about is the work directory's basename, and
+  // the starved-notice test below sizes its channel around the topic's
+  // length: a fixed prefix keeps it the same on every machine.
+  const dirs = useStateDirs('zm-task-floor');
   // `runTask` builds a briefing at most once per session (`task_briefed`),
   // so every run here is its own session: a shared id would turn every run
   // after the first into 'already-briefed' and never reach the budget code.
@@ -692,86 +564,18 @@ describe('task briefing memory floor', () => {
     /** Overrides `ZM_BRIEF_HOOK_BUDGET_CHARS` for this call, restored after. */
     budgetChars?: number;
   }): Promise<string> => {
-    vi.mocked(callBuildContext).mockResolvedValue({
-      memories: fixture.memories ?? [],
-      entities: [],
-      edges: [],
-      linked_memories: [],
-      recent: [],
-      rules: fixture.rules ?? [],
-      open_loops: fixture.loops ?? [],
-      open_loops_total: fixture.loops?.length ?? 0,
-      project_scope: 'proj.usr_x.demo',
-    });
-
-    const previousBudget = process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
-    if (fixture.budgetChars !== undefined) {
-      process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = String(fixture.budgetChars);
-    }
-
+    vi.mocked(callBuildContext).mockResolvedValue(briefingPack(fixture));
     runs += 1;
-    let emitted: string | null = null;
-    const adapter: HookClient = {
-      kind: 'codex',
-      ingestProvenance: 'test',
-      canTaskBrief: true,
-      canAnchorCompaction: false,
-      readInput: async () => ({
+    const run = () =>
+      brief('task', {
         sessionId: `task-session-${runs}`,
-        cwd: workDir,
-        prompt:
-          'add a retry with backoff to the ingest worker, it drops chunks',
-        transcriptPath: '',
-        hookEventName: 'UserPromptSubmit',
-        toolName: '',
-        alreadyContinued: false,
-        source: '',
-        trigger: '',
-      }),
-      parse: () => {
-        throw new Error('the task path never parses a transcript');
-      },
-      emitSessionBrief: () => {},
-      emitTaskBrief: (context) => {
-        emitted = context;
-      },
-      emitTurnContext: () => {},
-      emitReceipt: () => {},
-      emitCompactionAnchor: () => {},
-    };
-
-    try {
-      await runBrief('task', adapter);
-      return emitted ?? '';
-    } finally {
-      if (fixture.budgetChars !== undefined) {
-        if (previousBudget === undefined) {
-          delete process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
-        } else {
-          process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = previousBudget;
-        }
-      }
-    }
+        cwd: dirs.work,
+        prompt: SUBSTANTIVE,
+      });
+    return fixture.budgetChars === undefined
+      ? run()
+      : withEnv('ZM_BRIEF_HOOK_BUDGET_CHARS', String(fixture.budgetChars), run);
   };
-
-  beforeEach(() => {
-    stateDir = mkdtempSync(join(tmpdir(), 'zm-task-floor-state-'));
-    // The topic this briefing is about is this directory's basename, and the
-    // starved-notice test below sizes its channel around the topic's length:
-    // a fixed prefix keeps it the same on every machine (mkdtemp appends six
-    // characters).
-    workDir = mkdtempSync(join(tmpdir(), 'zm-task-floor-work-'));
-    previousState = process.env.XDG_STATE_HOME;
-    process.env.XDG_STATE_HOME = stateDir;
-  });
-
-  afterEach(() => {
-    vi.mocked(callBuildContext).mockReset();
-    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
-    else process.env.XDG_STATE_HOME = previousState;
-    rmSync(stateDir, { recursive: true, force: true });
-    rmSync(workDir, { recursive: true, force: true });
-  });
 
   it('keeps a stub of its pack even when the rules and the loops are long', async () => {
     // The session-start suite's long-rules shape, on the task path: one
@@ -899,18 +703,14 @@ describe('task briefing memory floor', () => {
  * the queue one message leaves behind is exactly what the next one reads.
  */
 describe('the briefing tail drains one memory per message', () => {
-  let stateDir: string;
-  let workDir: string;
-  let previousState: string | undefined;
+  const dirs = useStateDirs('zm-drain');
   const SESSION_ID = 'drain-session';
   /** How `planTailChunk` opens every chunk — present iff one was sent. */
   const CHUNK_FRAME = 'Continuing the session briefing';
-  const SUBSTANTIVE =
-    'add a retry with backoff to the ingest worker, it drops chunks';
 
   const seedTail = (memories: ContextMemory[]): void =>
     recordBriefTail(briefStatePath(), SESSION_ID, {
-      topic: basename(workDir),
+      topic: basename(dirs.work),
       memories,
       takenAt: '2026-09-23T10:00:00Z',
     });
@@ -923,113 +723,32 @@ describe('the briefing tail drains one memory per message', () => {
   const injectedIds = (sessionId = SESSION_ID): string[] =>
     loadBriefState(briefStatePath())[sessionId]?.injected_ids ?? [];
 
-  /** Runs `body` under `ZM_BRIEF_HOOK_BUDGET_CHARS=budget`, restored after. */
-  const withBudget = async <T>(
-    budget: number,
-    body: () => Promise<T>
-  ): Promise<T> => {
-    const previous = process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
-    process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = String(budget);
-    try {
-      return await body();
-    } finally {
-      if (previous === undefined) delete process.env.ZM_BRIEF_HOOK_BUDGET_CHARS;
-      else process.env.ZM_BRIEF_HOOK_BUDGET_CHARS = previous;
-    }
-  };
-
-  const serverPack = (memories: ContextMemory[]) => ({
-    memories,
-    entities: [],
-    edges: [],
-    linked_memories: [],
-    recent: [],
-    rules: [],
-    open_loops: [],
-    open_loops_total: 0,
-    project_scope: 'proj.usr_x.demo',
-  });
+  const serverPack = (memories: ContextMemory[]) => briefingPack({ memories });
 
   /** One hook invocation; returns what it put into the model's context. */
-  const runHook = async (
+  const runHook = (
     mode: 'task' | 'session-start',
     { prompt = 'ok', sessionId = SESSION_ID } = {}
-  ): Promise<string> => {
-    let emitted: string | null = null;
-    const adapter: HookClient = {
-      // 'codex' keeps session start off the Claude-plugin update check.
-      kind: 'codex',
-      ingestProvenance: 'test',
-      canTaskBrief: true,
-      canAnchorCompaction: false,
-      readInput: async () => ({
-        sessionId,
-        cwd: workDir,
-        prompt,
-        transcriptPath: '',
-        hookEventName: mode === 'task' ? 'UserPromptSubmit' : 'SessionStart',
-        toolName: '',
-        alreadyContinued: false,
-        source: '',
-        trigger: '',
-      }),
-      parse: () => {
-        throw new Error('the briefing hooks never parse a transcript');
-      },
-      emitSessionBrief: (context) => {
-        emitted = context;
-      },
-      emitTaskBrief: (context) => {
-        emitted = context;
-      },
-      emitTurnContext: () => {},
-      emitReceipt: () => {},
-      emitCompactionAnchor: () => {},
-    };
-    await runBrief(mode, adapter);
-    return emitted ?? '';
-  };
+  ): Promise<string> => brief(mode, { sessionId, cwd: dirs.work, prompt });
 
-  beforeEach(() => {
-    stateDir = mkdtempSync(join(tmpdir(), 'zm-drain-state-'));
-    workDir = mkdtempSync(join(tmpdir(), 'zm-drain-work-'));
-    previousState = process.env.XDG_STATE_HOME;
-    process.env.XDG_STATE_HOME = stateDir;
-    recordProjectScope(
-      projectScopeStatePath(),
-      resolveProjectHint(workDir),
-      'proj.usr_x.demo'
-    );
-  });
+  /** Puts the work directory on a feature branch: two topics at start. */
+  const onBranch = (branch: string): void => initRepo(dirs.work, { branch });
 
-  afterEach(() => {
-    vi.mocked(callBuildContext).mockReset();
-    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
-    else process.env.XDG_STATE_HOME = previousState;
-    rmSync(stateDir, { recursive: true, force: true });
-    rmSync(workDir, { recursive: true, force: true });
-  });
-
-  it('delivers exactly one chunk on a short reply, and the stored tail shrinks by exactly one', async () => {
-    const queued = [memory(701, 300), memory(702, 300), memory(703, 300)];
-    seedTail(queued);
-
-    const briefing = await runHook('task');
-
-    expect(briefing).toContain('PROJECT: proj.usr_x.demo');
-    expect(briefing).toContain(CHUNK_FRAME);
-    expect(briefing).toContain(queued[0]!.id);
-    expect(briefing).not.toContain(queued[1]!.id);
-    expect(tailIds()).toEqual([queued[1]!.id, queued[2]!.id]);
-    // Taken from the state file alone: a short reply never calls the server.
-    expect(callBuildContext).not.toHaveBeenCalled();
-  });
+  beforeEach(() => resolvedProject(dirs.work));
 
   it('empties the queue over successive short replies, and then sends no more chunks', async () => {
     const queued = [memory(711, 300), memory(712, 300)];
     seedTail(queued);
 
-    expect(await runHook('task')).toContain(queued[0]!.id);
+    const first = await runHook('task');
+    expect(first).toContain('PROJECT: proj.usr_x.demo');
+    expect(first).toContain(CHUNK_FRAME);
+    expect(first).toContain(queued[0]!.id);
+    expect(first).not.toContain(queued[1]!.id);
+    // The stored queue shrinks by exactly the one memory sent, taken from the
+    // state file alone: a short reply never calls the server.
+    expect(tailIds()).toEqual([queued[1]!.id]);
+    expect(callBuildContext).not.toHaveBeenCalled();
     const second = await runHook('task');
     expect(second).toContain(queued[1]!.id);
     expect(second).not.toContain(queued[0]!.id);
@@ -1119,8 +838,10 @@ describe('the briefing tail drains one memory per message', () => {
           ...serverPack(pack),
           rules,
         });
-        const briefing = await withBudget(budget, () =>
-          runHook(mode, { prompt: SUBSTANTIVE, sessionId })
+        const briefing = await withEnv(
+          'ZM_BRIEF_HOOK_BUDGET_CHARS',
+          String(budget),
+          () => runHook(mode, { prompt: SUBSTANTIVE, sessionId })
         );
         if (!/pack did not fit this briefing's channel/.test(briefing)) {
           continue;
@@ -1137,32 +858,9 @@ describe('the briefing tail drains one memory per message', () => {
       }
       // The sweep proves something only if the composer actually dropped it.
       expect(drops).toBeGreaterThan(0);
-    }
+    },
+    SWEEP_TIMEOUT_MS
   );
-
-  /** Puts `workDir` on a feature branch, so session start briefs two topics. */
-  const onBranch = (branch: string): void => {
-    execFileSync('git', ['init', '-q'], { cwd: workDir });
-    execFileSync('git', ['checkout', '-q', '-b', branch], { cwd: workDir });
-    execFileSync(
-      'git',
-      [
-        '-c',
-        'user.email=test@example.com',
-        '-c',
-        'user.name=test',
-        '-c',
-        'commit.gpgsign=false',
-        'commit',
-        '-q',
-        '--no-verify',
-        '--allow-empty',
-        '-m',
-        'init',
-      ],
-      { cwd: workDir }
-    );
-  };
 
   it.each(['session-start', 'task'] as const)(
     'keeps the %s pack when many long non-pinned rules meet the default budget',
@@ -1377,73 +1075,25 @@ describe('the briefing tail drains one memory per message', () => {
     expect(briefing).not.toContain(drained.id);
   });
 
-  it("does not deliver the previous window's tail after a compaction", async () => {
-    const queued = memory(761, 300);
-    seedTail([queued]);
-    stampSessionStart(briefStatePath(), SESSION_ID, Date.now(), 'compact');
+  it('emits exactly the banner, and clears the queue, when the state file holds an empty one', async () => {
+    // The hook's normal output for this session: nothing queued, banner only.
+    const normal = await runHook('task', { sessionId: 'drain-baseline' });
+    expect(normal).toContain('PROJECT: proj.usr_x.demo');
 
-    const briefing = await runHook('task');
+    seedTail([]);
 
-    expect(briefing).toContain('PROJECT: proj.usr_x.demo');
-    expect(briefing).not.toContain(CHUNK_FRAME);
-    expect(briefing).not.toContain(queued.id);
+    expect(await runHook('task')).toBe(normal);
+    // Nothing is left for the next message to trip over: an empty queue is
+    // cleared rather than read and skipped on every message.
+    expect(loadBriefState(briefStatePath())[SESSION_ID]).not.toHaveProperty(
+      'tail'
+    );
   });
-
-  it.each([
-    ['missing', () => rmSync(briefStatePath(), { force: true })],
-    [
-      'truncated mid-write',
-      () => {
-        mkdirSync(dirname(briefStatePath()), { recursive: true });
-        writeFileSync(briefStatePath(), `{"${SESSION_ID}": {"tail": {"memo`);
-      },
-    ],
-    [
-      'carrying a tail with no queue in it',
-      () => {
-        mkdirSync(dirname(briefStatePath()), { recursive: true });
-        writeFileSync(
-          briefStatePath(),
-          JSON.stringify({
-            [SESSION_ID]: {
-              injected_ids: [],
-              task_briefed: false,
-              epoch: 0,
-              tail: { topic: 'x' },
-              at: 1,
-            },
-          })
-        );
-      },
-    ],
-    ['holding an empty queue', () => seedTail([])],
-    [
-      'the JSON literal null',
-      () => {
-        mkdirSync(dirname(briefStatePath()), { recursive: true });
-        writeFileSync(briefStatePath(), 'null');
-      },
-    ],
-  ])(
-    'emits exactly the banner, and never throws, when the state file is %s',
-    async (_, damage) => {
-      // The hook's normal output for this session: nothing queued, banner only.
-      const normal = await runHook('task', { sessionId: 'drain-baseline' });
-      expect(normal).toContain('PROJECT: proj.usr_x.demo');
-
-      damage();
-
-      expect(await runHook('task')).toBe(normal);
-      // And nothing is left for the next message to trip over: an empty
-      // queue is cleared rather than read and skipped on every message.
-      expect(tailIds()).toBeNull();
-    }
-  );
 
   it('sends nothing at all in an ignored project, the tail included', async () => {
     // No resolved project, so no banner: anything emitted here is the drain.
     rmSync(projectScopeStatePath(), { force: true });
-    writeFileSync(join(workDir, '.zero-memory-ignore'), '');
+    writeFileSync(join(dirs.work, '.zero-memory-ignore'), '');
     const queued = memory(771, 300);
     seedTail([queued]);
 
@@ -1451,57 +1101,61 @@ describe('the briefing tail drains one memory per message', () => {
     expect(tailIds()).toEqual([queued.id]);
   });
 
-  it('never lets a draining message exceed the channel, across banner and memory sizes', async () => {
-    // Every banner size here leaves a different room for the chunk, and the
-    // memory sizes sweep one character at a time across the point where the
-    // memory stops arriving whole and falls back to a stub — the edge where a
-    // chunk budgeted without the banner or the composer's join runs over. The
-    // largest banner leaves too little room for even a stub.
-    const seen = { whole: 0, stub: 0, held: 0 };
-    let closest = 0;
-    for (const padding of [0, 2_000, 6_000, 8_000, 8_350]) {
-      recordProjectScope(
-        projectScopeStatePath(),
-        resolveProjectHint(workDir),
-        `proj.usr_x.${'d'.repeat(padding)}`
-      );
-      const banner = await runHook('task', {
-        sessionId: `drain-banner-${padding}`,
-      });
-      const room = DEFAULT_HOOK_BUDGET_CHARS - banner.length;
-      const from = Math.max(1, room - 450);
-      for (let content = from; content <= from + 300; content += 1) {
-        const queued = memory(781, content);
-        seedTail([queued]);
+  it(
+    'never lets a draining message exceed the channel, across banner and memory sizes',
+    async () => {
+      // Every banner size here leaves a different room for the chunk, and the
+      // memory sizes sweep one character at a time across the point where the
+      // memory stops arriving whole and falls back to a stub — the edge where a
+      // chunk budgeted without the banner or the composer's join runs over. The
+      // largest banner leaves too little room for even a stub.
+      const seen = { whole: 0, stub: 0, held: 0 };
+      let closest = 0;
+      for (const padding of [0, 2_000, 6_000, 8_000, 8_350]) {
+        recordProjectScope(
+          projectScopeStatePath(),
+          resolveProjectHint(dirs.work),
+          `proj.usr_x.${'d'.repeat(padding)}`
+        );
+        const banner = await runHook('task', {
+          sessionId: `drain-banner-${padding}`,
+        });
+        const room = DEFAULT_HOOK_BUDGET_CHARS - banner.length;
+        const from = Math.max(1, room - 450);
+        for (let content = from; content <= from + 300; content += 1) {
+          const queued = memory(781, content);
+          seedTail([queued]);
 
-        const briefing = await runHook('task');
+          const briefing = await runHook('task');
 
-        expect(
-          briefing.length,
-          `banner ${banner.length}, memory ${content}: ${briefing.length} chars`
-        ).toBeLessThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS);
-        if (!briefing.includes(CHUNK_FRAME)) {
-          // Nothing is lost at the edge: a chunk that could not be sent at
-          // all leaves the memory queued, untouched.
-          expect(tailIds(), `memory ${content} was dropped unsent`).toEqual([
-            queued.id,
-          ]);
-          seen.held += 1;
-        } else if (briefing.includes('"content":')) {
-          seen.whole += 1;
-        } else {
-          seen.stub += 1;
+          expect(
+            briefing.length,
+            `banner ${banner.length}, memory ${content}: ${briefing.length} chars`
+          ).toBeLessThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS);
+          if (!briefing.includes(CHUNK_FRAME)) {
+            // Nothing is lost at the edge: a chunk that could not be sent at
+            // all leaves the memory queued, untouched.
+            expect(tailIds(), `memory ${content} was dropped unsent`).toEqual([
+              queued.id,
+            ]);
+            seen.held += 1;
+          } else if (briefing.includes('"content":')) {
+            seen.whole += 1;
+          } else {
+            seen.stub += 1;
+          }
+          closest = Math.max(closest, briefing.length);
         }
-        closest = Math.max(closest, briefing.length);
       }
-    }
-    // The sweep proves something only if it reached every outcome and came
-    // right up to the edge of the channel.
-    expect(seen.whole).toBeGreaterThan(0);
-    expect(seen.stub).toBeGreaterThan(0);
-    expect(seen.held).toBeGreaterThan(0);
-    expect(closest).toBeGreaterThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS - 10);
-  });
+      // The sweep proves something only if it reached every outcome and came
+      // right up to the edge of the channel.
+      expect(seen.whole).toBeGreaterThan(0);
+      expect(seen.stub).toBeGreaterThan(0);
+      expect(seen.held).toBeGreaterThan(0);
+      expect(closest).toBeGreaterThanOrEqual(DEFAULT_HOOK_BUDGET_CHARS - 10);
+    },
+    SWEEP_TIMEOUT_MS
+  );
 });
 
 /**
@@ -1511,109 +1165,48 @@ describe('the briefing tail drains one memory per message', () => {
  * briefing has one topic and exactly one server call.
  */
 describe('session-start landing drift', () => {
-  let stateDir: string;
-  let workDir: string;
-  let previousState: string | undefined;
-
-  const git = (...args: string[]): string =>
-    execFileSync(
-      'git',
-      ['-c', 'user.email=test@example.com', '-c', 'user.name=test', ...args],
-      { cwd: workDir, encoding: 'utf8' }
-    ).trim();
-
-  const CARD_ID = 'crd_0000000000000019.0000000000';
-
-  const briefSessionStart = async (): Promise<string> => {
-    vi.mocked(callBuildContext).mockResolvedValue({
-      memories: [],
-      entities: [],
-      edges: [],
-      linked_memories: [],
-      recent: [],
-      rules: [],
-      open_loops: [],
-      open_loops_total: 0,
-      project_scope: 'proj.usr_x.demo',
-      work: {
-        bound_card: null,
-        active: 1,
-        waiting: 0,
-        lead: [
-          {
-            id: CARD_ID,
-            number: 19,
-            title: 'Cards know their branches',
-            state: 'active',
-          },
-        ],
-        open_branches: [
-          {
-            card_id: CARD_ID,
-            number: 19,
-            state: 'active',
-            repo: 'acme/memory-service',
-            branch: 'feature/x',
-          },
-        ],
+  const dirs = useStateDirs('zm-drift');
+  const CARD_ID = cardIdSchema.parse('crd_0000000000000019.0000000000');
+  const WORK: BriefingWork = {
+    bound_card: null,
+    active: 1,
+    waiting: 0,
+    lead: [
+      {
+        id: CARD_ID,
+        number: 19,
+        title: 'Cards know their branches',
+        state: 'active',
       },
-    });
-    let emitted = '';
-    const adapter: HookClient = {
-      // 'codex' so the Claude-only update check never runs here.
-      kind: 'codex',
-      ingestProvenance: 'test',
-      canTaskBrief: true,
-      canAnchorCompaction: false,
-      readInput: async () => ({
-        sessionId: 'drift-session',
-        cwd: workDir,
-        prompt: '',
-        transcriptPath: '',
-        hookEventName: 'SessionStart',
-        toolName: '',
-        alreadyContinued: false,
-        source: '',
-        trigger: '',
-      }),
-      parse: () => {
-        throw new Error('session-start never parses a transcript');
+    ],
+    open_branches: [
+      {
+        card_id: CARD_ID,
+        number: 19,
+        state: 'active',
+        repo: 'acme/memory-service',
+        branch: 'feature/x',
       },
-      emitSessionBrief: (context) => {
-        emitted = context;
-      },
-      emitTaskBrief: () => {},
-      emitTurnContext: () => {},
-      emitReceipt: () => {},
-      emitCompactionAnchor: () => {},
-    };
-    await runBrief('session-start', adapter);
-    return emitted;
+    ],
   };
 
-  beforeEach(() => {
-    previousState = process.env.XDG_STATE_HOME;
-    stateDir = mkdtempSync(join(tmpdir(), 'zm-drift-state-'));
-    process.env.XDG_STATE_HOME = stateDir;
-    workDir = mkdtempSync(join(tmpdir(), 'zm-drift-work-'));
-    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: workDir });
-    git('remote', 'add', 'origin', 'git@github.com:acme/memory-service.git');
-    git('commit', '-q', '--allow-empty', '-m', 'chore: start');
-    vi.mocked(callBuildContext).mockReset();
-  });
+  const briefSessionStart = (): Promise<string> => {
+    vi.mocked(callBuildContext).mockResolvedValue(briefingPack({ work: WORK }));
+    return brief('session-start', {
+      sessionId: 'drift-session',
+      cwd: dirs.work,
+    });
+  };
 
-  afterEach(() => {
-    if (previousState === undefined) {
-      delete process.env.XDG_STATE_HOME;
-    } else {
-      process.env.XDG_STATE_HOME = previousState;
-    }
-    rmSync(stateDir, { recursive: true, force: true });
-    rmSync(workDir, { recursive: true, force: true });
-  });
+  beforeEach(() =>
+    initRepo(dirs.work, {
+      origin: 'git@github.com:acme/memory-service.git',
+    })
+  );
 
   it('names a landing git holds while the card still holds the branch open', async () => {
     git(
+      dirs.work,
       'commit',
       '-q',
       '--allow-empty',
@@ -1629,12 +1222,6 @@ describe('session-start landing drift', () => {
     expect(text).toContain('- ZM-19 [active]: branch feature/x landed as');
   });
 
-  it('names the open branch and nothing more while it has not landed', async () => {
-    const text = await briefSessionStart();
-    expect(text).toContain('[active] on feature/x');
-    expect(text).not.toContain('landed as');
-  });
-
   it('puts what production took under the board, and leaves the section as it was without it', async () => {
     const board = '(`board list` for the rest)';
     const quiet = await briefSessionStart();
@@ -1642,13 +1229,15 @@ describe('session-start landing drift', () => {
     expect(quiet).not.toContain('PRODUCTION');
 
     // An equally fresh machine, so the release line is the only difference.
-    rmSync(stateDir, { recursive: true, force: true });
-    mkdirSync(stateDir, { recursive: true });
+    rmSync(dirs.state, { recursive: true, force: true });
+    mkdirSync(dirs.state, { recursive: true });
     const line =
       'PRODUCTION TOOK THE CHANGES: v1.0.0 carries ZM-7; the release is recorded on each.';
     vi.mocked(checkRelease).mockResolvedValue(line);
     const told = await briefSessionStart();
     expect(told).toBe(quiet.replace(board, `${board}\n${line}`));
-    expect(checkRelease).toHaveBeenLastCalledWith(workDir, { budgetMs: 3000 });
+    expect(checkRelease).toHaveBeenLastCalledWith(dirs.work, {
+      budgetMs: 3000,
+    });
   });
 });

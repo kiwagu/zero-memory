@@ -52,6 +52,9 @@ const SIDEBAR_LOOP =
   'a viewport-relative height, and check the result at the two narrow sizes ' +
   'the screenshot suite already captures before touching any other layout.';
 
+/** The cap on a loop the topic is not about (server default). */
+const LOOP_CAP = 400;
+
 const BACKUP_TOPIC = 'restoring a database dump and checking its watermark';
 const SIDEBAR_TOPIC = 'navigation column layout on small screens';
 
@@ -99,7 +102,8 @@ test.describe('open-loop focus', () => {
       expect(backupFocused!.content).toContain('rather than a habit');
 
       expect(sidebarStub!.truncated).toBe(true);
-      expect(sidebarStub!.content.length).toBeLessThan(SIDEBAR_LOOP.length);
+      // A headline is the loop's opening, cut at the section's cap.
+      expect(sidebarStub!.content).toBe(SIDEBAR_LOOP.slice(0, LOOP_CAP));
 
       // THE SWAP: same two loops, other topic, the depth follows.
       const onSidebarTopic = await loopsFor(mcp, SIDEBAR_TOPIC);
@@ -109,6 +113,7 @@ test.describe('open-loop focus', () => {
       expect(sidebarFocused!.truncated).toBe(false);
       expect(sidebarFocused!.content).toBe(SIDEBAR_LOOP);
       expect(backupStub!.truncated).toBe(true);
+      expect(backupStub!.content).toBe(BACKUP_LOOP.slice(0, LOOP_CAP));
     } finally {
       await mcp.close();
     }

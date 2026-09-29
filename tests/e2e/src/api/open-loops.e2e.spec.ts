@@ -119,37 +119,6 @@ test.describe('Open loops over MCP', () => {
     }
   });
 
-  test('close_loop refuses a non-loop kind', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    try {
-      const remembered = await mcp.callTool('remember', {
-        content:
-          'e2e open-loop marker: bun loads .env only from the cwd of the ' +
-          'process, not from the workspace root',
-        kind: 'gotcha',
-        scope: 'personal',
-      });
-      expect(remembered.isError ?? false).toBe(false);
-      const { memory_id } = firstJson<{ memory_id: string }>(remembered);
-
-      const refused = await mcp.callTool('close_loop', { memory_id });
-      expect(refused.isError ?? false).toBe(true);
-      expect(contentText(refused)).toContain('not an open loop');
-
-      // Still recallable: the refusal must not have touched the memory.
-      const recalled = await mcp.callTool('recall', {
-        query: 'where does bun load .env from?',
-        k: 10,
-      });
-      expect(contentText(recalled)).toContain(memory_id);
-    } finally {
-      await mcp.close();
-    }
-  });
-
   test('a loop past the soft TTL leaves the briefing but stays recallable', async () => {
     const seed = await readSeedState();
     // User B: this test's mid-suite write must not shift user A's recall
@@ -293,27 +262,6 @@ test.describe('Open loops over MCP', () => {
       await agent.close();
       await reporter.close();
       await later.close();
-    }
-  });
-
-  test('the content guard rejects a secret-bearing task (pointer, not payload)', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    try {
-      const token = `ghp_${'B'.repeat(36)}`;
-      const result = await mcp.callTool('remember', {
-        content: `check the deploy on machine B, it authenticates with ${token}`,
-        kind: 'task',
-        scope: 'personal',
-      });
-      expect(result.isError ?? false).toBe(true);
-      const text = contentText(result);
-      expect(text).toContain('secret_content_rejected');
-      expect(text).not.toContain(token);
-    } finally {
-      await mcp.close();
     }
   });
 });

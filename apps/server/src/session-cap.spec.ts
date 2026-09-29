@@ -28,25 +28,21 @@ describe('evictSessionsOverCap', () => {
     expect([...sessions.keys()]).toEqual(['newer', 'middle']);
   });
 
-  it('evicts repeatedly until the map fits the cap', () => {
+  it('evicts repeatedly until the map fits the cap, returning each session to close', () => {
     const sessions = makeSessions([
       ['a', 4],
       ['b', 1],
       ['c', 3],
       ['d', 2],
     ]);
-    const evicted = evictSessionsOverCap(sessions, 1);
-    expect(evicted.map(([id]) => id)).toEqual(['b', 'd', 'c']);
-    expect([...sessions.keys()]).toEqual(['a']);
-  });
-
-  it('returns the evicted sessions for the caller to close', () => {
-    const sessions = makeSessions([
-      ['stale', 1],
-      ['live', 2],
+    // The whole entry comes back, not just its id: the caller closes the
+    // evicted session's transport.
+    expect(evictSessionsOverCap(sessions, 1)).toEqual([
+      ['b', { lastSeenAt: 1 }],
+      ['d', { lastSeenAt: 2 }],
+      ['c', { lastSeenAt: 3 }],
     ]);
-    const [entry] = evictSessionsOverCap(sessions, 1);
-    expect(entry).toEqual(['stale', { lastSeenAt: 1 }]);
+    expect([...sessions.keys()]).toEqual(['a']);
   });
 });
 

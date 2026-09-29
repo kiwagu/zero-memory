@@ -12,50 +12,18 @@
  * for itself, so no other spec's user is affected and no server-wide
  * environment override is needed.
  */
-import { createClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
-import { passwordGrantToken, provisionE2EUser } from '../helpers/users.js';
+import { clearAllowance, setAllowance } from '../helpers/policy-allowance.js';
+import {
+  entityIdOf,
+  passwordGrantToken,
+  provisionE2EUser,
+} from '../helpers/users.js';
 
 const EMAIL = 'budget-degradation@zm.e2e';
-
-const admin = () =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-/** The `usr_` entity id the ledger and allowances are keyed by. */
-const entityIdOf = async (authUserId: string): Promise<string> => {
-  const { data, error } = await admin()
-    .from('profiles')
-    .select('id')
-    .eq('user_id', authUserId)
-    .single();
-  if (error) throw new Error(`no profile for ${authUserId}: ${error.message}`);
-  return (data as { id: string }).id;
-};
-
-const setAllowance = async (
-  subjectId: string,
-  limitValue: number | null
-): Promise<void> => {
-  const { error } = await admin().from('policy_allowances').upsert({
-    subject_id: subjectId,
-    budget_id: 'extraction',
-    limit_value: limitValue,
-  });
-  if (error) throw new Error(`could not store an allowance: ${error.message}`);
-};
-
-const clearAllowance = async (subjectId: string): Promise<void> => {
-  await admin()
-    .from('policy_allowances')
-    .delete()
-    .eq('subject_id', subjectId)
-    .eq('budget_id', 'extraction');
-};
 
 /** Records spend directly, so the test does not have to burn real tokens. */
 const recordSpend = async (

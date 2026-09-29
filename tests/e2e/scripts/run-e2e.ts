@@ -1083,7 +1083,7 @@ const main = async (): Promise<number> => {
       `\n✓ test stack + apps are up and will be reused.\n` +
         `  server: ${serverUrlOf(test)}  web: ${webUrlOf(test)}\n` +
         (mailUrlOf(test) ? `  mail:   ${mailUrlOf(test)}\n` : '') +
-        `  Iterate: bun run pw -- --grep @smoke   (E2E_SERVER_URL/E2E_WEB_URL preset)\n` +
+        `  Iterate: bun run pw -- --grep @smoke   (this stack's URLs and keys preset)\n` +
         `  Stop:    bun run e2e:down`
     );
     return 0;

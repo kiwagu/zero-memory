@@ -28,12 +28,13 @@ test.describe('memory feed and fact card', () => {
       await page.goto(
         `/memories?q=${encodeURIComponent(memoryId.slice(0, 12))}`
       );
+      const feed = page.getByTestId('memory-feed');
       await expect(
-        page
-          .getByTestId('memory-feed')
-          .getByText(fixture.content.slice(0, 60), { exact: false })
-          .first()
+        feed.getByText(fixture.content.slice(0, 60), { exact: false }).first()
       ).toBeVisible();
+      // The id's visible head — what a user copies from a card — finds that
+      // memory and nothing else, however small the corpus.
+      await expect(feed.getByTestId('memory-card')).toHaveCount(1);
     }
   });
 
@@ -61,22 +62,6 @@ test.describe('memory feed and fact card', () => {
     await expect(card.getByTestId('memory-original-text')).toContainText(
       fixture.verbatim!.slice(0, 20)
     );
-  });
-
-  test('searching by a mem_ id prefix finds exactly that memory', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    const fixture = FIXTURE_MEMORIES[1]!;
-    const memoryId = seed.fixtureMemoryIds[fixture.content]!;
-    // What a user copies from a card: the id's visible head, not the full id.
-    const prefix = memoryId.slice(0, 12);
-    await signInThroughForm(page, seed.userA);
-    await page.goto(`/memories?q=${encodeURIComponent(prefix)}`);
-
-    const cards = page.getByTestId('memory-card');
-    await expect(cards).toHaveCount(1);
-    await expect(cards.first()).toContainText(fixture.content.slice(0, 60));
   });
 
   test('@smoke fact card opens with content and provenance', async ({

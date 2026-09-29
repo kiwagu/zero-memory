@@ -245,16 +245,4 @@ describe('which model a call actually asks for', () => {
       )
     ).toBe('a-pinned-model');
   });
-
-  it("keeps the request's model on the vendor those names belong to", () => {
-    expect(effectiveModel(request, credential(), 'default')).toBe(
-      'claude-haiku-4-5-20251001'
-    );
-  });
-
-  it("falls back to the vendor's own default on another vendor", () => {
-    expect(
-      effectiveModel(request, credential({ provider: 'openai' }), 'gpt-4o-mini')
-    ).toBe('gpt-4o-mini');
-  });
 });

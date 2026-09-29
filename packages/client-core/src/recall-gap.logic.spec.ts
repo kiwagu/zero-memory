@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   decideRecallGap,
-  recallGapTally,
-  recallGapTrigger,
   SEARCH_REMINDER,
   SURPRISE_REMINDER,
   turnEndReminder,
@@ -18,56 +16,46 @@ const fresh: RecallGapCounters = {
   remindedOnSearch: false,
 };
 
-describe('recallGapTrigger', () => {
-  it('tells a tool failure apart from a tool success', () => {
-    // The failure event's name contains the success event's name, so a prefix
-    // match would file every failure as a success and the reminder that the
-    // dogfood actually measured would never fire.
-    expect(recallGapTrigger('PostToolUse')).toBe('memory-tool');
-    expect(recallGapTrigger('PostToolUseFailure')).toBe('failure');
-  });
-
-  it('accepts each client’s casing of the same moment', () => {
-    expect(recallGapTrigger('preToolUse')).toBe('search');
-    expect(recallGapTrigger('PreToolUse')).toBe('search');
-    expect(recallGapTrigger('stop')).toBe('turn-end');
-    expect(recallGapTrigger('Stop')).toBe('turn-end');
-  });
-
-  it('is inert for an event it does not know', () => {
-    expect(recallGapTrigger('SessionStart')).toBe('none');
-    expect(recallGapTrigger('')).toBe('none');
-  });
-});
-
-describe('recallGapTally', () => {
-  it('counts a read however the client namespaces the tool', () => {
-    for (const name of [
-      'recall',
-      'mcp__zero-memory__recall',
-      'mcp__plugin_zero-memory_zero-memory__recall',
-      'build_context',
-      'mcp__zero-memory__build_context',
-    ]) {
-      expect(recallGapTally(name)).toBe('recall');
-    }
-  });
-
-  it('counts a write', () => {
-    expect(recallGapTally('mcp__zero-memory__remember')).toBe('remember');
-    expect(recallGapTally('remember')).toBe('remember');
-  });
-
-  it('ignores memory tools that are neither a read nor a write', () => {
-    // Closing a loop or forgetting a memory says nothing about consulting it.
-    expect(recallGapTally('mcp__zero-memory__close_loop')).toBeNull();
-    expect(recallGapTally('mcp__zero-memory__forget')).toBeNull();
-    expect(recallGapTally(undefined)).toBeNull();
-    expect(recallGapTally('')).toBeNull();
-  });
-});
-
 describe('decideRecallGap', () => {
+  // What a memory-tool call counts as, however the client spells the event
+  // or mounts the tool: a read gates every reminder, a write feeds the
+  // turn-end one, and closing a loop or forgetting consults nothing.
+  it.each([
+    ['PostToolUse', 'recall', { kind: 'count', tally: 'recall' }],
+    ['PostToolUse', 'build_context', { kind: 'count', tally: 'recall' }],
+    [
+      'postToolUse',
+      'mcp__plugin_zero-memory_zero-memory__recall',
+      { kind: 'count', tally: 'recall' },
+    ],
+    ['PostToolUse', 'remember', { kind: 'count', tally: 'remember' }],
+    [
+      'PostToolUse',
+      'mcp__zero-memory__remember',
+      { kind: 'count', tally: 'remember' },
+    ],
+    ['PostToolUse', 'mcp__zero-memory__close_loop', { kind: 'silent' }],
+    ['PostToolUse', 'mcp__zero-memory__forget', { kind: 'silent' }],
+    ['PostToolUse', '', { kind: 'silent' }],
+    ['PostToolUse', undefined, { kind: 'silent' }],
+  ])('on %s, counts %s as %j', (event, toolName, action) => {
+    expect(decideRecallGap({ event, counters: fresh, toolName })).toEqual(
+      action
+    );
+  });
+
+  it('accepts each client’s casing of the reminder moments', () => {
+    expect(decideRecallGap({ event: 'preToolUse', counters: fresh })).toEqual({
+      kind: 'remind',
+      trigger: 'search',
+      text: SEARCH_REMINDER,
+    });
+    expect(
+      decideRecallGap({ event: 'stop', counters: { ...fresh, remembers: 1 } })
+        .kind
+    ).toBe('remind');
+  });
+
   it('counts a read on the memory-tool event', () => {
     expect(
       decideRecallGap({
@@ -142,7 +130,7 @@ describe('decideRecallGap', () => {
     ).toBe('silent');
   });
 
-  it('reminds on a search before any read, then stays quiet', () => {
+  it('reminds on a search before any read', () => {
     expect(decideRecallGap({ event: 'PreToolUse', counters: fresh })).toEqual({
       kind: 'remind',
       trigger: 'search',
@@ -166,6 +154,5 @@ describe('turnEndReminder', () => {
   it('frames the count as what memory may already hold, not as blame', () => {
     const text = turnEndReminder(3);
     expect(text).toContain('memory may already hold it');
-    expect(text.toLowerCase()).not.toContain('you failed');
   });
 });

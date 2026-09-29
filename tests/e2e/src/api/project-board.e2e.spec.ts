@@ -4,14 +4,14 @@
  * move, and what another agent left on it is readable without being binding.
  *
  * The invariants proven here are the ones the board would be worthless
- * without: a move cannot happen without a stated reason, a retry after a
- * timeout lands once, a note never moves the card, promoting a loop does not
- * close it, and a stranger sees nothing at all.
+ * without: a retry after a timeout lands once, a note never moves the card,
+ * promoting a loop does not close it, and a stranger sees nothing at all.
+ * What the card service refuses before any round trip — a move or an archive
+ * with no reason, a reply with nothing to answer — is its unit tests' to pin.
  */
 import { expect, test } from '@playwright/test';
-import { createClient } from '@supabase/supabase-js';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin, asUser } from '../helpers/board-store.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
@@ -107,17 +107,7 @@ test.describe('Project board over MCP', () => {
       });
       expect(twice.isError ?? false).toBe(true);
 
-      // 2. A move without a reason is refused — there is no way around it.
-      const reasonless = await agent.callTool('card', {
-        action: 'move',
-        card_id: card.id,
-        to: 'waiting',
-        reason: '   ',
-      });
-      expect(reasonless.isError ?? false).toBe(true);
-      expect(contentText(reasonless)).toMatch(/reason/i);
-
-      // ...and a move to the state it is already in says so rather than
+      // 2. A move to the state the card is already in says so rather than
       // writing a second identical row.
       const standstill = await agent.callTool('card', {
         action: 'move',
@@ -155,15 +145,6 @@ test.describe('Project board over MCP', () => {
       });
       expect(replay.isError ?? false).toBe(false);
       expect(firstJson<{ replayed: boolean }>(replay).replayed).toBe(true);
-
-      // A relation needs the note it answers.
-      const orphan = await agent.callTool('card_log', {
-        action: 'note',
-        card_id: card.id,
-        text: 'not so fast',
-        relation: 'disputes',
-      });
-      expect(orphan.isError ?? false).toBe(true);
 
       const answered = await agent.callTool('card_log', {
         action: 'note',
@@ -258,17 +239,7 @@ test.describe('Project board over MCP', () => {
       expect(still.card?.archived_at).toBeNull();
       expect(still.card?.origin_loop_id).toBe(loop.memory_id);
 
-      // 8. Archiving is terminal and, like every move, needs a reason.
-      expect(
-        (
-          await agent.callTool('card', {
-            action: 'archive',
-            card_id: card.id,
-            reason: '',
-          })
-        ).isError ?? false
-      ).toBe(true);
-
+      // 8. Archiving is terminal.
       const archived = await agent.callTool('card', {
         action: 'archive',
         card_id: card.id,
@@ -327,6 +298,13 @@ test.describe('Project board over MCP', () => {
       });
       expect(peek.isError ?? false).toBe(true);
       expect(contentText(peek)).not.toContain('cutover checklist');
+      // Refused the way a card that does not exist is: the stranger cannot
+      // even learn that there is one.
+      const refusal = firstJson<{ error: { code: string; message: string } }>(
+        peek
+      ).error;
+      expect(refusal.code).toBe('not_found');
+      expect(refusal.message).toMatch(/No such card/u);
 
       const listed = await stranger.callTool('board', {
         action: 'list',
@@ -481,12 +459,7 @@ test.describe('Project board over MCP', () => {
       expect(second.feed_has_more).toBe(false);
 
       // Reading the feed is not a recall: nothing was reinforced by it.
-      const admin = createClient(
-        e2eEnv.supabaseUrl,
-        e2eEnv.supabaseServiceRoleKey,
-        { auth: { persistSession: false, autoRefreshToken: false } }
-      );
-      const { count } = await admin
+      const { count } = await admin()
         .from('usage_events')
         .select('id', { count: 'exact', head: true })
         .eq('event_type', 'recall_used')
@@ -677,11 +650,6 @@ test.describe('Project board over MCP', () => {
     // A second conversation writes the completion-sounding evidence, so no
     // same-session rule can fold it into the loops.
     const other = await McpTestClient.connect(token);
-    const admin = createClient(
-      e2eEnv.supabaseUrl,
-      e2eEnv.supabaseServiceRoleKey,
-      { auth: { persistSession: false } }
-    );
     const stamp = Date.now();
     const hint = `/tmp/zm-e2e-board-handover-${stamp}`;
 
@@ -768,7 +736,7 @@ test.describe('Project board over MCP', () => {
         content: `e2e handover marker ${stamp}: the parquet export and the certificate rotation are both finished`,
         kind: 'fact',
       });
-      const { data: candidates, error } = await admin.rpc(
+      const { data: candidates, error } = await admin().rpc(
         'find_loop_closure_evidence',
         { p_min_similarity: 0.2 }
       );
@@ -858,14 +826,7 @@ test.describe('Project board over MCP', () => {
       } finally {
         await strangerAgent.close();
       }
-      const stranger = createClient(
-        e2eEnv.supabaseUrl,
-        e2eEnv.supabaseAnonKey,
-        {
-          auth: { persistSession: false },
-          global: { headers: { Authorization: `Bearer ${strangerToken}` } },
-        }
-      );
+      const stranger = asUser(strangerToken);
       const { data: claimed } = await stranger.rpc('card_create', {
         p_no_links: 'e2e fixture',
         p_scope: strangerScope,
@@ -916,10 +877,7 @@ test.describe('Project board over MCP', () => {
       await agent.close();
     }
 
-    const db = createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
-      auth: { persistSession: false },
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
+    const db = asUser(token);
     const plantedRef = await db.from('card_refs').insert({
       card_id: card.id,
       scope: own,
@@ -1017,11 +975,7 @@ test.describe('Finding a card on the board', () => {
       // each board the reader can see.
       const other = await scopeOf('two');
       const otherFirst = await create(other, 'Tune the recall threshold');
-      const db = createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
-        auth: { persistSession: false },
-        global: { headers: { Authorization: `Bearer ${token}` } },
-      });
-      const { data, error } = await db.rpc('board_list', {
+      const { data, error } = await asUser(token).rpc('board_list', {
         p_query: `ZM-${certs.number}`,
         p_limit: 200,
       });

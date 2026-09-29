@@ -140,3 +140,27 @@ const buildLogger = (name: string, bindings: LogContext): Logger => ({
 
 export const createLogger = (name: string, bindings: LogContext = {}): Logger =>
   buildLogger(name, bindings);
+
+/**
+ * Starts `task` without awaiting it, for side writes (metering, auditing) that
+ * must never break — or even slow — the operation they record. A failure is
+ * logged at warn with `context` and the error message, then dropped. The task
+ * starts one microtask later, so a synchronous throw from a misbehaving
+ * adapter becomes a rejection the single catch handles and never reaches the
+ * caller.
+ */
+export const runDetached = (
+  task: () => unknown,
+  logger: Logger,
+  message: string,
+  context: LogContext = {}
+): void => {
+  void Promise.resolve()
+    .then(task)
+    .catch((error: unknown) => {
+      logger.warn(message, {
+        ...context,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+};

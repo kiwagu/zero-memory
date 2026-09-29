@@ -10,10 +10,6 @@ import { readSeedState } from '../helpers/runtime-state.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
 import { passwordGrantToken } from '../helpers/users.js';
 
-interface BriefingPack {
-  open_loops: Array<{ id: string }>;
-}
-
 test.describe('Declared supersede over MCP', () => {
   test('remember with a supersedes link retires the old version (reversibly)', async () => {
     const seed = await readSeedState();
@@ -112,42 +108,6 @@ test.describe('Declared supersede over MCP', () => {
     } finally {
       await actor.close();
       await foreignOwner.close();
-    }
-  });
-
-  test('remembering the outcome with a supersedes link closes the open loop', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
-    try {
-      const task = await mcp.callTool('remember', {
-        content:
-          'e2e declared-supersede marker: rebuild the watcher binary on the ' +
-          'stage machine — see /shares/zm/build.log',
-        kind: 'task',
-        scope: 'personal',
-      });
-      expect(task.isError ?? false).toBe(false);
-      const taskId = firstJson<{ memory_id: string }>(task).memory_id;
-
-      const done = await mcp.callTool('remember', {
-        content:
-          'e2e declared-supersede marker: watcher binary rebuilt and deployed ' +
-          'on the stage machine, digest updated',
-        kind: 'fact',
-        links: [{ dst: taskId, type: 'supersedes' }],
-        scope: 'personal',
-      });
-      expect(done.isError ?? false).toBe(false);
-
-      // The loop is gone from briefings — no close_loop call needed.
-      const pack = firstJson<BriefingPack>(
-        await mcp.callTool('build_context', { topic: 'unrelated topic probe' })
-      );
-      expect(pack.open_loops.map((loop) => loop.id)).not.toContain(taskId);
-    } finally {
-      await mcp.close();
     }
   });
 

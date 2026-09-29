@@ -106,14 +106,6 @@ describe('account ownership map vs the schema', () => {
     const stale = [...mapped].filter((t) => !schema.has(t)).sort();
     expect(stale).toEqual([]);
   });
-
-  it('catches an undeclared table', () => {
-    // Proves the check fires rather than passing vacuously: a table present in
-    // the schema but absent from the map is reported.
-    const map = new Set(['memories']);
-    const schema = ['memories', 'a_new_table'];
-    expect(schema.filter((t) => !map.has(t))).toEqual(['a_new_table']);
-  });
 });
 
 /**

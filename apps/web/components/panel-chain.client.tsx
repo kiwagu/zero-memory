@@ -18,7 +18,7 @@ import {
   type PanelKind,
   type PanelRef,
 } from '@/lib/panel-chain';
-import type { CardViewData } from '@/lib/views/card.view';
+import type { CardViewData } from '@/lib/views/card.mapper';
 import type { EntityViewData } from '@/lib/views/entity.view';
 import type { MemoryViewData } from '@/lib/views/memory.view';
 

@@ -30,7 +30,6 @@ import {
 } from './metering.js';
 import { incrementCounter } from './metrics.js';
 import { evictSessionsOverCap, maxSessionsFromEnv } from './session-cap.js';
-import { sessionForOwner } from './session-ownership.js';
 
 /** Idle sessions are evicted after this long without a request. */
 const SESSION_IDLE_TTL_MS = 30 * 60 * 1000;
@@ -240,9 +239,11 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
         ? await request.json().catch(() => undefined)
         : undefined;
     const sessionId = request.headers.get('mcp-session-id');
-    let session = sessionId
-      ? sessionForOwner(sessions, sessionId, userEntityId)
-      : undefined;
+    // A session belongs to the user who created it. Another user's id is
+    // answered exactly like one that was never issued (the same 404 below),
+    // so a session id never confirms that it exists.
+    const found = sessionId ? sessions.get(sessionId) : undefined;
+    let session = found?.ownerUserEntityId === userEntityId ? found : undefined;
 
     if (!session) {
       if (sessionId) {

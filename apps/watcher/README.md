@@ -221,6 +221,12 @@ bun run build               # compile the standalone binary to dist/
 bun run test:vitest         # unit tests
 ```
 
+The specs share their test support through `src/testing/`: a hook client that
+records what a runner emits, a scratch repository to run real git in, and a
+fresh state home per test. A spec takes these from there rather than rolling
+its own copy — copies drift, and they were the watcher's largest source of
+test bulk.
+
 ### Watch
 
 - `TranscriptWatcher` (`src/watcher.ts`) watches per-project JSONL transcript

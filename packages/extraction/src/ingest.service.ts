@@ -134,7 +134,7 @@ export class IngestService {
     @injectBudgetGuard()
     private readonly budgetGuard: BudgetGuard,
     @injectSessionThreadRepository()
-    private readonly threads?: ISessionThreadRepository
+    private readonly threads: ISessionThreadRepository
   ) {}
 
   async ingest(
@@ -488,9 +488,6 @@ export class IngestService {
    * carries just the client session id, which still addresses the transcript.
    */
   async #threadToken(conversationId: string): Promise<string | null> {
-    if (!this.threads) {
-      return null;
-    }
     try {
       const thread = await this.threads.findByConversation(conversationId);
       return thread.isNone() ? null : thread.unwrap().token;

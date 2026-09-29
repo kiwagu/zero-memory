@@ -48,8 +48,20 @@ A memory, a card and an entity each have one loader in `lib/views/*.view.ts`
 (server-only, the viewer's session) that returns serializable view data, and
 one view in `@workspace/ui`. Pages render the view from the loader; a panel of
 the chain gets the same data from `/api/panels/…` and renders the same view.
-The chain's rules — insert after the source, no duplicates, close a branch,
-Escape order — are the pure reducer in `lib/panel-chain.ts`.
+A card's mapping from what the store answers to its view data is the pure
+`lib/views/card.mapper.ts`. The chain's rules — insert after the source, no
+duplicates, close a branch, Escape order — are the pure reducer in
+`lib/panel-chain.ts`.
+
+## Tests
+
+`bun run test:vitest` runs the pure logic under `lib/` in node: the feed's
+status filter (the query and the live feed answer to one table), the card
+mapper, the panel chain, and the other label and parsing helpers. The browser
+specs in `tests/e2e/src/web` prove the wiring on top of them — navigation,
+addresses, reloads, `data-testid` contracts and what a reader sees — and do
+not re-walk a filter or mapping table that a unit test or the `api` e2e
+project already owns.
 
 ## Run
 

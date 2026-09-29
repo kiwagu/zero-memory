@@ -65,6 +65,24 @@ export const provisionE2EUser = async (email: string): Promise<E2EUser> => {
 };
 
 /**
+ * The `usr_` entity id behind an auth uuid, read past RLS with the service
+ * role. Deliberately not "the first row of profiles the caller can see": once
+ * the caller has co-members that set holds several people, and picking the
+ * first one silently attributes someone else's id to the caller.
+ */
+export const entityIdOf = async (authUserId: string): Promise<string> => {
+  const { data, error } = await adminClient()
+    .from('profiles')
+    .select('id')
+    .eq('user_id', authUserId)
+    .single();
+  if (error) {
+    throw new Error(`no profile for ${authUserId}: ${error.message}`);
+  }
+  return (data as { id: string }).id;
+};
+
+/**
  * Deterministic sign-in for e2e: the Supabase password grant (the same
  * infrastructure scripts/zm-login's OAuth flow ends up on), no interactive
  * OAuth in setup. The returned JWT is accepted by the MCP HTTP transport.
