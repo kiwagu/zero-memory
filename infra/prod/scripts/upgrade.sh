@@ -62,14 +62,16 @@ fi
 # Every release pulls its images onto this disk and nothing else takes them
 # away. A full disk fails the pre-schema dump, or worse the pull, which comes
 # AFTER the schema has already moved on. So the older release images go first,
-# keeping the release being deployed and the one it replaces. Unused build
-# cache and dangling layers go too. This is housekeeping: a failure here is
-# reported and the deploy goes ahead.
+# keeping ZM_KEEP_RELEASES releases (5 by default), the one being deployed
+# among them. Unused build cache and dangling layers go too. This is
+# housekeeping: a failure here is reported and the deploy goes ahead.
 image_tag="$(grep -E '^ZM_IMAGE_TAG=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
 if [ -n "$image_tag" ]; then
   echo "→ making room for ${image_tag}"
   image_prefix="$(grep -E '^ZM_IMAGE_PREFIX=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
-  ZM_IMAGE_PREFIX="$image_prefix" infra/prod/scripts/prune-images.sh "$image_tag" \
+  keep_releases="$(grep -E '^ZM_KEEP_RELEASES=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  ZM_IMAGE_PREFIX="$image_prefix" ZM_KEEP_RELEASES="$keep_releases" \
+    infra/prod/scripts/prune-images.sh "$image_tag" \
     || echo "  pruning release images failed; the deploy goes ahead" >&2
   docker image prune -f >/dev/null || true
   docker builder prune -af >/dev/null || true

@@ -34,14 +34,40 @@ const tagsOf = (repository: string): string[] =>
     .sort();
 
 const suffix = randomBytes(4).toString('hex');
-const prefix = `zm-e2e-prune-${suffix}/`;
-const otherPrefix = `zm-e2e-prune-other-${suffix}/`;
 const container = `zm-e2e-prune-${suffix}`;
 const created: string[] = [];
 
-const tag = (base: string, name: string): void => {
+/** A registry prefix of this test's own, so no other image can match it. */
+const prefixFor = (name: string): string => `zm-e2e-prune-${name}-${suffix}/`;
+
+const tag = (name: string): void => {
+  // An image the isolated stack is running right now, so it is present.
+  const base = docker(
+    'inspect',
+    '--format',
+    '{{.Image}}',
+    'supabase_db_zero-memory-e2e'
+  );
   docker('tag', base, name);
   created.push(name);
+};
+
+const versions = (count: number): string[] =>
+  Array.from({ length: count }, (_, index) => `0.${index + 1}.0`);
+
+/** Runs the script for a deploy of `release`; `keep` unset means the default. */
+const prune = (prefix: string, release: string, keep?: string): void => {
+  const env: NodeJS.ProcessEnv = { ...process.env, ZM_IMAGE_PREFIX: prefix };
+  delete env.ZM_KEEP_RELEASES;
+  if (keep !== undefined) {
+    env.ZM_KEEP_RELEASES = keep;
+  }
+  const result = spawnSync('bash', [script, release], {
+    cwd: root,
+    encoding: 'utf8',
+    env,
+  });
+  expect(result.status, result.stderr).toBe(0);
 };
 
 test.afterAll(() => {
@@ -52,42 +78,49 @@ test.afterAll(() => {
 });
 
 test.describe('prune-images.sh', () => {
-  test('keeps the release being deployed, the newest other one and any a container uses, and drops the older ones', () => {
-    // An image the isolated stack is running right now, so it is present.
-    const base = docker(
-      'inspect',
-      '--format',
-      '{{.Image}}',
-      'supabase_db_zero-memory-e2e'
-    );
-    // 0.10.0 sorts after 0.9.0 only in version order, never as text.
+  test('keeps five releases by default, and any tag a container uses', () => {
+    const prefix = prefixFor('default');
+    const other = prefixFor('other');
+    // Twelve releases: 0.10.0 to 0.12.0 sort after 0.9.0 only in version
+    // order, never as text.
+    const all = versions(12);
     for (const service of ['server', 'web', 'docs']) {
-      for (const version of ['0.9.0', '0.10.0', '0.11.0', '0.12.0']) {
-        tag(base, `${prefix}zero-memory-${service}:${version}`);
+      for (const version of all) {
+        tag(`${prefix}zero-memory-${service}:${version}`);
       }
     }
-    tag(base, `${prefix}zero-memory-web:latest`);
-    tag(base, `${otherPrefix}zero-memory-server:0.1.0`);
-    docker('create', '--name', container, `${prefix}zero-memory-web:0.9.0`);
+    tag(`${prefix}zero-memory-web:latest`);
+    tag(`${other}zero-memory-server:0.1.0`);
+    docker('create', '--name', container, `${prefix}zero-memory-web:0.1.0`);
 
-    const result = spawnSync('bash', [script, '0.12.0'], {
-      cwd: root,
-      encoding: 'utf8',
-      env: { ...process.env, ZM_IMAGE_PREFIX: prefix },
-    });
-    expect(result.status, result.stderr).toBe(0);
+    prune(prefix, '0.12.0');
 
-    expect(tagsOf(`${prefix}zero-memory-server`)).toEqual(['0.11.0', '0.12.0']);
-    expect(tagsOf(`${prefix}zero-memory-docs`)).toEqual(['0.11.0', '0.12.0']);
-    // 0.9.0 stays for the container created from it; `latest` is not a
+    // The release being deployed and the four newest others.
+    const kept = all.slice(7).sort();
+    expect(tagsOf(`${prefix}zero-memory-server`)).toEqual(kept);
+    expect(tagsOf(`${prefix}zero-memory-docs`)).toEqual(kept);
+    // 0.1.0 stays for the container created from it; `latest` is not a
     // release tag, so the script leaves it alone.
-    expect(tagsOf(`${prefix}zero-memory-web`)).toEqual([
-      '0.11.0',
-      '0.12.0',
-      '0.9.0',
-      'latest',
-    ]);
+    expect(tagsOf(`${prefix}zero-memory-web`)).toEqual(
+      [...kept, '0.1.0', 'latest'].sort()
+    );
     // Another prefix is another stack's business.
-    expect(tagsOf(`${otherPrefix}zero-memory-server`)).toEqual(['0.1.0']);
+    expect(tagsOf(`${other}zero-memory-server`)).toEqual(['0.1.0']);
+  });
+
+  test('honours ZM_KEEP_RELEASES, and keeps an older release that is being deployed', () => {
+    const prefix = prefixFor('keep');
+    for (const version of versions(8)) {
+      tag(`${prefix}zero-memory-server:${version}`);
+    }
+
+    // A rollback to 0.5.0 with three releases to keep.
+    prune(prefix, '0.5.0', '3');
+
+    expect(tagsOf(`${prefix}zero-memory-server`)).toEqual([
+      '0.5.0',
+      '0.7.0',
+      '0.8.0',
+    ]);
   });
 });
