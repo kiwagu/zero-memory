@@ -281,6 +281,13 @@ the images and waits for the containers to report healthy. Compose recreates
 only what changed. By default, apply any new migrations separately; they are
 forward-only.
 
+Before anything is written to the disk, the same run makes room: it removes
+the stack's older release images. It keeps `ZM_KEEP_RELEASES` releases (5
+when unset in `infra/prod/.env`): the one being deployed and the newest others,
+starting with the release it replaces. It never removes
+an image a container was created from, and it also drops unused build cache
+and dangling layers. A failure there is reported and the deploy goes ahead.
+
 A host can manage the migrations itself: set `ZM_MIGRATE_ON_DEPLOY=1` in
 `infra/prod/.env` and point `ZM_DB_ENV_FILE` at an env file carrying
 `SUPABASE_DB_URL` (default `/etc/zero-memory/backup.env`, the same file the
@@ -294,7 +301,8 @@ the previous containers still serve. A host that never sets the flag is
 unaffected.
 
 Rolling back is the same command with the previous tag, and it is fast: the
-rehearsed procedure measured under a minute in each direction. The pin
+rehearsed procedure measured under a minute in each direction. The releases
+the host kept are still there; an older one is pulled from the registry again. The pin
 persists, so a later bare `upgrade.sh` re-run stays on the rolled-back version
 until you name a newer tag. The database does not roll back with it, and
 does not need to: the schema is ADD-only by design, so an older server
