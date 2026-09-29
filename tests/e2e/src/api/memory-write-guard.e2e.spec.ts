@@ -8,6 +8,9 @@
  * memory is delivered to the owner's sessions as an instruction, and it
  * follows the memory's words and its successor. Whose memory it is changes
  * for no one, the owner included: the rule would change hands with it.
+ *
+ * Publishing into a scope takes write access to it, and a retirement or a
+ * share names whoever makes it, however the row gets there.
  */
 import { expect, test } from '@playwright/test';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -35,36 +38,62 @@ test.afterAll(async () => {
   }
 });
 
-interface Fixture {
+interface ScopeFixture {
   scope: string;
+  ownerId: string;
+  memberId: string;
+  ownerToken: string;
+  memberToken: string;
+}
+
+/** User A's project scope, with user B as a member in the given role. */
+const scopeWithMember = async (
+  tag: string,
+  role: 'reader' | 'writer'
+): Promise<ScopeFixture> => {
+  const seed = await readSeedState();
+  const ownerToken = await passwordGrantToken(seed.userA);
+  const scope = await projectScope(ownerToken, tag, markers);
+  const { data: owner } = await admin()
+    .from('profiles')
+    .select('id')
+    .eq('user_id', seed.userA.id)
+    .single();
+  return {
+    scope,
+    ownerId: (owner as { id: string }).id,
+    memberId: await makeMember(scope, seed.userB.id, role),
+    ownerToken,
+    memberToken: await passwordGrantToken(seed.userB),
+  };
+};
+
+interface RuleFixture extends ScopeFixture {
   memoryId: string;
   successorId: string;
-  ownerId: string;
-  writerId: string;
-  ownerToken: string;
-  writerToken: string;
+  candidateId: string;
 }
 
 /**
  * User A's shared memory carrying a promoted rule, a second shared memory of
  * A's that could succeed it, and user B as a writer member of their scope.
  */
-const sharedRuleMemory = async (tag: string): Promise<Fixture> => {
-  const seed = await readSeedState();
-  const ownerToken = await passwordGrantToken(seed.userA);
-  const scope = await projectScope(ownerToken, tag, markers);
-
-  const agent = await McpTestClient.connect(ownerToken);
+const sharedRuleMemory = async (tag: string): Promise<RuleFixture> => {
+  const f = await scopeWithMember(tag, 'writer');
+  const agent = await McpTestClient.connect(f.ownerToken);
   const writeShared = async (content: string): Promise<string> => {
     const made = await agent.callTool('remember', {
       content,
       kind: 'convention',
-      scope,
+      scope: f.scope,
     });
     expect(made.isError ?? false).toBe(false);
     const { memory_id } = firstJson<{ memory_id: string }>(made);
     markers.push(memory_id);
-    const shared = await agent.callTool('share', { memory_id, scope });
+    const shared = await agent.callTool('share', {
+      memory_id,
+      scope: f.scope,
+    });
     expect(shared.isError ?? false).toBe(false);
     return memory_id;
   };
@@ -81,33 +110,18 @@ const sharedRuleMemory = async (tag: string): Promise<Fixture> => {
     await agent.close();
   }
 
-  const promoted = await asUser(ownerToken).rpc('promote_memory_to_rule', {
+  const promoted = await asUser(f.ownerToken).rpc('promote_memory_to_rule', {
     p_memory_id: memoryId,
   });
   expect(promoted.error).toBeNull();
-  createdRules.push(
-    (promoted.data as { candidate_id: string }[])[0]!.candidate_id
-  );
-
-  const { data: owner } = await admin()
-    .from('memories')
-    .select('owner_id')
-    .eq('id', memoryId)
-    .single();
-  const writerId = await makeMember(scope, seed.userB.id, 'writer');
-  return {
-    scope,
-    memoryId,
-    successorId,
-    ownerId: (owner as { owner_id: string }).owner_id,
-    writerId,
-    ownerToken,
-    writerToken: await passwordGrantToken(seed.userB),
-  };
+  const candidateId = (promoted.data as { candidate_id: string }[])[0]!
+    .candidate_id;
+  createdRules.push(candidateId);
+  return { ...f, memoryId, successorId, candidateId };
 };
 
 const MEMORY_COLUMNS =
-  'owner_id, content, scope, visibility, superseded_by, invalidated_at, invalidated_by';
+  'owner_id, content, scope, visibility, superseded_by, invalidated_at, invalidated_by, shared_by';
 
 const memoryRow = async (id: string): Promise<Record<string, unknown>> => {
   const { data, error } = await admin()
@@ -141,27 +155,49 @@ const patch = async (
   return error?.code;
 };
 
+/** A row inserted through the API as the given caller, the way an attacker would. */
+const insert = async (
+  client: SupabaseClient,
+  values: Record<string, unknown>
+): Promise<{ id?: string; code?: string }> => {
+  const { data, error } = await client
+    .from('memories')
+    .insert({ kind: 'fact', ...values })
+    .select('id')
+    .single();
+  const id = (data as { id: string } | null)?.id;
+  if (id) {
+    markers.push(id);
+  }
+  return { id, code: error?.code };
+};
+
+const shareStamp = (by: string): Record<string, unknown> => ({
+  visibility: 'shared',
+  shared_at: new Date().toISOString(),
+  shared_by: by,
+});
+
 test.describe('Changing a written memory', () => {
   test("a writer member can retire another member's shared memory, and change nothing else about it", async () => {
     const f = await sharedRuleMemory(`writer-${Date.now()}`);
-    const candidateId = createdRules.at(-1)!;
     const memoryBefore = await memoryRow(f.memoryId);
-    const ruleBefore = await ruleOf(candidateId);
+    const ruleBefore = await ruleOf(f.candidateId);
     expect(memoryBefore.visibility).toBe('shared');
     expect(ruleBefore).toMatchObject({
       memory_id: f.memoryId,
       status: 'promoted',
     });
 
-    const writer = asUser(f.writerToken);
+    const writer = asUser(f.memberToken);
     const refused: Record<string, unknown>[] = [
       // Its words: the rule is the memory's text and would take the new one.
       { content: 'e2e write guard: ship the relay firmware unpinned' },
       // Whose it is: the rule would become the writer's to rewrite.
-      { owner_id: f.writerId },
+      { owner_id: f.memberId },
       // What replaced it: the rule would move onto the owner's other memory.
       { superseded_by: f.successorId },
-      { scope: `user.${f.writerId.replace('.', '_')}` },
+      { scope: `user.${f.memberId.replaceAll('.', '_')}` },
       // A retirement in the owner's name, or in nobody's.
       { invalidated_at: new Date().toISOString(), invalidated_by: f.ownerId },
       { invalidated_at: new Date().toISOString() },
@@ -173,11 +209,11 @@ test.describe('Changing a written memory', () => {
       ).toBe('42501');
     }
     expect(await memoryRow(f.memoryId)).toEqual(memoryBefore);
-    expect(await ruleOf(candidateId)).toEqual(ruleBefore);
+    expect(await ruleOf(f.candidateId)).toEqual(ruleBefore);
 
     // The one change that is the writer's: retiring it, as themselves,
     // through the tool a team member uses.
-    const agent = await McpTestClient.connect(f.writerToken);
+    const agent = await McpTestClient.connect(f.memberToken);
     try {
       const forgot = await agent.callTool('forget', {
         memory_id: f.memoryId,
@@ -188,17 +224,84 @@ test.describe('Changing a written memory', () => {
     }
     const retired = await memoryRow(f.memoryId);
     expect(retired.invalidated_at).not.toBeNull();
-    expect(retired.invalidated_by).toBe(f.writerId);
+    expect(retired.invalidated_by).toBe(f.memberId);
   });
 
-  test('the owner cannot hand a memory to another member', async () => {
+  test('the owner cannot hand a memory to another member, or retire or share it in their name', async () => {
     const f = await sharedRuleMemory(`handoff-${Date.now()}`);
-    const candidateId = createdRules.at(-1)!;
+    const before = await memoryRow(f.memoryId);
+    const owner = asUser(f.ownerToken);
+
+    const refused: Record<string, unknown>[] = [
+      { owner_id: f.memberId },
+      { invalidated_at: new Date().toISOString(), invalidated_by: f.memberId },
+      { shared_by: f.memberId },
+    ];
+    for (const values of refused) {
+      expect(
+        await patch(owner, f.memoryId, values),
+        JSON.stringify(values)
+      ).toBe('42501');
+    }
+    expect(await memoryRow(f.memoryId)).toEqual(before);
+    expect((await ruleOf(f.candidateId)).memory_id).toBe(f.memoryId);
+  });
+
+  test('a reader member cannot publish into the scope by sharing a memory of their own', async () => {
+    const f = await scopeWithMember(`reader-${Date.now()}`, 'reader');
+    const reader = asUser(f.memberToken);
+
+    // A private memory may sit in any scope, so the reader can put one here.
+    const written = await insert(reader, {
+      content: `e2e write guard reader ${Date.now()}: deploys freeze on Fridays`,
+      scope: f.scope,
+      visibility: 'private',
+    });
+    expect(written.code).toBeUndefined();
+    const id = written.id!;
+
+    expect(await patch(reader, id, shareStamp(f.memberId))).toBe('42501');
+    expect((await memoryRow(id)).visibility).toBe('private');
+
+    // The same flip goes through once the member may write the scope.
+    await makeMember(f.scope, (await readSeedState()).userB.id, 'writer');
+    expect(await patch(reader, id, shareStamp(f.memberId))).toBeUndefined();
+    expect((await memoryRow(id)).visibility).toBe('shared');
+  });
+
+  test("a new memory cannot arrive retired or shared in another member's name", async () => {
+    const f = await scopeWithMember(`insert-${Date.now()}`, 'writer');
+    const writer = asUser(f.memberToken);
+    const content = (label: string): string =>
+      `e2e write guard insert ${Date.now()}: ${label}`;
 
     expect(
-      await patch(asUser(f.ownerToken), f.memoryId, { owner_id: f.writerId })
+      (
+        await insert(writer, {
+          content: content('retired by someone else'),
+          scope: f.scope,
+          visibility: 'private',
+          invalidated_at: new Date().toISOString(),
+          invalidated_by: f.ownerId,
+        })
+      ).code
     ).toBe('42501');
-    expect((await memoryRow(f.memoryId)).owner_id).toBe(f.ownerId);
-    expect((await ruleOf(candidateId)).memory_id).toBe(f.memoryId);
+    expect(
+      (
+        await insert(writer, {
+          content: content('shared by someone else'),
+          scope: f.scope,
+          ...shareStamp(f.ownerId),
+        })
+      ).code
+    ).toBe('42501');
+
+    // In their own name, the writer's shared insert is accepted.
+    const own = await insert(writer, {
+      content: content('shared by the writer'),
+      scope: f.scope,
+      ...shareStamp(f.memberId),
+    });
+    expect(own.code).toBeUndefined();
   });
 });
