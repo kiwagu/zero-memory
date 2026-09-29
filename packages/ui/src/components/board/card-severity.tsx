@@ -9,8 +9,10 @@ import { cn } from '@workspace/ui/lib/utils';
  * Drawn at every level, the normal one included, so the scale reads the same
  * on every card: three of five is the resting state, one tick is a card that
  * can wait, five is one that cannot. The tone rises with the level — muted
- * below normal, amber at high, red at urgent. Display-only: the level and
- * the hint that names it in words arrive from the app.
+ * below normal, amber at high, red at urgent. The meter fills the width it
+ * is given, so under a card's label it is exactly as wide as the label.
+ * Display-only: the level and the hint that names it in words arrive from
+ * the app.
  */
 interface CardSeverityProps {
   /** 1 to 5. */
@@ -37,7 +39,7 @@ function CardSeverity({ level, hint, className }: CardSeverityProps) {
       title={hint}
       data-testid="card-severity"
       data-severity={level}
-      className={cn('inline-flex items-center gap-0.5', className)}
+      className={cn('flex w-full items-center gap-0.5', className)}
     >
       {TICKS.map((tick) => {
         const filled = tick <= level;
@@ -46,7 +48,7 @@ function CardSeverity({ level, hint, className }: CardSeverityProps) {
             key={tick}
             data-filled={filled ? 'true' : 'false'}
             className={cn(
-              'h-2 w-1 rounded-[1px]',
+              'h-2 min-w-1 flex-1 rounded-[1px]',
               filled ? tone(level) : 'bg-border'
             )}
           />

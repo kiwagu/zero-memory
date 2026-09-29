@@ -95,4 +95,33 @@ describe('BoardColumns', () => {
     expect(meter).toBeLessThan(html.indexOf('Card 44'));
     expect(html).toContain('data-severity="5"');
   });
+
+  it('keeps a three-digit label on one line, with the meter spanning the label column', () => {
+    const html = renderToStaticMarkup(
+      <BoardColumns
+        columns={[
+          {
+            key: 'idea',
+            label: 'Idea',
+            cards: [
+              {
+                ...tile(111),
+                title: 'A title long enough to wrap beside the label column',
+                severity: { level: 2, hint: 'Severity 2 of 5: low' },
+              },
+            ],
+          },
+        ]}
+        emptyLabel="none"
+      />
+    );
+    // The label never wraps, whatever its digit count: `ZM-111` split after
+    // its hyphen would read as two things.
+    const label = html.match(/<span[^>]*data-testid="board-card-number"[^>]*>/);
+    expect(label?.[0]).toContain('whitespace-nowrap');
+    expect(html).toContain('>ZM-111<');
+    // The meter is as wide as the label column, not a fixed few pixels.
+    const meter = html.match(/<span[^>]*data-testid="card-severity"[^>]*>/);
+    expect(meter?.[0]).toContain('w-full');
+  });
 });

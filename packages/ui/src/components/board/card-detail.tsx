@@ -120,7 +120,7 @@ function CardDetail({
             The label is the card's link, and a click copies it; the severity
             sits under the label. */}
         <div className="flex items-start gap-2">
-          <span className="flex shrink-0 flex-col items-start gap-1 pt-1">
+          <span className="flex shrink-0 flex-col items-stretch gap-1 pt-1">
             <CardLabelLink
               label={numberLabel}
               href={link.href}

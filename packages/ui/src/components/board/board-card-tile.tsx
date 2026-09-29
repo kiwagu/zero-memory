@@ -62,7 +62,7 @@ function BoardCardTile({
             {/* The label never breaks: `ZM-12` split after its hyphen reads
                 as two things. The title wraps beside it, and the severity
                 sits under the label, in the room a wrapped title leaves. */}
-            <span className="flex shrink-0 flex-col items-start gap-1 pt-0.5">
+            <span className="flex shrink-0 flex-col items-stretch gap-1 pt-0.5">
               <span
                 className="text-muted-foreground text-xs whitespace-nowrap tabular-nums"
                 data-testid="board-card-number"
