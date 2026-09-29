@@ -104,6 +104,10 @@ the layer, the project it is delivered to and its place in the delivery TTL.
   and the rule is flagged **Text to review** on `/rules`. The writer's
   `remember` reply says so and names the call that sets a new text:
   `promote_rule` on the successor, with `rule_text`.
+- If the successor says exactly the rule's curated text, the rule is already
+  in sync: it moves with nothing to review. Writing a rule's text as a new
+  memory that supersedes its old one is how to re-anchor a rule without
+  promoting it again.
 - The rule stays where it is, and stays promoted, when moving it could
   cost it anything: the successor already has a rule of its own or was
   dismissed or revoked as one, belongs to another owner, or is itself retired.
