@@ -290,6 +290,37 @@ test.describe('A promoted rule follows its memory', () => {
     expect(reviewed.rule_text).toBe(newText);
   });
 
+  test('a curated rule whose successor says exactly its text moves with nothing to review', async () => {
+    const run = fresh();
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userB);
+    const curated = `Curated ${run}: land every epic as one squash commit.`;
+    const oldId = await remember(
+      token,
+      `rule-follows ${run}: the owner prefers squash landings over merge commits`
+    );
+    const rule = await promote(oldId, { rule_text: curated, pinned: true });
+
+    // Re-anchoring a rule: the successor is written with the rule's own text.
+    const reply = await rememberReply(token, curated, {
+      links: [{ type: 'supersedes', dst: oldId }],
+    });
+    const newId = reply.memory_id;
+    expect(reply.rules).toEqual([
+      expect.objectContaining({ memory_id: oldId, outcome: 'carried' }),
+    ]);
+
+    const after = await ruleById(rule.id);
+    expect(after.memory_id).toBe(newId);
+    expect(after.rule_text).toBe(curated);
+    expect(after.text_review_since).toBeNull();
+    expect(after.carried_from).toBe(oldId);
+    // Nothing the owner decided about the rule is touched.
+    expect(after.pinned).toBe(true);
+    expect(after.promoted_at).toBe(rule.promoted_at);
+    expect(after.target_layer).toBe(rule.target_layer);
+  });
+
   test('a project rule keeps its address when the successor lives elsewhere', async () => {
     const run = fresh();
     const seed = await readSeedState();
