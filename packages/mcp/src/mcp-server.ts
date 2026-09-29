@@ -2042,7 +2042,8 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'Keep the work itself on the record, the way `remember` keeps what ' +
         'you learned. `create` opens a card; `promote_loop` turns an open ' +
         'loop that outgrew a one-line handover into one, leaving the loop ' +
-        'untouched; `edit` rewrites its text; `move` declares where the work ' +
+        'untouched; `edit` rewrites its text or sets its `severity` (1 ' +
+        'minimal to 5 urgent, 3 unless said); `move` declares where the work ' +
         'now stands; `archive` takes it off the board; `link` relates it to ' +
         'another card (`to_card`: id or ZM-N) and `unlink` retires that. ' +
         'EVERY MOVE AND RELATION NEEDS A ' +

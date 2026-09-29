@@ -34,6 +34,12 @@ Two invariants shape everything else:
   blocks editing, attaching or noting. The board reports work; it never
   schedules it, claims it or hands it out.
 
+The same holds for a card's **severity**, a level from 1 (minimal) to 5
+(urgent), 3 unless said: a marker for readers that is set on create and
+changed through `editCard`, recorded in the history with the level it
+replaced, and never sorted, gated or dispatched by. The service refuses a
+level outside the scale before it travels.
+
 One more thing a move accounts for: **the branch**. Work entering `active`
 names the git branch it runs on, or says why it has none (`no_branch`), unless
 the card already holds an open branch; work leaving `active` with a branch

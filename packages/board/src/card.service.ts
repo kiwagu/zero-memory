@@ -5,6 +5,7 @@ import {
   cardLinkRelationSchema,
   cardNoteTextSchema,
   cardReasonSchema,
+  cardSeveritySchema,
   cardStateSchema,
   cardTitleSchema,
   gitBranchNameSchema,
@@ -39,6 +40,12 @@ import type {
 
 const invalid = (message: string): CardFailure =>
   toCardFailure('invalid', message);
+
+/** A level that is not one of the five is refused before any round trip. */
+const severityFailure = (severity: unknown): CardFailure | null =>
+  severity === undefined || cardSeveritySchema.safeParse(severity).success
+    ? null
+    : invalid('A severity is a whole number from 1 (minimal) to 5 (urgent).');
 
 /**
  * What can be refused about the branch rule without reading the card: a
@@ -125,6 +132,7 @@ export class CardService {
       return Err(invalid('The card body is longer than the limit.'));
     }
     const rule =
+      severityFailure(params.severity) ??
       branchDeclarationFailure((params.state ?? 'idea') === 'active', params) ??
       linkDeclarationFailure(true, params);
     if (rule) {
@@ -145,10 +153,12 @@ export class CardService {
       return Err(invalid('A card needs a title.'));
     }
     const rule =
+      severityFailure(params.severity) ??
       branchDeclarationFailure(
         (params.state ?? 'active') === 'active',
         params
-      ) ?? linkDeclarationFailure(true, params);
+      ) ??
+      linkDeclarationFailure(true, params);
     if (rule) {
       return Err(rule);
     }
@@ -188,8 +198,18 @@ export class CardService {
   async editCard(
     params: EditCardParams
   ): Promise<Result<CardWrite, CardFailure>> {
-    if (params.title === undefined && params.body === undefined) {
-      return Err(invalid('An edit must change the title or the body.'));
+    if (
+      params.title === undefined &&
+      params.body === undefined &&
+      params.severity === undefined
+    ) {
+      return Err(
+        invalid('An edit must change the title, the body or the severity.')
+      );
+    }
+    const severity = severityFailure(params.severity);
+    if (severity) {
+      return Err(severity);
     }
     if (params.title !== undefined) {
       const title = cardTitleSchema.safeParse(params.title);

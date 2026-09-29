@@ -357,4 +357,28 @@ describe('CardService', () => {
     expect((await service.resolveCard('proj.x', 0)).isErr()).toBe(true);
     expect((await service.resolveCard('proj.x', 1.5)).isErr()).toBe(true);
   });
+
+  it('refuses a severity outside 1..5 before it costs a round trip', async () => {
+    const created = await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Hotfix',
+      severity: 6,
+      noLinks: 'a test',
+    });
+    expect(created.isErr()).toBe(true);
+    expect(created.unwrapErr().code).toBe('invalid');
+    expect(created.unwrapErr().message).toMatch(/severity/i);
+
+    const edited = await service.editCard({ cardId, severity: 0 });
+    expect(edited.isErr()).toBe(true);
+    expect(edited.unwrapErr().code).toBe('invalid');
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('accepts an edit that changes only the severity', async () => {
+    const result = await service.editCard({ cardId, severity: 5 });
+
+    expect(result.isOk()).toBe(true);
+    expect(repository.calls).toEqual(['edit']);
+  });
 });

@@ -171,6 +171,7 @@ export type Database = {
           branch_note: string | null;
           card_id: string;
           created_at: string;
+          from_severity: number | null;
           from_state: string | null;
           id: string;
           idempotency_key: string | null;
@@ -192,6 +193,7 @@ export type Database = {
           squash_sha: string | null;
           target_branch: string | null;
           thread: string | null;
+          to_severity: number | null;
           to_state: string | null;
           type: string;
         };
@@ -201,6 +203,7 @@ export type Database = {
           branch_note?: string | null;
           card_id: string;
           created_at?: string;
+          from_severity?: number | null;
           from_state?: string | null;
           id?: string;
           idempotency_key?: string | null;
@@ -222,6 +225,7 @@ export type Database = {
           squash_sha?: string | null;
           target_branch?: string | null;
           thread?: string | null;
+          to_severity?: number | null;
           to_state?: string | null;
           type: string;
         };
@@ -231,6 +235,7 @@ export type Database = {
           branch_note?: string | null;
           card_id?: string;
           created_at?: string;
+          from_severity?: number | null;
           from_state?: string | null;
           id?: string;
           idempotency_key?: string | null;
@@ -252,6 +257,7 @@ export type Database = {
           squash_sha?: string | null;
           target_branch?: string | null;
           thread?: string | null;
+          to_severity?: number | null;
           to_state?: string | null;
           type?: string;
         };
@@ -404,6 +410,7 @@ export type Database = {
           origin_loop_id: string | null;
           revision: number;
           scope: unknown;
+          severity: number;
           state: string;
           title: string;
           updated_at: string;
@@ -419,6 +426,7 @@ export type Database = {
           origin_loop_id?: string | null;
           revision?: number;
           scope: unknown;
+          severity?: number;
           state?: string;
           title: string;
           updated_at?: string;
@@ -434,6 +442,7 @@ export type Database = {
           origin_loop_id?: string | null;
           revision?: number;
           scope?: unknown;
+          severity?: number;
           state?: string;
           title?: string;
           updated_at?: string;
@@ -2056,6 +2065,7 @@ export type Database = {
           p_no_links?: string;
           p_origin_loop_id?: string;
           p_scope: string;
+          p_severity?: number;
           p_state?: string;
           p_thread?: string;
           p_title: string;
@@ -2078,6 +2088,7 @@ export type Database = {
           p_body?: string;
           p_card_id: string;
           p_expected_revision?: number;
+          p_severity?: number;
           p_thread?: string;
           p_title?: string;
         };
@@ -2159,6 +2170,7 @@ export type Database = {
           p_loop_id: string;
           p_no_branch?: string;
           p_no_links?: string;
+          p_severity?: number;
           p_state?: string;
           p_thread?: string;
           p_title: string;

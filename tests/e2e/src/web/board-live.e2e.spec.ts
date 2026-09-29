@@ -166,6 +166,18 @@ test.describe('The board follows the agents while it is open', () => {
       await markPage(page);
       await page.getByRole('link', { name: 'Board', exact: true }).click();
       await expect(page).toHaveURL(/\/board/);
+      // A bare /board opens the board that moved last, which a test running
+      // beside this one may own at that moment. The reader then picks this
+      // board the in-app way too: the picker pushes a new address without a
+      // load, so the page and the channel it holds stay the ones under test.
+      const slug = made.scope.split('.').at(-1) ?? made.scope;
+      const picker = page.getByTestId('board-scope-filter');
+      await expect(picker).toBeVisible();
+      if (!(await picker.textContent())?.includes(slug)) {
+        await picker.click();
+        await page.getByRole('option', { name: new RegExp(slug) }).click();
+        await expect(page).toHaveURL(new RegExp(`scope=[^&]*${slug}`));
+      }
       await expect(
         page
           .getByTestId('board-card')

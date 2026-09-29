@@ -115,6 +115,18 @@ export const cardNoteRelationSchema = z.enum([
 export type CardNoteRelation = z.infer<typeof cardNoteRelationSchema>;
 
 /**
+ * How much a card matters, on a five-step scale like an issue tracker's
+ * priority: 1 minimal, 2 low, 3 normal, 4 high, 5 urgent. Most cards sit at
+ * the default; a level is a deliberate step away from it in either direction.
+ *
+ * A DECLARATION for readers, like the state: the board never sorts, gates or
+ * dispatches by it, and its one order — the last change — stays.
+ */
+export const CARD_SEVERITY_DEFAULT = 3;
+export const cardSeveritySchema = z.number().int().min(1).max(5);
+export type CardSeverity = z.infer<typeof cardSeveritySchema>;
+
+/**
  * Size ceilings for a card's text. They are the single source the storage
  * check constraints mirror, so a value can only be widened in one place.
  *
@@ -417,6 +429,8 @@ export const cardSchema = z.object({
   title: cardTitleSchema,
   body: cardBodySchema,
   state: cardStateSchema,
+  /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
+  severity: cardSeveritySchema.default(CARD_SEVERITY_DEFAULT),
   /** Bumped by every content edit; an edit may name the one it expects. */
   revision: z.number().int().nonnegative(),
   /** The loop this card was promoted from, when it was. */
@@ -470,6 +484,10 @@ export const cardEventSchema = z.object({
   links_note: z.string().nullable().default(null),
   /** The other card's number, for a card reference the reader may see. */
   ref_number: z.number().int().nullable().default(null),
+  /** For an `edited` event that moved the severity: the levels it moved
+   * between. Null on every other event, and on an edit of the text alone. */
+  from_severity: cardSeveritySchema.nullable().default(null),
+  to_severity: cardSeveritySchema.nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
@@ -514,6 +532,9 @@ export const briefingWorkCardSchema = z.object({
   number: z.number().int().positive(),
   title: z.string(),
   state: cardStateSchema,
+  /** 1 (minimal) to 5 (urgent). Optional: a server that predates it sends
+   * none, and a briefing names only a level that is not normal. */
+  severity: cardSeveritySchema.optional(),
   /** The version this card was last carried by, when it has one. */
   released_in: z.string().nullable().optional(),
   /**
@@ -659,6 +680,8 @@ export const boardCardSchema = z.object({
   number: z.number().int().positive(),
   title: z.string(),
   state: cardStateSchema,
+  /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
+  severity: cardSeveritySchema.default(CARD_SEVERITY_DEFAULT),
   updated_at: z.string(),
   archived_at: z.string().nullable(),
   /** How many artifacts the card points at. */
@@ -888,6 +911,14 @@ export const cardInputSchema = z.object({
     .describe(
       'Where a new card starts. Defaults to idea (promote_loop: active). ' +
         'Starting in active needs `branch` or `no_branch`.'
+    ),
+  severity: cardSeveritySchema
+    .optional()
+    .describe(
+      'How much the card matters: 1 minimal, 2 low, 3 normal, 4 high, 5 ' +
+        'urgent. 3 unless said. For create and promote_loop, and for edit, ' +
+        "where a change is recorded in the card's history. A marker for " +
+        'readers: the board never sorts or gates by it.'
     ),
   to: cardStateSchema
     .optional()

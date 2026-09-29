@@ -303,4 +303,32 @@ describe('toCardViewData', () => {
     ]);
     expect(detail.feed.moreLabel).toBe('board.moreFeed');
   });
+
+  it('carries the severity to the header, and names the levels a severity edit moved between', () => {
+    const detail = detailOf(
+      viewOf({
+        card: { ...card, severity: 5 },
+        events: [
+          event(1, {
+            type: 'edited',
+            revision: 2,
+            from_severity: 3,
+            to_severity: 5,
+          }),
+          event(2, { type: 'edited', revision: 3 }),
+        ],
+      })
+    );
+
+    expect(detail.severity).toEqual({
+      level: 5,
+      hint: 'board.severity.hint{"level":5,"label":"board.severity.5"}',
+    });
+    expect(detail.history.entries[0]).toMatchObject({
+      typeLabel: 'board.event.edited',
+      transitionLabel:
+        'board.severity.change{"from":"board.severity.3","to":"board.severity.5"}',
+    });
+    expect(detail.history.entries[1]?.transitionLabel).toBeUndefined();
+  });
 });

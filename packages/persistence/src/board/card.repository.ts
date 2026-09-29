@@ -102,6 +102,9 @@ const eventViewSchema = z.object({
   link_direction: z.enum(['out', 'in']).nullable().default(null),
   links_note: z.string().nullable().default(null),
   ref_number: z.number().nullable().default(null),
+  // The levels an edit moved the severity between; null on every other row.
+  from_severity: z.number().int().nullable().default(null),
+  to_severity: z.number().int().nullable().default(null),
   created_at: z.string(),
 });
 
@@ -199,6 +202,9 @@ const boardViewSchema = z.object({
           })
           .nullable(),
         released_in: z.string().nullable().default(null),
+        // 1 (minimal) to 5 (urgent); a store that predates it reads as
+        // normal, and zod would drop the field without a line here.
+        severity: z.number().int().default(3),
         blocked: z.boolean().default(false),
         links: z.number().default(0),
         // Kept, or zod would drop them on the way: my_last only with
@@ -242,6 +248,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_title: params.title,
       p_body: params.body ?? '',
       p_state: params.state ?? 'idea',
+      p_severity: params.severity ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
@@ -258,6 +265,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_title: params.title,
       p_body: params.body ?? '',
       p_state: params.state ?? 'active',
+      p_severity: params.severity ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
@@ -326,6 +334,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_card_id: params.cardId,
       p_title: params.title ?? undefined,
       p_body: params.body ?? undefined,
+      p_severity: params.severity ?? undefined,
       p_expected_revision: params.expectedRevision ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,

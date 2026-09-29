@@ -1,4 +1,5 @@
 import {
+  CARD_SEVERITY_DEFAULT,
   formatBoardName,
   formatCardLabel,
   type BriefingWork,
@@ -57,6 +58,12 @@ const named = (card: BriefingWorkCard, work: BriefingWork): string => {
   const branches = (work.open_branches ?? [])
     .filter((branch) => branch.card_id === card.id)
     .map((branch) => branch.branch);
+  // Only a level that is not normal is worth a token: most cards sit at the
+  // default, and a session must notice the one that does not.
+  const severity =
+    card.severity !== undefined && card.severity !== CARD_SEVERITY_DEFAULT
+      ? ` sev ${card.severity}`
+      : '';
   const on = branches.length > 0 ? ` on ${branches.join(', ')}` : '';
   const released = card.released_in ? ` released v${card.released_in}` : '';
   // In parentheses: a lead list is itself comma-separated, and a card's
@@ -77,7 +84,7 @@ const named = (card: BriefingWorkCard, work: BriefingWork): string => {
   const noted = notes.length > 0 ? ` (${notes.join('; ')})` : '';
   return (
     `${formatCardLabel(card.number)} "${clip(card.title, TITLE_MAX_CHARS)}" ` +
-    `[${card.state}]${on}${released}${noted}`
+    `[${card.state}]${severity}${on}${released}${noted}`
   );
 };
 

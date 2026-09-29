@@ -50,6 +50,7 @@ test.describe('Project board in the dashboard', () => {
         loop_id: loopId,
         title: 'Migrate the ingest worker',
         body: 'Goal: no traffic on the legacy queue.',
+        severity: 5,
         no_branch: 'an e2e fixture card with no code',
       });
       expect(promoted.isError ?? false).toBe(false);
@@ -100,6 +101,11 @@ test.describe('Project board in the dashboard', () => {
     // the note and the attachment that happened after the move.
     await expect(tile).toContainText(REASON);
     await expect(tile).toContainText(`ZM-${cardNumber}`);
+    // How much it matters, as ticks under the label: five of five here.
+    await expect(tile.getByTestId('card-severity')).toHaveAttribute(
+      'data-severity',
+      '5'
+    );
 
     // Narrower than its five columns, the board scrolls inside its own row.
     // The page itself never widens, so the header and the picker stay whole.
@@ -138,6 +144,10 @@ test.describe('Project board in the dashboard', () => {
       )
     ).toBe('stable');
     await expect(page).toHaveURL(new RegExp(`/board/${cardId}$`));
+    // The open card draws the same meter under its label.
+    await expect(
+      page.getByTestId('card-modal').getByTestId('card-severity')
+    ).toHaveAttribute('data-severity', '5');
     // The board is still there underneath, not replaced.
     await expect(page.getByTestId('board')).toBeVisible();
     await expect(page.getByTestId('card-detail')).toBeVisible();
