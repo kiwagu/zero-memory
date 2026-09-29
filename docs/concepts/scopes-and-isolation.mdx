@@ -32,6 +32,15 @@ a name collision can never grant access. Collaboration is always explicit:
 the scope admin adds a member with the `reader`, `writer`, or `admin` role.
 The schema does not currently contain an organization layer.
 
+A role is a right over the scope, not over the memories other members put in
+it. A writer adds memories to a shared scope and may retire another member's
+shared memory there, with `forget` or `close_loop`, in their own name. Changing
+it in any other way (its text, scope, visibility, or what supersedes it) is
+left to its owner, and no one can hand a memory to another owner. The database
+enforces both: a rule promoted from a memory is delivered to its owner's
+sessions and follows that memory's text, so whoever could rewrite the memory
+could rewrite the owner's rules.
+
 Legacy two-label project names such as `proj.api` are accepted on memory read
 and write paths and canonicalized to the caller's own
 `proj.<owner>.api`. New code should use the canonical form, or omit `scope`
