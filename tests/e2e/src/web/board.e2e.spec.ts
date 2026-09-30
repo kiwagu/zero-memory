@@ -154,10 +154,13 @@ test.describe('Project board in the dashboard', () => {
     await expect(
       page.getByTestId('card-modal').getByTestId('card-severity')
     ).toHaveAttribute('data-severity', '5');
-    // ...and names the type beside its icon.
+    // ...leads them with the type's icon and names the type underneath.
     await expect(
       page.getByTestId('card-modal').getByTestId('card-type')
-    ).toContainText('Task');
+    ).toHaveAttribute('data-type', 'task');
+    await expect(
+      page.getByTestId('card-modal').getByTestId('card-type-label')
+    ).toHaveText('Task');
     // The board is still there underneath, not replaced.
     await expect(page.getByTestId('board')).toBeVisible();
     await expect(page.getByTestId('card-detail')).toBeVisible();

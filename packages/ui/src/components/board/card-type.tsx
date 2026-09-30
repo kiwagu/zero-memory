@@ -16,10 +16,10 @@ import { cn } from '@workspace/ui/lib/utils';
  * broken), a task (neither: docs, tests, refactoring, ops) or a spike (the
  * output is an answer, not a change).
  *
- * The icon alone fits under a board tile's label; the open card writes the
- * type beside it. A card that predates types draws a muted dashed circle, so
- * the gap is visible rather than silent. Display-only: the type, its words
- * and the hint arrive from the app.
+ * The icon leads the severity ticks on the line under a card's label, small
+ * enough that both fit the label's width. A card that predates types draws a
+ * muted dashed circle, so the gap is visible rather than silent.
+ * Display-only: the type and the hint that names it arrive from the app.
  */
 type CardTypeValue = 'story' | 'bug' | 'task' | 'spike';
 
@@ -28,8 +28,6 @@ interface CardTypeProps {
   type: CardTypeValue | null;
   /** The type in words, for hover and assistive readers. */
   hint: string;
-  /** The type written beside the icon, on the open card. */
-  label?: string;
   className?: string;
 }
 
@@ -48,7 +46,7 @@ const UNDECLARED = {
   tone: 'text-muted-foreground/60',
 };
 
-function CardType({ type, hint, label, className }: CardTypeProps) {
+function CardType({ type, hint, className }: CardTypeProps) {
   const { icon: Icon, tone } = type ? ICONS[type] : UNDECLARED;
   return (
     <span
@@ -60,9 +58,6 @@ function CardType({ type, hint, label, className }: CardTypeProps) {
       className={cn('inline-flex items-center gap-1', className)}
     >
       <Icon aria-hidden="true" className={cn('size-3.5 shrink-0', tone)} />
-      {label ? (
-        <span className="text-muted-foreground text-xs">{label}</span>
-      ) : null}
     </span>
   );
 }

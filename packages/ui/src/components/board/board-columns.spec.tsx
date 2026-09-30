@@ -125,7 +125,7 @@ describe('BoardColumns', () => {
     expect(meter?.[0]).toContain('w-full');
   });
 
-  it('draws the type under the severity meter of a tile, before its title', () => {
+  it('draws the type icon before the severity meter, under the label and before the title', () => {
     const html = renderToStaticMarkup(
       <BoardColumns
         columns={[
@@ -146,8 +146,9 @@ describe('BoardColumns', () => {
     );
     const meter = html.indexOf('data-testid="card-severity"');
     const type = html.indexOf('data-testid="card-type"');
-    expect(type).toBeGreaterThan(meter);
-    expect(type).toBeLessThan(html.indexOf('Card 45'));
+    expect(type).toBeGreaterThan(html.indexOf('ZM-45'));
+    expect(type).toBeLessThan(meter);
+    expect(meter).toBeLessThan(html.indexOf('Card 45'));
     expect(html).toContain('data-type="bug"');
     // The tile shows the icon alone; the word is on the open card.
     expect(html).not.toContain('>Bug<');

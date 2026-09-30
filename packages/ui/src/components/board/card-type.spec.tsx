@@ -25,13 +25,4 @@ describe('CardType', () => {
     expect(html).toContain('data-type="none"');
     expect(html).toContain('aria-label="Type not declared"');
   });
-
-  it('writes the type beside the icon only when given a label', () => {
-    const bare = renderToStaticMarkup(<CardType type="bug" hint="Type: Bug" />);
-    const named = renderToStaticMarkup(
-      <CardType type="bug" hint="Type: Bug" label="Bug" />
-    );
-    expect(bare).not.toContain('>Bug<');
-    expect(named).toContain('>Bug<');
-  });
 });
