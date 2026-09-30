@@ -17,6 +17,7 @@ export const CARD_FAILURES = [
   'branch_required',
   'branch_open',
   'links_required',
+  'type_required',
   'not_linked',
 ] as const;
 export type CardFailureCode = (typeof CARD_FAILURES)[number];
@@ -45,6 +46,8 @@ const DEFAULT_MESSAGE: Record<CardFailureCode, string> = {
     'Say how this card relates to the board: pass links ' +
     '[{card, relation, reason}] or no_links saying why it relates to no ' +
     'other card.',
+  type_required:
+    'Say why the work exists: pass type — story, bug, task or spike.',
   not_linked: 'These two cards have no such live relation.',
 };
 
@@ -88,6 +91,7 @@ export const cardFailureToErrorCode = (
     case 'invalid':
     case 'branch_required':
     case 'links_required':
+    case 'type_required':
       return 'validation_failed';
     case 'not_found':
       return 'not_found';

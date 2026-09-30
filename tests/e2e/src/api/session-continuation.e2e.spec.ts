@@ -75,6 +75,7 @@ test('a second conversation is offered the card the first one worked on last', a
       action: 'create',
       scope,
       title: 'Relay keys',
+      type: 'task',
       state: 'active',
       no_branch: 'e2e fixture',
       no_links: 'e2e fixture',

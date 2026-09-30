@@ -1,4 +1,4 @@
-import { newCardId, newMemoryId } from '@workspace/contracts';
+import { newCardId, newMemoryId, type CardType } from '@workspace/contracts';
 import { Ok, type Result } from 'oxide.ts';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -13,6 +13,8 @@ import { CardService } from './card.service.js';
  */
 class RecordingRepository implements ICardRepository {
   calls: string[] = [];
+  /** The type of the card every write returns. */
+  cardType: CardType | null = null;
 
   #ok(): Promise<Result<CardWrite, CardFailure>> {
     return Promise.resolve(
@@ -24,6 +26,7 @@ class RecordingRepository implements ICardRepository {
           title: 'Ship it',
           body: '',
           state: 'idea',
+          type: this.cardType,
           revision: 1,
           origin_loop_id: null,
           created_by: 'usr_0000000000000000.0000000000',
@@ -278,6 +281,7 @@ describe('CardService', () => {
     const result = await service.createCard({
       scope: 'proj.usr_test.board',
       title: 'Ship it',
+      type: 'task',
       links: [{ card: 'ZM-2', relation: 'depends_on', reason: 'needs it' }],
       noLinks: 'standalone',
     });
@@ -289,6 +293,7 @@ describe('CardService', () => {
     const result = await service.promoteLoop({
       loopId: newMemoryId(),
       title: 'Ship it',
+      type: 'spike',
       noBranch: 'research',
       noLinks: '   ',
     });
@@ -311,6 +316,7 @@ describe('CardService', () => {
     await service.createCard({
       scope: 'proj.usr_test.board',
       title: 'Ship it',
+      type: 'task',
     });
     expect(repository.calls).toEqual(['create']);
   });
@@ -362,6 +368,7 @@ describe('CardService', () => {
     const created = await service.createCard({
       scope: 'proj.usr_test.board',
       title: 'Hotfix',
+      type: 'bug',
       severity: 6,
       noLinks: 'a test',
     });
@@ -380,5 +387,71 @@ describe('CardService', () => {
 
     expect(result.isOk()).toBe(true);
     expect(repository.calls).toEqual(['edit']);
+  });
+
+  it('refuses a new card that does not say why its work exists, before its relations', async () => {
+    const created = await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Ship it',
+    });
+    expect(created.unwrapErr().code).toBe('type_required');
+    expect(created.unwrapErr().message).toMatch(/story, bug, task or spike/u);
+
+    const promoted = await service.promoteLoop({
+      loopId: newMemoryId(),
+      title: 'Ship it',
+      noBranch: 'research',
+      noLinks: 'standalone',
+    });
+    expect(promoted.unwrapErr().code).toBe('type_required');
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a type the vocabulary does not have, wherever it is passed', async () => {
+    const created = await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Ship it',
+      type: 'Bug' as never,
+      noLinks: 'a test',
+    });
+    const moved = await service.moveCard({
+      cardId,
+      to: 'active',
+      reason: 'picked up',
+      noBranch: 'research',
+      type: 'epic' as never,
+    });
+    const edited = await service.editCard({ cardId, type: 'epic' as never });
+    for (const result of [created, moved, edited]) {
+      expect(result.unwrapErr().code).toBe('invalid');
+      expect(result.unwrapErr().message).toMatch(/story, bug, task or spike/u);
+    }
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('accepts an edit that changes only the type', async () => {
+    const result = await service.editCard({ cardId, type: 'bug' });
+
+    expect(result.isOk()).toBe(true);
+    expect(repository.calls).toEqual(['edit']);
+  });
+
+  it('suggests remembering a gotcha after a bug lands, and nothing after other work', async () => {
+    const land = () =>
+      service.landCard({
+        cardId,
+        branch,
+        squashSha: 'abcdef1',
+        target: 'main',
+        reason: 'gate green',
+      });
+
+    repository.cardType = 'bug';
+    expect((await land()).unwrap().hint).toMatch(/gotcha/u);
+
+    for (const other of ['story', 'task', 'spike', null] as const) {
+      repository.cardType = other;
+      expect((await land()).unwrap().hint ?? null).toBeNull();
+    }
   });
 });

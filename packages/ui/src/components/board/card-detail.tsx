@@ -10,6 +10,10 @@ import {
   type CardSeverityProps,
 } from '@workspace/ui/components/board/card-severity';
 import {
+  CardType,
+  type CardTypeProps,
+} from '@workspace/ui/components/board/card-type';
+import {
   CardLinks,
   type CardLinkGroup,
 } from '@workspace/ui/components/board/card-links';
@@ -50,6 +54,8 @@ interface CardDetailData {
   title: string;
   /** How much it matters, drawn under the label. */
   severity?: Pick<CardSeverityProps, 'level' | 'hint'>;
+  /** Why the work exists: its icon leads the severity, its name sits under. */
+  type?: Pick<CardTypeProps, 'type' | 'hint'> & { label: string };
   badges: BadgeListItem[];
   /** "Updated <time>", already formatted. */
   updatedLabel: string;
@@ -94,6 +100,7 @@ function CardDetail({
   link,
   title,
   severity,
+  type,
   badges,
   updatedLabel,
   originLoop,
@@ -127,8 +134,33 @@ function CardDetail({
               copyHint={link.copyHint}
               copiedLabel={link.copiedLabel}
             />
-            {severity ? (
-              <CardSeverity level={severity.level} hint={severity.hint} />
+            {severity || type ? (
+              // The type icon leads, and the ticks take what is left of the
+              // label's width; the type's name sits under them.
+              <span className="flex items-center gap-1">
+                {type ? (
+                  <CardType
+                    type={type.type}
+                    hint={type.hint}
+                    className="shrink-0"
+                  />
+                ) : null}
+                {severity ? (
+                  <CardSeverity
+                    level={severity.level}
+                    hint={severity.hint}
+                    className="min-w-0 flex-1"
+                  />
+                ) : null}
+              </span>
+            ) : null}
+            {type?.label ? (
+              <span
+                className="text-muted-foreground text-xs"
+                data-testid="card-type-label"
+              >
+                {type.label}
+              </span>
             ) : null}
           </span>
           <h1

@@ -75,6 +75,7 @@ const board = async (tag: string) => {
       await rpc<{ card: CardJson }>(db, 'card_create', {
         p_scope: scope,
         p_title: title,
+        p_type: 'task',
         p_state: state,
         p_no_links: 'e2e fixture',
         ...(state === 'active' ? { p_no_branch: 'e2e fixture' } : {}),
@@ -148,6 +149,7 @@ test.describe('The cards I worked on', () => {
     const theirs = await rpc<{ card: CardJson }>(dbB, 'card_create', {
       p_scope: scope,
       p_title: 'Their card',
+      p_type: 'task',
       p_state: 'idea',
       p_no_links: 'e2e fixture',
     });
@@ -326,6 +328,7 @@ test.describe('What a new session would be offered', () => {
     const card = await rpc<{ card: CardJson }>(dbB, 'card_create', {
       p_scope: hidden,
       p_title: 'Theirs',
+      p_type: 'task',
       p_state: 'active',
       p_no_links: 'e2e fixture',
       p_no_branch: 'e2e fixture',

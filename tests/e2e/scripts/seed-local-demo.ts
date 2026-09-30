@@ -170,9 +170,12 @@ const BOARD: Array<{
   noLinks?: string;
   /** How much the card matters, 1 to 5; a card without one sits at normal. */
   severity?: number;
+  /** Why the work exists. */
+  type: 'story' | 'bug' | 'task' | 'spike';
 }> = [
   {
     title: 'Weekly decision digest per project',
+    type: 'story',
     body:
       'Goal: one short summary a week of the decisions recorded in a project.\n\n' +
       'Boundaries: reads existing memories only; no new capture path.\n\n' +
@@ -184,6 +187,7 @@ const BOARD: Array<{
   },
   {
     title: 'Translate imported memories into the canonical language',
+    type: 'bug',
     body:
       'Goal: an import written in any language is found by an English query.\n\n' +
       'Boundaries: reuse the translator of the write path; each memory keeps ' +
@@ -213,6 +217,7 @@ const BOARD: Array<{
   },
   {
     title: 'Swap the embedding model without a re-index outage',
+    type: 'task',
     body:
       'Goal: move to a stronger embedding model while recall keeps answering.\n\n' +
       'Boundaries: old and new vectors live side by side until the switch.\n\n' +
@@ -245,6 +250,7 @@ const BOARD: Array<{
   },
   {
     title: 'Paginate the memory feed',
+    type: 'story',
     body:
       'Goal: the feed stays fast however large the corpus grows.\n\n' +
       'Done when: a visit loads one page, and paging is stable while new ' +
@@ -268,6 +274,7 @@ const BOARD: Array<{
   },
   {
     title: 'Browser extension that captures decisions from web chats',
+    type: 'spike',
     body: 'Goal: decisions made in a browser chat reach memory without copy and paste.',
     severity: 1,
     links: [
@@ -574,6 +581,7 @@ try {
       action: 'create',
       scope: anchor.scope,
       title: spec.title,
+      type: spec.type,
       body: spec.body,
       ...(spec.severity ? { severity: spec.severity } : {}),
       ...(links.length > 0 ? { links } : { no_links: spec.noLinks }),

@@ -41,6 +41,7 @@ test('the board tool lists the cards I worked on, with my latest step', async ()
           action: 'create',
           scope: made.scope,
           title,
+          type: 'task',
           no_links: 'e2e fixture',
         })
       ).card;

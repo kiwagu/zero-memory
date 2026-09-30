@@ -34,6 +34,10 @@ Components live under `src/components`, global styles under
   - `board/board-card-tile` — one card as the board shows it.
   - `board/card-severity` — how much a card matters, as five ticks filled up
     to its level, drawn under the card's label on the tile and the detail.
+  - `board/card-type` — why a card's work exists, as the icon most boards use
+    for a story, bug, task or spike (a dashed circle when a card has none),
+    drawn before the severity ticks on the line under the card's label; the
+    detail names the type under that line.
   - `board/board-column-fold` — one column with the cards past the horizon
     folded behind an arrow in the right of its header; the arrow shows only
     when there are such cards, and its hint says how many and why.

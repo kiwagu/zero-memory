@@ -41,6 +41,7 @@ test.describe('Card relations over MCP', () => {
           action: 'create',
           scope,
           title: 'Rotate the relay keys',
+          type: 'task',
           no_links: 'the first card of this board',
         })
       ).card;
@@ -48,6 +49,7 @@ test.describe('Card relations over MCP', () => {
         action: 'create',
         scope,
         title: 'Ship the relay once the keys rotate',
+        type: 'task',
       });
       expect(bare.isError).toBe(true);
       expect(contentText(bare)).toMatch(/links|no_links/u);
@@ -58,6 +60,7 @@ test.describe('Card relations over MCP', () => {
           action: 'create',
           scope,
           title: 'Ship the relay',
+          type: 'task',
           links: [
             {
               card: `ZM-${keys.number}`,
@@ -81,6 +84,7 @@ test.describe('Card relations over MCP', () => {
           action: 'create',
           scope,
           title: 'Relay docs',
+          type: 'task',
           no_links: 'docs start alone',
         })
       ).card;

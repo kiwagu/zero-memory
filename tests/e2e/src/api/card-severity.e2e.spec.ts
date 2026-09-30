@@ -50,6 +50,7 @@ test.describe('Card severity over MCP', () => {
         action: 'create',
         project_hint: hint,
         title: 'Tidy the importer',
+        type: 'task',
         no_links: 'e2e fixture',
       });
       expect(plain.isError ?? false).toBe(false);
@@ -59,6 +60,7 @@ test.describe('Card severity over MCP', () => {
         action: 'create',
         project_hint: hint,
         title: 'Hotfix the relay',
+        type: 'task',
         severity: 5,
         no_links: 'e2e fixture',
       });
@@ -122,6 +124,7 @@ test.describe('Card severity over MCP', () => {
         action: 'create',
         project_hint: hint,
         title: 'Beyond the scale',
+        type: 'task',
         severity: 6,
         no_links: 'e2e fixture',
       });
@@ -132,6 +135,7 @@ test.describe('Card severity over MCP', () => {
         action: 'create',
         project_hint: hint,
         title: 'On the scale',
+        type: 'task',
         no_links: 'e2e fixture',
       });
       expect(created.isError ?? false).toBe(false);
@@ -170,6 +174,7 @@ test.describe('Card severity over MCP', () => {
         action: 'create',
         project_hint: hint,
         title: 'Hotfix the relay',
+        type: 'task',
         severity: 5,
         state: 'active',
         no_branch: 'an e2e fixture card with no code',

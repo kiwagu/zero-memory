@@ -127,6 +127,20 @@ export const cardSeveritySchema = z.number().int().min(1).max(5);
 export type CardSeverity = z.infer<typeof cardSeveritySchema>;
 
 /**
+ * Why a card's work exists, in the vocabulary most boards already use:
+ * story (a feature from the user's side, a person's or an agent's), bug (a
+ * product function is broken), task (neither: docs, tests, refactoring, ops),
+ * spike (the output is an answer, not a change).
+ *
+ * A DECLARATION for readers like the state and the severity: the board never
+ * sorts, gates or dispatches by it. Every new card declares one; a card that
+ * predates types reads as null, "not declared", until it is picked up.
+ */
+export const CARD_TYPES = ['story', 'bug', 'task', 'spike'] as const;
+export const cardTypeSchema = z.enum(CARD_TYPES);
+export type CardType = z.infer<typeof cardTypeSchema>;
+
+/**
  * Size ceilings for a card's text. They are the single source the storage
  * check constraints mirror, so a value can only be widened in one place.
  *
@@ -431,6 +445,8 @@ export const cardSchema = z.object({
   state: cardStateSchema,
   /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
   severity: cardSeveritySchema.default(CARD_SEVERITY_DEFAULT),
+  /** Why the work exists. Null on a card that predates types. */
+  type: cardTypeSchema.nullable().default(null),
   /** Bumped by every content edit; an edit may name the one it expects. */
   revision: z.number().int().nonnegative(),
   /** The loop this card was promoted from, when it was. */
@@ -488,6 +504,10 @@ export const cardEventSchema = z.object({
    * between. Null on every other event, and on an edit of the text alone. */
   from_severity: cardSeveritySchema.nullable().default(null),
   to_severity: cardSeveritySchema.nullable().default(null),
+  /** For an `edited` event that changed the type, or a `moved` one that
+   * declared it: the type before (null when there was none) and after. */
+  from_card_type: cardTypeSchema.nullable().default(null),
+  to_card_type: cardTypeSchema.nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
@@ -535,6 +555,9 @@ export const briefingWorkCardSchema = z.object({
   /** 1 (minimal) to 5 (urgent). Optional: a server that predates it sends
    * none, and a briefing names only a level that is not normal. */
   severity: cardSeveritySchema.optional(),
+  /** Why the work exists. Optional: a server that predates types sends none,
+   * and a card that predates them sends null. */
+  type: cardTypeSchema.nullable().optional(),
   /** The version this card was last carried by, when it has one. */
   released_in: z.string().nullable().optional(),
   /**
@@ -682,6 +705,9 @@ export const boardCardSchema = z.object({
   state: cardStateSchema,
   /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
   severity: cardSeveritySchema.default(CARD_SEVERITY_DEFAULT),
+  /** Why the work exists. Null on a card, or from a server, that predates
+   * types. */
+  type: cardTypeSchema.nullable().default(null),
   updated_at: z.string(),
   archived_at: z.string().nullable(),
   /** How many artifacts the card points at. */
@@ -920,6 +946,18 @@ export const cardInputSchema = z.object({
         "where a change is recorded in the card's history. A marker for " +
         'readers: the board never sorts or gates by it.'
     ),
+  type: cardTypeSchema
+    .optional()
+    .describe(
+      'Why the work exists, and so how to take it up: `story` (a feature ' +
+        "from the user's side — design it with the owner before code), " +
+        '`bug` (a product function is broken — reproduce it first and land ' +
+        'a regression test), `task` (neither: docs, tests, refactoring, ops ' +
+        '— just do it) or `spike` (the output is an answer, not a change — ' +
+        'usually `no_branch`, and the answer is remembered). Required for ' +
+        'create and promote_loop; on move, only to declare a card that has ' +
+        'none; edit changes it.'
+    ),
   to: cardStateSchema
     .optional()
     .describe(
@@ -1021,6 +1059,9 @@ export const cardOutputSchema = z.object({
    * offers as possibly related, so one call can reconsider.
    */
   candidates: z.array(cardLinkCandidateSchema).default([]),
+  /** What the call suggests doing next, when the board has a suggestion.
+   * Never a condition: the call already did what it was asked. */
+  hint: z.string().nullable().default(null),
 });
 export type CardOutput = z.infer<typeof cardOutputSchema>;
 

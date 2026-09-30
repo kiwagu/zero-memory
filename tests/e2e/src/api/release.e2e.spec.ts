@@ -36,6 +36,7 @@ test.describe('Releases over MCP', () => {
           no_links: 'e2e fixture',
           scope,
           title: 'Ship the proxy fix',
+          type: 'task',
           state: 'active',
           branch: { repo: 'acme/memory-service', name: 'feature/proxy' },
         })
@@ -88,6 +89,7 @@ test.describe('Releases over MCP', () => {
           no_links: 'e2e fixture',
           scope,
           title: 'A second card, tag-released with no build',
+          type: 'task',
           state: 'active',
           branch: { repo: 'acme/memory-service', name: 'feature/tagged' },
         })
@@ -148,6 +150,7 @@ test.describe('Releases over MCP', () => {
           no_links: 'e2e fixture',
           scope,
           title: 'Warm the cache on deploy',
+          type: 'task',
           state: 'active',
           branch,
         })

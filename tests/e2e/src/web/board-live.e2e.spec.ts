@@ -53,6 +53,7 @@ test.describe('The board follows the agents while it is open', () => {
             action: 'create',
             scope: made.scope,
             title,
+            type: 'task',
             no_links: 'e2e fixture',
           })
         ).card;
@@ -140,6 +141,7 @@ test.describe('The board follows the agents while it is open', () => {
             action: 'create',
             scope: made.scope,
             title,
+            type: 'task',
             no_links: 'e2e fixture',
           })
         ).card;

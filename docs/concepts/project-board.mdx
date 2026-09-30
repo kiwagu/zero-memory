@@ -70,6 +70,44 @@ every card. A briefing names the level only when it is not normal — `sev 5`
 beside the card — so an urgent card reaches a new session without a word
 spent on every ordinary one.
 
+## A card says why its work exists
+
+Every card declares a **type**, in the vocabulary most issue trackers use:
+
+- `story`: a feature or requirement from the user's side, where the user may
+  be a person or an agent;
+- `bug`: a product function is broken;
+- `task`: work that is neither, such as docs, tests, refactoring or ops;
+- `spike`: work whose output is an answer, not a change.
+
+The type says why the work exists, which the card's title already implies: a
+title that names a breakage is a bug even when its fix lands as a new
+feature. It is not read off the commits, because one card's work often lands
+as several commits of different kinds.
+
+`create` and `promote_loop` refuse a card without a type, with
+`type_required`. `edit` changes it, and the card's history records the type
+it replaced; no reason is asked for, as with the severity. A `move` can only
+declare a type for a card that has none: cards opened before types existed
+carry none, show as "type not declared", and are asked for one on their way
+into `active`. A different type on a move to a card that has one is refused;
+change it with `edit`.
+
+Like the state and the severity, the type is a declaration for readers: the
+board never sorts, gates or dispatches by it. What it changes is how the work
+is taken up, and the `card` tool's `type` parameter says so for each type: a bug
+is reproduced first and lands with a regression test, a story is designed
+with its owner before code, a task is done, and a spike answers its question,
+usually with no branch. When a bug card lands, the answer to `land` suggests
+remembering what the fix taught as a gotcha and attaching it to the card.
+
+The dashboard draws the type as an icon before the severity ticks, on the
+line under the card's label: green
+bookmark for a story, red bug, blue check box for a task, violet flask for a
+spike, and a muted dashed circle for a card with none. The open card names the
+type under that line. A briefing names the type of every card that has
+one, right after its state: `[active] bug sev 4`.
+
 ## Every move carries a reason
 
 A card cannot change state without a stated reason. The tool refuses a blank
@@ -528,7 +566,7 @@ itself holds only the cards.
 
 <Screenshot path="/board">
 
-![The project board as one row of state columns — idea, active, waiting, with the rest past the edge — each card with its severity as ticks under its label, each moved card showing the reason it was moved, and the idea that another card blocks marked blocked](/img/project-board.png)
+![The project board as one row of state columns — idea, active, waiting, with the rest past the edge — each card with its severity as ticks under its label and its type as an icon before them, each moved card showing the reason it was moved, and the idea that another card blocks marked blocked](/img/project-board.png)
 
 </Screenshot>
 

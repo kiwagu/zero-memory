@@ -40,6 +40,14 @@ changed through `editCard`, recorded in the history with the level it
 replaced, and never sorted, gated or dispatched by. The service refuses a
 level outside the scale before it travels.
 
+A card's **type** (`story`, `bug`, `task` or `spike`) says why its work
+exists and is required: `createCard` and `promoteLoop` refuse a card without
+one (`type_required`) before it travels, and the store refuses a card from
+before types on its way into `active` until a move declares one. `editCard`
+changes a type; a move only declares a missing one. `landCard` answers a
+landed bug with a `hint` to remember what the fix taught; a suggestion, never
+a condition.
+
 One more thing a move accounts for: **the branch**. Work entering `active`
 names the git branch it runs on, or says why it has none (`no_branch`), unless
 the card already holds an open branch; work leaving `active` with a branch

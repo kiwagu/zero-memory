@@ -51,6 +51,7 @@ export class CardCommandHandler implements ICommandHandler<
           body: command.body,
           state: command.state,
           severity: command.severity,
+          type: command.type,
           branch: command.branch,
           noBranch: command.no_branch,
           links: command.links,
@@ -65,6 +66,7 @@ export class CardCommandHandler implements ICommandHandler<
           body: command.body,
           state: command.state,
           severity: command.severity,
+          type: command.type,
           branch: command.branch,
           noBranch: command.no_branch,
           links: command.links,
@@ -78,6 +80,7 @@ export class CardCommandHandler implements ICommandHandler<
           title: command.title,
           body: command.body,
           severity: command.severity,
+          type: command.type,
           expectedRevision: command.expected_revision,
         });
         break;
@@ -92,6 +95,7 @@ export class CardCommandHandler implements ICommandHandler<
           notLanded: command.not_landed,
           links: command.links,
           noLinks: command.no_links,
+          type: command.type,
         });
         break;
       case 'land':
@@ -145,6 +149,7 @@ export class CardCommandHandler implements ICommandHandler<
       changed: write.changed,
       replayed: write.replayed,
       candidates: write.candidates ?? [],
+      hint: write.hint ?? null,
     };
   }
 

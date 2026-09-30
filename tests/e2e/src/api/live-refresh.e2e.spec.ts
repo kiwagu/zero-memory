@@ -166,6 +166,7 @@ test.describe('Each reader hears their own channel', () => {
       await rpc(asUser(tokenA), 'card_create', {
         p_scope: scope,
         p_title: 'Relay keys',
+        p_type: 'task',
         p_state: 'idea',
         p_no_links: 'e2e fixture',
       });
@@ -216,6 +217,7 @@ test.describe('Each reader hears their own channel', () => {
       await rpc(asUser(tokenA), 'card_create', {
         p_scope: scope,
         p_title: 'Relay keys',
+        p_type: 'task',
         p_state: 'idea',
         p_no_links: 'e2e fixture',
       });
@@ -319,6 +321,7 @@ test.describe('Each reader hears their own channel', () => {
       await rpc(asUser(invited.token), 'card_create', {
         p_scope: invitedBoard,
         p_title: 'Sentinel',
+        p_type: 'task',
         p_state: 'idea',
         p_no_links: 'e2e fixture',
       });

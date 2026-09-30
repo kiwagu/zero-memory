@@ -5,6 +5,7 @@ import type {
   CardLinkRelation,
   CardSeverity,
   CardState,
+  CardType,
   MemoryId,
 } from '@workspace/contracts';
 import { Command, type CommandProps } from '@workspace/domain';
@@ -28,6 +29,7 @@ export class CardCommand extends Command implements CardInput {
   public readonly body?: string;
   public readonly state?: CardState;
   public readonly severity?: CardSeverity;
+  public readonly type?: CardType;
   public readonly to?: CardState;
   public readonly reason?: string;
   public readonly expected_revision?: number;
@@ -55,6 +57,7 @@ export class CardCommand extends Command implements CardInput {
     this.body = props.body;
     this.state = props.state;
     this.severity = props.severity;
+    this.type = props.type;
     this.to = props.to;
     this.reason = props.reason;
     this.expected_revision = props.expected_revision;

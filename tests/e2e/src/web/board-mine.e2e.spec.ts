@@ -44,6 +44,7 @@ const boardOf = async (tag: string) => {
         action: 'create',
         scope: made.scope,
         title,
+        type: 'task',
         no_links: 'e2e fixture',
         ...(active ? { state: 'active', no_branch: 'e2e fixture' } : {}),
       })

@@ -10,6 +10,7 @@ import type {
   CardRelease,
   CardSeverity,
   CardState,
+  CardType,
 } from '@workspace/contracts';
 import type { Result } from 'oxide.ts';
 
@@ -46,6 +47,8 @@ export interface CreateCardParams extends CardAuthorship, EnterActiveParams {
   state?: CardState;
   /** 1 (minimal) to 5 (urgent); the store defaults to normal. */
   severity?: CardSeverity;
+  /** Why the work exists; required, and refused when missing. */
+  type?: CardType;
 }
 
 export interface PromoteLoopParams extends CardAuthorship, EnterActiveParams {
@@ -54,6 +57,8 @@ export interface PromoteLoopParams extends CardAuthorship, EnterActiveParams {
   body?: string;
   state?: CardState;
   severity?: CardSeverity;
+  /** Why the work exists; required, and refused when missing. */
+  type?: CardType;
 }
 
 export interface MoveCardParams extends CardAuthorship, EnterActiveParams {
@@ -62,6 +67,8 @@ export interface MoveCardParams extends CardAuthorship, EnterActiveParams {
   reason: string;
   /** Leaving active with an open branch that has not landed: why. */
   notLanded?: string;
+  /** Declares the type of a card that has none; a declared one is kept. */
+  type?: CardType;
 }
 
 /** A branch that landed as a squash commit on its target. */
@@ -92,6 +99,8 @@ export interface EditCardParams extends CardAuthorship {
   body?: string;
   /** A new level; the history records the one it moved from. */
   severity?: CardSeverity;
+  /** A new type; the history records the one it replaced. */
+  type?: CardType;
   expectedRevision?: number;
 }
 
@@ -140,7 +149,8 @@ export interface CardWrite {
   changed: boolean;
   replayed: boolean;
   /** What the board offered after a card said it relates to nothing. */
-  candidates?: CardLinkCandidate[];
+  candidates?: CardLinkCandidate[]; /** What the call suggests doing next; never a condition. */
+  hint?: string | null;
 }
 
 /** One attachment as a reader sees it — with a preview only if they may. */
@@ -184,6 +194,9 @@ export interface CardEventView {
   /** For an edit that moved the severity: the levels it moved between. */
   from_severity?: CardSeverity | null;
   to_severity?: CardSeverity | null;
+  /** For an edit that changed the type, or a move that declared it. */
+  from_card_type?: CardType | null;
+  to_card_type?: CardType | null;
   created_at: string;
 }
 
@@ -251,6 +264,8 @@ export interface BoardCardView {
   title: string;
   state: CardState;
   severity: CardSeverity;
+  /** Null on a card that predates types. */
+  type: CardType | null;
   updated_at: string;
   archived_at: string | null;
   refs: number;

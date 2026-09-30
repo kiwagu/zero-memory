@@ -49,6 +49,7 @@ test.describe('Project board in the dashboard', () => {
         no_links: 'e2e fixture',
         loop_id: loopId,
         title: 'Migrate the ingest worker',
+        type: 'task',
         body: 'Goal: no traffic on the legacy queue.',
         severity: 5,
         no_branch: 'an e2e fixture card with no code',
@@ -106,6 +107,11 @@ test.describe('Project board in the dashboard', () => {
       'data-severity',
       '5'
     );
+    // Why the work exists, as an icon under the ticks.
+    await expect(tile.getByTestId('card-type')).toHaveAttribute(
+      'data-type',
+      'task'
+    );
 
     // Narrower than its five columns, the board scrolls inside its own row.
     // The page itself never widens, so the header and the picker stay whole.
@@ -148,6 +154,13 @@ test.describe('Project board in the dashboard', () => {
     await expect(
       page.getByTestId('card-modal').getByTestId('card-severity')
     ).toHaveAttribute('data-severity', '5');
+    // ...leads them with the type's icon and names the type underneath.
+    await expect(
+      page.getByTestId('card-modal').getByTestId('card-type')
+    ).toHaveAttribute('data-type', 'task');
+    await expect(
+      page.getByTestId('card-modal').getByTestId('card-type-label')
+    ).toHaveText('Task');
     // The board is still there underneath, not replaced.
     await expect(page.getByTestId('board')).toBeVisible();
     await expect(page.getByTestId('card-detail')).toBeVisible();
@@ -216,6 +229,7 @@ test.describe('Project board in the dashboard', () => {
         no_links: 'e2e fixture',
         scope: quietScope,
         title: quietTitle,
+        type: 'task',
       });
       expect(quietCard.isError ?? false).toBe(false);
 
@@ -231,6 +245,7 @@ test.describe('Project board in the dashboard', () => {
         no_links: 'e2e fixture',
         scope: busyScope,
         title: busyTitle,
+        type: 'task',
       });
       expect(busyCard.isError ?? false).toBe(false);
       // One more touch, so "moved last" is unambiguous.
@@ -318,6 +333,7 @@ test.describe('Project board in the dashboard', () => {
         no_links: 'e2e fixture',
         scope,
         title: 'Order the nightly jobs',
+        type: 'task',
       });
       expect(created.isError ?? false).toBe(false);
       cardId = firstJson<CardResult>(created).card.id;
@@ -367,6 +383,7 @@ test.describe('Project board in the dashboard', () => {
             action: 'create',
             scope,
             title,
+            type: 'task',
             no_links: 'e2e fixture',
           })
         ).card;
@@ -432,6 +449,7 @@ test.describe('Project board in the dashboard', () => {
           no_links: 'e2e fixture',
           scope,
           title: 'Ship the feed pages',
+          type: 'task',
           state: 'active',
           branch: { repo: 'acme/memory-service', name: 'feature/feed-ship' },
         })
@@ -508,6 +526,7 @@ test.describe('Project board in the dashboard', () => {
         no_links: 'e2e fixture',
         scope,
         title: 'Markdown card',
+        type: 'task',
         body: [
           '**Goal** is readable.',
           '',
@@ -585,6 +604,7 @@ test.describe('Panel chain in the card dialog', () => {
           no_links: 'e2e fixture',
           scope,
           title,
+          type: 'task',
           body,
         });
         expect(created.isError ?? false).toBe(false);
@@ -727,6 +747,7 @@ test.describe('Panel chain in the card dialog', () => {
         no_links: 'e2e fixture',
         scope: b.scope,
         title: cardTitle,
+        type: 'task',
         body: 'panel-chain card body',
       });
       expect(created.isError ?? false).toBe(false);
@@ -905,6 +926,7 @@ test.describe('Panel chain in the card dialog', () => {
           no_links: 'e2e fixture',
           scope,
           title: 'Page the memory feed',
+          type: 'task',
           state: 'active',
           branch: { repo: 'acme/memory-service', name: 'feature/feed-pages' },
         })
@@ -977,6 +999,7 @@ test.describe('Panel chain in the card dialog', () => {
           title:
             'Styled scrollbars that do not break the layout under long ' +
             'content, even when the card title runs well past one line',
+          type: 'task',
         })
       ).card;
     } finally {
@@ -1039,6 +1062,7 @@ test.describe('Panel chain in the card dialog', () => {
           no_links: 'e2e fixture',
           scope,
           title: 'A card to link to',
+          type: 'task',
         })
       ).card;
       cardId = created.id;
@@ -1094,6 +1118,7 @@ test.describe('Panel chain in the card dialog', () => {
           action: 'create',
           scope,
           title,
+          type: 'task',
           ...declaration,
         });
         expect(created.isError ?? false).toBe(false);
@@ -1151,6 +1176,7 @@ test.describe('Panel chain in the card dialog', () => {
           action: 'create',
           scope: elsewhereScope,
           title: `relations elsewhere ${stamp}`,
+          type: 'task',
           no_links: 'e2e fixture',
         })
       ).card;
