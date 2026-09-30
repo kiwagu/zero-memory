@@ -63,6 +63,7 @@ test.describe('Cards across project boards', () => {
         action: 'create',
         project_hint: `Quokka Ledger ${id}`,
         title: 'The ledger export drops the last row',
+        type: 'task',
         no_links: 'e2e fixture',
       });
       expect(created.isError ?? false, contentText(created)).toBe(false);
@@ -88,6 +89,7 @@ test.describe('Cards across project boards', () => {
       const own = await agent.callTool('card', {
         action: 'create',
         title: 'Read the ledger CSV once its last row is fixed',
+        type: 'task',
         no_links: 'e2e fixture',
       });
       expect(own.isError ?? false, contentText(own)).toBe(false);
@@ -114,6 +116,7 @@ test.describe('Cards across project boards', () => {
         action: 'create',
         project_hint: `bilby-schedular-${id}`,
         title: 'A card aimed at a misspelt project',
+        type: 'task',
         no_links: 'e2e fixture',
       });
       expect(card.isError ?? false).toBe(true);
@@ -169,6 +172,7 @@ test.describe('Cards across project boards', () => {
       const card = await agent.callTool('card', {
         action: 'create',
         title: 'A card with nowhere to go',
+        type: 'task',
         no_links: 'e2e fixture',
       });
       expect(card.isError ?? false).toBe(true);
@@ -247,6 +251,7 @@ test.describe('Cards across project boards', () => {
         action: 'create',
         project_hint: 'QX',
         title: 'Meant for my own project',
+        type: 'task',
         no_links: 'e2e fixture',
       });
       expect(squatted.isError ?? false).toBe(true);
@@ -259,6 +264,7 @@ test.describe('Cards across project boards', () => {
         action: 'create',
         project_hint: `ember-dunes-${id}`,
         title: 'The survey export drops the dune heights',
+        type: 'task',
         no_links: 'e2e fixture',
       });
       expect(filed.isError ?? false, contentText(filed)).toBe(false);

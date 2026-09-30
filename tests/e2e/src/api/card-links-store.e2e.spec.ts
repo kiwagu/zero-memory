@@ -75,6 +75,7 @@ const newCard = async (
     await rpc<{ card: CardJson }>(db, 'card_create', {
       p_scope: scope,
       p_title: title,
+      p_type: 'task',
       p_no_links: 'e2e fixture',
     })
   ).card;
@@ -564,6 +565,7 @@ test.describe('Relations are assessed', () => {
     const bare = await rpc<CreateResult>(db, 'card_create', {
       p_scope: scope,
       p_title: 'Relay rollout',
+      p_type: 'task',
     });
     expect(bare.error).toBe('links_required');
     expect(Array.isArray(bare.candidates)).toBe(true);
@@ -571,6 +573,7 @@ test.describe('Relations are assessed', () => {
     const none = await rpc<CreateResult>(db, 'card_create', {
       p_scope: scope,
       p_title: 'Relay rollout',
+      p_type: 'task',
       p_no_links: 'a standalone rollout',
     });
     expect(none.error).toBeUndefined();
@@ -588,6 +591,7 @@ test.describe('Relations are assessed', () => {
     const linked = await rpc<CreateResult>(db, 'card_create', {
       p_scope: scope,
       p_title: 'Relay second rollout',
+      p_type: 'task',
       p_links: [
         {
           card: `ZM-${base.number}`,
@@ -613,6 +617,7 @@ test.describe('Relations are assessed', () => {
     const both = await rpc<CreateResult>(db, 'card_create', {
       p_scope: scope,
       p_title: 'Relay third rollout',
+      p_type: 'task',
       p_links: [
         { card: base.id, relation: 'relates_to', reason: 'same relay' },
       ],
@@ -622,12 +627,14 @@ test.describe('Relations are assessed', () => {
     const blank = await rpc<CreateResult>(db, 'card_create', {
       p_scope: scope,
       p_title: 'Relay third rollout',
+      p_type: 'task',
       p_no_links: '   ',
     });
     expect(blank.error).toBe('invalid');
     const unknown = await rpc<CreateResult>(db, 'card_create', {
       p_scope: scope,
       p_title: 'Relay third rollout',
+      p_type: 'task',
       p_links: [{ card: 'ZM-9999', relation: 'relates_to', reason: 'why' }],
     });
     expect(unknown.error).toBe('not_found');
@@ -645,6 +652,7 @@ test.describe('Relations are assessed', () => {
     const refused = await rpc<CreateResult>(db, 'card_create', {
       p_scope: scope,
       p_title: 'Relay loop',
+      p_type: 'task',
       p_links: [
         { card: a.id, relation: 'blocks', reason: 'first' },
         { card: a.id, relation: 'depends_on', reason: 'second' },
@@ -672,6 +680,7 @@ test.describe('Relations are assessed', () => {
     const refused = await rpc<CreateResult>(db, 'card_create', {
       p_scope: scope,
       p_title: 'Certificates expire early',
+      p_type: 'task',
       p_body: `Found while doing ZM-${index.number}: the edge certificates expire.`,
     });
     expect(refused.error).toBe('links_required');
@@ -703,6 +712,7 @@ test.describe('Relations are assessed', () => {
         number: 90,
         title: 'Card from before the rule',
         state: 'idea',
+        type: 'task',
         created_by: (profile as { id: string }).id,
       })
       .select('id')
@@ -826,6 +836,7 @@ test.describe('Relations are assessed', () => {
       rpc<CreateResult>(db, 'card_promote_loop', {
         p_loop_id: loopId,
         p_title: 'Migrate the relay queue',
+        p_type: 'task',
         p_no_branch: 'e2e fixture',
         ...extra,
       });
@@ -1143,6 +1154,7 @@ test.describe('Relations are read', () => {
       rpc<{ card: CardJson }>(db, 'card_create', {
         p_scope: scope,
         p_title: title,
+        p_type: 'task',
         p_state: 'active',
         p_no_branch: 'e2e fixture',
         p_no_links: 'e2e fixture',

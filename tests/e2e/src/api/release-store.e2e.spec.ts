@@ -274,6 +274,7 @@ test.describe('Release commands in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Shipped work',
+      p_type: 'task',
     });
     await rpc(db, 'card_move', {
       p_card_id: card.id,
@@ -364,6 +365,7 @@ test.describe('Release commands in the store', () => {
         p_no_links: 'e2e fixture',
         p_scope: scope,
         p_title: title,
+        p_type: 'task',
       });
       if (state !== 'idea') {
         await rpc(db, 'card_move', {
@@ -417,6 +419,7 @@ test.describe('Release commands in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: other,
       p_title: 'Elsewhere',
+      p_type: 'task',
     });
 
     const foreign = await rpc<{ recorded: string[] }>(db, 'release_record', {
@@ -458,6 +461,7 @@ test.describe('Release commands in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Briefed release',
+      p_type: 'task',
     });
     await rpc(db, 'card_move', {
       p_card_id: card.id,
@@ -549,6 +553,7 @@ test.describe('Release commands in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Landed twice',
+      p_type: 'task',
     });
     await rpc(db, 'card_move', {
       p_card_id: card.id,
@@ -613,6 +618,7 @@ test.describe('Release commands in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Landed while looked at',
+      p_type: 'task',
     });
     await rpc(db, 'card_move', {
       p_card_id: card.id,

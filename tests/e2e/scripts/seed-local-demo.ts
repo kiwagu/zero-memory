@@ -574,6 +574,7 @@ try {
       action: 'create',
       scope: anchor.scope,
       title: spec.title,
+      type: 'task',
       body: spec.body,
       ...(spec.severity ? { severity: spec.severity } : {}),
       ...(links.length > 0 ? { links } : { no_links: spec.noLinks }),

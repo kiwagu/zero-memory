@@ -85,6 +85,7 @@ test.describe('Card branches in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Page the memory feed',
+      p_type: 'task',
     });
 
     const target = `${REPO}:feature/feed-pages`;
@@ -177,6 +178,7 @@ test.describe('Card branches in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Rotate the edge certificates',
+      p_type: 'task',
     });
     await rpc(owner, 'card_attach', {
       p_card_id: card.id,
@@ -231,6 +233,7 @@ test.describe('A branch belongs to its card', () => {
       p_no_links: 'e2e fixture',
       p_scope: other,
       p_title: 'A card in the other project',
+      p_type: 'task',
     });
 
     const planted = await db.from('card_branches').insert({
@@ -282,6 +285,7 @@ test.describe('The branch rule in the store', () => {
       {
         p_scope: scope,
         p_title: 'Starts running',
+        p_type: 'task',
         p_state: 'active',
         p_no_links: 'e2e fixture',
       }
@@ -293,6 +297,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Both at once',
+      p_type: 'task',
       p_state: 'active',
       p_branch_repo: REPO,
       p_branch_name: 'feature/x',
@@ -304,6 +309,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'A branch on an idea',
+      p_type: 'task',
       p_branch_repo: REPO,
       p_branch_name: 'feature/x',
     });
@@ -313,6 +319,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Page the feed',
+      p_type: 'task',
       p_state: 'active',
       p_branch_repo: REPO,
       p_branch_name: 'feature/feed-pages',
@@ -333,6 +340,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Measure the recall gap',
+      p_type: 'task',
       p_state: 'active',
       p_no_branch: 'a measurement on the review stand, no code',
     });
@@ -350,6 +358,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Idea first',
+      p_type: 'task',
     });
     const refused = await rpc<{ error?: string }>(db, 'card_move', {
       p_card_id: card.id,
@@ -407,6 +416,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Swap the embedding model',
+      p_type: 'task',
       p_state: 'active',
       p_branch_repo: REPO,
       p_branch_name: 'feature/embeddings',
@@ -447,6 +457,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Plain idea',
+      p_type: 'task',
     });
     const stray = await rpc<{ error?: string }>(db, 'card_move', {
       p_card_id: plain.id,
@@ -613,6 +624,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Shipped long ago',
+      p_type: 'task',
     });
     await rpc(db, 'card_move', {
       p_card_id: card.id,
@@ -636,6 +648,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Already waiting',
+      p_type: 'task',
     });
     await rpc(db, 'card_move', {
       p_card_id: stay.id,
@@ -665,6 +678,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Abandoned',
+      p_type: 'task',
       p_state: 'active',
       p_branch_repo: REPO,
       p_branch_name: 'feature/abandoned',
@@ -733,6 +747,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Fixed in the branch that brought it',
+      p_type: 'task',
     });
     await rpc(db, 'card_move', {
       p_card_id: card.id,
@@ -811,6 +826,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Compat',
+      p_type: 'task',
     });
     // Exactly the arguments the previous server sends, by name.
     const moved = await rpc<{ card: CardJson }>(db, 'card_move', {
@@ -854,6 +870,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Brought the search',
+      p_type: 'task',
       p_state: 'active',
       p_branch_repo: REPO,
       p_branch_name: 'feature/search',
@@ -876,6 +893,7 @@ test.describe('The branch rule in the store', () => {
       p_no_links: 'e2e fixture',
       p_scope: scope,
       p_title: 'Search misses deleted rows',
+      p_type: 'task',
       p_state: 'active',
       p_branch_repo: REPO,
       p_branch_name: 'feature/search',

@@ -88,6 +88,7 @@ test.describe('Project board over MCP', () => {
         no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Migrate the ingest worker off the legacy queue',
+        type: 'task',
         no_branch: 'an e2e fixture card with no code',
         body: 'Goal: no traffic on the legacy queue.\nBoundaries: no schema change.',
       });
@@ -103,6 +104,7 @@ test.describe('Project board over MCP', () => {
         no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Second attempt at the same work',
+        type: 'task',
         no_branch: 'an e2e fixture card with no code',
       });
       expect(twice.isError ?? false).toBe(true);
@@ -286,6 +288,7 @@ test.describe('Project board over MCP', () => {
         no_links: 'e2e fixture',
         scope,
         title: 'Private work nobody else should see',
+        type: 'task',
         body: 'Contains the cutover checklist.',
       });
       expect(created.isError ?? false).toBe(false);
@@ -392,6 +395,7 @@ test.describe('Project board over MCP', () => {
         no_links: 'e2e fixture',
         scope: early.scope,
         title: 'Keep the nightly jobs from colliding',
+        type: 'task',
       });
       expect(created.isError ?? false).toBe(false);
       const card = firstJson<CardResult>(created).card;
@@ -585,6 +589,7 @@ test.describe('Project board over MCP', () => {
         no_links: 'e2e fixture',
         scope,
         title: 'Keep the nightly jobs from colliding',
+        type: 'task',
       });
       expect(created.isError ?? false).toBe(false);
       const card = firstJson<CardResult>(created).card;
@@ -712,6 +717,7 @@ test.describe('Project board over MCP', () => {
         no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Move the billing export to parquet',
+        type: 'task',
         no_branch: 'an e2e fixture card with no code',
       });
       expect(promoted.isError ?? false).toBe(false);
@@ -724,6 +730,7 @@ test.describe('Project board over MCP', () => {
         no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'The same work again',
+        type: 'task',
         no_branch: 'an e2e fixture card with no code',
       });
       expect(twice.isError ?? false).toBe(true);
@@ -794,6 +801,7 @@ test.describe('Project board over MCP', () => {
             no_links: 'e2e fixture',
             loop_id: control.memory_id,
             title: 'Rotate the edge certificates',
+            type: 'task',
             no_branch: 'an e2e fixture card with no code',
           })
         )
@@ -831,6 +839,7 @@ test.describe('Project board over MCP', () => {
         p_no_links: 'e2e fixture',
         p_scope: strangerScope,
         p_title: 'Not mine to claim',
+        p_type: 'task',
         p_origin_loop_id: foreign.memory_id,
       });
       expect((claimed as { error?: string } | null)?.error).toBe('not_found');
@@ -871,6 +880,7 @@ test.describe('Project board over MCP', () => {
           no_links: 'e2e fixture',
           scope: other,
           title: 'A card in the other project',
+          type: 'task',
         })
       ).card;
     } finally {
@@ -943,6 +953,7 @@ test.describe('Finding a card on the board', () => {
             action: 'create',
             scope,
             title,
+            type: 'task',
             no_links: 'e2e fixture',
           })
         ).card;

@@ -60,6 +60,7 @@ test.describe('Card branches over MCP', () => {
         no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Move the ingest worker',
+        type: 'task',
       });
       expect(bare.isError ?? false).toBe(true);
       expect(contentText(bare)).toMatch(/branch/u);
@@ -69,6 +70,7 @@ test.describe('Card branches over MCP', () => {
         no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Move the ingest worker',
+        type: 'task',
         branch: { repo: REPO, name: 'feature/ingest-queue' },
       });
       expect(promoted.isError ?? false).toBe(false);
@@ -167,6 +169,7 @@ test.describe('Card branches over MCP', () => {
           no_links: 'e2e fixture',
           scope,
           title: 'Measure the recall gap',
+          type: 'task',
         })
       ).card;
 
