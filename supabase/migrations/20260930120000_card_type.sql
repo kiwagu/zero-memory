@@ -698,8 +698,13 @@ begin
     end if;
 
     v_from := v_card.state;
+    -- A declared type is a change of content, like an edit: it bumps the
+    -- revision, so a writer holding the card's older revision gets a
+    -- conflict instead of silently overwriting the type.
     update public.cards
        set state = p_to_state, type = coalesce(v_card.type, p_type),
+           revision = v_card.revision
+                      + case when v_declares then 1 else 0 end,
            updated_at = now()
      where id = p_card_id
     returning * into v_card;
@@ -707,15 +712,17 @@ begin
     select coalesce(max(seq), 0) + 1 into v_seq
       from public.card_events where card_id = p_card_id;
 
-    -- A type this move declared rides on the move event, from none.
+    -- A type this move declared rides on the move event, from none, with
+    -- the revision it made.
     insert into public.card_events
       (card_id, scope, seq, type, agent_label, thread,
        from_state, to_state, reason, idempotency_key, branch_note, links_note,
-       to_card_type)
+       revision, to_card_type)
     values
       (p_card_id, v_card.scope, v_seq, 'moved', p_agent_label, p_thread,
        v_from, p_to_state, btrim(p_reason), p_idempotency_key,
        coalesce(v_no_branch, v_not_landed), v_no_links,
+       case when v_declares then v_card.revision end,
        case when v_declares then p_type end);
   exception when sqlstate 'ZM001' then
     return v_refusal;

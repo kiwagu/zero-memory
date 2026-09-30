@@ -157,7 +157,21 @@ test.describe('Card type over MCP', () => {
         type: 'task',
       });
       expect(picked.isError ?? false).toBe(false);
-      expect(firstJson<TypedCard>(picked).card.type).toBe('task');
+      const declared = firstJson<TypedCard>(picked).card;
+      expect(declared.type).toBe('task');
+      // Declaring a type is a change of content: it bumps the revision, so a
+      // writer that read the card before still gets a conflict, not a silent
+      // overwrite of the declared type.
+      const seen = firstJson<TypedCard>(edited).card.revision;
+      expect(declared.revision).toBe(seen + 1);
+      const stale = await agent.callTool('card', {
+        action: 'edit',
+        card_id: card.id,
+        type: 'story',
+        expected_revision: seen,
+      });
+      expect(stale.isError).toBe(true);
+      expect(contentText(stale)).toMatch(/moved on|conflict/iu);
       const after = firstJson<BoardRead>(
         await agent.callTool('board', { action: 'get', card_id: card.id })
       );
@@ -191,6 +205,57 @@ test.describe('Card type over MCP', () => {
       });
       expect(restated.isError ?? false).toBe(false);
       expect(firstJson<TypedCard>(restated).card.type).toBe('task');
+    } finally {
+      await agent.close();
+    }
+  });
+
+  test('a card that predates types and is already active is noted, attached and landed without one', async () => {
+    const seed = await readSeedState();
+    const agent = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    const hint = `/tmp/zm-e2e-type-legacy-active-${Date.now()}`;
+    try {
+      const created = await agent.callTool('card', {
+        action: 'create',
+        project_hint: hint,
+        title: 'Retry the relay handshake',
+        type: 'bug',
+        state: 'active',
+        branch: { repo: REPO, name: 'fix/relay-handshake' },
+        no_links: 'e2e fixture',
+      });
+      expect(created.isError ?? false).toBe(false);
+      const card = firstJson<TypedCard>(created).card;
+      psql(`update public.cards set type = null where id = '${card.id}'`);
+
+      const noted = await agent.callTool('card_log', {
+        action: 'note',
+        card_id: card.id,
+        text: 'The retry covers the first handshake only.',
+      });
+      expect(noted.isError ?? false).toBe(false);
+      const attached = await agent.callTool('card_log', {
+        action: 'attach',
+        card_id: card.id,
+        ref_kind: 'url',
+        ref_target: 'https://example.com/relay-handshake',
+      });
+      expect(attached.isError ?? false).toBe(false);
+      const landed = await agent.callTool('card', {
+        action: 'land',
+        card_id: card.id,
+        branch: { repo: REPO, name: 'fix/relay-handshake' },
+        squash_sha: 'abcdef2',
+        target: 'main',
+        reason: 'gate green; waits for the release',
+      });
+      expect(landed.isError ?? false).toBe(false);
+      const after = firstJson<TypedCard>(landed);
+      expect(after.card).toMatchObject({ state: 'waiting', type: null });
+      // No type, so nothing to suggest about a bug.
+      expect(after.hint).toBeNull();
     } finally {
       await agent.close();
     }
