@@ -22,6 +22,7 @@ import {
   cardEventLabel,
   cardLabel,
   cardSeverityHint,
+  cardTypeHint,
   cardStateLabel,
   cardStateVariant,
   readableBoard,
@@ -147,6 +148,7 @@ export default async function BoardPage({
       level: card.severity,
       hint: cardSeverityHint(card.severity, t),
     },
+    type: { type: card.type, hint: cardTypeHint(card.type, t) },
     badges: [
       { label: scopeLabel(card.scope), variant: 'outline' as const },
       ...(card.released_in

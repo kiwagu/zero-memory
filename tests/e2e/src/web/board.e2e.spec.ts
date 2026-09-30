@@ -107,6 +107,11 @@ test.describe('Project board in the dashboard', () => {
       'data-severity',
       '5'
     );
+    // Why the work exists, as an icon under the ticks.
+    await expect(tile.getByTestId('card-type')).toHaveAttribute(
+      'data-type',
+      'task'
+    );
 
     // Narrower than its five columns, the board scrolls inside its own row.
     // The page itself never widens, so the header and the picker stay whole.
@@ -149,6 +154,10 @@ test.describe('Project board in the dashboard', () => {
     await expect(
       page.getByTestId('card-modal').getByTestId('card-severity')
     ).toHaveAttribute('data-severity', '5');
+    // ...and names the type beside its icon.
+    await expect(
+      page.getByTestId('card-modal').getByTestId('card-type')
+    ).toContainText('Task');
     // The board is still there underneath, not replaced.
     await expect(page.getByTestId('board')).toBeVisible();
     await expect(page.getByTestId('card-detail')).toBeVisible();

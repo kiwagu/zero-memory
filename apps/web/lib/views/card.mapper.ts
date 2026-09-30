@@ -23,6 +23,9 @@ import {
   cardSeverityLabel,
   cardStateLabel,
   cardStateVariant,
+  cardTypeHint,
+  cardTypeLabel,
+  type CardEvent,
   type CardFeed,
   type CardLink,
   type CardLinkRelation,
@@ -87,6 +90,32 @@ export function cardMentionNumbers(view: CardView): number[] {
  * the reader may not see never arrives, and its label stays text, like a
  * label naming no card.
  */
+/**
+ * What an edit changed beyond its text: the severity levels and the types it
+ * moved between, in that order, or nothing for an edit of the text alone.
+ */
+function editedMarkers(event: CardEvent, t: WebTranslator): string | undefined {
+  const markers = [
+    event.from_severity !== null && event.to_severity !== null
+      ? t('board.severity.change', {
+          from: cardSeverityLabel(event.from_severity, t),
+          to: cardSeverityLabel(event.to_severity, t),
+        })
+      : null,
+    event.type === 'edited' && event.to_card_type !== null
+      ? event.from_card_type !== null
+        ? t('board.type.change', {
+            from: cardTypeLabel(event.from_card_type, t),
+            to: cardTypeLabel(event.to_card_type, t),
+          })
+        : t('board.type.declared', {
+            to: cardTypeLabel(event.to_card_type, t),
+          })
+      : null,
+  ].filter((marker): marker is string => marker !== null);
+  return markers.length > 0 ? markers.join(' · ') : undefined;
+}
+
 export function toCardViewData(
   view: CardView,
   extras: {
@@ -224,20 +253,15 @@ export function toCardViewData(
       id: event.id,
       seqLabel: String(event.seq),
       typeLabel: cardEventLabel(event.type, t),
-      // A move names the states it went between; an edit that changed the
-      // severity names the levels, in the same place.
+      // A move names the states it went between; an edit names the levels
+      // and the types it changed, in the same place.
       transitionLabel:
         event.from_state && event.to_state
           ? `${cardStateLabel(event.from_state, t)} → ${cardStateLabel(
               event.to_state,
               t
             )}`
-          : event.from_severity !== null && event.to_severity !== null
-            ? t('board.severity.change', {
-                from: cardSeverityLabel(event.from_severity, t),
-                to: cardSeverityLabel(event.to_severity, t),
-              })
-            : undefined,
+          : editedMarkers(event, t),
       actorLabel: event.agent_label ?? event.actor_id,
       timeLabel: formatTimestamp(event.created_at),
       reason: event.reason ?? undefined,
@@ -247,6 +271,15 @@ export function toCardViewData(
           : []),
         ...(event.links_note
           ? [{ label: t('board.linksDeclaration'), text: event.links_note }]
+          : []),
+        // A move that declared a card's first type says which.
+        ...(event.type === 'moved' && event.to_card_type
+          ? [
+              {
+                label: t('board.typeDeclaration'),
+                text: cardTypeLabel(event.to_card_type, t),
+              },
+            ]
           : []),
       ],
       note: event.text
@@ -293,6 +326,11 @@ export function toCardViewData(
       severity: {
         level: card.severity,
         hint: cardSeverityHint(card.severity, t),
+      },
+      type: {
+        type: card.type,
+        hint: cardTypeHint(card.type, t),
+        label: cardTypeLabel(card.type, t),
       },
       badges,
       updatedLabel: `${t('board.updated')} ${formatTimestamp(card.updated_at)}`,

@@ -124,4 +124,32 @@ describe('BoardColumns', () => {
     const meter = html.match(/<span[^>]*data-testid="card-severity"[^>]*>/);
     expect(meter?.[0]).toContain('w-full');
   });
+
+  it('draws the type under the severity meter of a tile, before its title', () => {
+    const html = renderToStaticMarkup(
+      <BoardColumns
+        columns={[
+          {
+            key: 'active',
+            label: 'Active',
+            cards: [
+              {
+                ...tile(45),
+                severity: { level: 3, hint: 'Severity 3 of 5: normal' },
+                type: { type: 'bug', hint: 'Type: Bug' },
+              },
+            ],
+          },
+        ]}
+        emptyLabel="none"
+      />
+    );
+    const meter = html.indexOf('data-testid="card-severity"');
+    const type = html.indexOf('data-testid="card-type"');
+    expect(type).toBeGreaterThan(meter);
+    expect(type).toBeLessThan(html.indexOf('Card 45'));
+    expect(html).toContain('data-type="bug"');
+    // The tile shows the icon alone; the word is on the open card.
+    expect(html).not.toContain('>Bug<');
+  });
 });

@@ -331,4 +331,62 @@ describe('toCardViewData', () => {
     });
     expect(detail.history.entries[1]?.transitionLabel).toBeUndefined();
   });
+
+  it('carries the type to the header with its name, and a card from before types as not declared', () => {
+    expect(detailOf(viewOf({ card: { ...card, type: 'bug' } })).type).toEqual({
+      type: 'bug',
+      hint: 'board.type.hint{"label":"board.type.bug"}',
+      label: 'board.type.bug',
+    });
+    expect(detailOf(viewOf()).type).toEqual({
+      type: null,
+      hint: 'board.type.none',
+      label: 'board.type.none',
+    });
+  });
+
+  it('names the types an edit changed between, beside its levels, and a type a move declared', () => {
+    const detail = detailOf(
+      viewOf({
+        card: { ...card, type: 'bug' },
+        events: [
+          event(1, {
+            type: 'moved',
+            from_state: 'idea',
+            to_state: 'active',
+            to_card_type: 'story',
+          }),
+          event(2, {
+            type: 'edited',
+            revision: 2,
+            from_card_type: 'story',
+            to_card_type: 'bug',
+          }),
+          event(3, {
+            type: 'edited',
+            revision: 3,
+            from_severity: 3,
+            to_severity: 4,
+            from_card_type: 'bug',
+            to_card_type: 'task',
+          }),
+        ],
+      })
+    );
+    const [moved, retyped, both] = detail.history.entries;
+    expect(moved?.transitionLabel).toBe(
+      'board.state.idea → board.state.active'
+    );
+    expect(moved?.declarations).toContainEqual({
+      label: 'board.typeDeclaration',
+      text: 'board.type.story',
+    });
+    expect(retyped?.transitionLabel).toBe(
+      'board.type.change{"from":"board.type.story","to":"board.type.bug"}'
+    );
+    expect(both?.transitionLabel).toBe(
+      'board.severity.change{"from":"board.severity.3","to":"board.severity.4"} · ' +
+        'board.type.change{"from":"board.type.bug","to":"board.type.task"}'
+    );
+  });
 });

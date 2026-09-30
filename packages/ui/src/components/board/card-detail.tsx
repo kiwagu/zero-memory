@@ -10,6 +10,10 @@ import {
   type CardSeverityProps,
 } from '@workspace/ui/components/board/card-severity';
 import {
+  CardType,
+  type CardTypeProps,
+} from '@workspace/ui/components/board/card-type';
+import {
   CardLinks,
   type CardLinkGroup,
 } from '@workspace/ui/components/board/card-links';
@@ -50,6 +54,8 @@ interface CardDetailData {
   title: string;
   /** How much it matters, drawn under the label. */
   severity?: Pick<CardSeverityProps, 'level' | 'hint'>;
+  /** Why the work exists, drawn with its name under the severity. */
+  type?: Pick<CardTypeProps, 'type' | 'hint' | 'label'>;
   badges: BadgeListItem[];
   /** "Updated <time>", already formatted. */
   updatedLabel: string;
@@ -94,6 +100,7 @@ function CardDetail({
   link,
   title,
   severity,
+  type,
   badges,
   updatedLabel,
   originLoop,
@@ -129,6 +136,9 @@ function CardDetail({
             />
             {severity ? (
               <CardSeverity level={severity.level} hint={severity.hint} />
+            ) : null}
+            {type ? (
+              <CardType type={type.type} hint={type.hint} label={type.label} />
             ) : null}
           </span>
           <h1

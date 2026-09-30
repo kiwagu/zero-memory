@@ -4,6 +4,10 @@ import {
   CardSeverity,
   type CardSeverityProps,
 } from '@workspace/ui/components/board/card-severity';
+import {
+  CardType,
+  type CardTypeProps,
+} from '@workspace/ui/components/board/card-type';
 import { Card, CardContent } from '@workspace/ui/components/card';
 import {
   BadgeList,
@@ -25,6 +29,8 @@ interface BoardColumnCard {
   title: string;
   /** How much it matters, drawn under the label. */
   severity?: Pick<CardSeverityProps, 'level' | 'hint'>;
+  /** Why the work exists, drawn as an icon under the severity. */
+  type?: Pick<CardTypeProps, 'type' | 'hint'>;
   badges: BadgeListItem[];
   /** What last happened and when, in one line. */
   lastEventLabel?: string;
@@ -74,6 +80,9 @@ function BoardCardTile({
                   level={card.severity.level}
                   hint={card.severity.hint}
                 />
+              ) : null}
+              {card.type ? (
+                <CardType type={card.type.type} hint={card.type.hint} />
               ) : null}
             </span>
             <span className="text-sm leading-snug font-medium">

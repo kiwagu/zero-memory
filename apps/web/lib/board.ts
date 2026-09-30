@@ -29,6 +29,12 @@ export type CardState = (typeof CARD_STATES)[number];
 
 const cardStateSchema = z.enum(CARD_STATES);
 
+/** Why a card's work exists; null on a card that predates types. */
+export const CARD_TYPES = ['story', 'bug', 'task', 'spike'] as const;
+export type CardType = (typeof CARD_TYPES)[number];
+
+const cardTypeSchema = z.enum(CARD_TYPES);
+
 /** One row of the board listing. */
 export const boardCardSchema = z.object({
   id: z.string(),
@@ -38,6 +44,8 @@ export const boardCardSchema = z.object({
   state: cardStateSchema,
   /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
   severity: z.number().int().min(1).max(5).default(3),
+  /** Why the work exists. A card or a server that predates types: null. */
+  type: cardTypeSchema.nullable().default(null),
   updated_at: z.string(),
   archived_at: z.string().nullable(),
   refs: z.number(),
@@ -154,6 +162,8 @@ export const cardSchema = z.object({
   state: cardStateSchema,
   /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
   severity: z.number().int().min(1).max(5).default(3),
+  /** Why the work exists. A card or a server that predates types: null. */
+  type: cardTypeSchema.nullable().default(null),
   revision: z.number(),
   origin_loop_id: z.string().nullable(),
   created_by: z.string(),
@@ -209,6 +219,9 @@ export const cardEventSchema = z.object({
   /** For an edit that moved the severity: the levels it moved between. */
   from_severity: z.number().nullable().default(null),
   to_severity: z.number().nullable().default(null),
+  /** For an edit that changed the type, or a move that declared it. */
+  from_card_type: cardTypeSchema.nullable().default(null),
+  to_card_type: cardTypeSchema.nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
@@ -387,6 +400,29 @@ export function cardSeverityLabel(level: number, t: WebTranslator): string {
     default:
       return String(level);
   }
+}
+
+/** A card type in words. Literal keys only (lint-enforced). */
+export function cardTypeLabel(type: CardType | null, t: WebTranslator): string {
+  switch (type) {
+    case 'story':
+      return t('board.type.story');
+    case 'bug':
+      return t('board.type.bug');
+    case 'task':
+      return t('board.type.task');
+    case 'spike':
+      return t('board.type.spike');
+    default:
+      return t('board.type.none');
+  }
+}
+
+/** What the type icon says on hover; a card from before types says so. */
+export function cardTypeHint(type: CardType | null, t: WebTranslator): string {
+  return type
+    ? t('board.type.hint', { label: cardTypeLabel(type, t) })
+    : t('board.type.none');
 }
 
 /** What the severity meter says on hover: the level, the scale, the name. */
