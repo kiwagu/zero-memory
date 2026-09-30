@@ -442,4 +442,21 @@ describe('renderBoardSummary', () => {
     expect(block).toContain('ZM-10 "Tidy" [active]');
     expect(block).not.toContain('sev 3');
   });
+
+  it("names a card's type right after its state, and nothing for a card that has none", () => {
+    const block = renderBoardSummary({
+      bound_card: null,
+      active: 2,
+      waiting: 1,
+      lead: [
+        { ...card(11, 'Relay drops', 'active'), type: 'bug', severity: 4 },
+        { ...card(12, 'Bulk import', 'waiting'), type: 'story' },
+        { ...card(13, 'From before types', 'active'), type: null },
+      ],
+    })!;
+    expect(block).toContain('ZM-11 "Relay drops" [active] bug sev 4');
+    expect(block).toContain('ZM-12 "Bulk import" [waiting] story');
+    expect(block).toContain('ZM-13 "From before types" [active]');
+    expect(block).not.toContain('null');
+  });
 });

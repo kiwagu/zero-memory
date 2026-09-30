@@ -64,6 +64,9 @@ const named = (card: BriefingWorkCard, work: BriefingWork): string => {
     card.severity !== undefined && card.severity !== CARD_SEVERITY_DEFAULT
       ? ` sev ${card.severity}`
       : '';
+  // The type tells a new session how to take the card up, so it is always
+  // named when the card has one; a card from before types has none to name.
+  const type = card.type ? ` ${card.type}` : '';
   const on = branches.length > 0 ? ` on ${branches.join(', ')}` : '';
   const released = card.released_in ? ` released v${card.released_in}` : '';
   // In parentheses: a lead list is itself comma-separated, and a card's
@@ -84,7 +87,7 @@ const named = (card: BriefingWorkCard, work: BriefingWork): string => {
   const noted = notes.length > 0 ? ` (${notes.join('; ')})` : '';
   return (
     `${formatCardLabel(card.number)} "${clip(card.title, TITLE_MAX_CHARS)}" ` +
-    `[${card.state}]${severity}${on}${released}${noted}`
+    `[${card.state}]${type}${severity}${on}${released}${noted}`
   );
 };
 
