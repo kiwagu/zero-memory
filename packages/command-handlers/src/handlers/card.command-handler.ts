@@ -145,6 +145,7 @@ export class CardCommandHandler implements ICommandHandler<
       changed: write.changed,
       replayed: write.replayed,
       candidates: write.candidates ?? [],
+      hint: null,
     };
   }
 

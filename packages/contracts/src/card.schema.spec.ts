@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   boardCardSchema,
+  briefingWorkCardSchema,
   briefingWorkSchema,
   cardBranchViewSchema,
   cardEventSchema,
   cardSeveritySchema,
+  cardTypeSchema,
   CARD_SEVERITY_DEFAULT,
   formatBoardName,
   formatBranchRef,
@@ -233,5 +235,77 @@ describe('a card carries a severity', () => {
     expect([moved.from_severity, moved.to_severity]).toEqual([3, 5]);
     const plain = cardEventSchema.parse(event);
     expect([plain.from_severity, plain.to_severity]).toEqual([null, null]);
+  });
+});
+
+describe('a card carries a type', () => {
+  it('reads one of story, bug, task or spike, and refuses anything else', () => {
+    for (const type of ['story', 'bug', 'task', 'spike']) {
+      expect(cardTypeSchema.parse(type)).toBe(type);
+    }
+    for (const type of ['Bug', 'epic', 'subtask', '', null, 1]) {
+      expect(cardTypeSchema.safeParse(type).success).toBe(false);
+    }
+  });
+
+  it('reads a card from a server that predates types as not declared', () => {
+    const row = {
+      id: 'crd_0000000000000045.0000000000',
+      scope: 'proj.usr_0000000000000001_0000000000.acme',
+      number: 45,
+      title: 'Card types',
+      state: 'active',
+      updated_at: '2026-09-30T17:00:00+00:00',
+      archived_at: null,
+      refs: 0,
+      last_event: null,
+    };
+    expect(boardCardSchema.parse(row).type).toBeNull();
+    expect(boardCardSchema.parse({ ...row, type: 'bug' }).type).toBe('bug');
+    expect(boardCardSchema.safeParse({ ...row, type: 'epic' }).success).toBe(
+      false
+    );
+    const named = {
+      id: row.id,
+      number: 45,
+      title: 'Card types',
+      state: 'active',
+    };
+    expect(briefingWorkCardSchema.parse(named).type).toBeUndefined();
+    expect(
+      briefingWorkCardSchema.parse({ ...named, type: null }).type
+    ).toBeNull();
+  });
+
+  it('reads the types an edit or a move declared, and a step that set none', () => {
+    const event = {
+      id: 'cev_0000000000000003.0000000000',
+      seq: 3,
+      type: 'moved',
+      actor_id: 'usr_0000000000000001.0000000000',
+      agent_label: null,
+      thread: null,
+      from_state: 'idea',
+      to_state: 'active',
+      reason: 'picked up',
+      revision: null,
+      text: null,
+      reply_to: null,
+      relation: null,
+      ref_kind: null,
+      ref_target: null,
+      created_at: '2026-09-30T17:00:00+00:00',
+    };
+    const declared = cardEventSchema.parse({
+      ...event,
+      from_card_type: null,
+      to_card_type: 'task',
+    });
+    expect([declared.from_card_type, declared.to_card_type]).toEqual([
+      null,
+      'task',
+    ]);
+    const plain = cardEventSchema.parse(event);
+    expect([plain.from_card_type, plain.to_card_type]).toEqual([null, null]);
   });
 });
