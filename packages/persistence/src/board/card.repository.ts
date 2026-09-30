@@ -25,6 +25,7 @@ import {
   cardLinkViewSchema,
   cardReleaseSchema,
   cardSchema,
+  cardTypeSchema,
   type Card,
 } from '@workspace/contracts';
 import { singleton } from '@workspace/di';
@@ -105,6 +106,9 @@ const eventViewSchema = z.object({
   // The levels an edit moved the severity between; null on every other row.
   from_severity: z.number().int().nullable().default(null),
   to_severity: z.number().int().nullable().default(null),
+  // The types an edit changed between, or a move declared; null elsewhere.
+  from_card_type: cardTypeSchema.nullable().default(null),
+  to_card_type: cardTypeSchema.nullable().default(null),
   created_at: z.string(),
 });
 
@@ -205,6 +209,8 @@ const boardViewSchema = z.object({
         // 1 (minimal) to 5 (urgent); a store that predates it reads as
         // normal, and zod would drop the field without a line here.
         severity: z.number().int().default(3),
+        // Null on a card that predates types; zod would drop it otherwise.
+        type: cardTypeSchema.nullable().default(null),
         blocked: z.boolean().default(false),
         links: z.number().default(0),
         // Kept, or zod would drop them on the way: my_last only with
@@ -249,6 +255,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_body: params.body ?? '',
       p_state: params.state ?? 'idea',
       p_severity: params.severity ?? undefined,
+      p_type: params.type ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
@@ -266,6 +273,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_body: params.body ?? '',
       p_state: params.state ?? 'active',
       p_severity: params.severity ?? undefined,
+      p_type: params.type ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
@@ -285,6 +293,7 @@ export class SupabaseCardRepository implements ICardRepository {
       ...branchArgs(params),
       p_not_landed: params.notLanded ?? undefined,
       ...linkArgs(params),
+      p_type: params.type ?? undefined,
     });
   }
 
@@ -335,6 +344,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_title: params.title ?? undefined,
       p_body: params.body ?? undefined,
       p_severity: params.severity ?? undefined,
+      p_type: params.type ?? undefined,
       p_expected_revision: params.expectedRevision ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,

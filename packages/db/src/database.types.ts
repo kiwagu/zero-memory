@@ -171,6 +171,7 @@ export type Database = {
           branch_note: string | null;
           card_id: string;
           created_at: string;
+          from_card_type: string | null;
           from_severity: number | null;
           from_state: string | null;
           id: string;
@@ -193,6 +194,7 @@ export type Database = {
           squash_sha: string | null;
           target_branch: string | null;
           thread: string | null;
+          to_card_type: string | null;
           to_severity: number | null;
           to_state: string | null;
           type: string;
@@ -203,6 +205,7 @@ export type Database = {
           branch_note?: string | null;
           card_id: string;
           created_at?: string;
+          from_card_type?: string | null;
           from_severity?: number | null;
           from_state?: string | null;
           id?: string;
@@ -225,6 +228,7 @@ export type Database = {
           squash_sha?: string | null;
           target_branch?: string | null;
           thread?: string | null;
+          to_card_type?: string | null;
           to_severity?: number | null;
           to_state?: string | null;
           type: string;
@@ -235,6 +239,7 @@ export type Database = {
           branch_note?: string | null;
           card_id?: string;
           created_at?: string;
+          from_card_type?: string | null;
           from_severity?: number | null;
           from_state?: string | null;
           id?: string;
@@ -257,6 +262,7 @@ export type Database = {
           squash_sha?: string | null;
           target_branch?: string | null;
           thread?: string | null;
+          to_card_type?: string | null;
           to_severity?: number | null;
           to_state?: string | null;
           type?: string;
@@ -413,6 +419,7 @@ export type Database = {
           severity: number;
           state: string;
           title: string;
+          type: string | null;
           updated_at: string;
         };
         Insert: {
@@ -429,6 +436,7 @@ export type Database = {
           severity?: number;
           state?: string;
           title: string;
+          type?: string | null;
           updated_at?: string;
         };
         Update: {
@@ -445,6 +453,7 @@ export type Database = {
           severity?: number;
           state?: string;
           title?: string;
+          type?: string | null;
           updated_at?: string;
         };
         Relationships: [
@@ -2069,6 +2078,7 @@ export type Database = {
           p_state?: string;
           p_thread?: string;
           p_title: string;
+          p_type?: string;
         };
         Returns: Json;
       };
@@ -2091,6 +2101,7 @@ export type Database = {
           p_severity?: number;
           p_thread?: string;
           p_title?: string;
+          p_type?: string;
         };
         Returns: Json;
       };
@@ -2144,6 +2155,7 @@ export type Database = {
           p_reason: string;
           p_thread?: string;
           p_to_state: string;
+          p_type?: string;
         };
         Returns: Json;
       };
@@ -2174,6 +2186,7 @@ export type Database = {
           p_state?: string;
           p_thread?: string;
           p_title: string;
+          p_type?: string;
         };
         Returns: Json;
       };

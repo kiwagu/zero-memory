@@ -44,6 +44,7 @@ describe('cardFailureToErrorCode', () => {
     ['kaboom', 'invalid', 'validation_failed'],
     ['branch_required', 'branch_required', 'validation_failed'],
     ['links_required', 'links_required', 'validation_failed'],
+    ['type_required', 'type_required', 'validation_failed'],
     ['archived', 'archived', 'conflict'],
     ['same_state', 'same_state', 'conflict'],
     ['conflict', 'conflict', 'conflict'],

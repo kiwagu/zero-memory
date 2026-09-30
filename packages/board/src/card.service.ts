@@ -8,6 +8,7 @@ import {
   cardSeveritySchema,
   cardStateSchema,
   cardTitleSchema,
+  cardTypeSchema,
   gitBranchNameSchema,
   gitCommitShaSchema,
   type Card,
@@ -46,6 +47,36 @@ const severityFailure = (severity: unknown): CardFailure | null =>
   severity === undefined || cardSeveritySchema.safeParse(severity).success
     ? null
     : invalid('A severity is a whole number from 1 (minimal) to 5 (urgent).');
+
+const TYPE_WORDS = 'story, bug, task or spike';
+
+/** A type the vocabulary does not have is refused before any round trip. */
+const typeFailure = (type: unknown): CardFailure | null =>
+  type === undefined || cardTypeSchema.safeParse(type).success
+    ? null
+    : invalid(`A card's type is one of ${TYPE_WORDS}.`);
+
+/**
+ * Every new card says why its work exists. A missing type is answerable
+ * without the card, so it is refused here, before the relation rule the store
+ * decides; whether an existing card still lacks one is the store's call.
+ */
+const typeDeclarationFailure = (type: unknown): CardFailure | null =>
+  type === undefined
+    ? toCardFailure(
+        'type_required',
+        `Say why the work exists: pass type — ${TYPE_WORDS}.`
+      )
+    : typeFailure(type);
+
+/**
+ * What a landed bug leaves to do: the fix is in, but what it taught is only
+ * kept if someone writes it down. A suggestion, never a gate.
+ */
+const BUG_LANDED_HINT =
+  'This bug landed. If the fix taught something a future session must not ' +
+  'relearn, remember it as a gotcha and attach it to this card (card_log ' +
+  'attach, ref_kind: memory).';
 
 /**
  * What can be refused about the branch rule without reading the card: a
@@ -132,6 +163,7 @@ export class CardService {
       return Err(invalid('The card body is longer than the limit.'));
     }
     const rule =
+      typeDeclarationFailure(params.type) ??
       severityFailure(params.severity) ??
       branchDeclarationFailure((params.state ?? 'idea') === 'active', params) ??
       linkDeclarationFailure(true, params);
@@ -153,6 +185,7 @@ export class CardService {
       return Err(invalid('A card needs a title.'));
     }
     const rule =
+      typeDeclarationFailure(params.type) ??
       severityFailure(params.severity) ??
       branchDeclarationFailure(
         (params.state ?? 'active') === 'active',
@@ -183,6 +216,7 @@ export class CardService {
       );
     }
     const rule =
+      typeFailure(params.type) ??
       branchDeclarationFailure(state.data === 'active', params) ??
       linkDeclarationFailure(state.data === 'active', params);
     if (rule) {
@@ -201,15 +235,18 @@ export class CardService {
     if (
       params.title === undefined &&
       params.body === undefined &&
-      params.severity === undefined
+      params.severity === undefined &&
+      params.type === undefined
     ) {
       return Err(
-        invalid('An edit must change the title, the body or the severity.')
+        invalid(
+          'An edit must change the title, the body, the severity or the type.'
+        )
       );
     }
-    const severity = severityFailure(params.severity);
-    if (severity) {
-      return Err(severity);
+    const marker = severityFailure(params.severity) ?? typeFailure(params.type);
+    if (marker) {
+      return Err(marker);
     }
     if (params.title !== undefined) {
       const title = cardTitleSchema.safeParse(params.title);
@@ -312,13 +349,16 @@ export class CardService {
     if (rule) {
       return Err(rule);
     }
-    return this.repository.land({
+    const landed = await this.repository.land({
       ...params,
       branch: branch.data,
       squashSha: sha.data,
       target: target.data,
       reason: reason.data,
     });
+    return landed.map((write) =>
+      write.card.type === 'bug' ? { ...write, hint: BUG_LANDED_HINT } : write
+    );
   }
 
   /** State how this card relates to another, with a reason. */

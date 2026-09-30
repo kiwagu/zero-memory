@@ -2043,7 +2043,8 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'you learned. `create` opens a card; `promote_loop` turns an open ' +
         'loop that outgrew a one-line handover into one, leaving the loop ' +
         'untouched; `edit` rewrites its text or sets its `severity` (1 ' +
-        'minimal to 5 urgent, 3 unless said); `move` declares where the work ' +
+        'minimal to 5 urgent, 3 unless said) or its `type`; `move` declares ' +
+        'where the work ' +
         'now stands; `archive` takes it off the board; `link` relates it to ' +
         'another card (`to_card`: id or ZM-N) and `unlink` retires that. ' +
         'EVERY MOVE AND RELATION NEEDS A ' +
@@ -2064,7 +2065,14 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'inverses) or `no_links` saying why there are none. A refusal lists ' +
         "the board's candidates: judge each one yourself, because a " +
         'relation nobody declared is invisible to every other agent. Only ' +
-        'blocked_by makes a card blocked. A new card goes on your ' +
+        'blocked_by makes a card blocked. A CARD DECLARES ITS TYPE when it ' +
+        'is created or promoted, and when an undeclared card enters active: ' +
+        "`story` (a feature from the user's side — design it with the owner " +
+        'before code), `bug` (a product function is broken — reproduce it ' +
+        'first and land a regression test), `task` (neither: docs, tests, ' +
+        'refactoring, ops — just do it) or `spike` (the output is an answer, ' +
+        'not a change — usually `no_branch`, and the answer is remembered). ' +
+        '`edit` changes it. A new card goes on your ' +
         "session's board; name ANOTHER project in `project_hint` (any " +
         'spelling, a repo path or a git remote) to file work there — your ' +
         'session stays put — and relate its cards by id (crd_…). A ' +
