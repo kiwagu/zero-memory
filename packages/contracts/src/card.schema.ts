@@ -949,9 +949,14 @@ export const cardInputSchema = z.object({
   type: cardTypeSchema
     .optional()
     .describe(
-      'Why the work exists: story, bug, task or spike. Required for create ' +
-        'and promote_loop; on move, only to declare a card that has none; ' +
-        'edit changes it.'
+      'Why the work exists, and so how to take it up: `story` (a feature ' +
+        "from the user's side — design it with the owner before code), " +
+        '`bug` (a product function is broken — reproduce it first and land ' +
+        'a regression test), `task` (neither: docs, tests, refactoring, ops ' +
+        '— just do it) or `spike` (the output is an answer, not a change — ' +
+        'usually `no_branch`, and the answer is remembered). Required for ' +
+        'create and promote_loop; on move, only to declare a card that has ' +
+        'none; edit changes it.'
     ),
   to: cardStateSchema
     .optional()
