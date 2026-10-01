@@ -199,6 +199,39 @@ default) on the dashboard hostname, so a file `terms.html` there answers at
 `/terms`. Nothing about them is baked into an image: publishing, editing or
 withdrawing a document is a file change and a reload, never a rebuild.
 
+An account that arrives without an acceptance — one created through a social
+provider, or one that existed before the documents were configured — is asked
+once, on `/accept-terms`, before any dashboard page opens, and then never
+again. An instance without documents never shows that page.
+
+## Social login
+
+The dashboard can sign people in with GitHub and Google. The buttons appear by
+themselves: at render time the login page asks Auth which providers this
+instance has enabled, so there is nothing to configure in the dashboard and
+nothing baked into its image. Enabling a provider is a Supabase setting:
+
+- Register an OAuth app at the provider with the callback
+  `https://<your-supabase-host>/auth/v1/callback` — Auth's own address, not
+  the dashboard's. On a hosted project that is
+  `https://<project-ref>.supabase.co/auth/v1/callback`.
+- Hosted project: paste the client id and secret under Authentication →
+  Providers in the Supabase dashboard.
+- Self-hosted stack: set `GITHUB_ENABLED=true`, `GITHUB_CLIENT_ID`,
+  `GITHUB_SECRET` (and the `GOOGLE_*` trio) in the stack's `.env` and restart
+  the auth container; the compose file wires them with disabled defaults.
+- Local CLI stack: `[auth.external.github]` and `[auth.external.google]` in
+  `supabase/config.toml` read their credentials through `env(...)`; flip
+  `enabled` locally and restart the stack.
+
+Accounts are one per email. Signing in with a provider whose email matches an
+existing, confirmed account links the provider to that account: the password
+keeps working and nothing is replaced. Two things are worth telling users: a
+password sign-up for an email that already belongs to a provider account is
+answered quietly with no confirmation mail (the sign-in form says so above
+its fields), and a password can be added to a provider account from the
+password-reset flow.
+
 ## Client machines
 
 The short path for a developer machine is

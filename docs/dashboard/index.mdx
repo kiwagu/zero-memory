@@ -7,7 +7,11 @@ The dashboard is the web UI for browsing and managing shared memory. It runs
 alongside the memory server (in a development checkout, `bun dev` from the repo
 root starts everything and serves the dashboard on port 3100) and signs you in
 with a Supabase account — register a new one or use a provisioned account on
-the login page.
+the login page. When the instance has GitHub or Google enabled, the login page
+offers them as buttons above the fields; an account is one per email, so a
+provider sign-in with the address of an existing, confirmed account opens that
+account rather than a second one. A page you were sent to the login form
+from is where you land afterwards.
 
 Every screen shares the same chrome. The **zero-memory** wordmark and the nav
 sit on the left. In the top-right are the signed-in account, a theme switcher
