@@ -29,6 +29,15 @@ describe('safeNext', () => {
     expect(safeNext('settings')).toBe('/');
   });
 
+  it('refuses control characters that a URL parser would strip into a host', () => {
+    // `new URL('/\t/evil.test', base)` drops the tab and lands on evil.test.
+    expect(safeNext('/\t/evil.test')).toBe('/');
+    expect(safeNext('/\n/evil.test')).toBe('/');
+    expect(safeNext('/\r/evil.test')).toBe('/');
+    expect(safeNext('/settings\u0000')).toBe('/');
+    expect(safeNext('/\u007f/evil.test')).toBe('/');
+  });
+
   it('falls back when nothing or several values arrive', () => {
     expect(safeNext(undefined)).toBe('/');
     expect(safeNext(['/a', '/b'])).toBe('/');

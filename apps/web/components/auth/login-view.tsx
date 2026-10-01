@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   LoginForm,
@@ -68,6 +68,28 @@ export function LoginView({
     string | null
   >(null);
   const [resent, setResent] = useState(false);
+
+  // Auth puts a refusal in the URL FRAGMENT when there is no code to exchange
+  // — a spent or expired link, an implicit-flow error. The server never sees
+  // a fragment, so only the browser can turn it into the message it is.
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (!hash) {
+      return;
+    }
+    const params = new URLSearchParams(hash);
+    const reason = params.get('error_description') ?? params.get('error');
+    if (!reason) {
+      return;
+    }
+    // Deferred, as the reset view does: a state write that is part of the
+    // effect's own tick would re-render in the same pass it synchronises.
+    const timer = setTimeout(() => {
+      setError(reason);
+      window.history.replaceState(null, '', window.location.pathname);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   function switchMode(next: LoginMode) {
     setMode(next);

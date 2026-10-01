@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import {
@@ -8,6 +9,7 @@ import {
 } from '@workspace/ui/components/auth/accept-terms-card';
 import type { ConsentCopy } from '@workspace/ui/components/auth/consent-sentence';
 
+import { createClient } from '@/lib/supabase/client';
 import { acceptTerms } from '@/lib/terms.actions';
 
 /**
@@ -24,6 +26,7 @@ export function AcceptTermsView({
   labels: AcceptTermsLabels;
   consent: ConsentCopy;
 }) {
+  const router = useRouter();
   const [checked, setChecked] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +40,15 @@ export function AcceptTermsView({
     setPending(false);
   }
 
+  async function handleSignOut() {
+    setPending(true);
+    // Local scope, as the dashboard's own sign-out: this browser leaves,
+    // agents authorized elsewhere keep their sessions.
+    await createClient().auth.signOut({ scope: 'local' });
+    router.replace('/login');
+    router.refresh();
+  }
+
   return (
     <AcceptTermsCard
       labels={labels}
@@ -46,6 +58,7 @@ export function AcceptTermsView({
       error={error}
       onCheckedChange={setChecked}
       onAccept={() => void handleAccept()}
+      onSignOut={() => void handleSignOut()}
     />
   );
 }

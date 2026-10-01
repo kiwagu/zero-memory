@@ -76,7 +76,10 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
     url.search = '';
-    return NextResponse.redirect(new URL(next, url));
+    const target = new URL(next, url);
+    // `safeNext` already refused anything that could resolve elsewhere; the
+    // origin check is the second lock on the same door.
+    return NextResponse.redirect(target.origin === url.origin ? target : url);
   }
 
   return response;

@@ -39,6 +39,7 @@ export default async function AcceptTermsPage({
           description: t('auth.acceptTerms.description'),
           continue: t('auth.acceptTerms.continue'),
           continuePending: t('auth.acceptTerms.continuePending'),
+          signOut: t('header.signOut'),
         }}
         consent={{
           template,

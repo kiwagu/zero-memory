@@ -18,5 +18,12 @@ export function safeNext(value: string | string[] | undefined): string {
   if (value.includes('\\') || value.includes('..')) {
     return '/';
   }
+  // A URL parser strips ASCII control characters before it looks at the
+  // string, so `/\t/evil.test` is `//evil.test` by the time it is resolved —
+  // a host, not a path. None of them belongs in a path the dashboard owns.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(value)) {
+    return '/';
+  }
   return value;
 }

@@ -83,6 +83,32 @@ test.describe('auth callback', () => {
     await expect(page).toHaveURL(/\/login\?error=missing_code$/);
     await expect(page.getByTestId('auth-login-error')).toBeVisible();
   });
+
+  test("@smoke a provider's refusal reaches the login page as the reason, not as a missing code", async ({
+    page,
+  }) => {
+    // What Auth sends back when the person cancels at the provider.
+    await page.goto(
+      '/auth/callback?error=access_denied&error_code=provider_denied&error_description=The+user+denied+access'
+    );
+    await expect(page).toHaveURL(/\/login\?error=/);
+    await expect(page.getByTestId('auth-login-error')).toHaveText(
+      'The user denied access'
+    );
+  });
+
+  test('@smoke a refusal carried in the URL fragment is shown too', async ({
+    page,
+  }) => {
+    // Auth puts the reason in the fragment when there is no code to exchange
+    // (a spent or expired link, an implicit-flow error).
+    await page.goto(
+      '/login#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired'
+    );
+    await expect(page.getByTestId('auth-login-error')).toHaveText(
+      'Email link is invalid or has expired'
+    );
+  });
 });
 
 test.describe('terms for an account that never accepted them', () => {
@@ -123,6 +149,29 @@ test.describe('terms for an account that never accepted them', () => {
     // Asked once: the next visit goes straight through.
     await page.goto('/settings');
     await expect(page).toHaveURL(/\/settings$/);
+  });
+
+  test('@smoke the gate can be left by signing out, and records nothing', async ({
+    page,
+  }) => {
+    const user = await provisionE2EUser(`terms-${Date.now()}-c@zm.e2e`, {
+      acceptedTerms: false,
+    });
+    await page.goto('/login');
+    await page.getByTestId('auth-login-email').fill(user.email);
+    await page.getByTestId('auth-login-password').fill(user.password);
+    await page.getByTestId('auth-login-submit').click();
+    await expect(page).toHaveURL(/\/accept-terms$/);
+
+    await page.getByTestId('accept-terms-sign-out').click();
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(page.getByTestId('auth-login-form')).toBeVisible();
+    // Signed out for real: the dashboard is a guest's view again.
+    await page.goto('/memories');
+    await expect(page).toHaveURL(/\/login\?next=%2Fmemories$/);
+
+    const { data } = await adminClient().auth.admin.getUserById(user.id);
+    expect(data.user?.user_metadata.terms_accepted_at ?? null).toBeNull();
   });
 
   test('@smoke an unticked acceptance does not pass', async ({ page }) => {

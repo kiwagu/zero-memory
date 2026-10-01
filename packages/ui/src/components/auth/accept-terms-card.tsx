@@ -19,6 +19,8 @@ interface AcceptTermsLabels {
   description: string;
   continue: string;
   continuePending: string;
+  /** The way out for someone who declines, or picked the wrong account. */
+  signOut: string;
 }
 
 /**
@@ -35,6 +37,7 @@ function AcceptTermsCard({
   error,
   onCheckedChange,
   onAccept,
+  onSignOut,
 }: {
   labels: AcceptTermsLabels;
   consent: ConsentCopy;
@@ -43,6 +46,7 @@ function AcceptTermsCard({
   error: string | null;
   onCheckedChange: (checked: boolean) => void;
   onAccept: () => void;
+  onSignOut: () => void;
 }) {
   return (
     <Card className="w-full max-w-sm">
@@ -92,6 +96,19 @@ function AcceptTermsCard({
           >
             {pending ? labels.continuePending : labels.continue}
           </Button>
+          <p className="text-center text-sm">
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="text-muted-foreground h-auto p-0"
+              data-testid="accept-terms-sign-out"
+              disabled={pending}
+              onClick={onSignOut}
+            >
+              {labels.signOut}
+            </Button>
+          </p>
         </form>
       </CardContent>
     </Card>
