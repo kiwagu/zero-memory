@@ -1,7 +1,9 @@
 import { BuildVersion } from '@/components/build-version';
 import { LoginView } from '@/components/auth/login-view';
+import { readEnabledProviders } from '@/lib/auth-providers';
 import { getRequestMessages } from '@/lib/i18n';
 import { legalLinks } from '@/lib/legal';
+import { safeNext } from '@/lib/safe-next';
 
 export default async function LoginPage({
   searchParams,
@@ -11,8 +13,14 @@ export default async function LoginPage({
   const { t } = await getRequestMessages();
   // A failed auth callback redirects here with its reason. Dropping it is how
   // a broken recovery link becomes "clicking the mail did nothing".
-  const failure = (await searchParams).error;
+  const params = await searchParams;
+  const failure = params.error;
   const initialError = typeof failure === 'string' ? failure : undefined;
+  // Where the guard sent the guest from; cleaned, because it is URL input.
+  const next = safeNext(params.next);
+  // Which social buttons to draw — this instance's Auth settings decide, at
+  // render time, so one image serves instances with different providers.
+  const providers = await readEnabledProviders();
   // Read here, in the server component, so the addresses stay RUNTIME
   // configuration: the dashboard image is deployment-agnostic, and a value
   // inlined at build time would tie one image to one instance's documents.
@@ -30,6 +38,14 @@ export default async function LoginPage({
     <main className="flex min-h-screen items-center justify-center p-4">
       <LoginView
         initialError={initialError}
+        next={next}
+        providers={providers}
+        providerLabels={{
+          github: t('auth.providers.github'),
+          google: t('auth.providers.google'),
+          or: t('auth.providers.or'),
+          linkedHint: t('auth.providers.linkedHint'),
+        }}
         legal={legal}
         consentLabels={{
           // One sentence per configuration: an instance that publishes only

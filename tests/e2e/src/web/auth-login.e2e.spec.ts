@@ -34,4 +34,27 @@ test.describe('dashboard login', () => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByTestId('insights-page')).toBeVisible();
   });
+
+  test('@smoke a guest sent to the login page returns to where they were going', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    await page.goto('/settings');
+    // The guard keeps the destination, so the detour is invisible afterwards.
+    await expect(page).toHaveURL(/\/login\?next=%2Fsettings$/);
+    await page.getByTestId('auth-login-email').fill(seed.userA.email);
+    await page.getByTestId('auth-login-password').fill(seed.userA.password);
+    await page.getByTestId('auth-login-submit').click();
+    await expect(page).toHaveURL(/\/settings$/);
+  });
+
+  test('@smoke a return path to another site is refused', async ({ page }) => {
+    const seed = await readSeedState();
+    await page.goto('/login?next=https%3A%2F%2Fevil.test%2Fx');
+    await page.getByTestId('auth-login-email').fill(seed.userA.email);
+    await page.getByTestId('auth-login-password').fill(seed.userA.password);
+    await page.getByTestId('auth-login-submit').click();
+    await expect(page.getByTestId('insights-page')).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+  });
 });

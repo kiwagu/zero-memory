@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { externalOrigin } from '@/lib/external-origin';
+import { safeNext } from '@/lib/safe-next';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 /**
@@ -12,7 +13,9 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const origin = externalOrigin(request);
   const code = searchParams.get('code');
-  const next = searchParams.get('next') ?? '/';
+  // Attacker-controlled: a provider sign-in carries it through the provider
+  // and back, so it is cleaned here the same way the login page cleans it.
+  const next = safeNext(searchParams.get('next') ?? undefined);
 
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=missing_code`);
