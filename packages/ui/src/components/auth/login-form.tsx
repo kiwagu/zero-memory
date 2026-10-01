@@ -12,6 +12,10 @@ import {
 } from '@workspace/ui/components/card';
 import { Field, FieldLabel } from '@workspace/ui/components/field';
 import { Input } from '@workspace/ui/components/input';
+import {
+  ConsentSentence,
+  type ConsentCopy,
+} from '@workspace/ui/components/auth/consent-sentence';
 import { ProviderMark } from '@workspace/ui/components/auth/provider-mark';
 
 /**
@@ -40,20 +44,11 @@ interface LoginFormLabels {
 }
 
 /**
- * What a deployment asks a new account to accept. Absent = the instance
- * publishes no documents, and then nothing about consent is rendered at all.
- *
- * `template` carries the two placeholders `{terms}` and `{privacy}`; each is
- * replaced by a link when its address is configured and by plain text when it
- * is not, so an instance that publishes only one document still reads as a
- * sentence.
+ * What a deployment asks a new account to accept, plus the checkbox state.
+ * Absent = the instance publishes no documents, and then nothing about
+ * consent is rendered at all. The sentence itself is ConsentSentence's.
  */
-interface LoginFormConsent {
-  template: string;
-  termsLabel: string;
-  privacyLabel: string;
-  termsHref?: string;
-  privacyHref?: string;
+interface LoginFormConsent extends ConsentCopy {
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
 }
@@ -153,44 +148,6 @@ function ProviderButtons({
         <span className="bg-border h-px flex-1" />
       </div>
     </div>
-  );
-}
-
-/**
- * The consent sentence with its links in place. The copy arrives already
- * translated, so the only thing decided here is where a link goes — splitting
- * on the placeholders keeps the word order of every language intact, which
- * concatenating fragments would not.
- */
-function ConsentSentence({ consent }: { consent: LoginFormConsent }) {
-  const parts = consent.template.split(/(\{terms\}|\{privacy\})/g);
-  return (
-    <span>
-      {parts.map((part, index) => {
-        const isTerms = part === '{terms}';
-        const isPrivacy = part === '{privacy}';
-        if (!isTerms && !isPrivacy) {
-          return <React.Fragment key={index}>{part}</React.Fragment>;
-        }
-        const label = isTerms ? consent.termsLabel : consent.privacyLabel;
-        const href = isTerms ? consent.termsHref : consent.privacyHref;
-        if (!href) {
-          return <React.Fragment key={index}>{label}</React.Fragment>;
-        }
-        return (
-          <a
-            key={index}
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            data-testid={isTerms ? 'auth-login-terms' : 'auth-login-privacy'}
-            className="text-foreground underline underline-offset-2"
-          >
-            {label}
-          </a>
-        );
-      })}
-    </span>
   );
 }
 

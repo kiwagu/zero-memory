@@ -27,14 +27,30 @@ const adminClient = (): SupabaseClient =>
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-/** Creates the user if missing, otherwise re-syncs the known e2e password. */
-export const provisionE2EUser = async (email: string): Promise<E2EUser> => {
+/**
+ * Creates the user if missing, otherwise re-syncs the known e2e password.
+ *
+ * The stand publishes legal documents, and the dashboard asks an account
+ * that never accepted them to do so once before any page — so a fixture
+ * account carries an acceptance, the way a password sign-up records one. A
+ * spec that wants the un-accepted state (a provider-created account) passes
+ * `acceptedTerms: false`.
+ */
+export const provisionE2EUser = async (
+  email: string,
+  options: { acceptedTerms?: boolean } = {}
+): Promise<E2EUser> => {
   assertE2EEmail(email);
   const admin = adminClient();
+  const acceptedTerms = options.acceptedTerms ?? true;
+  const userMetadata = acceptedTerms
+    ? { terms_accepted_at: new Date().toISOString() }
+    : { terms_accepted_at: null };
   const created = await admin.auth.admin.createUser({
     email,
     password: e2eEnv.password,
     email_confirm: true,
+    user_metadata: userMetadata,
   });
   if (!created.error) {
     return { id: created.data.user.id, email, password: e2eEnv.password };
@@ -55,6 +71,7 @@ export const provisionE2EUser = async (email: string): Promise<E2EUser> => {
   }
   const updated = await admin.auth.admin.updateUserById(existing.id, {
     password: e2eEnv.password,
+    user_metadata: userMetadata,
   });
   if (updated.error) {
     throw new Error(

@@ -11,6 +11,13 @@ import { serverSupabaseEnvironment } from './lib/supabase/env';
  * round-trip to the auth server after the key set is cached).
  */
 export async function proxy(request: NextRequest) {
+  // Server layouts cannot read the URL; the dashboard layout needs the path
+  // to send an account back to it after a one-time acceptance. Set on the
+  // REQUEST so every `NextResponse.next({ request })` below forwards it.
+  request.headers.set(
+    'x-pathname',
+    request.nextUrl.pathname + request.nextUrl.search
+  );
   let response = NextResponse.next({ request });
   const { url, anonKey, authCookieName } = serverSupabaseEnvironment();
 
