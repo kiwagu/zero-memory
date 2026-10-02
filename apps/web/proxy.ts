@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { safeNext } from './lib/safe-next';
 import { serverSupabaseEnvironment } from './lib/supabase/env';
 
 /**
@@ -10,6 +11,13 @@ import { serverSupabaseEnvironment } from './lib/supabase/env';
  * round-trip to the auth server after the key set is cached).
  */
 export async function proxy(request: NextRequest) {
+  // Server layouts cannot read the URL; the dashboard layout needs the path
+  // to send an account back to it after a one-time acceptance. Set on the
+  // REQUEST so every `NextResponse.next({ request })` below forwards it.
+  request.headers.set(
+    'x-pathname',
+    request.nextUrl.pathname + request.nextUrl.search
+  );
   let response = NextResponse.next({ request });
   const { url, anonKey, authCookieName } = serverSupabaseEnvironment();
 
@@ -49,17 +57,29 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/auth/');
 
   if (!isAuthenticated && !isPublic) {
+    // Keep where the guest was going: after sign-in the login page sends them
+    // back there. The dashboard root is the default and needs no parameter.
+    const destination = pathname + request.nextUrl.search;
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.search = '';
+    if (destination !== '/') {
+      url.searchParams.set('next', destination);
+    }
     return NextResponse.redirect(url);
   }
 
   if (isAuthenticated && isLoginPage) {
+    const next = safeNext(
+      request.nextUrl.searchParams.get('next') ?? undefined
+    );
     const url = request.nextUrl.clone();
     url.pathname = '/';
     url.search = '';
-    return NextResponse.redirect(url);
+    const target = new URL(next, url);
+    // `safeNext` already refused anything that could resolve elsewhere; the
+    // origin check is the second lock on the same door.
+    return NextResponse.redirect(target.origin === url.origin ? target : url);
   }
 
   return response;

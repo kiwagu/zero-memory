@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   LoginForm,
@@ -14,11 +14,15 @@ import {
   type MailSentNoticeLabels,
 } from '@workspace/ui/components/auth/mail-sent-notice';
 
+import type { SocialProvider } from '@/lib/auth-providers';
 import { createClient } from '@/lib/supabase/client';
 import type { LegalLinks } from '@/lib/legal';
 
 export function LoginView({
   initialError,
+  next,
+  providers,
+  providerLabels,
   labels,
   confirmationLabels,
   legal,
@@ -26,6 +30,16 @@ export function LoginView({
 }: {
   /** Reason a redirect landed here, e.g. a callback that could not complete. */
   initialError?: string;
+  /** Where to go after sign-in; already cleaned by the page. */
+  next: string;
+  /** The social providers this instance enables, in display order. */
+  providers: SocialProvider[];
+  providerLabels: {
+    github: string;
+    google: string;
+    or: string;
+    linkedHint: string;
+  };
   labels: LoginFormLabels;
   /** Resolved from this deployment's configuration; absent documents = no gate. */
   legal: LegalLinks;
@@ -54,6 +68,28 @@ export function LoginView({
     string | null
   >(null);
   const [resent, setResent] = useState(false);
+
+  // Auth puts a refusal in the URL FRAGMENT when there is no code to exchange
+  // — a spent or expired link, an implicit-flow error. The server never sees
+  // a fragment, so only the browser can turn it into the message it is.
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (!hash) {
+      return;
+    }
+    const params = new URLSearchParams(hash);
+    const reason = params.get('error_description') ?? params.get('error');
+    if (!reason) {
+      return;
+    }
+    // Deferred, as the reset view does: a state write that is part of the
+    // effect's own tick would re-render in the same pass it synchronises.
+    const timer = setTimeout(() => {
+      setError(reason);
+      window.history.replaceState(null, '', window.location.pathname);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
 
   function switchMode(next: LoginMode) {
     setMode(next);
@@ -113,7 +149,7 @@ export function LoginView({
         setPending(false);
         return;
       }
-      router.replace('/');
+      router.replace(next);
       router.refresh();
       return;
     }
@@ -127,8 +163,29 @@ export function LoginView({
       setPending(false);
       return;
     }
-    router.replace('/');
+    router.replace(next);
     router.refresh();
+  }
+
+  async function handleProvider(provider: SocialProvider) {
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    const supabase = createClient();
+    // The provider sends the browser to Auth, Auth to /auth/callback with a
+    // code, and the callback — after exchanging it — to `next`. The callback
+    // cleans `next` again: it travels through two other sites on the way.
+    const { error: providerError } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
+    });
+    if (providerError) {
+      setError(providerError.message);
+      setPending(false);
+    }
+    // On success the browser is already navigating away; nothing to reset.
   }
 
   async function handleResend() {
@@ -188,6 +245,19 @@ export function LoginView({
       onModeChange={switchMode}
       onSubmit={() => void handleSubmit()}
       forgotPasswordHref="/forgot-password"
+      providers={
+        providers.length > 0
+          ? {
+              items: providers.map((id) => ({
+                id,
+                label: providerLabels[id],
+              })),
+              dividerLabel: providerLabels.or,
+              linkedHint: providerLabels.linkedHint,
+              onSelect: (id) => void handleProvider(id),
+            }
+          : undefined
+      }
       consent={
         legal.required
           ? {

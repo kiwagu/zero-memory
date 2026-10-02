@@ -67,6 +67,22 @@ enable_signup = true
 double_confirm_changes = true
 enable_confirmations = true
 
+# Social providers. The dashboard draws a button for every provider this stack
+# reports as enabled, so the switch here is the whole wiring. Off by default:
+# enabling one needs an OAuth app at the provider with the callback
+# http://127.0.0.1:55321/auth/v1/callback and its credentials exported in the
+# shell that runs `supabase start` (`env()` reads them from there). Flip
+# `enabled` locally for a session and never commit it on.
+[auth.external.github]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GITHUB_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GITHUB_SECRET)"
+
+[auth.external.google]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+
 # Our own templates instead of the built-in ones, so what the mail catcher shows
 # is the markup a real user receives. Generated — edit the components in
 # packages/email and re-run `bun run --cwd packages/email mail:export`; the

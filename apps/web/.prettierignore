@@ -1,4 +1,8 @@
 .next/
+# The review stand builds into its own cache directory next to `.next/`; a
+# stale one holds gigabytes of chunks that the pre-commit format walk would
+# otherwise read file by file.
+.next-review/
 out/
 build/
 next-env.d.ts

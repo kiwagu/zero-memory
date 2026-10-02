@@ -80,6 +80,20 @@ enable_signup = true
 double_confirm_changes = true
 enable_confirmations = true
 
+# One provider on, one off, with credentials that open nothing: the suite
+# checks that the login page draws exactly the enabled provider and that Auth
+# hands the browser to github.com for it while refusing the disabled one. No
+# real provider account is ever used on this stand.
+[auth.external.github]
+enabled = true
+client_id = "e2e-github-client-id"
+secret = "e2e-github-secret"
+
+[auth.external.google]
+enabled = false
+client_id = "e2e-google-client-id"
+secret = "e2e-google-secret"
+
 # Same templates as every other stack — the point of asserting mail here is that
 # the recovery spec sees what a real user gets, not GoTrue's built-in default.
 # Generated: `bun run --cwd packages/email mail:export`; paths are relative to

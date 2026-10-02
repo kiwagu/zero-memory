@@ -38,9 +38,15 @@ dependency is `@workspace/db` for the generated database types.
 - `/api/panels/[kind]/[id]` — the data behind one panel of the chain (`memory`,
   `card` or `entity`): exactly what that resource's page shows, read under the
   viewer's session; anything the viewer may not read is a 404.
-- `/login`, `/forgot-password`, `/reset-password` — Supabase auth flows.
-  `proxy.ts` refreshes the session and redirects unauthenticated requests to
-  `/login`.
+- `/login`, `/forgot-password`, `/reset-password` — Supabase auth flows. The
+  login page draws a button for every social provider the instance's Auth
+  settings report as enabled (`lib/auth-providers.ts`), and honours a
+  site-root `next` so a guest returns to the page that sent them. `proxy.ts`
+  refreshes the session and redirects unauthenticated requests to `/login`
+  with that `next`.
+- `/accept-terms` — the one-time acceptance an account owes on an instance
+  that publishes legal documents when it arrived without one (created through
+  a provider). The dashboard layout sends such accounts here first.
 
 ## Views
 

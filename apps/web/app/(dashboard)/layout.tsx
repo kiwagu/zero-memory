@@ -10,9 +10,15 @@ import {
   type DashboardNavItem,
 } from '@/components/dashboard-sidebar';
 import { DashboardTopbar } from '@/components/dashboard-topbar';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+
 import { currentAccount } from '@/lib/account';
 import { getRequestMessages } from '@/lib/i18n';
+import { legalLinks } from '@/lib/legal';
+import { safeNext } from '@/lib/safe-next';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { termsGate } from '@/lib/terms-gate';
 
 export default async function DashboardLayout({
   children,
@@ -28,6 +34,19 @@ export default async function DashboardLayout({
   modal: React.ReactNode;
 }>) {
   const supabase = await createServerSupabaseClient();
+  // An account that arrived without accepting this instance's documents —
+  // created through a provider — is asked once before any dashboard page.
+  // The guard put the requested path in a header, because a layout cannot
+  // see the URL by itself; it becomes the return path after acceptance.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  if (termsGate(legalLinks(), claimsData?.claims ?? null) === 'accept') {
+    const requested = safeNext((await headers()).get('x-pathname') ?? '/');
+    redirect(
+      requested === '/'
+        ? '/accept-terms'
+        : `/accept-terms?next=${encodeURIComponent(requested)}`
+    );
+  }
   const account = await currentAccount(supabase);
   const { t } = await getRequestMessages();
 
