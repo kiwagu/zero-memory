@@ -117,6 +117,21 @@ test.describe('agent authorization in the browser', () => {
     await expect(page.getByTestId('oauth-consent-account')).toHaveText(
       user.email
     );
+    // Everything an allowed client can do is named, account deletion included.
+    for (const area of [
+      'memories',
+      'graph',
+      'conflicts',
+      'rules',
+      'board',
+      'projects',
+      'activity',
+      'account',
+    ]) {
+      await expect(
+        page.getByTestId(`oauth-consent-area-${area}`)
+      ).toBeVisible();
+    }
     await page.getByTestId('oauth-consent-allow').click();
 
     await page.waitForURL((url) => url.href.startsWith(REDIRECT_URI));

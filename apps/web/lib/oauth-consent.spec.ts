@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AUTHORIZATION_ID_RE,
   decideAuthorization,
-  describeScopes,
   readAuthorization,
   returnHost,
 } from './oauth-consent';
@@ -139,17 +138,5 @@ describe('what the consent screen says', () => {
     expect(returnHost('cursor://anysphere.cursor-mcp/oauth/callback')).toBe(
       'cursor://anysphere.cursor-mcp'
     );
-  });
-
-  it('describes each known scope, and shows an unknown one as is', () => {
-    const labels = { read: 'Read', write: 'Write' };
-    expect(describeScopes('mcp:read mcp:write', labels)).toEqual([
-      'Read',
-      'Write',
-    ]);
-    expect(describeScopes('mcp:read  other', labels)).toEqual([
-      'Read',
-      'other',
-    ]);
   });
 });

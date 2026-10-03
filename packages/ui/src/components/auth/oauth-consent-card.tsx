@@ -12,13 +12,24 @@ import {
   CardTitle,
 } from '@workspace/ui/components/card';
 
+/**
+ * One area of what the client may do as the person, in plain words.
+ * `destructive` marks an area whose actions cannot be taken back.
+ */
+interface OAuthConsentArea {
+  id: string;
+  title: string;
+  body: string;
+  destructive?: boolean;
+}
+
 /** Translated copy. `{client}`, `{host}` and `{account}` are placeholders. */
 interface OAuthConsentLabels {
   title: string;
   unnamedClient: string;
   description: string;
-  /** One line per permission the client asks for, in plain words. */
-  scopes: string[];
+  /** Everything an allowed client can reach; the screen hides none of it. */
+  areas: OAuthConsentArea[];
   returnTo: string;
   signedInAs: string;
   /** The way out for someone signed in with the wrong account. */
@@ -104,9 +115,20 @@ function OAuthConsentCard({
         <CardDescription>{labels.description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <ul className="list-disc space-y-1 pl-5 text-sm">
-          {labels.scopes.map((scope) => (
-            <li key={scope}>{scope}</li>
+        <ul className="space-y-2 text-sm">
+          {labels.areas.map((area) => (
+            <li key={area.id} data-testid={`oauth-consent-area-${area.id}`}>
+              <span
+                className={
+                  area.destructive
+                    ? 'text-destructive font-medium'
+                    : 'font-medium'
+                }
+              >
+                {area.title}
+              </span>
+              <span className="text-muted-foreground block">{area.body}</span>
+            </li>
           ))}
         </ul>
         <p className="text-muted-foreground text-sm">
@@ -172,4 +194,4 @@ function OAuthConsentCard({
   );
 }
 
-export { OAuthConsentCard, type OAuthConsentLabels };
+export { OAuthConsentCard, type OAuthConsentArea, type OAuthConsentLabels };

@@ -10,7 +10,15 @@ const labels: OAuthConsentLabels = {
   title: '{client} wants access to your memory',
   unnamedClient: 'An unnamed client',
   description: 'If you allow it, it will be able to:',
-  scopes: ['Read your memories and board', 'Save memories and move cards'],
+  areas: [
+    { id: 'memories', title: 'Memories', body: 'Search and save memories' },
+    {
+      id: 'account',
+      title: 'Your account',
+      body: 'Permanently delete your account',
+      destructive: true,
+    },
+  ],
   returnTo: 'You will be sent back to {host}.',
   signedInAs: 'Signed in as {account}.',
   signOut: 'Not you? Sign out',
@@ -42,11 +50,18 @@ describe('OAuthConsentCard', () => {
     const html = render();
     expect(html).toContain('data-testid="oauth-consent-client"');
     expect(html).toContain('Claude Code');
-    expect(html).toContain('Read your memories and board');
+    expect(html).toContain('data-testid="oauth-consent-area-memories"');
+    expect(html).toContain('Search and save memories');
     expect(html).toContain('127.0.0.1');
     expect(html).toContain('alice@example.com');
     expect(html).toContain('data-testid="oauth-consent-allow"');
     expect(html).toContain('data-testid="oauth-consent-deny"');
+  });
+
+  it('marks an area that cannot be taken back', () => {
+    const html = render();
+    const account = html.slice(html.indexOf('oauth-consent-area-account'));
+    expect(account).toContain('text-destructive');
   });
 
   it('renders a hostile client name as text, never as markup', () => {

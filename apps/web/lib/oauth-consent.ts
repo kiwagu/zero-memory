@@ -192,22 +192,3 @@ export function returnHost(redirectUri: string): string {
     return redirectUri;
   }
 }
-
-/**
- * One line per requested scope, in the person's words: the two scopes this
- * server grants arrive translated; anything else is shown as the token itself
- * rather than hidden.
- */
-export function describeScopes(
-  scope: string,
-  labels: { read: string; write: string }
-): string[] {
-  const known: Record<string, string> = {
-    'mcp:read': labels.read,
-    'mcp:write': labels.write,
-  };
-  return scope
-    .split(' ')
-    .filter(Boolean)
-    .map((token) => known[token] ?? token);
-}

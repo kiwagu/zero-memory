@@ -15,7 +15,6 @@ import { getRequestMessages } from '@/lib/i18n';
 import { legalLinks } from '@/lib/legal';
 import {
   AUTHORIZATION_ID_RE,
-  describeScopes,
   readAuthorization,
   returnHost,
 } from '@/lib/oauth-consent';
@@ -82,10 +81,52 @@ export default async function OAuthConsentPage({
           title: t('oauth.consent.title', { client: '{client}' }),
           unnamedClient: t('oauth.consent.unnamedClient'),
           description: t('oauth.consent.description'),
-          scopes: describeScopes(details.scope, {
-            read: t('oauth.consent.scopes.read'),
-            write: t('oauth.consent.scopes.write'),
-          }),
+          // Everything an allowed client can do as the person, one entry per
+          // area of the server's tools; the MCP package's consent-area spec
+          // fails when a tool or an area is missing from this list.
+          areas: [
+            {
+              id: 'memories',
+              title: t('oauth.consent.areas.memories.title'),
+              body: t('oauth.consent.areas.memories.body'),
+            },
+            {
+              id: 'graph',
+              title: t('oauth.consent.areas.graph.title'),
+              body: t('oauth.consent.areas.graph.body'),
+            },
+            {
+              id: 'conflicts',
+              title: t('oauth.consent.areas.conflicts.title'),
+              body: t('oauth.consent.areas.conflicts.body'),
+            },
+            {
+              id: 'rules',
+              title: t('oauth.consent.areas.rules.title'),
+              body: t('oauth.consent.areas.rules.body'),
+            },
+            {
+              id: 'board',
+              title: t('oauth.consent.areas.board.title'),
+              body: t('oauth.consent.areas.board.body'),
+            },
+            {
+              id: 'projects',
+              title: t('oauth.consent.areas.projects.title'),
+              body: t('oauth.consent.areas.projects.body'),
+            },
+            {
+              id: 'activity',
+              title: t('oauth.consent.areas.activity.title'),
+              body: t('oauth.consent.areas.activity.body'),
+            },
+            {
+              id: 'account',
+              title: t('oauth.consent.areas.account.title'),
+              body: t('oauth.consent.areas.account.body'),
+              destructive: true,
+            },
+          ],
           returnTo: t('oauth.consent.returnTo', { host: '{host}' }),
           signedInAs: t('oauth.consent.signedInAs', { account: '{account}' }),
           signOut: t('oauth.consent.signOut'),
