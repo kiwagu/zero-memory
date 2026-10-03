@@ -39,6 +39,10 @@ const makeSession = (): AuthSession => ({
 
 const makeAuthGateway = (session: AuthSession | null = makeSession()) =>
   ({
+    verifyAccessToken: vi
+      .fn()
+      .mockResolvedValue(session ? { userId: session.userId } : null),
+    mintSession: vi.fn().mockResolvedValue(session),
     signInWithPassword: vi.fn().mockResolvedValue(session),
     refreshSession: vi.fn().mockResolvedValue(session),
   }) satisfies IAuthGateway;

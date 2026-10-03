@@ -10,24 +10,12 @@ import type {
   OAuthCodeRecord,
   OAuthConsentRecord,
 } from '../oauth-store.js';
+import { ONE_SHOT_AUTH, resolveServiceEnv } from './supabase-env.js';
 
 type ClientRow = Database['public']['Tables']['oauth_clients']['Row'];
 type CodeRow = Database['public']['Tables']['oauth_codes']['Row'];
 type AuthorizationRow =
   Database['public']['Tables']['oauth_authorizations']['Row'];
-
-/** Fail fast on missing configuration — no silent fallbacks. */
-const resolveServiceEnv = (): { url: string; serviceRoleKey: string } => {
-  const url = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRoleKey) {
-    throw new Error(
-      'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in the ' +
-        'environment.'
-    );
-  }
-  return { url, serviceRoleKey };
-};
 
 const toClientRecord = (row: ClientRow): OAuthClientRecord => ({
   clientId: row.client_id,
@@ -314,11 +302,7 @@ export class SupabaseOAuthStore implements IOAuthStore {
   #client(): SupabaseClient<Database> {
     const { url, serviceRoleKey } = resolveServiceEnv();
     return createClient<Database>(url, serviceRoleKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false,
-      },
+      auth: ONE_SHOT_AUTH,
     });
   }
 }
