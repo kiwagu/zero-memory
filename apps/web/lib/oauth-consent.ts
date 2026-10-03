@@ -103,17 +103,40 @@ const call = async (
   }
 };
 
+/** The consent API's own refusal: the flat OAuth error body. */
+const consentErrorSchema = z.object({
+  error: z.enum(['not_found', 'invalid_request']),
+});
+
+/**
+ * Anything the consent API would not have said is logged with the address
+ * it came from: the usual cause is a dashboard whose `ZM_SERVER_URL` points
+ * at another server — one without this API, or one that does not know the
+ * request — and the person would otherwise read "expired" for a wiring fault.
+ */
+const unexpected = (status: number | null): ConsentReadResult => {
+  console.warn('oauth consent: unexpected answer from the server', {
+    server: serverBaseUrl(),
+    status,
+  });
+  return { kind: 'failed' };
+};
+
 const settle = (
   answer: { status: number; body: unknown } | null
 ): ConsentReadResult => {
   if (answer === null) {
-    return { kind: 'failed' };
+    return unexpected(null);
   }
   if (answer.status === 404 || answer.status === 409) {
-    return { kind: 'gone' };
+    // Only the consent API's own answer means nothing is pending for this
+    // person; a bare 404 from a server without the route is a wiring fault.
+    return consentErrorSchema.safeParse(answer.body).success
+      ? { kind: 'gone' }
+      : unexpected(answer.status);
   }
   if (answer.status !== 200) {
-    return { kind: 'failed' };
+    return unexpected(answer.status);
   }
   const redirect = consentResultSchema.safeParse(answer.body);
   if (redirect.success) {
@@ -122,7 +145,7 @@ const settle = (
   const details = authorizationDetailsSchema.safeParse(answer.body);
   return details.success
     ? { kind: 'details', details: details.data }
-    : { kind: 'failed' };
+    : unexpected(answer.status);
 };
 
 const pathOf = (authorizationId: string): string =>

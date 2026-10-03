@@ -81,6 +81,15 @@ describe('readAuthorization', () => {
     expect(
       await readAuthorization('tok', ID, respond(404, { error: 'not_found' }))
     ).toEqual({ kind: 'gone' });
+    // A server without the consent API answers its own 404 shape: that is a
+    // dashboard pointed at the wrong server, not an expired request.
+    expect(
+      await readAuthorization(
+        'tok',
+        ID,
+        respond(404, { error: { code: 'not_found', message: 'No route' } })
+      )
+    ).toEqual({ kind: 'failed' });
     expect(
       await readAuthorization('tok', ID, respond(200, { surprise: true }))
     ).toEqual({ kind: 'failed' });
@@ -105,9 +114,17 @@ describe('decideAuthorization', () => {
   });
 
   it('reports a request that is no longer pending as gone', async () => {
-    for (const status of [404, 409]) {
+    for (const [status, error] of [
+      [404, 'not_found'],
+      [409, 'invalid_request'],
+    ] as const) {
       expect(
-        await decideAuthorization('tok', ID, 'approve', respond(status, {}))
+        await decideAuthorization(
+          'tok',
+          ID,
+          'approve',
+          respond(status, { error })
+        )
       ).toEqual({ kind: 'gone' });
     }
   });
