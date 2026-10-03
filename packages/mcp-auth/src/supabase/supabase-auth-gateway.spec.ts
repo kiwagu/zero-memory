@@ -82,3 +82,40 @@ describe('SupabaseAuthGateway.mintSession', () => {
     expect(await gateway.mintSession(ALICE)).toBeNull();
   });
 });
+
+describe('SupabaseAuthGateway.verifyAccessToken', () => {
+  const tokenWith = (aal: string) =>
+    `h.${Buffer.from(JSON.stringify({ sub: ALICE, aal })).toString('base64url')}.s`;
+
+  const gatewayFor = (factors: Array<{ status: string }>) => {
+    const anon = {
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: { id: ALICE, factors } },
+          error: null,
+        }),
+      },
+    } as unknown as SupabaseClient;
+    return new SupabaseAuthGateway({
+      anon: () => anon,
+      service: () => anon,
+    });
+  };
+
+  it('says a session owes its second factor only when one is verified and not given', async () => {
+    const withFactor = gatewayFor([{ status: 'verified' }]);
+    expect(await withFactor.verifyAccessToken(tokenWith('aal1'))).toEqual({
+      userId: ALICE,
+      owesSecondFactor: true,
+    });
+    expect(await withFactor.verifyAccessToken(tokenWith('aal2'))).toEqual({
+      userId: ALICE,
+      owesSecondFactor: false,
+    });
+    const unconfirmed = gatewayFor([{ status: 'unverified' }]);
+    expect(await unconfirmed.verifyAccessToken(tokenWith('aal1'))).toEqual({
+      userId: ALICE,
+      owesSecondFactor: false,
+    });
+  });
+});

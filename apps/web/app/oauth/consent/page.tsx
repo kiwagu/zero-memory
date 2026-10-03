@@ -19,6 +19,7 @@ import {
   returnHost,
 } from '@/lib/oauth-consent';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { requireAssurance } from '@/lib/mfa';
 import { termsGate } from '@/lib/terms-gate';
 
 /**
@@ -41,6 +42,9 @@ export default async function OAuthConsentPage({
   const here = `/oauth/consent?authorization_id=${raw}`;
 
   const supabase = await createServerSupabaseClient();
+  // Granting an agent is the step the second factor exists for: an account
+  // that has one gives the code before it sees who is asking.
+  await requireAssurance(supabase, here);
   const { data: claimsData } = await supabase.auth.getClaims();
   const claims = claimsData?.claims ?? null;
   // The same one-time acceptance the dashboard asks for: an account created

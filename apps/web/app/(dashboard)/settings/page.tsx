@@ -2,9 +2,11 @@ import { SettingsDeleteAccount } from '@/components/settings-delete-account';
 import { SettingsMemoryPanel } from '@/components/settings-memory-panel';
 import { SettingsProfile } from '@/components/settings-profile';
 import { SettingsProviderKey } from '@/components/settings-provider-key';
+import { SettingsSecurity } from '@/components/settings-security';
 import { currentAccount } from '@/lib/account';
 import { readCredentialStatus } from '@/lib/credential-status';
 import { getRequestMessages } from '@/lib/i18n';
+import { readAssurance } from '@/lib/mfa';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export default async function SettingsPage() {
@@ -12,6 +14,10 @@ export default async function SettingsPage() {
   const credential = await readCredentialStatus();
   const supabase = await createServerSupabaseClient();
   const account = await currentAccount(supabase);
+  // Deleting the account is confirmed with the second factor; an account
+  // without one turns it on first. (The layout already made a session with a
+  // factor give the code before any settings page opened.)
+  const { verifiedFactors } = await readAssurance(supabase);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -38,6 +44,28 @@ export default async function SettingsPage() {
         }}
       />
 
+      <SettingsSecurity
+        labels={{
+          title: t('settings.security.title'),
+          description: t('settings.security.description'),
+          start: t('settings.security.start'),
+          scanHint: t('settings.security.scanHint'),
+          secretHint: t('settings.security.secretHint'),
+          code: t('settings.security.code'),
+          confirm: t('settings.security.confirm'),
+          confirming: t('settings.security.confirming'),
+          cancel: t('settings.security.cancel'),
+          enabled: t('settings.security.enabled'),
+          addedOn: t('settings.security.addedOn', { date: '{date}' }),
+          remove: t('settings.security.remove'),
+          removeNeedsCode: t('settings.security.removeNeedsCode'),
+        }}
+        messages={{
+          refused: t('settings.security.refused'),
+          failed: t('settings.security.failed'),
+          appName: t('settings.security.appName'),
+        }}
+      />
       <SettingsMemoryPanel
         labels={{
           exportTitle: t('settings.export.title'),
@@ -88,6 +116,11 @@ export default async function SettingsPage() {
 
       <SettingsDeleteAccount
         email={account.email}
+        blockedReason={
+          verifiedFactors === 0
+            ? t('settings.deleteAccount.needsTwoFactor')
+            : null
+        }
         labels={{
           title: t('settings.deleteAccount.title'),
           description: t('settings.deleteAccount.description'),

@@ -18,7 +18,7 @@ import { userDataTables, ACCOUNT_OWNERSHIP_MAP } from '@workspace/db';
 
 import { e2eEnv } from '../helpers/env.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
-import { signInThroughForm } from '../helpers/web.js';
+import { enrollTotp, totpCode } from '../helpers/mfa.js';
 import {
   passwordGrantToken,
   provisionE2EUser,
@@ -105,6 +105,8 @@ test.describe('account self-deletion', () => {
   test('@smoke the person deletes it in Settings; a bystander is untouched', async ({
     page,
   }) => {
+    // The code step may wait for the authenticator's next 30-second window.
+    test.setTimeout(120_000);
     const db = admin();
     const a = await freshUser(db, 'account-self-del-a@zm.e2e');
     const b = await freshUser(db, 'account-self-del-b@zm.e2e');
@@ -140,8 +142,19 @@ test.describe('account self-deletion', () => {
       .eq('id', aMem[0]!);
     expect(shareError, 'seed a shared memory for A').toBeNull();
 
-    // A erases itself in the dashboard — the request carries no subject.
-    await signInThroughForm(page, a.user);
+    // A erases itself in the dashboard — the request carries no subject. The
+    // deletion is confirmed with a second factor, so A has one and gives it.
+    const factor = await enrollTotp(aToken);
+    await page.goto('/login');
+    await page.getByTestId('auth-login-email').fill(a.user.email);
+    await page.getByTestId('auth-login-password').fill(a.user.password);
+    await page.getByTestId('auth-login-submit').click();
+    await expect(page).toHaveURL(/\/mfa\/verify$/);
+    await page
+      .getByTestId('mfa-verify-code')
+      .fill(await totpCode(factor.secret, factor.lastCode));
+    await page.getByTestId('mfa-verify-submit').click();
+    await expect(page.getByTestId('insights-page')).toBeVisible();
     await page.goto('/settings');
     const erased = page.waitForResponse(
       (response) =>

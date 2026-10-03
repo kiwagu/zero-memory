@@ -227,24 +227,46 @@ const NOT_FOUND = oauthError(
   'No pending authorization with this id is waiting for you.'
 );
 
-/** The Auth user id behind a `Bearer` dashboard session, or null. */
+/**
+ * Who is deciding, from the `Bearer` dashboard session. Granting an agent is
+ * what the second factor guards, so a session that still owes its code is
+ * refused here as well as by the page in front: an agent's own session, or a
+ * stolen password without the phone, must not reach the consent API directly.
+ */
 const authenticate = async (
   deps: OAuthDeps,
   header: string | null | undefined
-): Promise<string | null> => {
-  if (!header?.startsWith('Bearer ')) {
-    return null;
+): Promise<
+  | { kind: 'ok'; userId: string }
+  | { kind: 'refused'; result: HandlerResult<OAuthErrorBody> }
+> => {
+  const token = header?.startsWith('Bearer ')
+    ? header.slice('Bearer '.length).trim()
+    : '';
+  const verified =
+    token === '' ? null : await deps.auth.verifyAccessToken(token);
+  if (!verified) {
+    return {
+      kind: 'refused',
+      result: oauthError(
+        401,
+        'invalid_token',
+        'Sign in to the dashboard first.'
+      ),
+    };
   }
-  const token = header.slice('Bearer '.length).trim();
-  if (token === '') {
-    return null;
+  if (verified.owesSecondFactor) {
+    return {
+      kind: 'refused',
+      result: oauthError(
+        403,
+        'insufficient_aal',
+        'Give the code from your authenticator app first.'
+      ),
+    };
   }
-  const verified = await deps.auth.verifyAccessToken(token);
-  return verified?.userId ?? null;
+  return { kind: 'ok', userId: verified.userId };
 };
-
-const unauthenticated = (): HandlerResult<OAuthErrorBody> =>
-  oauthError(401, 'invalid_token', 'Sign in to the dashboard first.');
 
 /** Every scope the request asks for is one the person already approved. */
 const consentCovers = (granted: string, requested: string): boolean => {
@@ -343,10 +365,11 @@ export const handleAuthorizationRead = async (
 ): Promise<
   HandlerResult<AuthorizationDetails | ConsentResult | OAuthErrorBody>
 > => {
-  const userId = await authenticate(deps, input.authorization);
-  if (!userId) {
-    return unauthenticated();
+  const caller = await authenticate(deps, input.authorization);
+  if (caller.kind === 'refused') {
+    return caller.result;
   }
+  const userId = caller.userId;
   const id = authorizationIdSchema.safeParse(input.authorizationId);
   if (!id.success) {
     return NOT_FOUND;
@@ -391,10 +414,11 @@ export const handleConsentDecision = async (
   deps: OAuthDeps,
   input: AuthorizationRequestInput & { body: unknown }
 ): Promise<HandlerResult<ConsentResult | OAuthErrorBody>> => {
-  const userId = await authenticate(deps, input.authorization);
-  if (!userId) {
-    return unauthenticated();
+  const caller = await authenticate(deps, input.authorization);
+  if (caller.kind === 'refused') {
+    return caller.result;
   }
+  const userId = caller.userId;
   const decision = consentDecisionSchema.safeParse(input.body);
   if (!decision.success) {
     return oauthError(400, 'invalid_request', 'Decide "approve" or "deny".');

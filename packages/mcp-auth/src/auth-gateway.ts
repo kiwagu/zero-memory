@@ -15,10 +15,14 @@ export interface AuthSession {
 
 export interface IAuthGateway {
   /**
-   * Who holds this bearer token: the Auth user id behind a live session, or
-   * null when the token is not one (never throws for that).
+   * Who holds this bearer token: the Auth user id behind a live session, and
+   * whether that session still owes its second factor — the account has a
+   * verified one and the session has not presented the code (below `aal2`).
+   * Null when the token is not a live session (never throws for that).
    */
-  verifyAccessToken(accessToken: string): Promise<{ userId: string } | null>;
+  verifyAccessToken(
+    accessToken: string
+  ): Promise<{ userId: string; owesSecondFactor: boolean } | null>;
 
   /**
    * A NEW session for this Auth user, independent of any session they hold
