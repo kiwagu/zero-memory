@@ -490,6 +490,24 @@ test.describe('account lifecycle: hard_delete_user', () => {
       }
     }
 
+    // The consent screen's rows: a request this user opened and a client they
+    // approved. Both point at the marker client above, which erasure keeps
+    // while removing what the departing user did with it.
+    const markerClientId = 'oac_e2eerasezzzz1234.0000000000';
+    await insertOrThrow(db, 'oauth_authorizations', {
+      client_id: markerClientId,
+      redirect_uri: 'https://e2e.invalid/callback',
+      code_challenge: 'e'.repeat(43),
+      scope: 'mcp:read mcp:write',
+      user_id: userId,
+      expires_at: '2099-01-01T00:00:00Z',
+    });
+    await insertOrThrow(db, 'oauth_consents', {
+      user_id: userId,
+      client_id: markerClientId,
+      scope: 'mcp:read mcp:write',
+    });
+
     // ---- The cross-user half of erasure.
     //
     // Rows owned by ANOTHER user that merely NAME the departing one — who

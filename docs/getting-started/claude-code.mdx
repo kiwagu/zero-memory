@@ -20,8 +20,9 @@ default address: the installer asks for this URL, checks it, and stores it in
 `~/.config/zero-memory/config.json`, which the MCP registration, the hooks and
 the ingest daemon all read.
 
-Authentication is **OAuth**. A one-time browser login stores a token that the
-hooks and the MCP client reuse and refresh. No Supabase URL, email, or
+Authentication is **OAuth**. A one-time browser sign-in on the dashboard, and
+an Allow on its consent screen, store a token that the hooks and the MCP
+client reuse and refresh. No Supabase URL, email, or
 password is needed on the client.
 
 ## Install the plugin (recommended)

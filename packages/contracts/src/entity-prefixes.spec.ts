@@ -64,6 +64,7 @@ describe('ENTITY_PREFIXES catalog', () => {
     expect(entityIds.prefixFor('edge')).toBe('edg');
     expect(entityIds.prefixFor('usage_event')).toBe('usg');
     expect(entityIds.prefixFor('oauth_client')).toBe('oac');
+    expect(entityIds.prefixFor('oauth_authorization')).toBe('oaa');
     expect(entityIds.prefixFor('mcp_session')).toBe('ses');
     expect(entityIds.prefixFor('user')).toBe('usr');
     expect(entityIds.prefixFor('memory_review')).toBe('mrq');

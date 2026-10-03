@@ -2,14 +2,32 @@ import { entityIdSchemas } from '@workspace/contracts';
 
 import type {
   IOAuthStore,
+  NewOAuthAuthorization,
+  OAuthAuthorizationRecord,
+  OAuthAuthorizationStatus,
   OAuthClientRecord,
   OAuthCodeRecord,
+  OAuthConsentRecord,
 } from './oauth-store.js';
+
+interface StoredAuthorization extends OAuthAuthorizationRecord {
+  boundTo: string | null;
+}
+
+const toAuthorizationRecord = ({
+  boundTo: _boundTo,
+  ...record
+}: StoredAuthorization): OAuthAuthorizationRecord => ({ ...record });
+
+const isLive = (row: StoredAuthorization, now: Date): boolean =>
+  row.status === 'pending' && row.expiresAt.getTime() > now.getTime();
 
 /** In-memory OAuth store for unit tests (mirrors the adapter semantics). */
 export class InMemoryOAuthStore implements IOAuthStore {
   readonly #clients = new Map<string, OAuthClientRecord>();
   readonly #codes = new Map<string, OAuthCodeRecord>();
+  readonly #authorizations = new Map<string, StoredAuthorization>();
+  readonly #consents = new Map<string, OAuthConsentRecord>();
 
   async insertClient(
     client: Omit<OAuthClientRecord, 'clientId'>
@@ -45,5 +63,72 @@ export class InMemoryOAuthStore implements IOAuthStore {
         this.#codes.delete(code);
       }
     }
+  }
+
+  async insertAuthorization(
+    authorization: NewOAuthAuthorization
+  ): Promise<OAuthAuthorizationRecord> {
+    const row: StoredAuthorization = {
+      ...authorization,
+      id: entityIdSchemas.oauth_authorization.create(),
+      status: 'pending',
+      boundTo: null,
+    };
+    this.#authorizations.set(row.id, row);
+    return toAuthorizationRecord(row);
+  }
+
+  async bindAuthorization(
+    id: string,
+    authUserId: string,
+    now: Date
+  ): Promise<OAuthAuthorizationRecord | null> {
+    const row = this.#authorizations.get(id);
+    if (!row || !isLive(row, now)) {
+      return null;
+    }
+    if (row.boundTo !== null && row.boundTo !== authUserId) {
+      return null;
+    }
+    row.boundTo = authUserId;
+    return toAuthorizationRecord(row);
+  }
+
+  async decideAuthorization(
+    id: string,
+    authUserId: string,
+    status: Exclude<OAuthAuthorizationStatus, 'pending'>,
+    now: Date
+  ): Promise<OAuthAuthorizationRecord | null> {
+    const row = this.#authorizations.get(id);
+    if (!row || !isLive(row, now) || row.boundTo !== authUserId) {
+      return null;
+    }
+    row.status = status;
+    return toAuthorizationRecord(row);
+  }
+
+  async deleteExpiredAuthorizations(now: Date): Promise<void> {
+    for (const [id, row] of this.#authorizations) {
+      if (row.expiresAt.getTime() <= now.getTime()) {
+        this.#authorizations.delete(id);
+      }
+    }
+  }
+
+  async findConsent(
+    authUserId: string,
+    clientId: string
+  ): Promise<OAuthConsentRecord | null> {
+    const consent = this.#consents.get(`${authUserId} ${clientId}`);
+    return consent ? { ...consent } : null;
+  }
+
+  async upsertConsent(
+    authUserId: string,
+    clientId: string,
+    scope: string
+  ): Promise<void> {
+    this.#consents.set(`${authUserId} ${clientId}`, { scope });
   }
 }

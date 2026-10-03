@@ -5,7 +5,8 @@
  * Flow:
  *   1. provision alice + bob (service role, idempotent),
  *   2. assert the unauthenticated 401 challenge on /mcp,
- *   3. alice: full OAuth flow (DCR -> authorize form -> code -> token),
+ *   3. alice: full OAuth flow (DCR -> authorize -> consent, as the dashboard
+ *      would send it under her own session -> code -> token),
  *   4. alice: create_scope + add bob as writer (user-JWT RPCs),
  *   5. alice via MCP: remember a fact in the project scope, then share it,
  *   6. bob: own OAuth flow (incl. refresh grant), recall + build_context see
@@ -161,30 +162,54 @@ const oauthFlow = async (user: {
     resource: `${BASE_URL}/mcp`,
   });
 
-  // GET /oauth/authorize serves the self-contained login form.
-  const loginPage = await fetch(
-    `${BASE_URL}/oauth/authorize?${authorizeParams}`
-  );
-  const loginHtml = await loginPage.text();
-  if (loginPage.status !== 200 || !loginHtml.includes('<form')) {
-    fail(`authorize page did not render a form (${loginPage.status})`);
-  }
-
-  // POST credentials + the OAuth params (as the hidden fields would).
-  const submit = await fetch(`${BASE_URL}/oauth/authorize`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      ...Object.fromEntries(authorizeParams),
-      email: user.email,
-      password: user.password,
-    }),
+  // GET /oauth/authorize parks the request and hands the browser to the
+  // dashboard's consent page; only the request's id travels.
+  const start = await fetch(`${BASE_URL}/oauth/authorize?${authorizeParams}`, {
     redirect: 'manual',
   });
-  if (submit.status !== 302) {
-    fail(`authorize submit expected 302, got ${submit.status}`);
+  if (start.status !== 302) {
+    fail(`authorize expected 302 to the dashboard, got ${start.status}`);
   }
-  const location = new URL(submit.headers.get('location') ?? '');
+  const authorizationId =
+    new URL(start.headers.get('location') ?? '').searchParams.get(
+      'authorization_id'
+    ) ?? fail('no authorization_id in the hand-off to the dashboard');
+
+  // The dashboard's half: the person's own session (here from a password
+  // sign-in) reads the request and approves it.
+  const person = createClient(SUPABASE_URL, ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const signedIn = await person.auth.signInWithPassword(user);
+  const dashboardToken =
+    signedIn.data.session?.access_token ??
+    fail(`sign-in failed for ${user.email}: ${signedIn.error?.message}`);
+  const consentHeaders = {
+    authorization: `Bearer ${dashboardToken}`,
+    'content-type': 'application/json',
+  };
+  const read = await fetch(
+    `${BASE_URL}/oauth/authorizations/${authorizationId}`,
+    { headers: consentHeaders }
+  );
+  if (read.status !== 200) {
+    fail(`reading the authorization failed with ${read.status}`);
+  }
+  const decision = await fetch(
+    `${BASE_URL}/oauth/authorizations/${authorizationId}/consent`,
+    {
+      method: 'POST',
+      headers: consentHeaders,
+      body: JSON.stringify({ decision: 'approve' }),
+    }
+  );
+  if (decision.status !== 200) {
+    fail(`approving the authorization failed with ${decision.status}`);
+  }
+  const { redirect_url: redirectUrl } = (await decision.json()) as {
+    redirect_url: string;
+  };
+  const location = new URL(redirectUrl);
   if (location.searchParams.get('state') !== state) {
     fail('state mismatch in the authorization redirect');
   }

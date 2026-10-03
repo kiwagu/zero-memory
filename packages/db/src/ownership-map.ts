@@ -61,6 +61,10 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   // Directly owned — per-user operational and identity rows.
   ingest_log: { kind: 'owned', ownerColumn: 'user_id' },
   oauth_codes: { kind: 'owned', ownerColumn: 'user_id' },
+  // An authorization request the user opened on the consent screen, and the
+  // clients they approved. Unbound pending requests (null user) are nobody's.
+  oauth_authorizations: { kind: 'owned', ownerColumn: 'user_id' },
+  oauth_consents: { kind: 'owned', ownerColumn: 'user_id' },
   usage_events: { kind: 'owned', ownerColumn: 'user_id' },
   usage_daily: { kind: 'owned', ownerColumn: 'user_id' },
   scope_members: { kind: 'owned', ownerColumn: 'user_id' },

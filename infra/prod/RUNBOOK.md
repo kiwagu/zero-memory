@@ -307,7 +307,34 @@ gets misdiagnosed as something else.
 After changing an account's password, re-authenticate everything that signed in
 as it: `zero-memory-watcher login` on every watcher host, and re-authorize the
 MCP connection in each editor. OAuth client registrations survive, because the
-issuer (`ZM_PUBLIC_URL`) did not change — only the sessions are gone.
+issuer (`ZM_PUBLIC_URL`) did not change — only the sessions are gone. The
+consents survive too, so with the dashboard signed in each re-authorization is
+one browser round trip with no screen.
+
+### Which clients an account has approved
+
+Approving a client on the consent screen records a row in
+`public.oauth_consents` (person × client, with the scope and when), and it is
+what lets the same client reconnect without the screen. Read it with the
+service role:
+
+```sql
+select c.user_id, k.client_name, c.client_id, c.scope, c.granted_at, c.revoked_at
+from public.oauth_consents c
+join public.oauth_clients k using (client_id)
+order by c.granted_at desc;
+```
+
+To make a client ask again next time, mark the consent revoked:
+
+```sql
+update public.oauth_consents
+set revoked_at = now()
+where user_id = '<usr_…>' and client_id = '<oac_…>';
+```
+
+That does not end an agent that is already connected: its session runs until
+its refresh token is revoked, for example by the password change above.
 
 ### Self-hosted stack — Supabase API keys and JWT secret
 
@@ -629,23 +656,35 @@ What is enforced, and where:
   Supabase JWT; Postgres row-level security decides what each user can see or
   write (scope membership via `scope_members`, private-by-default). The
   server never widens access on a user path.
-- **OAuth surface is rate-limited.** `POST /oauth/token`, `POST
-/oauth/authorize`, `POST /oauth/register` — the only unauthenticated,
-  brute-forceable endpoints — share an in-memory fixed-window limiter keyed
+- **OAuth surface is rate-limited.** `POST /oauth/token`, `GET
+/oauth/authorize` (each request parks a pending row), `POST /oauth/register`
+  — the only unauthenticated endpoints — share an in-memory fixed-window limiter keyed
   by client IP + route (`ZM_RATELIMIT_MAX` per `ZM_RATELIMIT_WINDOW_S`,
   default 30/60 s; over-limit → 429 + `Retry-After`). Client IP is the first
   `X-Forwarded-For` hop — only trustworthy behind our caddy/nginx edge, with
   the socket address as fallback.
-- **OAuth tables are deny-all.** `oauth_clients` / `oauth_codes` have RLS
-  enabled with **no** policies; only the service-role adapter behind the
+- **OAuth tables are deny-all.** `oauth_clients`, `oauth_codes`,
+  `oauth_authorizations` and `oauth_consents` grant nothing to API roles and
+  carry an explicit deny-all policy; only the service-role adapter behind the
   OAuth endpoints reaches them.
+- **People sign in on the dashboard, never on the server.** `/oauth/authorize`
+  parks the request (10-minute TTL) and redirects to the dashboard's consent
+  page with only its id. The consent endpoints take the person's own session
+  as a bearer; the first signed-in reader binds the request and anyone else
+  gets 404, so once someone has opened a request nobody else can see or
+  decide it. Binding does not tell who started the request: a link forwarded
+  unopened is bound by whoever opens it, so resisting a deceptive "please
+  approve" request rests on the consent screen, which names the client, where
+  the browser returns and which account is deciding. Approval mints a
+  separate session for the agent, pinned to the approving account; the
+  person's browser session is never handed out.
 - **Authorization codes are single-use and short-lived.** Redemption is an
   atomic `DELETE … RETURNING` (a replayed or raced code loses), TTL 5
   minutes, expired codes swept opportunistically.
 - **PKCE S256 is mandatory** (plain rejected), redirect URIs are exact-match
   against registration, and registration accepts only https or loopback-http
-  URIs. Login failures render one constant message (no user-exists oracle);
-  credentials are never logged.
+  URIs. Credentials never reach the authorization server: sign-in happens on
+  the dashboard through Supabase Auth.
 - **Memories are ADD-only** on the agent path: `remember`/`ingest` append;
   supersede/forget are explicit, provenance-tracked operations.
 - **Bounded server state.** MCP sessions are capped (`ZM_MAX_SESSIONS`,

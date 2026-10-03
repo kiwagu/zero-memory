@@ -154,7 +154,13 @@ snapshot. In outline:
    `ZM_TRUST_PROXY=true` (which is what "deployed behind the edge" means)
    the server refuses to start on a missing or non-HTTPS public URL rather
    than booting into a silently broken issuer. Keep `ZM_TRUST_PROXY=true`
-   only when the server sits behind the edge.
+   only when the server sits behind the edge. The server also needs the
+   dashboard's external origin, **`ZM_WEB_URL`**: authorizing an agent sends
+   the person there to sign in and approve it. The production compose file
+   derives it as `https://${ZM_WEB_HOST}`, so set it only when the dashboard
+   is reached some other way. It follows the same rules as the issuer — a
+   bare origin, https outside loopback — and behind the edge the server
+   refuses to start without a valid one.
 3. Bring the stack up:
 
    ```sh
@@ -224,6 +230,10 @@ nothing baked into its image. Enabling a provider is a Supabase setting:
   `supabase/config.toml` read their credentials through `env(...)`; flip
   `enabled` locally and restart the stack.
 
+The same sign-in serves agents. Authorizing an MCP client opens the dashboard,
+so an account created through a provider connects its agents exactly like a
+password account does.
+
 Accounts are one per email. Signing in with a provider whose email matches an
 existing, confirmed account links the provider to that account: the password
 keeps working and nothing is replaced. Two things are worth telling users: a
@@ -240,8 +250,9 @@ per-platform bundle, run one installer, sign in. The pieces it installs:
 
 - MCP client: register `{"type":"http","url":"https://zm.example.com/mcp"}`.
   The client discovers OAuth via the 401 challenge, self-registers through
-  dynamic client registration, and opens the login page. Users sign up and
-  reset passwords in the dashboard.
+  dynamic client registration, and opens the dashboard, where the person signs
+  in and allows the client on a consent screen. Users sign up and reset
+  passwords in the dashboard.
 - Watcher (auto-capture of session transcripts): run
   `zero-memory-watcher login https://zm.example.com` once. It stores the
   server address in `~/.config/zero-memory/config.json` — the one answer

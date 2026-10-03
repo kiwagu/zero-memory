@@ -43,6 +43,10 @@ export const ENTITY_PREFIXES = {
   // our own OAuth server's client id (packages/mcp-auth); RFC 6749/7591 leave
   // client_id opaque, so it is ours to shape.
   oauth_client: 'oac',
+  // a pending authorization of our OAuth server: the request a client started,
+  // parked while the person signs in to the dashboard and decides. Ours to
+  // shape for the same reason as the client id.
+  oauth_authorization: 'oaa',
   // MCP streamable-HTTP session id, minted by our transport (SoR rule), even
   // though it is ephemeral transport state.
   mcp_session: 'ses',

@@ -41,6 +41,10 @@ app host connects the returned server to a transport.
   the first text block, so a client branches on `error.code` instead of on
   prose. A thrown value carrying a taxonomy code keeps its class; anything
   else is `internal`.
+- `CONSENT_AREAS` — every tool, grouped into the areas the dashboard's consent
+  screen names when a person allows an agent. Its spec fails when a tool has
+  no area, or an area has no copy in the web catalogs or no line on the
+  consent page, so the screen never describes less than an agent can do.
 - `CONTRACT_CAPABILITY_KEY` — the `capabilities.experimental` key under which
   the initialize handshake announces `CONTRACT_VERSION`. It rides a capability
   rather than `serverInfo` (the SDK client drops unknown keys there) or
