@@ -36,6 +36,7 @@
     "@workspace/typescript-config": "workspace:^",
     "dotenv": "^17.2.4",
     "eslint": "catalog:",
+    "otpauth": "9.5.2",
     "typescript": "catalog:"
   }
 }

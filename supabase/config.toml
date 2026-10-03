@@ -62,6 +62,16 @@ enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10
 enable_signup = true
 
+# The second factor: an authenticator app (TOTP). Turning it on is each
+# person's choice in Settings → Security; once they have, the dashboard asks
+# for a code after every first factor, and deleting the account needs one.
+[auth.mfa]
+max_enrolled_factors = 10
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
 [auth.email]
 enable_signup = true
 double_confirm_changes = true
