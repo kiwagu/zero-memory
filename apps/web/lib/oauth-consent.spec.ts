@@ -65,6 +65,18 @@ describe('readAuthorization', () => {
     expect(result).toEqual({ kind: 'redirect', url });
   });
 
+  it('never follows a script-bearing redirect, whatever the server says', async () => {
+    for (const url of [
+      'javascript:alert(document.cookie)//?code=c',
+      'JavaScript:alert(1)',
+      'data:text/html,<script>alert(1)</script>',
+    ]) {
+      expect(
+        await readAuthorization('tok', ID, respond(200, { redirect_url: url }))
+      ).toEqual({ kind: 'failed' });
+    }
+  });
+
   it('maps a missing request, and anything unexpected, to typed outcomes', async () => {
     expect(
       await readAuthorization('tok', ID, respond(404, { error: 'not_found' }))

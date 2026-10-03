@@ -671,9 +671,13 @@ What is enforced, and where:
   parks the request (10-minute TTL) and redirects to the dashboard's consent
   page with only its id. The consent endpoints take the person's own session
   as a bearer; the first signed-in reader binds the request and anyone else
-  gets 404, so a forwarded "please approve" link cannot hand one person's
-  memory to another's client. Approval mints a separate session for the
-  agent; the person's browser session is never handed out.
+  gets 404, so once someone has opened a request nobody else can see or
+  decide it. Binding does not tell who started the request: a link forwarded
+  unopened is bound by whoever opens it, so resisting a deceptive "please
+  approve" request rests on the consent screen, which names the client, where
+  the browser returns and which account is deciding. Approval mints a
+  separate session for the agent, pinned to the approving account; the
+  person's browser session is never handed out.
 - **Authorization codes are single-use and short-lived.** Redemption is an
   atomic `DELETE … RETURNING` (a replayed or raced code loses), TTL 5
   minutes, expired codes swept opportunistically.

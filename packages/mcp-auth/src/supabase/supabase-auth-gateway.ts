@@ -28,8 +28,31 @@ const toAuthSession = (session: Session): AuthSession => ({
  * the service role, because only an administrator may issue a sign-in on a
  * user's behalf.
  */
+export interface SupabaseAuthGatewayClients {
+  /** A one-shot anon-key client (token checks, redemption, refresh). */
+  anon: () => SupabaseClient;
+  /** A one-shot service-role client (minting on a user's behalf). */
+  service: () => SupabaseClient;
+}
+
+const defaultClients: SupabaseAuthGatewayClients = {
+  anon: () => {
+    const { url, anonKey } = resolveAnonEnv();
+    return createClient(url, anonKey, { auth: ONE_SHOT_AUTH });
+  },
+  service: () => {
+    const { url, serviceRoleKey } = resolveServiceEnv();
+    return createClient(url, serviceRoleKey, { auth: ONE_SHOT_AUTH });
+  },
+};
+
 export class SupabaseAuthGateway implements IAuthGateway {
   readonly #logger = createLogger(SupabaseAuthGateway.name);
+  readonly #clients: SupabaseAuthGatewayClients;
+
+  constructor(clients: SupabaseAuthGatewayClients = defaultClients) {
+    this.#clients = clients;
+  }
 
   async verifyAccessToken(
     accessToken: string
@@ -45,6 +68,12 @@ export class SupabaseAuthGateway implements IAuthGateway {
    * An administrator-issued one-time sign-in, redeemed on the spot: the link
    * is generated (nothing is mailed) and its hashed token is verified at once,
    * which opens a fresh session of its own for the user.
+   *
+   * The link is addressed by email, and an email can move between accounts —
+   * or, for a deleted account, make Auth create a new one — between the
+   * lookup and the link. So the user is pinned twice, on the link and on the
+   * session it opens; a session that belongs to anyone else is revoked on the
+   * spot and nothing is returned.
    */
   async mintSession(userId: string): Promise<AuthSession | null> {
     const admin = this.#service().auth.admin;
@@ -67,6 +96,10 @@ export class SupabaseAuthGateway implements IAuthGateway {
       });
       return null;
     }
+    if (link.user?.id !== userId) {
+      this.#logger.warn('session mint: sign-in link names another user');
+      return null;
+    }
     const { data: verified, error: verifyError } =
       await this.#anon().auth.verifyOtp({
         type: 'magiclink',
@@ -76,6 +109,15 @@ export class SupabaseAuthGateway implements IAuthGateway {
       this.#logger.warn('session mint: sign-in link not redeemed', {
         error: verifyError?.message,
       });
+      return null;
+    }
+    if (verified.session.user.id !== userId) {
+      this.#logger.warn(
+        'session mint: redeemed session belongs to another user'
+      );
+      await admin
+        .signOut(verified.session.access_token, 'local')
+        .catch(() => undefined);
       return null;
     }
     return toAuthSession(verified.session);
@@ -93,12 +135,10 @@ export class SupabaseAuthGateway implements IAuthGateway {
   }
 
   #anon(): SupabaseClient {
-    const { url, anonKey } = resolveAnonEnv();
-    return createClient(url, anonKey, { auth: ONE_SHOT_AUTH });
+    return this.#clients.anon();
   }
 
   #service(): SupabaseClient {
-    const { url, serviceRoleKey } = resolveServiceEnv();
-    return createClient(url, serviceRoleKey, { auth: ONE_SHOT_AUTH });
+    return this.#clients.service();
   }
 }

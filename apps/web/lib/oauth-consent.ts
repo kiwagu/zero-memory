@@ -29,7 +29,31 @@ const authorizationDetailsSchema = z.object({
 });
 export type AuthorizationDetails = z.infer<typeof authorizationDetailsSchema>;
 
-const consentResultSchema = z.object({ redirect_url: z.string().url() });
+/**
+ * Schemes the page must never navigate to, whatever the server says: they run
+ * script or read local resources. The server already refuses to register
+ * them; this is the second lock, because the page hands the URL straight to
+ * `location.assign`.
+ */
+const UNSAFE_SCHEMES = new Set([
+  'javascript:',
+  'data:',
+  'vbscript:',
+  'file:',
+  'blob:',
+]);
+
+export function isSafeRedirect(url: string): boolean {
+  try {
+    return !UNSAFE_SCHEMES.has(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+const consentResultSchema = z.object({
+  redirect_url: z.string().url().refine(isSafeRedirect),
+});
 
 export type ConsentDecision = 'approve' | 'deny';
 

@@ -21,19 +21,24 @@ import {
 } from '@playwright/test';
 
 import { e2eEnv } from '../helpers/env.js';
-import { provisionE2EUser, type E2EUser } from '../helpers/users.js';
+import {
+  passwordGrantToken,
+  provisionE2EUser,
+  type E2EUser,
+} from '../helpers/users.js';
 
 const LISTENER_PORT = 45790;
 const REDIRECT_URI = `http://127.0.0.1:${LISTENER_PORT}/callback`;
 
 const registerClient = async (
   request: APIRequestContext,
-  clientName: string
+  clientName: string,
+  redirectUri = REDIRECT_URI
 ): Promise<string> => {
   const response = await request.post(`${e2eEnv.serverUrl}/oauth/register`, {
     data: {
       client_name: clientName,
-      redirect_uris: [REDIRECT_URI],
+      redirect_uris: [redirectUri],
       token_endpoint_auth_method: 'none',
     },
   });
@@ -42,13 +47,13 @@ const registerClient = async (
 };
 
 /** A fresh authorization request, as a client would open it. */
-const authorizeRequest = (clientId: string) => {
+const authorizeRequest = (clientId: string, redirectUri = REDIRECT_URI) => {
   const verifier = randomBytes(32).toString('base64url');
   const state = randomBytes(8).toString('base64url');
   const url = new URL(`${e2eEnv.serverUrl}/oauth/authorize`);
   url.search = new URLSearchParams({
     client_id: clientId,
-    redirect_uri: REDIRECT_URI,
+    redirect_uri: redirectUri,
     response_type: 'code',
     code_challenge: createHash('sha256').update(verifier).digest('base64url'),
     code_challenge_method: 'S256',
@@ -179,6 +184,56 @@ test.describe('agent authorization in the browser', () => {
     await expect(page.getByTestId('oauth-consent-client')).toHaveText(
       'zm-e2e-web-terms'
     );
+  });
+
+  test('@smoke a native app allowed before is sent back to its own scheme without a screen', async ({
+    page,
+    request,
+  }) => {
+    // Desktop clients register a private-use scheme. The screenless path
+    // answers from the page render, so the hand-back is a plain HTTP redirect
+    // to that scheme; the browser passes it to the OS, which the test cannot
+    // follow, so it reads the redirect itself.
+    const nativeRedirect = 'cursor://anysphere.cursor-mcp/oauth/callback';
+    const user = await freshUser('native');
+    const clientId = await registerClient(
+      request,
+      'zm-e2e-web-native',
+      nativeRedirect
+    );
+    // The first approval, through the consent API the screen uses.
+    const first = authorizeRequest(clientId, nativeRedirect);
+    const started = await request.get(first.url, { maxRedirects: 0 });
+    const authorizationId = new URL(
+      started.headers()['location'] ?? ''
+    ).searchParams.get('authorization_id');
+    const approved = await request.post(
+      `${e2eEnv.serverUrl}/oauth/authorizations/${authorizationId}/consent`,
+      {
+        headers: {
+          authorization: `Bearer ${await passwordGrantToken(user)}`,
+        },
+        data: { decision: 'approve' },
+      }
+    );
+    expect(approved.status()).toBe(200);
+
+    await page.goto('/login');
+    await signIn(page, user);
+    await expect(page.getByTestId('insights-page')).toBeVisible();
+
+    const second = authorizeRequest(clientId, nativeRedirect);
+    const handBack = page.waitForResponse((response) =>
+      response.url().includes('/oauth/consent?')
+    );
+    // Navigating to an app's scheme is not a page load; the goto may fail.
+    await page.goto(second.url).catch(() => undefined);
+    const response = await handBack;
+    expect(response.status()).toBe(307);
+    const location = new URL(response.headers()['location'] ?? '');
+    expect(location.href.startsWith(`${nativeRedirect}?`)).toBe(true);
+    expect(location.searchParams.get('state')).toBe(second.state);
+    expect(location.searchParams.get('code')).toBeTruthy();
   });
 
   test('@smoke a broken consent link says so instead of failing', async ({
