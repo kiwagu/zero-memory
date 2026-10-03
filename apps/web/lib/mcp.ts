@@ -144,28 +144,6 @@ export async function exportMemoriesViaServer(
   );
 }
 
-export interface DeleteAccountResult {
-  /** The erased account's `usr_` id. */
-  subject: string;
-  /** Whether an auth principal was found and removed. */
-  auth_deleted: boolean;
-  memories: number;
-  entities: number;
-}
-
-/**
- * Erases the signed-in user's own account through the server's audited
- * `delete_account` tool — the cascade that removes everything they own, their
- * profile, and their sign-in principal. The tool takes no subject: it always
- * erases the authenticated caller, so this bridge cannot target another account.
- * Irreversible; the caller should offer the export first.
- */
-export async function deleteAccountViaServer(
-  accessToken: string
-): Promise<DeleteAccountResult> {
-  return callServerTool<DeleteAccountResult>(accessToken, 'delete_account', {});
-}
-
 /** Where a re-imported memory lands, mirroring the `import_memory` contract. */
 export type ImportTarget = 'personal' | 'core' | 'project';
 

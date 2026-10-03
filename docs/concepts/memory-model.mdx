@@ -60,8 +60,9 @@ The MCP server exposes one schema-first surface around the memory lifecycle:
   as wrong or stale), `list_conflicts`, `get_conflict`, `resolve_conflict`,
   and `resolve_conflicts`.
 - Rules and quality: `promote_rule` and `benchmark_memory`.
-- Operations and portability: `session_receipt`, `export_metrics`,
-  `export_memories`, and `delete_account`.
+- Operations and portability: `session_receipt`, `export_metrics`, and
+  `export_memories`. There is no tool that deletes an account: a person does
+  that in the dashboard's settings.
 
 Inputs and outputs come from the shared
 [contracts package](/docs/platform/contracts-and-errors), so HTTP and stdio

@@ -3,7 +3,6 @@ export * from './board/briefing-work.reader.js';
 export * from './board/card.repository.js';
 export * from './board/release.repository.js';
 export * from './ingest/ingest-log.repository.js';
-export * from './memory/account-eraser.js';
 export * from './memory/entity.repository.js';
 export * from './memory/export-metrics.reader.js';
 export * from './memory/graph.service.js';

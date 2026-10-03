@@ -1,15 +1,15 @@
 /**
- * Account self-deletion through the `delete_account` MCP tool.
+ * Account self-deletion: only a person, in the dashboard, can do it.
  *
  * The direct-RPC completeness of the cascade is pinned by account-lifecycle.e2e;
- * what THIS spec guards is the self-serve tool path the dashboard uses, and its
- * one load-bearing property: the tool takes NO subject, so it can only erase the
- * authenticated caller. Two guarantees:
- *   1. calling `delete_account` (no args) as user A erases everything the
- *      ownership map attributes to A, and removes A's auth principal;
- *   2. user B — a bystander who never called it — is completely untouched.
- * (2) is the proof that the subject comes from the caller's context, not from
- * anything a client could send.
+ * what THIS spec guards is who can reach it.
+ *   1. An agent cannot: the memory server lists no deletion tool, and a call
+ *      by the old name is refused.
+ *   2. The person can, from Settings: confirming with their address erases
+ *      everything the ownership map attributes to them and removes their auth
+ *      principal, while user B — a bystander — is completely untouched. The
+ *      route takes no subject, so (2) is also the proof that the subject is
+ *      the signed-in caller, not anything a client could send.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
@@ -18,6 +18,7 @@ import { userDataTables, ACCOUNT_OWNERSHIP_MAP } from '@workspace/db';
 
 import { e2eEnv } from '../helpers/env.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
+import { signInThroughForm } from '../helpers/web.js';
 import {
   passwordGrantToken,
   provisionE2EUser,
@@ -79,8 +80,31 @@ const memoryCount = async (
   return count ?? 0;
 };
 
-test.describe('account self-deletion: delete_account tool', () => {
-  test('erases the caller and leaves a bystander untouched', async () => {
+test.describe('account self-deletion', () => {
+  test('@smoke an agent has no way to delete the account', async () => {
+    const db = admin();
+    const agentUser = await freshUser(db, 'account-self-del-agent@zm.e2e');
+    const token = await passwordGrantToken(agentUser.user);
+    const mcp = await McpTestClient.connect(token);
+    try {
+      expect(await mcp.listToolNames()).not.toContain('delete_account');
+      // Called by its old name anyway: refused, as an error or a thrown one.
+      const outcome = await mcp
+        .callTool('delete_account', {})
+        .then((result) => (result.isError ? 'refused' : 'ran'))
+        .catch(() => 'refused');
+      expect(outcome).toBe('refused');
+    } finally {
+      await mcp.close();
+    }
+    const { data: still } = await db.auth.admin.getUserById(agentUser.user.id);
+    expect(still.user?.id).toBe(agentUser.user.id);
+    await db.rpc('hard_delete_user', { p_user_id: agentUser.userId });
+  });
+
+  test('@smoke the person deletes it in Settings; a bystander is untouched', async ({
+    page,
+  }) => {
     const db = admin();
     const a = await freshUser(db, 'account-self-del-a@zm.e2e');
     const b = await freshUser(db, 'account-self-del-b@zm.e2e');
@@ -116,19 +140,21 @@ test.describe('account self-deletion: delete_account tool', () => {
       .eq('id', aMem[0]!);
     expect(shareError, 'seed a shared memory for A').toBeNull();
 
-    // A erases itself through the tool — no subject is sent.
-    const mcp = await McpTestClient.connect(aToken);
-    let summary: { auth_deleted: boolean; memories: number; subject: string };
-    try {
-      const result = await mcp.callTool('delete_account', {});
-      expect(result.isError ?? false).toBe(false);
-      summary = firstJson<typeof summary>(result);
-    } finally {
-      await mcp.close();
-    }
-    expect(summary.subject).toBe(a.userId);
-    expect(summary.auth_deleted).toBe(true);
-    expect(summary.memories).toBeGreaterThanOrEqual(2);
+    // A erases itself in the dashboard — the request carries no subject.
+    await signInThroughForm(page, a.user);
+    await page.goto('/settings');
+    const erased = page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/settings/delete-account') &&
+        response.request().method() === 'POST'
+    );
+    await page.getByTestId('settings-delete-account-open').click();
+    await page.getByTestId('settings-delete-account-input').fill(a.user.email);
+    await page.getByTestId('settings-delete-account-confirm').click();
+    // The page signs out and leaves right after the answer, which discards
+    // its body; what the erasure did is read back from the database below.
+    expect((await erased).status()).toBe(200);
+    await expect(page).toHaveURL(/\/login/);
 
     // Completeness for A: every mapped user-data table holds zero rows keyed on
     // A's owner column (the transitive/anonymize dispositions are covered by the

@@ -14,7 +14,6 @@ import {
   ForgetMemoryCommand,
   DescribeScopeCommand,
   ExportMemoriesCommand,
-  HardDeleteAccountCommand,
   ImportMemoryCommand,
   IngestConversationCommand,
   LinkCommand,
@@ -37,8 +36,6 @@ import {
   closeLoopInputSchema,
   closeLoopOutputSchema,
   CONTRACT_VERSION,
-  deleteAccountInputSchema,
-  deleteAccountOutputSchema,
   entitiesInputSchema,
   entitiesOutputSchema,
   exportMetricsInputSchema,
@@ -88,7 +85,6 @@ import {
   type CardOutput,
   type CloseLoopOutput,
   type ContextRule,
-  type DeleteAccountOutput,
   type EntitiesOutput,
   type ExportMetricsOutput,
   type ForgetOutput,
@@ -815,7 +811,6 @@ export const TOOL_ANNOTATIONS = {
   // time; a repeat of record writes no new card event and only refreshes
   // when the state was last seen.
   release: ADDITIVE_IDEMPOTENT,
-  delete_account: DESTRUCTIVE,
 } as const satisfies Record<string, ToolAnnotations>;
 
 /**
@@ -2446,43 +2441,6 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         return asToolResult(result);
       } catch (error) {
         logger.error('export_memories failed', { error: String(error) });
-        return toolErrorFromThrown(error);
-      }
-    }
-  );
-
-  server.registerTool(
-    'delete_account',
-    {
-      title: 'Erase the caller account',
-      annotations: TOOL_ANNOTATIONS.delete_account,
-      description:
-        "Permanently erase the caller's own account and everything it owns " +
-        '(memories, entities, edges, links, and per-user operational rows), ' +
-        'then remove the profile and sign-in principal. Irreversible and ' +
-        'self-only: it takes no subject, so it can never target another ' +
-        'account; the subject is the authenticated caller. Recorded in the ' +
-        'audit log. Offer the export tool first (data portability). Intended ' +
-        'for the dashboard delete-account flow.',
-      inputSchema: deleteAccountInputSchema.shape,
-      outputSchema: deleteAccountOutputSchema.shape,
-    },
-    async () => {
-      try {
-        // Deliberately NOT volume-metered: the pre-execution `mcp_tool_call`
-        // emit is fire-and-forget on a separate connection, and this tool
-        // deletes the caller's own usage_events inside the cascade. A metering
-        // row for THIS call would race the erasure and commit between the
-        // cascade's usage_events delete and its profiles delete, dangling a
-        // usage_events → profiles reference and aborting the whole erasure. The
-        // deletion is audited in audit_log (a content-free erasure record), so
-        // no metering signal is lost that matters.
-        const result = await deps.runInToolContext<DeleteAccountOutput>(() =>
-          deps.commandBus.execute(new HardDeleteAccountCommand())
-        );
-        return asToolResult(result);
-      } catch (error) {
-        logger.error('delete_account failed', { error: String(error) });
         return toolErrorFromThrown(error);
       }
     }

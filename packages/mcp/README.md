@@ -21,8 +21,9 @@ app host connects the returned server to a transport.
   - hygiene: `scan_hygiene`, `list_conflicts`, `get_conflict`,
     `resolve_conflict`, `resolve_conflicts`;
   - rules/quality: `promote_rule`, `benchmark_memory`;
-  - operations: `session_receipt`, `export_metrics`, `export_memories`,
-    `delete_account`.
+  - operations: `session_receipt`, `export_metrics`, `export_memories`.
+    There is deliberately no account-deletion tool: an agent acts as the
+    person, so erasing the account is left to the person in the dashboard.
     Read-tool results carry a reinforcement footer; `build_context` additionally
     renders applicable standing rules and active open loops.
 - `McpServerDeps` — `commandBus`, `queryBus`, `runInToolContext` (wraps every

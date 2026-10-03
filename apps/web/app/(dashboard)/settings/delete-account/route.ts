@@ -1,30 +1,56 @@
-import { deleteAccountViaServer } from '@/lib/mcp';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { currentSubjectId } from '@/lib/subject';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 // Reads the caller's session, so it can never be statically cached.
 export const dynamic = 'force-dynamic';
 
 /**
- * Erases the signed-in user's own account. The deletion runs through the
- * server's audited `delete_account` tool, which always erases the authenticated
- * caller (no subject is sent), so this endpoint cannot target another account.
- * The cascade removes the sign-in principal too, which invalidates every session
- * of the user at the source; the client still clears its own cookies and
- * redirects to the login page afterwards.
+ * Erases the signed-in user's own account — the one place it can happen. The
+ * memory server offers agents no way to delete an account, so a person does
+ * it here, signed in to the dashboard.
+ *
+ * The subject is the verified caller and nothing else: no id is accepted from
+ * the request. The erasure (`hard_delete_user`) removes everything the account
+ * owns, severs what other people's rows say about it, records a content-free
+ * audit row and deletes the sign-in principal, which ends every session of the
+ * user at the source; the client still clears its own cookies afterwards. It
+ * spans rows past row-level security and removes the auth user, so it runs on
+ * the service role, from this server only.
  */
-export async function POST(): Promise<Response> {
-  const supabase = await createServerSupabaseClient();
-  const accessToken = (await supabase.auth.getSession()).data.session
-    ?.access_token;
-  if (!accessToken) {
+export async function POST(request: Request): Promise<Response> {
+  // Only the dashboard's own page may ask. A browser marks a cross-site
+  // request as such, and the session cookie would otherwise ride along.
+  const site = request.headers.get('sec-fetch-site');
+  if (site !== null && site !== 'same-origin') {
+    return new Response('Refused: not sent from the dashboard.', {
+      status: 403,
+    });
+  }
+
+  const subjectId = await currentSubjectId();
+  if (!subjectId) {
     return new Response('Not signed in.', { status: 401 });
   }
 
-  try {
-    const result = await deleteAccountViaServer(accessToken);
-    return Response.json(result);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return new Response(`Account deletion failed: ${message}`, { status: 500 });
+  const admin = createAdminClient();
+  if (!admin) {
+    return new Response(
+      'Account deletion is not configured on this server: ' +
+        'SUPABASE_SERVICE_ROLE_KEY is missing.',
+      { status: 500 }
+    );
   }
+
+  const { data, error } = await admin.rpc('hard_delete_user', {
+    p_user_id: subjectId,
+  });
+  if (error) {
+    // A database message can quote what it was given; log it here, send a
+    // fixed sentence over the wire.
+    console.error('account deletion failed', { message: error.message });
+    return new Response('Account deletion failed. Nothing was deleted.', {
+      status: 500,
+    });
+  }
+  return Response.json(data);
 }

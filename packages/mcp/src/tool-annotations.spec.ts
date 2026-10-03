@@ -36,7 +36,6 @@ const DESTRUCTIVE_TOOLS = [
   'forget',
   'resolve_conflict',
   'resolve_conflicts',
-  'delete_account',
 ] as const;
 
 describe('tool annotations', () => {
