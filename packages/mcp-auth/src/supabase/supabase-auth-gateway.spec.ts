@@ -75,4 +75,10 @@ describe('SupabaseAuthGateway.mintSession', () => {
     expect(await gateway.mintSession(ALICE)).toBeNull();
     expect(signOut).toHaveBeenCalledExactlyOnceWith(`access-${BOB}`, 'local');
   });
+
+  it('still withholds the session when revoking it fails', async () => {
+    const { gateway, signOut } = fakeAuth({ sessionUser: BOB });
+    signOut.mockRejectedValueOnce(new Error('network down'));
+    expect(await gateway.mintSession(ALICE)).toBeNull();
+  });
 });

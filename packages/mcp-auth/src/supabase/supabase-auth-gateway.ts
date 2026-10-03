@@ -72,8 +72,9 @@ export class SupabaseAuthGateway implements IAuthGateway {
    * The link is addressed by email, and an email can move between accounts —
    * or, for a deleted account, make Auth create a new one — between the
    * lookup and the link. So the user is pinned twice, on the link and on the
-   * session it opens; a session that belongs to anyone else is revoked on the
-   * spot and nothing is returned.
+   * session it opens; a session that belongs to anyone else is never returned,
+   * and revoking it is attempted on the spot (best effort: a failed revocation
+   * is logged, and the session's tokens never leave this method either way).
    */
   async mintSession(userId: string): Promise<AuthSession | null> {
     const admin = this.#service().auth.admin;
@@ -115,9 +116,18 @@ export class SupabaseAuthGateway implements IAuthGateway {
       this.#logger.warn(
         'session mint: redeemed session belongs to another user'
       );
-      await admin
+      const revoked = await admin
         .signOut(verified.session.access_token, 'local')
-        .catch(() => undefined);
+        .catch((thrown: unknown) => ({
+          error: {
+            message: thrown instanceof Error ? thrown.message : 'thrown',
+          },
+        }));
+      if (revoked.error) {
+        this.#logger.warn('session mint: revoking that session failed', {
+          error: revoked.error.message,
+        });
+      }
       return null;
     }
     return toAuthSession(verified.session);
