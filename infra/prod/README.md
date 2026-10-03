@@ -224,6 +224,7 @@ Set in `infra/prod/.env` (see `.env.example` for comments):
 | `ZM_BIND_HOST`                  | compose        | Backend bind address (default `127.0.0.1`)             |
 | `ZM_SERVER_PORT`                | compose        | Host port for the MCP server (container: 8787)         |
 | `ZM_PUBLIC_URL`                 | server         | External server URL = OAuth issuer (see TLS)           |
+| `ZM_WEB_URL`                    | server         | Dashboard origin agents approve on (default from host) |
 | `ZM_EMAIL`, `ZM_PASSWORD`       | server         | Local-user/stdio credentials; unused by HTTP MCP       |
 | `ANTHROPIC_API_KEY`             | server         | Optional model-backed extraction and hygiene           |
 | `ZM_WEB_PORT`                   | compose        | Host port for the dashboard (container: 3100)          |

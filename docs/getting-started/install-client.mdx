@@ -33,10 +33,15 @@ at user scope, so every project on the machine sees it:
 <HostedConnectCommand client="claude" />
 
 Then start the agent, run `/mcp`, pick `zero-memory` and authorize. The browser
-opens the instance's own login page; on success the client stores a token and
-refreshes it on its own. No API key is issued and no password is shared with
+opens the instance's dashboard: sign in there the way you always do (password,
+or GitHub or Google when the instance offers them), and allow the client on the
+consent screen, which names the client, what it may do and where the browser
+returns. On success the client stores a token and refreshes it on its own; the
+next time the same client reconnects, a signed-in browser sends it straight
+back without the screen. No API key is issued and no password is shared with
 the client: the server is an OAuth 2.1 authorization server, and the client
-registers itself dynamically with PKCE.
+registers itself dynamically with PKCE. The agent gets a session of its own,
+so signing out of the dashboard does not disconnect it.
 
 `/mcp` should now show `zero-memory` as connected, and the memory tools appear
 as `mcp__zero-memory__*`. Cursor and Codex CLI register the same endpoint their
