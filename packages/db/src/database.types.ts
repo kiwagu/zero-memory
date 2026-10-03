@@ -1109,6 +1109,66 @@ export type Database = {
           },
         ];
       };
+      oauth_authorizations: {
+        Row: {
+          client_id: string;
+          code_challenge: string;
+          created_at: string;
+          decided_at: string | null;
+          expires_at: string;
+          id: string;
+          redirect_uri: string;
+          resource: string | null;
+          scope: string;
+          state: string | null;
+          status: string;
+          user_id: string | null;
+        };
+        Insert: {
+          client_id: string;
+          code_challenge: string;
+          created_at?: string;
+          decided_at?: string | null;
+          expires_at: string;
+          id?: string;
+          redirect_uri: string;
+          resource?: string | null;
+          scope: string;
+          state?: string | null;
+          status?: string;
+          user_id?: string | null;
+        };
+        Update: {
+          client_id?: string;
+          code_challenge?: string;
+          created_at?: string;
+          decided_at?: string | null;
+          expires_at?: string;
+          id?: string;
+          redirect_uri?: string;
+          resource?: string | null;
+          scope?: string;
+          state?: string | null;
+          status?: string;
+          user_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'oauth_authorizations_client_id_fkey';
+            columns: ['client_id'];
+            isOneToOne: false;
+            referencedRelation: 'oauth_clients';
+            referencedColumns: ['client_id'];
+          },
+          {
+            foreignKeyName: 'oauth_authorizations_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       oauth_clients: {
         Row: {
           client_id: string;
@@ -1183,6 +1243,45 @@ export type Database = {
           },
           {
             foreignKeyName: 'oauth_codes_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      oauth_consents: {
+        Row: {
+          client_id: string;
+          granted_at: string;
+          revoked_at: string | null;
+          scope: string;
+          user_id: string;
+        };
+        Insert: {
+          client_id: string;
+          granted_at?: string;
+          revoked_at?: string | null;
+          scope: string;
+          user_id: string;
+        };
+        Update: {
+          client_id?: string;
+          granted_at?: string;
+          revoked_at?: string | null;
+          scope?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'oauth_consents_client_id_fkey';
+            columns: ['client_id'];
+            isOneToOne: false;
+            referencedRelation: 'oauth_clients';
+            referencedColumns: ['client_id'];
+          },
+          {
+            foreignKeyName: 'oauth_consents_user_id_fkey';
             columns: ['user_id'];
             isOneToOne: false;
             referencedRelation: 'profiles';
