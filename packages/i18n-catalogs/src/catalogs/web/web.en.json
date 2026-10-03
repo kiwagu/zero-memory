@@ -430,8 +430,6 @@
   "oauth.consent.areas.projects.body": "Write a project's description from its memories.",
   "oauth.consent.areas.activity.title": "Conversations and metrics",
   "oauth.consent.areas.activity.body": "Send its conversations for capture, and read your session receipts and effectiveness metrics.",
-  "oauth.consent.areas.account.title": "Your account",
-  "oauth.consent.areas.account.body": "Permanently delete your account and everything in it.",
   "oauth.consent.returnTo": "Afterwards you will be sent back to {host}.",
   "oauth.consent.signedInAs": "Signed in as {account}.",
   "oauth.consent.signOut": "Not you? Sign out",

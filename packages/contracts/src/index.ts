@@ -1,7 +1,6 @@
 export * from './card.schema.js';
 export * from './content-guard.schema.js';
 export * from './contract-version.js';
-export * from './delete-account.schema.js';
 export * from './entity-prefixes.js';
 export * from './error.schema.js';
 export * from './export-memories.schema.js';

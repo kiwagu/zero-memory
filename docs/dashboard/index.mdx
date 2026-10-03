@@ -17,8 +17,8 @@ Connecting an agent runs through the dashboard too. When an MCP client asks for
 access, the browser opens a consent screen here that names the client, lists
 everything it will be able to do as you (memories, the knowledge graph,
 conflicts, rules, project boards, project descriptions, conversations and
-metrics, and deleting your account), and shows where the browser returns
-afterwards and which account is deciding;
+metrics), and shows where the browser returns afterwards and which account is
+deciding;
 **Allow** lets it in and **Deny** refuses. A client you allowed before
 reconnects without the screen. Each agent holds a session of its own, so
 signing out of the dashboard leaves connected agents working.
@@ -77,7 +77,9 @@ works.
   saving takes effect immediately and clearing it restores the fallback — plus
   [export](/docs/guides/export) and [import](/docs/guides/import) of your
   memory, your own model-provider key, and account deletion. Account deletion
-  still demands the exact address, not the display name.
+  still demands the exact address, not the display name, and this is the only
+  place it exists: no agent can delete an account, because the memory server
+  offers no tool for it.
 
 Activity and Settings sit at the bottom of the sidebar; the rest are the
 primary navigation.

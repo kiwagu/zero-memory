@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { currentSubjectId } from '@/lib/subject';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 /**
  * Installing and withdrawing a user's own provider key.
@@ -36,29 +36,6 @@ const looksLikeKey = (key: string): boolean =>
 /** An endpoint override is only ever an http(s) URL, and only for its provider. */
 const looksLikeBaseUrl = (url: string): boolean =>
   /^https?:\/\/\S+$/.test(url) && url.length <= 400;
-
-/**
- * The caller's own `usr_` id.
- *
- * Derived from `getUser()` — which verifies the session against the auth
- * server — and then matched explicitly on `user_id`. Both halves matter: the
- * profiles table is readable by any signed-in user, so a query without that
- * filter would return everybody's rows, not the caller's.
- */
-const currentSubjectId = async (): Promise<string | null> => {
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const { data } = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('user_id', user.id)
-    .maybeSingle();
-  return (data as { id: string } | null)?.id ?? null;
-};
 
 export async function POST(request: NextRequest) {
   const body = (await request.json()) as {

@@ -32,7 +32,6 @@ import {
   DeterministicUsefulnessJudge,
 } from '@workspace/extraction/testing';
 import {
-  ACCOUNT_ERASER,
   BRIEFING_WORK_READER,
   ENTITY_REPOSITORY,
   EXPORT_METRICS_READER,
@@ -59,7 +58,6 @@ import {
 } from '@workspace/policy';
 import {
   StoredPolicyProvider,
-  SupabaseAccountEraser,
   SupabaseBudgetWindowReader,
   SupabaseCredentialResolver,
   SupabaseSpendMeter,
@@ -101,7 +99,6 @@ export const register = (c = container): void => {
   c.registerSingleton(RELEASE_REPOSITORY, SupabaseReleaseRepository);
   c.registerSingleton(BRIEFING_WORK_READER, SupabaseBriefingWorkReader);
   c.registerSingleton(MEMORY_EXPORT_READER, SupabaseMemoryExportReader);
-  c.registerSingleton(ACCOUNT_ERASER, SupabaseAccountEraser);
   c.registerSingleton(MEMORY_SEARCH_SERVICE, SupabaseMemorySearchService);
   c.registerSingleton(SCOPE_META_REPOSITORY, SupabaseScopeMetaRepository);
   c.registerSingleton(PROJECT_RULES_READER, SupabaseProjectRulesReader);

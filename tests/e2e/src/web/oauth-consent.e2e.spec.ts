@@ -117,7 +117,7 @@ test.describe('agent authorization in the browser', () => {
     await expect(page.getByTestId('oauth-consent-account')).toHaveText(
       user.email
     );
-    // Everything an allowed client can do is named, account deletion included.
+    // Everything an allowed client can do is named.
     for (const area of [
       'memories',
       'graph',
@@ -126,7 +126,6 @@ test.describe('agent authorization in the browser', () => {
       'board',
       'projects',
       'activity',
-      'account',
     ]) {
       await expect(
         page.getByTestId(`oauth-consent-area-${area}`)

@@ -1,4 +1,3 @@
-export * from './account-eraser.js';
 export * from './content-guard.js';
 export * from './edge-type.vo.js';
 export * from './entity-anchor.js';

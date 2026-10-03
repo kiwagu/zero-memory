@@ -120,12 +120,6 @@ export default async function OAuthConsentPage({
               title: t('oauth.consent.areas.activity.title'),
               body: t('oauth.consent.areas.activity.body'),
             },
-            {
-              id: 'account',
-              title: t('oauth.consent.areas.account.title'),
-              body: t('oauth.consent.areas.account.body'),
-              destructive: true,
-            },
           ],
           returnTo: t('oauth.consent.returnTo', { host: '{host}' }),
           signedInAs: t('oauth.consent.signedInAs', { account: '{account}' }),

@@ -37,7 +37,6 @@ export const CONSENT_AREAS = {
   board: ['board', 'card', 'card_log', 'release'],
   projects: ['describe_scope'],
   activity: ['ingest_conversation', 'session_receipt', 'export_metrics'],
-  account: ['delete_account'],
 } as const satisfies Record<string, readonly ToolName[]>;
 
 export type ConsentArea = keyof typeof CONSENT_AREAS;

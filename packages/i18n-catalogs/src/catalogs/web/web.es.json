@@ -430,8 +430,6 @@
   "oauth.consent.areas.projects.body": "Escribir la descripción de un proyecto a partir de sus memorias.",
   "oauth.consent.areas.activity.title": "Conversaciones y métricas",
   "oauth.consent.areas.activity.body": "Enviar sus conversaciones para captura, y leer tus resúmenes de sesión y métricas de eficacia.",
-  "oauth.consent.areas.account.title": "Tu cuenta",
-  "oauth.consent.areas.account.body": "Eliminar de forma permanente tu cuenta y todo su contenido.",
   "oauth.consent.returnTo": "Después volverás a {host}.",
   "oauth.consent.signedInAs": "Sesión iniciada como {account}.",
   "oauth.consent.signOut": "¿No eres tú? Cerrar sesión",
