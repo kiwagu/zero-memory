@@ -47,6 +47,11 @@ export type DeleteAccountPanelProps = {
   labels: DeleteAccountLabels;
   /** The exact string the user must type to arm the delete button (their email). */
   confirmationValue: string;
+  /**
+   * Why deletion cannot start yet — the account has no second factor to
+   * confirm it with. While set, the dialog stays closed and this is shown.
+   */
+  blockedReason?: string | null;
   /** Starts a data export (data portability) — offered, never required. */
   onExport: () => void;
   /**
@@ -70,6 +75,7 @@ export type DeleteAccountPanelProps = {
 export function DeleteAccountPanel({
   labels,
   confirmationValue,
+  blockedReason = null,
   onExport,
   onDelete,
 }: DeleteAccountPanelProps) {
@@ -116,10 +122,20 @@ export function DeleteAccountPanel({
         </CardTitle>
         <CardDescription>{labels.description}</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-col gap-3">
+        {blockedReason ? (
+          <p
+            className="text-muted-foreground text-sm"
+            data-testid="settings-delete-account-blocked"
+          >
+            {blockedReason}
+          </p>
+        ) : null}
         <Button
           variant="destructive"
+          className="self-start"
           onClick={() => reset(true)}
+          disabled={Boolean(blockedReason)}
           data-testid="settings-delete-account-open"
         >
           {labels.trigger}

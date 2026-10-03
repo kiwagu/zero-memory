@@ -4,7 +4,9 @@ import { BuildVersion } from '@/components/build-version';
 import { AcceptTermsView } from '@/components/auth/accept-terms-view';
 import { getRequestMessages } from '@/lib/i18n';
 import { legalLinks } from '@/lib/legal';
+import { requireAssurance } from '@/lib/mfa';
 import { safeNext } from '@/lib/safe-next';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 /**
  * The one-time acceptance for an account that arrived without one — created
@@ -21,8 +23,16 @@ export default async function AcceptTermsPage({
   if (!legal.required) {
     redirect('/');
   }
-  const { t } = await getRequestMessages();
   const next = safeNext((await searchParams).next);
+  // The second factor comes first: accepting the documents is part of using
+  // the account, which waits until the person has given the code.
+  await requireAssurance(
+    await createServerSupabaseClient(),
+    next === '/'
+      ? '/accept-terms'
+      : `/accept-terms?next=${encodeURIComponent(next)}`
+  );
+  const { t } = await getRequestMessages();
   const template =
     legal.documents === 'both'
       ? t('auth.consent.template', { terms: '{terms}', privacy: '{privacy}' })

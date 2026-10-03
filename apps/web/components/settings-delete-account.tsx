@@ -18,14 +18,17 @@ import { createClient } from '@/lib/supabase/client';
 export function SettingsDeleteAccount({
   labels,
   email,
+  blockedReason,
 }: {
   labels: DeleteAccountLabels;
   email: string;
+  blockedReason: string | null;
 }) {
   return (
     <DeleteAccountPanel
       labels={labels}
       confirmationValue={email}
+      blockedReason={blockedReason}
       onExport={() => {
         // Reuse the existing audited export route; a download attribute makes it
         // save rather than navigate.
