@@ -80,6 +80,7 @@ const enrolFactor = async (accessToken: string) => {
 
 test.describe('what Auth enforces once a factor is enrolled', () => {
   let user: E2EUser;
+  let aal2Token = '';
 
   test.beforeAll(async () => {
     user = await provisionE2EUser(`mfa-aal-${Date.now()}@zm.e2e`);
@@ -87,6 +88,7 @@ test.describe('what Auth enforces once a factor is enrolled', () => {
     const enrolled = await enrollTotp(first);
     // Presenting the code raises the session to aal2.
     expect(claimsOf(enrolled.aal2AccessToken).aal).toBe('aal2');
+    aal2Token = enrolled.aal2AccessToken;
   });
 
   test('a new password sign-in starts at aal1', async () => {
@@ -124,5 +126,54 @@ test.describe('what Auth enforces once a factor is enrolled', () => {
       status: 403,
       code: 'insufficient_aal',
     });
+  });
+
+  test('@smoke the consent API refuses a session that has not given the code', async ({
+    request,
+  }) => {
+    const registered = await request.post(
+      `${e2eEnv.serverUrl}/oauth/register`,
+      {
+        data: {
+          client_name: 'zm-e2e-mfa-api',
+          redirect_uris: ['http://127.0.0.1:45792/callback'],
+          token_endpoint_auth_method: 'none',
+        },
+      }
+    );
+    const clientId = (await registered.json()).client_id as string;
+    const started = await request.get(`${e2eEnv.serverUrl}/oauth/authorize`, {
+      maxRedirects: 0,
+      params: {
+        client_id: clientId,
+        redirect_uri: 'http://127.0.0.1:45792/callback',
+        response_type: 'code',
+        code_challenge: 'c'.repeat(43),
+        code_challenge_method: 'S256',
+      },
+    });
+    const authorizationId = new URL(
+      started.headers()['location'] ?? ''
+    ).searchParams.get('authorization_id');
+    const path = `${e2eEnv.serverUrl}/oauth/authorizations/${authorizationId}`;
+    const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+    // A password alone — or an agent's session — cannot see or approve it.
+    for (const token of [
+      await passwordGrantToken(user),
+      await agentStyleToken(user.email),
+    ]) {
+      const read = await request.get(path, { headers: bearer(token) });
+      expect(read.status()).toBe(403);
+      expect((await read.json()).error).toBe('insufficient_aal');
+      const decided = await request.post(`${path}/consent`, {
+        headers: bearer(token),
+        data: { decision: 'approve' },
+      });
+      expect(decided.status()).toBe(403);
+    }
+    // With the code given, the person sees it.
+    const read = await request.get(path, { headers: bearer(aal2Token) });
+    expect(read.status()).toBe(200);
   });
 });

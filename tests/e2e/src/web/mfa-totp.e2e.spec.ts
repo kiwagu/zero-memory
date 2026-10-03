@@ -109,9 +109,10 @@ test.describe('two-factor authentication', () => {
     await expect(page.getByTestId('mfa-start')).toBeVisible();
     await page.reload();
     await expect(page.getByTestId('mfa-start')).toBeVisible();
-    const { data } = await admin().auth.admin.mfa.listFactors({
+    const { data, error } = await admin().auth.admin.mfa.listFactors({
       userId: user.id,
     });
+    expect(error).toBeNull();
     expect(data?.factors ?? []).toHaveLength(0);
   });
 
@@ -194,6 +195,14 @@ test.describe('two-factor authentication', () => {
     });
     expect(refused.status()).toBe(403);
     expect(await refused.text()).toContain('code');
+    // The other change the dashboard makes with the service role, the
+    // person's model-provider key, is refused to that session as well.
+    const keyWrite = await page.request.post('/settings/provider-key', {
+      data: { provider: 'anthropic', apiKey: 'sk-ant-e2e-0123456789abcdef' },
+    });
+    expect(keyWrite.status()).toBe(403);
+    const keyRevoke = await page.request.delete('/settings/provider-key');
+    expect(keyRevoke.status()).toBe(403);
     const { data: still } = await admin().auth.admin.getUserById(user.id);
     expect(still.user?.id).toBe(user.id);
 

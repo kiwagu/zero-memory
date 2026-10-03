@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { secondFactorRefusal } from '@/lib/mfa';
 import { currentSubjectId } from '@/lib/subject';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 /**
  * Installing and withdrawing a user's own provider key.
@@ -87,6 +89,15 @@ export async function POST(request: NextRequest) {
   if (!subjectId) {
     return NextResponse.json({ error: 'Not signed in.' }, { status: 401 });
   }
+  // The key is written with the service role, past the page gate: a session
+  // that owes its second factor does not change it.
+  const refused = await secondFactorRefusal(await createServerSupabaseClient());
+  if (refused) {
+    return NextResponse.json(
+      { error: await refused.text() },
+      { status: refused.status }
+    );
+  }
 
   const admin = createAdminClient();
   if (!admin) {
@@ -119,6 +130,15 @@ export async function DELETE() {
   const subjectId = await currentSubjectId();
   if (!subjectId) {
     return NextResponse.json({ error: 'Not signed in.' }, { status: 401 });
+  }
+  // The key is written with the service role, past the page gate: a session
+  // that owes its second factor does not change it.
+  const refused = await secondFactorRefusal(await createServerSupabaseClient());
+  if (refused) {
+    return NextResponse.json(
+      { error: await refused.text() },
+      { status: refused.status }
+    );
   }
 
   const admin = createAdminClient();

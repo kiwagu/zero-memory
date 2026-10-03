@@ -40,19 +40,24 @@ type ServerSupabase = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 /**
  * The session's level and the account's verified factors, both asked of Auth
  * now: the factors come from the user record rather than the session cookie,
- * so a factor added in another browser applies here at once.
+ * so a factor added in another browser applies here at once. When Auth cannot
+ * say, this throws rather than report "no factor" — a lookup that fails must
+ * never open what the factor guards.
  */
 export async function readAssurance(
   supabase: ServerSupabase
 ): Promise<{ aal: string | undefined; verifiedFactors: number }> {
-  const [{ data: claimsData }, { data: factors }] = await Promise.all([
+  const [{ data: claimsData }, { data: factors, error }] = await Promise.all([
     supabase.auth.getClaims(),
     supabase.auth.mfa.listFactors(),
   ]);
+  if (error || !factors) {
+    throw new Error('The second factor could not be checked right now.');
+  }
   const aal = claimsData?.claims?.aal;
   return {
     aal: typeof aal === 'string' ? aal : undefined,
-    verifiedFactors: (factors?.totp ?? []).filter(
+    verifiedFactors: factors.totp.filter(
       (factor) => factor.status === 'verified'
     ).length,
   };
@@ -70,4 +75,29 @@ export async function requireAssurance(
   if (assuranceGap(aal, verifiedFactors) === 'verify') {
     redirect(verifyPathFor(nextPath));
   }
+}
+
+/**
+ * For route handlers that change the account with the service role, where
+ * the page gate does not reach: a session that owes the code is refused, and
+ * so is one whose factors cannot be checked right now. Null means go ahead.
+ */
+export async function secondFactorRefusal(
+  supabase: ServerSupabase
+): Promise<Response | null> {
+  let assurance: Awaited<ReturnType<typeof readAssurance>>;
+  try {
+    assurance = await readAssurance(supabase);
+  } catch {
+    return new Response(
+      'Your second factor could not be checked right now. Try again.',
+      { status: 503 }
+    );
+  }
+  if (assuranceGap(assurance.aal, assurance.verifiedFactors) === 'verify') {
+    return new Response('Enter the code from your authenticator app first.', {
+      status: 403,
+    });
+  }
+  return null;
 }

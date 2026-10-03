@@ -131,9 +131,16 @@ export function SettingsSecurity({
       return;
     }
     setPending(true);
-    await createClient().auth.mfa.unenroll({ factorId: state.factorId });
-    pendingFactor.current = null;
+    const { error: cancelError } = await createClient().auth.mfa.unenroll({
+      factorId: state.factorId,
+    });
     setPending(false);
+    if (cancelError) {
+      // The half-set-up app is still there; stay on this step to retry.
+      setError(messages.failed);
+      return;
+    }
+    pendingFactor.current = null;
     setError(null);
     setState({ kind: 'none' });
   }

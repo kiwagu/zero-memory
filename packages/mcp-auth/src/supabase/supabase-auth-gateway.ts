@@ -22,6 +22,18 @@ const toAuthSession = (session: Session): AuthSession => ({
   expiresIn: session.expires_in ?? DEFAULT_EXPIRES_IN_SECONDS,
 });
 
+/** The `aal` claim of a token Auth has already verified. */
+const assuranceLevelOf = (accessToken: string): string | undefined => {
+  try {
+    const payload = JSON.parse(
+      Buffer.from(accessToken.split('.')[1] ?? '', 'base64url').toString('utf8')
+    ) as { aal?: unknown };
+    return typeof payload.aal === 'string' ? payload.aal : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 /**
  * Supabase Auth adapter for the identity gateway. Token checks and refresh
  * go through an anon-key client; minting a session for a user needs
@@ -56,12 +68,19 @@ export class SupabaseAuthGateway implements IAuthGateway {
 
   async verifyAccessToken(
     accessToken: string
-  ): Promise<{ userId: string } | null> {
+  ): Promise<{ userId: string; owesSecondFactor: boolean } | null> {
     const { data, error } = await this.#anon().auth.getUser(accessToken);
     if (error || !data.user) {
       return null;
     }
-    return { userId: data.user.id };
+    const hasFactor = (data.user.factors ?? []).some(
+      (factor) => factor.status === 'verified'
+    );
+    // Auth has just accepted this token, so its claims can be read as given.
+    return {
+      userId: data.user.id,
+      owesSecondFactor: hasFactor && assuranceLevelOf(accessToken) !== 'aal2',
+    };
   }
 
   /**

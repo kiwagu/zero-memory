@@ -35,23 +35,31 @@ export function MfaVerifyView({
     const supabase = createClient();
     const { data: factors, error: listError } =
       await supabase.auth.mfa.listFactors();
-    const factor = factors?.totp.find((item) => item.status === 'verified');
-    if (listError || !factor) {
+    const verified = (factors?.totp ?? []).filter(
+      (item) => item.status === 'verified'
+    );
+    if (listError || verified.length === 0) {
       setError(messages.failed);
       setPending(false);
       return;
     }
-    const { error: verifyError } = await supabase.auth.mfa.challengeAndVerify({
-      factorId: factor.id,
-      code,
-    });
-    if (verifyError) {
-      setError(messages.refused);
-      setPending(false);
-      return;
+    // A person may keep a second phone as a backup; the code is tried
+    // against each app they have, so whichever phone is at hand works.
+    for (const factor of verified) {
+      const { error: verifyError } = await supabase.auth.mfa.challengeAndVerify(
+        {
+          factorId: factor.id,
+          code,
+        }
+      );
+      if (!verifyError) {
+        router.replace(next);
+        router.refresh();
+        return;
+      }
     }
-    router.replace(next);
-    router.refresh();
+    setError(messages.refused);
+    setPending(false);
   }
 
   async function signOut() {

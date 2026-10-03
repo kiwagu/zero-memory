@@ -20,7 +20,13 @@ const WEB_URL = 'http://localhost:3100';
 const REDIRECT_URI = 'http://127.0.0.1:41241/callback';
 const ALICE = 'a0000000-0000-4000-8000-00000000000a';
 const BOB = 'b0000000-0000-4000-8000-00000000000b';
-const BEARER = { alice: 'Bearer alice-token', bob: 'Bearer bob-token' };
+const CAROL = 'c0000000-0000-4000-8000-00000000000c';
+const BEARER = {
+  alice: 'Bearer alice-token',
+  bob: 'Bearer bob-token',
+  // Carol has an authenticator app and signed in without giving its code.
+  carol: 'Bearer carol-aal1-token',
+};
 
 const sessionOf = (userId: string): AuthSession => ({
   userId,
@@ -34,10 +40,13 @@ const makeAuthGateway = () =>
   ({
     verifyAccessToken: vi.fn(async (token: string) => {
       if (token === 'alice-token') {
-        return { userId: ALICE };
+        return { userId: ALICE, owesSecondFactor: false };
       }
       if (token === 'bob-token') {
-        return { userId: BOB };
+        return { userId: BOB, owesSecondFactor: false };
+      }
+      if (token === 'carol-aal1-token') {
+        return { userId: CAROL, owesSecondFactor: true };
       }
       return null;
     }),
@@ -171,6 +180,32 @@ describe('reading an authorization', () => {
       });
       expect(read.status).toBe(404);
     }
+  });
+});
+
+describe('a session that owes its second factor', () => {
+  it('can neither read nor decide, and binds nothing', async () => {
+    const { deps, auth, clientId } = await setup();
+    const id = await start(deps, clientId);
+    const read = await handleAuthorizationRead(deps, {
+      authorizationId: id,
+      authorization: BEARER.carol,
+    });
+    expect(read.status).toBe(403);
+    expect(read.body).toMatchObject({ error: 'insufficient_aal' });
+    const decided = await handleConsentDecision(deps, {
+      authorizationId: id,
+      authorization: BEARER.carol,
+      body: { decision: 'approve' },
+    });
+    expect(decided.status).toBe(403);
+    expect(auth.mintSession).not.toHaveBeenCalled();
+    // Still waiting for whoever opens it with the code given.
+    const alice = await handleAuthorizationRead(deps, {
+      authorizationId: id,
+      authorization: BEARER.alice,
+    });
+    expect(alice.status).toBe(200);
   });
 });
 

@@ -1,4 +1,4 @@
-import { readAssurance } from '@/lib/mfa';
+import { readAssurance, secondFactorRefusal } from '@/lib/mfa';
 import { currentSubjectId } from '@/lib/subject';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
@@ -41,20 +41,20 @@ export async function POST(request: Request): Promise<Response> {
     return new Response('Not signed in.', { status: 401 });
   }
 
-  const { aal, verifiedFactors } = await readAssurance(
-    await createServerSupabaseClient()
-  );
+  const supabase = await createServerSupabaseClient();
+  const refused = await secondFactorRefusal(supabase);
+  if (refused) {
+    return refused;
+  }
+  // Without a factor there is nothing an agent lacks, so deletion waits until
+  // the person turns one on.
+  const { verifiedFactors } = await readAssurance(supabase);
   if (verifiedFactors === 0) {
     return new Response(
       'Turn on two-factor authentication first: deleting the account is ' +
         'confirmed with a code from your authenticator app.',
       { status: 403 }
     );
-  }
-  if (aal !== 'aal2') {
-    return new Response('Enter the code from your authenticator app first.', {
-      status: 403,
-    });
   }
 
   const admin = createAdminClient();

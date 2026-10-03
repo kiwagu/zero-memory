@@ -249,8 +249,14 @@ in Settings, and from then on every sign-in — password, GitHub or Google —
 asks for a six-digit code before the dashboard opens. The same code guards
 the consent screen that lets an agent in, a password reset, and deleting the
 account, which cannot be done at all until the account has a second factor.
-Agents are unaffected: the sessions they receive never present a code, and
-nothing on the server or in the database asks them for one.
+Agents keep working: the sessions they receive never present a code, and
+nothing they use through the memory server asks them for one. The code is
+also what stops an agent from acting as the person where only the person
+should: once an account has a factor, Auth refuses a session without the code
+a password or email change and a new factor, and the dashboard refuses it the
+consent screen, account deletion and the provider key. On an account without
+a factor an agent's session could set up one of its own, so the advice to
+people is to turn two-factor on before connecting agents.
 
 Auth must allow TOTP enrolment, or turning it on fails in Settings:
 
