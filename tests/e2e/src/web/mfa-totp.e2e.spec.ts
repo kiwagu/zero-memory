@@ -198,7 +198,10 @@ test.describe('two-factor authentication', () => {
     // The other change the dashboard makes with the service role, the
     // person's model-provider key, is refused to that session as well.
     const keyWrite = await page.request.post('/settings/provider-key', {
-      data: { provider: 'anthropic', apiKey: 'sk-ant-e2e-0123456789abcdef' },
+      data: {
+        provider: 'openai',
+        apiKey: 'e2e-fixture-not-a-real-key-0123456789',
+      },
     });
     expect(keyWrite.status()).toBe(403);
     const keyRevoke = await page.request.delete('/settings/provider-key');
