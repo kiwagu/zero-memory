@@ -34,7 +34,10 @@ dependency is `@workspace/db` for the generated database types.
 - `/review` — duplicate/supersede/contradiction hygiene queue.
 - `/rules` — standing-rule candidates, delivery budget, and pins.
 - `/scopes` — scope creation and membership management.
-- `/settings` — provider credentials, memory transfer, and account deletion.
+- `/settings` — profile, two-factor authentication, memory transfer, provider
+  credentials, and account deletion. Deletion runs here and nowhere else
+  (`settings/delete-account/route.ts`, service role, for the signed-in caller)
+  and needs a verified authenticator app and a session that gave its code.
 - `/api/panels/[kind]/[id]` — the data behind one panel of the chain (`memory`,
   `card` or `entity`): exactly what that resource's page shows, read under the
   viewer's session; anything the viewer may not read is a 404.
@@ -47,6 +50,13 @@ dependency is `@workspace/db` for the generated database types.
 - `/accept-terms` — the one-time acceptance an account owes on an instance
   that publishes legal documents when it arrived without one (created through
   a provider). The dashboard layout sends such accounts here first.
+- `/mfa/verify` — the second-factor step. `lib/mfa.ts` decides whether a
+  session still owes the code (an account with a verified factor, below
+  `aal2`); the dashboard layout, `/accept-terms`, `/oauth/consent` and the
+  password reset send such a session here with a `next`. Enforced in the app,
+  never in row-level security, because agent sessions stay `aal1` by design.
+- `/oauth/consent` — where an agent's authorization lands: the person signs
+  in, gives the code if they have a factor, and allows or denies the client.
 
 ## Views
 

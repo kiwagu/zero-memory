@@ -76,10 +76,13 @@ works.
   and an editable **display name** the dashboard shows in place of it, where
   saving takes effect immediately and clearing it restores the fallback — plus
   [export](/docs/guides/export) and [import](/docs/guides/import) of your
-  memory, your own model-provider key, and account deletion. Account deletion
-  still demands the exact address, not the display name, and this is the only
-  place it exists: no agent can delete an account, because the memory server
-  offers no tool for it.
+  memory, your own model-provider key, two-factor authentication, and account
+  deletion. Two-factor authentication adds a code from an authenticator app
+  after every sign-in, before the consent screen for agents, and to a
+  password reset; removing the app asks for a code from it. Account deletion
+  is the only place an account can be deleted — no agent can do it, because
+  the memory server offers no tool for it — and it needs two-factor turned on
+  and the code given in this session, besides the exact address.
 
 Activity and Settings sit at the bottom of the sidebar; the rest are the
 primary navigation.

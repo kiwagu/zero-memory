@@ -311,6 +311,22 @@ issuer (`ZM_PUBLIC_URL`) did not change — only the sessions are gone. The
 consents survive too, so with the dashboard signed in each re-authorization is
 one browser round trip with no screen.
 
+### Locked out of two-factor authentication
+
+Someone who lost the phone with their authenticator app cannot sign in past
+the code step, and cannot remove the factor themselves (removing it needs a
+code). After confirming who they are out of band, take the factor off their
+account with the service role, then tell them to turn two-factor on again in
+Settings:
+
+```sh
+SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… bun scripts/mfa-unenroll.ts person@example.com
+SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… bun scripts/mfa-unenroll.ts person@example.com --yes
+```
+
+The first run only lists the factors; the second removes them. It changes
+nothing else about the account.
+
 ### Which clients an account has approved
 
 Approving a client on the consent screen records a row in

@@ -242,6 +242,29 @@ answered quietly with no confirmation mail (the sign-in form says so above
 its fields), and a password can be added to a provider account from the
 password-reset flow.
 
+## Two-factor authentication
+
+People can protect their account with an authenticator app: they turn it on
+in Settings, and from then on every sign-in — password, GitHub or Google —
+asks for a six-digit code before the dashboard opens. The same code guards
+the consent screen that lets an agent in, a password reset, and deleting the
+account, which cannot be done at all until the account has a second factor.
+Agents are unaffected: the sessions they receive never present a code, and
+nothing on the server or in the database asks them for one.
+
+Auth must allow TOTP enrolment, or turning it on fails in Settings:
+
+- Hosted project: Authentication → Multi-Factor, enable the authenticator
+  app (TOTP) for enrolment and verification.
+- Self-hosted stack: `MFA_TOTP_ENROLL_ENABLED` and `MFA_TOTP_VERIFY_ENABLED`
+  in the stack's `.env`; the compose file defaults both to `true`.
+- Local CLI stack: `[auth.mfa.totp]` with `enroll_enabled` and
+  `verify_enabled` in `supabase/config.toml`, already on.
+
+Someone who loses their phone is let back in by an operator, after checking
+their identity: `bun scripts/mfa-unenroll.ts <email>` lists the account's
+factors with the service role, and `--yes` removes them.
+
 ## Client machines
 
 The short path for a developer machine is
