@@ -825,6 +825,7 @@ const ensureApps = async (
       ...extractionEnv,
       PORT: String(contour.serverPort),
       ZM_PUBLIC_URL: serverUrl,
+      ZM_WEB_URL: webUrl,
     }
   );
 

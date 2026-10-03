@@ -36,6 +36,11 @@ services:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       ZM_PUBLIC_URL: ${ZM_PUBLIC_URL}
+      # External origin of the dashboard: the authorization endpoint sends a
+      # person there to sign in and approve an agent. Derived from the
+      # dashboard's hostname unless set; the server refuses to start behind
+      # the edge when it resolves to anything but an https origin.
+      ZM_WEB_URL: ${ZM_WEB_URL:-https://${ZM_WEB_HOST}}
       # Revision of THIS checkout, stamped by the deploy script. The image and
       # the checkout advance independently, so /healthz reports both.
       ZM_CHECKOUT_SHA: ${ZM_CHECKOUT_SHA:-}

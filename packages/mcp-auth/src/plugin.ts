@@ -28,6 +28,11 @@ import { SupabaseOAuthStore } from './supabase/supabase-oauth-store.js';
 export interface McpAuthPluginOptions {
   /** Public base URL of this server (OAuth issuer), no trailing slash. */
   issuer: string;
+  /**
+   * External origin of the dashboard, no trailing slash. The authorization
+   * endpoint sends the person there to sign in and approve the client.
+   */
+  webUrl: string;
   /** Storage override (defaults to the Supabase service-role adapter). */
   store?: IOAuthStore;
   /** Identity gateway override (defaults to Supabase Auth). */

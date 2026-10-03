@@ -4,7 +4,7 @@ import { trustProxyFromEnv } from '@workspace/mcp-auth';
 import { Elysia } from 'elysia';
 
 import { createApp } from './app.js';
-import { resolvePublicUrl } from './public-url.js';
+import { resolvePublicUrl, resolveWebUrl } from './public-url.js';
 import { startHygieneScheduler } from './hygiene-scheduler.js';
 import { startTranslationScheduler } from './translation-scheduler.js';
 import { startUsageScheduler } from './usage-scheduler.js';
@@ -20,6 +20,12 @@ const { url: publicUrl, warnings: publicUrlWarnings } = resolvePublicUrl({
   port,
   trustProxy: trustProxyFromEnv(),
 });
+// The dashboard is where a person signs in and approves an agent; the
+// authorization endpoint sends them there, so it is validated the same way.
+const { url: webUrl, warnings: webUrlWarnings } = resolveWebUrl({
+  raw: process.env.ZM_WEB_URL,
+  trustProxy: trustProxyFromEnv(),
+});
 
 // The logger is a dependency-free leaf: feed it the ambient correlation id so
 // every line — including deep persistence/extraction logs — carries requestId.
@@ -33,7 +39,7 @@ register();
 // A thin outer app owns listening and wraps every request in the correlation
 // context before delegating to the real routes (`inner.handle`). This keeps the
 // ALS boundary in one place and out of Elysia's per-route lifecycle.
-const inner = createApp({ publicUrl });
+const inner = createApp({ publicUrl, webUrl });
 const handle = withRequestObservability(
   (request) => inner.handle(request),
   logger
@@ -45,8 +51,11 @@ const app = new Elysia()
 for (const warning of publicUrlWarnings) {
   logger.warn('public url', { warning });
 }
+for (const warning of webUrlWarnings) {
+  logger.warn('web url', { warning });
+}
 
-logger.info('server started', { port, publicUrl });
+logger.info('server started', { port, publicUrl, webUrl });
 
 // Optional in-process nightly hygiene scan (independent of the watcher).
 startHygieneScheduler();

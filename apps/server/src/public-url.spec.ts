@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolvePublicUrl } from './public-url.js';
+import { resolvePublicUrl, resolveWebUrl } from './public-url.js';
 
 const behindEdge = { port: 8787, trustProxy: true };
 const local = { port: 8787, trustProxy: false };
@@ -63,5 +63,37 @@ describe('resolvePublicUrl', () => {
     ['with credentials', 'https://user:pass@zm.example.com'],
   ])('always rejects a malformed value (%s)', (_case, raw) => {
     expect(() => resolvePublicUrl({ raw, ...local })).toThrow();
+  });
+});
+
+describe('resolveWebUrl', () => {
+  it('normalizes the dashboard origin the consent redirect goes to', () => {
+    expect(
+      resolveWebUrl({ raw: 'https://app.example.com/', trustProxy: true })
+    ).toEqual({ url: 'https://app.example.com', warnings: [] });
+  });
+
+  it('falls back to the local dashboard with a warning off the edge', () => {
+    const resolved = resolveWebUrl({ raw: undefined, trustProxy: false });
+    expect(resolved.url).toBe('http://localhost:3100');
+    expect(resolved.warnings[0]).toContain('ZM_WEB_URL is not set');
+  });
+
+  it('refuses to start behind the edge without it', () => {
+    expect(() => resolveWebUrl({ raw: '', trustProxy: true })).toThrow(
+      /ZM_WEB_URL is not set/
+    );
+  });
+
+  it('refuses a path, which would send people to the wrong page', () => {
+    expect(() =>
+      resolveWebUrl({ raw: 'https://app.example.com/dash', trustProxy: false })
+    ).toThrow(/bare origin without a path/);
+  });
+
+  it('refuses plain http on a public host behind the edge', () => {
+    expect(() =>
+      resolveWebUrl({ raw: 'http://app.example.com', trustProxy: true })
+    ).toThrow(/ZM_WEB_URL uses http:/);
   });
 });

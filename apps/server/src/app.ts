@@ -14,6 +14,8 @@ import {
 export interface AppOptions {
   /** Public base URL of this server (OAuth issuer), no trailing slash. */
   publicUrl: string;
+  /** External origin of the dashboard, where agents are approved. */
+  webUrl: string;
   /** Downstream probes for /readyz; defaults read env + the DI container. */
   readiness?: ReadinessProbes;
 }
@@ -53,7 +55,7 @@ export const createApp = (options: AppOptions) =>
     .use(
       createReadinessRoutes(options.readiness ?? createDefaultReadinessProbes())
     )
-    .use(mcpAuthPlugin({ issuer: options.publicUrl }))
+    .use(mcpAuthPlugin({ issuer: options.publicUrl, webUrl: options.webUrl }))
     .use(createMcpHttpRoutes({ issuer: options.publicUrl }));
 
 export type App = ReturnType<typeof createApp>;
