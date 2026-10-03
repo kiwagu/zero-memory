@@ -18,10 +18,10 @@ export const dynamic = 'force-dynamic';
  * the service role, from this server only.
  */
 export async function POST(request: Request): Promise<Response> {
-  // Only the dashboard's own page may ask. A browser marks a cross-site
-  // request as such, and the session cookie would otherwise ride along.
-  const site = request.headers.get('sec-fetch-site');
-  if (site !== null && site !== 'same-origin') {
+  // Only the dashboard's own page may ask. Every current browser marks where
+  // a request comes from; a missing mark is refused as well, because a
+  // same-site sibling origin would otherwise carry the session cookie here.
+  if (request.headers.get('sec-fetch-site') !== 'same-origin') {
     return new Response('Refused: not sent from the dashboard.', {
       status: 403,
     });
