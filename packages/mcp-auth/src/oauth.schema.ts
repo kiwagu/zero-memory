@@ -78,13 +78,6 @@ export type AuthorizationDetails = z.infer<typeof authorizationDetailsSchema>;
 export const consentResultSchema = z.object({ redirect_url: z.string().url() });
 export type ConsentResult = z.infer<typeof consentResultSchema>;
 
-/** POST /oauth/authorize = authorization request + the login credentials. */
-export const authorizeSubmitSchema = authorizeRequestSchema.extend({
-  email: z.string().min(3).max(320),
-  password: z.string().min(1).max(1024),
-});
-export type AuthorizeSubmit = z.infer<typeof authorizeSubmitSchema>;
-
 /** POST /oauth/token — authorization_code grant. */
 export const authorizationCodeGrantSchema = z.object({
   grant_type: z.literal('authorization_code'),

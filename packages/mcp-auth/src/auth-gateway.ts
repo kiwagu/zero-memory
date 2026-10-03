@@ -27,12 +27,6 @@ export interface IAuthGateway {
    */
   mintSession(userId: string): Promise<AuthSession | null>;
 
-  /** Password login; null on invalid credentials (never throws for that). */
-  signInWithPassword(
-    email: string,
-    password: string
-  ): Promise<AuthSession | null>;
-
   /** Rotates a refresh token; null when it is invalid/revoked. */
   refreshSession(refreshToken: string): Promise<AuthSession | null>;
 }

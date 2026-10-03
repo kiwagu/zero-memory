@@ -23,8 +23,8 @@ const toAuthSession = (session: Session): AuthSession => ({
 });
 
 /**
- * Supabase Auth adapter for the identity gateway. Token checks, sign-in and
- * refresh go through an anon-key client; minting a session for a user needs
+ * Supabase Auth adapter for the identity gateway. Token checks and refresh
+ * go through an anon-key client; minting a session for a user needs
  * the service role, because only an administrator may issue a sign-in on a
  * user's behalf.
  */
@@ -79,23 +79,6 @@ export class SupabaseAuthGateway implements IAuthGateway {
       return null;
     }
     return toAuthSession(verified.session);
-  }
-
-  async signInWithPassword(
-    email: string,
-    password: string
-  ): Promise<AuthSession | null> {
-    const { data, error } = await this.#anon().auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error || !data.session) {
-      this.#logger.warn('password sign-in rejected', {
-        error: error?.message,
-      });
-      return null;
-    }
-    return toAuthSession(data.session);
   }
 
   async refreshSession(refreshToken: string): Promise<AuthSession | null> {

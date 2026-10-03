@@ -4,7 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AuthSession, IAuthGateway } from './auth-gateway.js';
 import {
-  handleAuthorizeSubmit,
+  handleAuthorizationRead,
+  handleAuthorizeStart,
+  handleConsentDecision,
   handleRegister,
   handleToken,
   validateAuthorizeRequest,
@@ -43,7 +45,6 @@ const makeAuthGateway = (session: AuthSession | null = makeSession()) =>
       .fn()
       .mockResolvedValue(session ? { userId: session.userId } : null),
     mintSession: vi.fn().mockResolvedValue(session),
-    signInWithPassword: vi.fn().mockResolvedValue(session),
     refreshSession: vi.fn().mockResolvedValue(session),
   }) satisfies IAuthGateway;
 
@@ -51,6 +52,7 @@ const makeDeps = (auth: IAuthGateway = makeAuthGateway()): OAuthDeps => ({
   store: new InMemoryOAuthStore(),
   auth,
   issuer: ISSUER,
+  webUrl: 'http://localhost:3100',
 });
 
 const registerClient = async (deps: OAuthDeps): Promise<string> => {
@@ -63,27 +65,36 @@ const registerClient = async (deps: OAuthDeps): Promise<string> => {
   return (result.body as { client_id: string }).client_id;
 };
 
-/** Drives authorize POST and returns the one-time code from the redirect. */
+/**
+ * Drives the consent flow (start, the person approves on the dashboard) and
+ * returns the one-time code from the redirect back to the client.
+ */
 const obtainCode = async (
   deps: OAuthDeps,
   clientId: string,
   challenge: string
 ): Promise<{ code: string; state: string | null }> => {
-  const submitted = await handleAuthorizeSubmit(deps, {
+  const started = await handleAuthorizeStart(deps, {
     client_id: clientId,
     redirect_uri: REDIRECT_URI,
     response_type: 'code',
     code_challenge: challenge,
     code_challenge_method: 'S256',
     state: 'xyz',
-    email: 'alice@example.com',
-    password: 'pw',
   });
-  expect(submitted.kind).toBe('redirect');
-  if (submitted.kind !== 'redirect') {
+  if (started.kind !== 'redirect') {
     throw new Error('expected redirect');
   }
-  const url = new URL(submitted.location);
+  const authorizationId =
+    new URL(started.location).searchParams.get('authorization_id') ?? '';
+  const signedIn = { authorizationId, authorization: 'Bearer dashboard' };
+  await handleAuthorizationRead(deps, signedIn);
+  const decided = await handleConsentDecision(deps, {
+    ...signedIn,
+    body: { decision: 'approve' },
+  });
+  expect(decided.status).toBe(200);
+  const url = new URL((decided.body as { redirect_url: string }).redirect_url);
   expect(url.origin + url.pathname).toBe(REDIRECT_URI);
   return {
     code: url.searchParams.get('code') ?? '',
@@ -327,22 +338,5 @@ describe('token flow', () => {
     });
     expect(result.status).toBe(400);
     expect(result.body).toMatchObject({ error: 'unsupported_grant_type' });
-  });
-
-  it('re-renders the login on bad credentials without minting a code', async () => {
-    const deps = makeDeps(makeAuthGateway(null));
-    const clientId = await registerClient(deps);
-
-    const submitted = await handleAuthorizeSubmit(deps, {
-      client_id: clientId,
-      redirect_uri: REDIRECT_URI,
-      response_type: 'code',
-      code_challenge: computeS256Challenge('a'.repeat(43)),
-      code_challenge_method: 'S256',
-      email: 'alice@example.com',
-      password: 'wrong',
-    });
-
-    expect(submitted.kind).toBe('retry');
   });
 });

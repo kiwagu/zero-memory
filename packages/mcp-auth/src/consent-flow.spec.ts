@@ -1,0 +1,292 @@
+import { randomBytes } from 'node:crypto';
+
+import { describe, expect, it, vi } from 'vitest';
+
+import type { AuthSession, IAuthGateway } from './auth-gateway.js';
+import {
+  handleAuthorizationRead,
+  handleAuthorizeStart,
+  handleConsentDecision,
+  handleRegister,
+  handleToken,
+  type OAuthDeps,
+} from './handlers.js';
+import { InMemoryOAuthStore } from './in-memory-oauth-store.js';
+import type { AuthorizationDetails, ConsentResult } from './oauth.schema.js';
+import { computeS256Challenge } from './pkce.js';
+
+const ISSUER = 'http://localhost:8787';
+const WEB_URL = 'http://localhost:3100';
+const REDIRECT_URI = 'http://127.0.0.1:41241/callback';
+const ALICE = 'a0000000-0000-4000-8000-00000000000a';
+const BOB = 'b0000000-0000-4000-8000-00000000000b';
+const BEARER = { alice: 'Bearer alice-token', bob: 'Bearer bob-token' };
+
+const sessionOf = (userId: string): AuthSession => ({
+  userId,
+  accessToken: `agent-access-${randomBytes(4).toString('hex')}`,
+  refreshToken: `agent-refresh-${randomBytes(4).toString('hex')}`,
+  expiresIn: 3600,
+});
+
+/** Two signed-in people, each holding a dashboard token. */
+const makeAuthGateway = () =>
+  ({
+    verifyAccessToken: vi.fn(async (token: string) => {
+      if (token === 'alice-token') {
+        return { userId: ALICE };
+      }
+      if (token === 'bob-token') {
+        return { userId: BOB };
+      }
+      return null;
+    }),
+    mintSession: vi.fn(async (userId: string): Promise<AuthSession | null> =>
+      sessionOf(userId)
+    ),
+    refreshSession: vi.fn().mockResolvedValue(null),
+  }) satisfies IAuthGateway;
+
+const setup = async () => {
+  const auth = makeAuthGateway();
+  const deps: OAuthDeps = {
+    store: new InMemoryOAuthStore(),
+    auth,
+    issuer: ISSUER,
+    webUrl: WEB_URL,
+  };
+  const registered = await handleRegister(deps, {
+    client_name: 'zm-unit',
+    redirect_uris: [REDIRECT_URI],
+  });
+  const clientId = (registered.body as { client_id: string }).client_id;
+  return { deps, auth, clientId };
+};
+
+const authorizeQuery = (clientId: string, challenge: string) => ({
+  client_id: clientId,
+  redirect_uri: REDIRECT_URI,
+  response_type: 'code',
+  code_challenge: challenge,
+  code_challenge_method: 'S256',
+  state: 'xyz',
+});
+
+/** Starts an authorization and returns the id the dashboard receives. */
+const start = async (
+  deps: OAuthDeps,
+  clientId: string,
+  challenge = computeS256Challenge(randomBytes(48).toString('base64url'))
+): Promise<string> => {
+  const started = await handleAuthorizeStart(
+    deps,
+    authorizeQuery(clientId, challenge)
+  );
+  if (started.kind !== 'redirect') {
+    throw new Error(`expected a redirect, got ${started.message}`);
+  }
+  const location = new URL(started.location);
+  expect(location.origin + location.pathname).toBe(`${WEB_URL}/oauth/consent`);
+  return location.searchParams.get('authorization_id') ?? '';
+};
+
+const redirectOf = (body: unknown): URL =>
+  new URL((body as ConsentResult).redirect_url);
+
+describe('authorization start', () => {
+  it('parks the request and sends the person to the dashboard', async () => {
+    const { deps, clientId } = await setup();
+    const id = await start(deps, clientId);
+    expect(id).toMatch(/^oaa_/);
+  });
+
+  it('shows client and redirect problems instead of redirecting', async () => {
+    const { deps, clientId } = await setup();
+    const started = await handleAuthorizeStart(deps, {
+      ...authorizeQuery(clientId, 'a'.repeat(43)),
+      redirect_uri: 'http://127.0.0.1:41241/elsewhere',
+    });
+    expect(started).toMatchObject({ kind: 'invalid', status: 400 });
+  });
+});
+
+describe('reading an authorization', () => {
+  it('requires a signed-in caller', async () => {
+    const { deps, clientId } = await setup();
+    const id = await start(deps, clientId);
+    for (const authorization of [undefined, 'Bearer nope', 'alice-token']) {
+      const read = await handleAuthorizationRead(deps, {
+        authorizationId: id,
+        authorization,
+      });
+      expect(read.status).toBe(401);
+    }
+  });
+
+  it('shows the first reader what the client asks for', async () => {
+    const { deps, clientId } = await setup();
+    const id = await start(deps, clientId);
+    const read = await handleAuthorizationRead(deps, {
+      authorizationId: id,
+      authorization: BEARER.alice,
+    });
+    expect(read.status).toBe(200);
+    expect(read.body as AuthorizationDetails).toMatchObject({
+      authorization_id: id,
+      client: { client_id: clientId, client_name: 'zm-unit' },
+      scope: 'mcp:read mcp:write',
+      redirect_uri: REDIRECT_URI,
+    });
+  });
+
+  it('is nobody else’s once someone opened it', async () => {
+    const { deps, clientId } = await setup();
+    const id = await start(deps, clientId);
+    await handleAuthorizationRead(deps, {
+      authorizationId: id,
+      authorization: BEARER.alice,
+    });
+    const read = await handleAuthorizationRead(deps, {
+      authorizationId: id,
+      authorization: BEARER.bob,
+    });
+    expect(read.status).toBe(404);
+    const decided = await handleConsentDecision(deps, {
+      authorizationId: id,
+      authorization: BEARER.bob,
+      body: { decision: 'approve' },
+    });
+    expect(decided.status).toBe(404);
+  });
+
+  it('answers 404 for an unknown or malformed id', async () => {
+    const { deps } = await setup();
+    for (const authorizationId of [
+      'oaa_0000000000000000.0000000000',
+      'not-an-id',
+    ]) {
+      const read = await handleAuthorizationRead(deps, {
+        authorizationId,
+        authorization: BEARER.alice,
+      });
+      expect(read.status).toBe(404);
+    }
+  });
+});
+
+describe('deciding', () => {
+  it('approval issues a code the token endpoint redeems for a fresh session', async () => {
+    const { deps, auth, clientId } = await setup();
+    const verifier = randomBytes(48).toString('base64url');
+    const id = await start(deps, clientId, computeS256Challenge(verifier));
+    await handleAuthorizationRead(deps, {
+      authorizationId: id,
+      authorization: BEARER.alice,
+    });
+    const decided = await handleConsentDecision(deps, {
+      authorizationId: id,
+      authorization: BEARER.alice,
+      body: { decision: 'approve' },
+    });
+    expect(decided.status).toBe(200);
+    const redirect = redirectOf(decided.body);
+    expect(redirect.origin + redirect.pathname).toBe(REDIRECT_URI);
+    expect(redirect.searchParams.get('state')).toBe('xyz');
+    expect(auth.mintSession).toHaveBeenCalledExactlyOnceWith(ALICE);
+
+    const minted = await vi.mocked(auth.mintSession).mock.results[0]?.value;
+    const token = await handleToken(deps, {
+      grant_type: 'authorization_code',
+      code: redirect.searchParams.get('code'),
+      code_verifier: verifier,
+      client_id: clientId,
+      redirect_uri: REDIRECT_URI,
+    });
+    expect(token.status).toBe(200);
+    expect(token.body).toMatchObject({
+      access_token: (minted as AuthSession).accessToken,
+      refresh_token: (minted as AuthSession).refreshToken,
+    });
+  });
+
+  it('a second authorization of an approved client needs no screen', async () => {
+    const { deps, clientId } = await setup();
+    const first = await start(deps, clientId);
+    await handleConsentDecision(deps, {
+      authorizationId: first,
+      authorization: BEARER.alice,
+      body: { decision: 'approve' },
+    });
+    const second = await start(deps, clientId);
+    const read = await handleAuthorizationRead(deps, {
+      authorizationId: second,
+      authorization: BEARER.alice,
+    });
+    expect(read.status).toBe(200);
+    expect(redirectOf(read.body).searchParams.get('code')).toBeTruthy();
+    // Someone else's consent covers nothing for this person.
+    const third = await start(deps, clientId);
+    const bobRead = await handleAuthorizationRead(deps, {
+      authorizationId: third,
+      authorization: BEARER.bob,
+    });
+    expect(bobRead.body).toHaveProperty('authorization_id', third);
+  });
+
+  it('denial returns access_denied to the client and records no consent', async () => {
+    const { deps, auth, clientId } = await setup();
+    const id = await start(deps, clientId);
+    const decided = await handleConsentDecision(deps, {
+      authorizationId: id,
+      authorization: BEARER.alice,
+      body: { decision: 'deny' },
+    });
+    expect(decided.status).toBe(200);
+    const redirect = redirectOf(decided.body);
+    expect(redirect.searchParams.get('error')).toBe('access_denied');
+    expect(redirect.searchParams.get('state')).toBe('xyz');
+    expect(redirect.searchParams.get('code')).toBeNull();
+    expect(auth.mintSession).not.toHaveBeenCalled();
+    expect(await deps.store.findConsent(ALICE, clientId)).toBeNull();
+  });
+
+  it('is taken once', async () => {
+    const { deps, clientId } = await setup();
+    const id = await start(deps, clientId);
+    const decide = () =>
+      handleConsentDecision(deps, {
+        authorizationId: id,
+        authorization: BEARER.alice,
+        body: { decision: 'approve' },
+      });
+    expect((await decide()).status).toBe(200);
+    const again = await decide();
+    expect(again.status).toBe(404);
+    expect(again.body).not.toHaveProperty('redirect_url');
+  });
+
+  it('refuses a malformed decision', async () => {
+    const { deps, clientId } = await setup();
+    const id = await start(deps, clientId);
+    const decided = await handleConsentDecision(deps, {
+      authorizationId: id,
+      authorization: BEARER.alice,
+      body: { decision: 'maybe' },
+    });
+    expect(decided.status).toBe(400);
+  });
+
+  it('reports a session that could not be minted, and issues no code', async () => {
+    const { deps, auth, clientId } = await setup();
+    vi.mocked(auth.mintSession).mockResolvedValueOnce(null);
+    const id = await start(deps, clientId);
+    const decided = await handleConsentDecision(deps, {
+      authorizationId: id,
+      authorization: BEARER.alice,
+      body: { decision: 'approve' },
+    });
+    expect(decided.status).toBe(503);
+    expect(decided.body).toMatchObject({ error: 'server_error' });
+    expect(await deps.store.findConsent(ALICE, clientId)).toBeNull();
+  });
+});
