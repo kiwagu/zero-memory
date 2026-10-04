@@ -7,7 +7,7 @@ import {
 } from './sanitize.js';
 
 describe('sanitizeCommandPayload', () => {
-  it('keeps small payloads intact', () => {
+  it('keeps the facts of a command and only the length of what was written', () => {
     const payload = sanitizeCommandPayload({
       content: 'chose bun over node',
       kind: 'decision',
@@ -15,17 +15,43 @@ describe('sanitizeCommandPayload', () => {
     });
 
     expect(payload).toEqual({
-      content: 'chose bun over node',
+      content: '[content, 19 chars]',
       kind: 'decision',
       scope: 'proj.zm',
     });
   });
 
-  it('clips long string fields to the cap and notes how much was dropped', () => {
-    const long = 'x'.repeat(MAX_STRING_LENGTH + 200);
-    const payload = sanitizeCommandPayload({ content: long });
+  it('redacts every field a person or an agent wrote, wherever it sits', () => {
+    const payload = sanitizeCommandPayload({
+      verbatim: 'the exact words',
+      transcript_chunk: 'a whole conversation',
+      title: 'card title',
+      body: 'card body',
+      text: 'a note',
+      reason: 'why it moved',
+      entities: [{ name: 'a secret-looking name', type: 'concept' }],
+      memory_id: 'mem_a',
+      recalled_ids: ['mem_b', 'mem_c'],
+    });
 
-    const clipped = payload.content as string;
+    expect(payload).toEqual({
+      verbatim: '[content, 15 chars]',
+      transcript_chunk: '[content, 20 chars]',
+      title: '[content, 10 chars]',
+      body: '[content, 9 chars]',
+      text: '[content, 6 chars]',
+      reason: '[content, 12 chars]',
+      entities: [{ name: '[content, 21 chars]', type: 'concept' }],
+      memory_id: 'mem_a',
+      recalled_ids: ['mem_b', 'mem_c'],
+    });
+  });
+
+  it('clips long identifier-like fields to the cap and notes how much was dropped', () => {
+    const long = 'x'.repeat(MAX_STRING_LENGTH + 200);
+    const payload = sanitizeCommandPayload({ label: long });
+
+    const clipped = payload.label as string;
     expect(clipped.startsWith('x'.repeat(MAX_STRING_LENGTH))).toBe(true);
     expect(clipped).toContain('[200 more]');
     expect(clipped.length).toBeLessThan(long.length);
@@ -34,11 +60,11 @@ describe('sanitizeCommandPayload', () => {
   it('clips strings nested in arrays and objects', () => {
     const long = 'y'.repeat(MAX_STRING_LENGTH + 1);
     const payload = sanitizeCommandPayload({
-      entities: [{ name: long, type: 'concept' }],
+      tags: [{ label: long, type: 'concept' }],
     });
 
-    const entities = payload.entities as Array<{ name: string }>;
-    expect(entities[0]?.name).toContain('[1 more]');
+    const tags = payload.tags as Array<{ label: string }>;
+    expect(tags[0]?.label).toContain('[1 more]');
   });
 
   it('collapses an over-cap payload to a truncation marker with the keys', () => {

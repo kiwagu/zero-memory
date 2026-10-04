@@ -10,6 +10,7 @@
  * body (oauth spec). Both are parsed by third-party client libraries.
  */
 import { expect, test } from '@playwright/test';
+import { createClient } from '@supabase/supabase-js';
 
 import { e2eEnv } from '../helpers/env.js';
 import { FIXTURE_MEMORIES } from '../helpers/fixture-memories.js';
@@ -144,6 +145,29 @@ test.describe('write-path error taxonomy', () => {
       // message, not its details, not any other block.
       expect(error.message).toContain('secret_content_rejected');
       expect(contentText(result)).not.toContain(secret);
+
+      // The refusal is audited, and the audit keeps the words out as well: the
+      // row names the command and the outcome, and of the content only its
+      // length. The write is fire-and-forget, so it is read with patience.
+      const admin = createClient(
+        e2eEnv.supabaseUrl,
+        e2eEnv.supabaseServiceRoleKey,
+        { auth: { persistSession: false, autoRefreshToken: false } }
+      );
+      const recentErrors = async (): Promise<string> => {
+        const { data } = await admin
+          .from('audit_log')
+          .select('payload')
+          .eq('command', 'RememberCommand')
+          .eq('outcome', 'error')
+          .order('occurred_at', { ascending: false })
+          .limit(5);
+        return JSON.stringify(data ?? []);
+      };
+      await expect
+        .poll(recentErrors, { timeout: 10_000 })
+        .toMatch(/\[content, \d+ chars\]/);
+      expect(await recentErrors()).not.toContain(secret);
     } finally {
       await mcp.close();
     }

@@ -322,11 +322,15 @@ export class RuleCandidateDetector {
       throw new Error(`promote_rule: upsert failed: ${upErr.message}`);
     }
 
-    await this.#audit('incubator.promote_on_demand', {
-      memory_id: memoryId,
-      target_layer: targetLayer,
-      applies_scope: address ?? '',
-    });
+    await this.#audit(
+      'incubator.promote_on_demand',
+      {
+        memory_id: memoryId,
+        target_layer: targetLayer,
+        applies_scope: address ?? '',
+      },
+      ownerId
+    );
 
     return {
       memory_id: memoryId,
@@ -510,13 +514,17 @@ export class RuleCandidateDetector {
         `incubator: draft save for ${candidateId} failed: ${error.message}`
       );
     }
-    await this.#audit('incubator.distill', {
-      candidate: candidateId,
-      memory_id: row.memory_id,
-      useful_sessions: row.useful_sessions,
-      confidence: judgement.verdict.confidence,
-      model: judgement.model,
-    });
+    await this.#audit(
+      'incubator.distill',
+      {
+        candidate: candidateId,
+        memory_id: row.memory_id,
+        useful_sessions: row.useful_sessions,
+        confidence: judgement.verdict.confidence,
+        model: judgement.model,
+      },
+      row.owner_id
+    );
   }
 
   /** The distiller is unconvinced: close the candidacy without human time. */
@@ -580,14 +588,22 @@ export class RuleCandidateDetector {
     }
   }
 
+  /**
+   * One audit row for the incubator's action. `actorId` is the person whose
+   * rule it is when the action was theirs (an on-demand promotion) or ran on
+   * their behalf (a distillation of their candidate); null for a judgement
+   * the scheduler reached on its own.
+   */
   async #audit(
     command: string,
-    payload: Record<string, string | number>
+    payload: Record<string, string | number>,
+    actorId: string | null = null
   ): Promise<void> {
     const { error } = await this.client.from('audit_log').insert({
       command,
       payload,
       outcome: 'ok',
+      actor_id: actorId,
       author_kind: 'agent',
       agent_name: AGENT_NAME,
     });
