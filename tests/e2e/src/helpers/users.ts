@@ -99,6 +99,37 @@ export const entityIdOf = async (authUserId: string): Promise<string> => {
   return (data as { id: string }).id;
 };
 
+/** A membership as the database holds it. */
+export interface MembershipRow {
+  scope: string;
+  user_id: string;
+  role: string;
+  granted_by: string | null;
+  accepted_at: string | null;
+  invited_email: string | null;
+  created_at: string;
+}
+
+/**
+ * Every membership of `scope` as the database holds it, read past RLS with
+ * the service role. What a spec checks after a refused write is the stored
+ * row, not the part of it the refused caller is allowed to see.
+ */
+export const scopeMemberships = async (
+  scope: string
+): Promise<MembershipRow[]> => {
+  const { data, error } = await adminClient()
+    .from('scope_members')
+    .select(
+      'scope, user_id, role, granted_by, accepted_at, invited_email, created_at'
+    )
+    .eq('scope', scope);
+  if (error) {
+    throw new Error(`cannot read the members of ${scope}: ${error.message}`);
+  }
+  return (data ?? []) as MembershipRow[];
+};
+
 /**
  * Deterministic sign-in for e2e: the Supabase password grant (the same
  * infrastructure scripts/zm-login's OAuth flow ends up on), no interactive
