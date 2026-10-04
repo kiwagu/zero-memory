@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { safeNext } from './lib/safe-next';
+import { secureCookies } from './lib/supabase/cookie-security';
 import { serverSupabaseEnvironment } from './lib/supabase/env';
 
 /**
@@ -24,6 +25,7 @@ export async function proxy(request: NextRequest) {
   const supabase = createServerClient(url, anonKey, {
     cookieOptions: {
       name: authCookieName,
+      secure: secureCookies(request.headers),
     },
     cookies: {
       getAll() {
