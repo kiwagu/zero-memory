@@ -91,9 +91,10 @@ test.describe('auth callback', () => {
     await page.goto(
       '/auth/callback?error=access_denied&error_code=provider_denied&error_description=The+user+denied+access'
     );
-    await expect(page).toHaveURL(/\/login\?error=/);
+    await expect(page).toHaveURL(/\/login\?error=provider_denied$/);
+    // The page says why in its own words, chosen from the codes.
     await expect(page.getByTestId('auth-login-error')).toHaveText(
-      'The user denied access'
+      'The provider did not complete the sign-in. Try again, or sign in another way.'
     );
   });
 
@@ -106,8 +107,31 @@ test.describe('auth callback', () => {
       '/login#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired'
     );
     await expect(page.getByTestId('auth-login-error')).toHaveText(
-      'Email link is invalid or has expired'
+      'This link has expired or was already used. Request a new one.'
     );
+  });
+
+  test('@smoke text written into a refusal link is never shown on the login page', async ({
+    page,
+  }) => {
+    // Anyone can hand someone a callback link; the description in it is theirs.
+    const planted = 'Your account is locked. Call 555-0100 now.';
+    await page.goto(
+      `/auth/callback?error=access_denied&error_description=${encodeURIComponent(planted)}`
+    );
+    await expect(page).toHaveURL(/\/login\?error=provider_denied$/);
+    await expect(page.getByTestId('auth-login-error')).not.toContainText(
+      '555-0100'
+    );
+    expect(await page.content()).not.toContain('555-0100');
+
+    await page.goto(
+      `/login#error=server_error&error_description=${encodeURIComponent(planted)}`
+    );
+    await expect(page.getByTestId('auth-login-error')).toHaveText(
+      'The sign-in did not complete. Try again.'
+    );
+    expect(await page.content()).not.toContain('555-0100');
   });
 });
 

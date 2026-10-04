@@ -28,6 +28,10 @@ server {
     ssl_certificate     /etc/nginx/certs/zm.example.com.fullchain.pem;
     ssl_certificate_key /etc/nginx/certs/zm.example.com.privkey.pem;
 
+    # Once a browser has seen the site over https it never tries plain http
+    # again, not even for the first request of a later visit.
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+
     # Operational counters are unauthenticated, and this server block proxies
     # every path — without this the /metrics endpoint would be world-readable.
     # Scrape it from the host instead (http://127.0.0.1:8787/metrics); remove
@@ -69,6 +73,10 @@ server {
     ssl_certificate     /etc/nginx/certs/memory.example.com.fullchain.pem;
     ssl_certificate_key /etc/nginx/certs/memory.example.com.privkey.pem;
 
+    # Once a browser has seen the site over https it never tries plain http
+    # again, not even for the first request of a later visit.
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+
     location / {
         proxy_pass http://127.0.0.1:3100;
         proxy_http_version 1.1;
@@ -92,6 +100,10 @@ server {
 
     ssl_certificate     /etc/nginx/certs/docs.example.com.fullchain.pem;
     ssl_certificate_key /etc/nginx/certs/docs.example.com.privkey.pem;
+
+    # Once a browser has seen the site over https it never tries plain http
+    # again, not even for the first request of a later visit.
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
 
     # The site can write markdown into its own content tree through /upload,
     # guarded only by an environment variable inside the container. Deciding it

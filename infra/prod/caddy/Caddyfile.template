@@ -27,6 +27,10 @@
 	# remove this only if your scraper is external and you guard it yourself.
 	respond /metrics 404
 
+	# Once a browser has seen the site over https it never tries plain http
+	# again, not even for the first request of a later visit.
+	header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+
 	reverse_proxy zm-server:8787 {
 		# Streamable HTTP MCP responds with text/event-stream; never
 		# buffer, so events (initialize result, tool progress) flush
@@ -37,6 +41,8 @@
 
 # ── Web dashboard ───────────────────────────────────────────────────────────
 {$ZM_WEB_HOST} {
+	header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+
 	# Legal texts, for a deployment that publishes any: whatever is bound at
 	# /srv/legal (ZM_LEGAL_DIR, empty by default) is served here, so a file
 	# named terms.html answers at /terms. Those are the addresses
@@ -75,6 +81,8 @@
 	# configured. Remove this line only if you deliberately want to author pages
 	# over the internet.
 	respond /upload* 404
+
+	header Strict-Transport-Security "max-age=63072000; includeSubDomains"
 
 	reverse_proxy zm-docs:3200
 }

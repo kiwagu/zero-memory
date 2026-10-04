@@ -33,8 +33,12 @@ export async function GET(request: Request): Promise<Response> {
       scopes.length > 0 ? scopes : undefined
     ));
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return new Response(`Export failed: ${message}`, { status: 500 });
+    // The server's message may quote what it was given; the log keeps it and a
+    // fixed string goes back over the wire.
+    console.warn('memory export failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return new Response('Export failed. Try again later.', { status: 500 });
   }
 
   const entries: ZipEntry[] = items.map((memory) => ({
