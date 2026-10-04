@@ -440,6 +440,7 @@
   "auth.mfa.failed": "The code could not be checked right now. Try again.",
   "oauth.consent.title": "{client} wants access to your memory",
   "oauth.consent.unnamedClient": "An unnamed client",
+  "oauth.consent.nameNote": "This name was chosen by the client itself and is not verified.",
   "oauth.consent.description": "If you allow it, this client acts as you in everything below:",
   "oauth.consent.areas.memories.title": "Memories",
   "oauth.consent.areas.memories.body": "Search and read your memories and briefings; save new ones; share them and move them between projects; import and export them; forget and restore them.",

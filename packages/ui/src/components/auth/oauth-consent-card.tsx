@@ -27,6 +27,8 @@ interface OAuthConsentArea {
 interface OAuthConsentLabels {
   title: string;
   unnamedClient: string;
+  /** The name is the client's own claim, and the screen says so. */
+  nameNote: string;
   description: string;
   /** Everything an allowed client can reach; the screen hides none of it. */
   areas: OAuthConsentArea[];
@@ -42,10 +44,17 @@ interface OAuthConsentLabels {
 /** Long enough for any real client's name, short enough not to dominate. */
 const MAX_CLIENT_NAME = 80;
 
-const displayName = (name: string): string =>
-  name.length > MAX_CLIENT_NAME
+// Format characters (direction overrides, zero-width joiners) are not text a
+// person reads; a name is shown without them, so it cannot be made to read as
+// another name.
+const FORMAT_CHARACTERS = /\p{Cf}/gu;
+
+const displayName = (raw: string): string => {
+  const name = raw.replace(FORMAT_CHARACTERS, '');
+  return name.length > MAX_CLIENT_NAME
     ? `${name.slice(0, MAX_CLIENT_NAME - 1)}…`
     : name;
+};
 
 /**
  * Fills one placeholder of a translated template with a node, keeping the
@@ -112,6 +121,12 @@ function OAuthConsentCard({
             </strong>
           </Fill>
         </CardTitle>
+        <p
+          data-testid="oauth-consent-name-note"
+          className="text-muted-foreground text-xs"
+        >
+          {labels.nameNote}
+        </p>
         <CardDescription>{labels.description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

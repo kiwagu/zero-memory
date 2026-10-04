@@ -90,6 +90,7 @@ export default async function OAuthConsentPage({
         labels={{
           title: t('oauth.consent.title', { client: '{client}' }),
           unnamedClient: t('oauth.consent.unnamedClient'),
+          nameNote: t('oauth.consent.nameNote'),
           description: t('oauth.consent.description'),
           // Everything an allowed client can do as the person, one entry per
           // area of the server's tools; the MCP package's consent-area spec

@@ -181,8 +181,13 @@ describe('what the consent screen says', () => {
     expect(returnHost('https://claude.ai/api/mcp/auth_callback')).toBe(
       'claude.ai'
     );
+    // An app's own scheme is shown whole: the browser hands the entire URI to
+    // whatever program owns the scheme, and the path can carry anything.
     expect(returnHost('cursor://anysphere.cursor-mcp/oauth/callback')).toBe(
-      'cursor://anysphere.cursor-mcp'
+      'cursor://anysphere.cursor-mcp/oauth/callback'
+    );
+    expect(returnHost('ms-word:ofe|u|https://example.com/x')).toBe(
+      'ms-word:ofe|u|https://example.com/x'
     );
   });
 });

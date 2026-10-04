@@ -440,6 +440,7 @@
   "auth.mfa.failed": "No se ha podido comprobar el código ahora. Inténtalo de nuevo.",
   "oauth.consent.title": "{client} quiere acceder a tu memoria",
   "oauth.consent.unnamedClient": "Un cliente sin nombre",
+  "oauth.consent.nameNote": "Este nombre lo eligió el propio cliente y no está verificado.",
   "oauth.consent.description": "Si lo permites, este cliente actúa en tu nombre en todo lo siguiente:",
   "oauth.consent.areas.memories.title": "Memorias",
   "oauth.consent.areas.memories.body": "Buscar y leer tus memorias y resúmenes; guardar nuevas; compartirlas y moverlas entre proyectos; importarlas y exportarlas; olvidarlas y restaurarlas.",

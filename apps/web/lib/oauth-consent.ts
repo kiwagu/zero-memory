@@ -193,9 +193,11 @@ export async function decideAuthorization(
 }
 
 /**
- * Where the browser goes after the decision, as the screen names it: the
- * host for a web or loopback address, the scheme and host for an app's own
- * URI scheme — what tells a genuine local client from a look-alike.
+ * Where the browser goes after the decision, as the screen names it — what
+ * tells a genuine local client from a look-alike. For a web or loopback
+ * address that is the host. An app's own URI scheme is shown whole: the
+ * browser hands the entire URI to whatever program owns the scheme, and the
+ * part after the scheme can carry anything, so the person sees all of it.
  */
 export function returnHost(redirectUri: string): string {
   try {
@@ -203,7 +205,7 @@ export function returnHost(redirectUri: string): string {
     if (url.protocol === 'http:' || url.protocol === 'https:') {
       return url.hostname;
     }
-    return url.host ? `${url.protocol}//${url.host}` : url.protocol;
+    return redirectUri;
   } catch {
     return redirectUri;
   }

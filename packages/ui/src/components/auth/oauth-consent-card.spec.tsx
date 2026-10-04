@@ -9,6 +9,7 @@ import {
 const labels: OAuthConsentLabels = {
   title: '{client} wants access to your memory',
   unnamedClient: 'An unnamed client',
+  nameNote: 'The client chose this name itself; it is not verified.',
   description: 'If you allow it, it will be able to:',
   areas: [
     { id: 'memories', title: 'Memories', body: 'Search and save memories' },
@@ -78,6 +79,22 @@ describe('OAuthConsentCard', () => {
 
   it('says so when the client registered no name', () => {
     expect(render({ clientName: null })).toContain('An unnamed client');
+  });
+
+  it('says the name is the client’s own and unverified', () => {
+    const html = render();
+    expect(html).toContain('data-testid="oauth-consent-name-note"');
+    expect(html).toContain(
+      'The client chose this name itself; it is not verified.'
+    );
+  });
+
+  it('drops invisible format characters from the name', () => {
+    // A direction override could make a name read as another; it is not text.
+    const html = render({ clientName: 'Claude‮ Code​' });
+    expect(html).not.toContain('‮');
+    expect(html).not.toContain('​');
+    expect(html).toContain('Claude Code');
   });
 
   it('locks both choices while one is being sent', () => {
