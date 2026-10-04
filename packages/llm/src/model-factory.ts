@@ -94,7 +94,8 @@ export const defaultModelFactory: LanguageModelFactory = ({
       // baseURL is the one endpoint a caller chooses rather than a fixed
       // vendor host, which makes it an SSRF primitive on a shared server —
       // fetch is swapped for one that re-checks (and, for HTTP, pins) the
-      // resolved address on every call. Off by default (self-host); see
+      // resolved address on every call. On by default; a one-person instance
+      // with Ollama on a private address opts out. See
       // @workspace/endpoint-guard.
       return createOpenAICompatible({
         name: 'ollama',
