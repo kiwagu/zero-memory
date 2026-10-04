@@ -133,3 +133,11 @@ echo "→ applying"
 # meets a service that is still starting and reads it as a failed release.
 "${compose[@]}" up -d --wait
 "${compose[@]}" ps
+
+# The edge reads its Caddyfile once, at start, and `up -d` recreates only a
+# service whose resolved compose config changed — the Caddyfile is a mounted
+# file, not compose config, so a release that edits it leaves Caddy serving
+# the old one. Reloading with an unchanged file is a no-op for Caddy, so this
+# runs on every deploy rather than guessing whether the template changed.
+echo "→ reloading the edge config"
+"${compose[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile

@@ -531,6 +531,17 @@ loads as `abc`. Escape it as `abc\$Def`, or avoid `$` in passwords
 entirely. When verifying, never print the password — compare length or a
 masked form.
 
+## The edge at deploy
+
+The deploy script ends by reloading Caddy (`docker compose … exec -T caddy
+caddy reload --config /etc/caddy/Caddyfile`). The Caddyfile is a mounted
+file, not compose config, so `up -d` leaves a running Caddy on the config it
+started with even when a release changed the template; the reload is what
+makes a header or site-block change go live. Caddy treats an unchanged config
+as a no-op, so the step costs nothing on a release that touched no edge
+config, and a reload never drops connections the way a container restart
+would.
+
 ## Migrations at deploy
 
 With `ZM_MIGRATE_ON_DEPLOY=1` in `infra/prod/.env`, `upgrade.sh` manages the
