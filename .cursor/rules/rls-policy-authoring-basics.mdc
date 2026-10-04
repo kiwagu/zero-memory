@@ -36,6 +36,7 @@ The default access posture is **fail-closed**: a row is invisible unless a predi
 - When choosing a default for a visibility/ownership column or a new `select` predicate, **err toward private**. The forgotten case must fail **closed** (un-shared, recoverable) — never **open** (leaked, irrecoverable). A missing sharing decision means private, not exposed.
 - The guarantee is an **RLS fact, not an application filter.** Never rely on an app-side `where owner = me` or a `status='draft'` view filter as the privacy boundary — the stack exposes direct PostgREST access that bypasses it (`poc-no-fallbacks`: no fake fence). The fence is the policy predicate.
 - Compose audience as **OR'd grants on top of a floor** (owner → scope/role/user grants → supervisory), each an independent disjunct that only **widens**.
+- **Every table under RLS also carries the restrictive policy `complete sessions only`** (`as restrictive for all to authenticated using ((select private.session_complete())) with check ((select private.session_complete()))`). It is the one deliberate `restrictive` policy: on an account with a second factor, a session that has not given the code identifies nobody and reaches no row, while sessions the authorization server opened for agents (recorded in `public.agent_sessions`) pass. The migration that introduced it added it to every table that existed then; **a migration that creates a new table under RLS adds this policy itself** — the permissive policies alone would let an incomplete session through.
 
 Operation rules:
 

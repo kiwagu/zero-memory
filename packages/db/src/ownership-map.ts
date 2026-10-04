@@ -177,6 +177,11 @@ export const ACCOUNT_OWNERSHIP_MAP = {
     reason:
       'OAuth client registry (RFC 7591 dynamic registration); no owner column, shared across users',
   },
+  agent_sessions: {
+    kind: 'excluded',
+    reason:
+      'Auth-level record of the sessions the authorization server opened for agents, keyed by Auth session and user uuids (not the usr_ id); content-free (session id, client, time); removed by the foreign-key cascade when the Auth user is deleted, which the lifecycle guard asserts',
+  },
   ranking_config: {
     kind: 'excluded',
     reason: 'global engine ranking configuration; instance-wide, not user data',

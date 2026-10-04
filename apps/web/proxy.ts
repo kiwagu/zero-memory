@@ -2,8 +2,24 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { safeNext } from './lib/safe-next';
+import {
+  AGENT_SESSION_REFUSAL,
+  ASSURANCE_UNAVAILABLE,
+  SECOND_FACTOR_REFUSAL,
+  assuranceGap,
+  sessionAssuranceSchema,
+} from './lib/session-assurance';
 import { secureCookies } from './lib/supabase/cookie-security';
 import { serverSupabaseEnvironment } from './lib/supabase/env';
+
+/**
+ * Whether the browser is navigating to a page, as opposed to code fetching an
+ * answer: every current browser marks a navigation, and a request that only
+ * accepts HTML is one too.
+ */
+const navigates = (request: NextRequest): boolean =>
+  request.headers.get('sec-fetch-mode') === 'navigate' ||
+  (request.headers.get('accept') ?? '').includes('text/html');
 
 /**
  * Session refresh + route protection. Everything except /login requires a
@@ -82,6 +98,45 @@ export async function proxy(request: NextRequest) {
     // `safeNext` already refused anything that could resolve elsewhere; the
     // origin check is the second lock on the same door.
     return NextResponse.redirect(target.origin === url.origin ? target : url);
+  }
+
+  // A signed-in session is not yet a complete sign-in. On an account with a
+  // second factor it sees nothing but the page that asks for the code until
+  // the code is given, and a session the authorization server opened for an
+  // agent is not a person's at all. Decided here, for every path the
+  // dashboard serves — pages, route handlers, server actions — rather than in
+  // one layout, which a route handler never passes through. The database
+  // applies the same rule to every row; this check only says why.
+  if (isAuthenticated && !isPublic) {
+    const { data, error } = await supabase.rpc('session_assurance');
+    const assurance = error ? null : sessionAssuranceSchema.safeParse(data);
+    if (!assurance?.success) {
+      return new NextResponse(ASSURANCE_UNAVAILABLE, { status: 503 });
+    }
+    if (assurance.data.agent) {
+      return new NextResponse(AGENT_SESSION_REFUSAL, { status: 403 });
+    }
+    if (
+      pathname !== '/mfa/verify' &&
+      assuranceGap(assurance.data.aal, assurance.data.verified_factors) ===
+        'verify'
+    ) {
+      // A person navigating is sent to give the code and brought back; a
+      // request made by code — a route handler called from a page, an API
+      // route, a server action — gets the refusal itself, since a redirect
+      // would hand it a sign-in page where it expected an answer.
+      if (!navigates(request)) {
+        return new NextResponse(SECOND_FACTOR_REFUSAL, { status: 403 });
+      }
+      const destination = pathname + request.nextUrl.search;
+      const url = request.nextUrl.clone();
+      url.pathname = '/mfa/verify';
+      url.search = '';
+      if (destination !== '/') {
+        url.searchParams.set('next', safeNext(destination));
+      }
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;

@@ -246,17 +246,23 @@ password-reset flow.
 
 People can protect their account with an authenticator app: they turn it on
 in Settings, and from then on every sign-in — password, GitHub or Google —
-asks for a six-digit code before the dashboard opens. The same code guards
-the consent screen that lets an agent in, a password reset, and deleting the
-account, which cannot be done at all until the account has a second factor.
-Agents keep working: the sessions they receive never present a code, and
-nothing they use through the memory server asks them for one. The code is
-also what stops an agent from acting as the person where only the person
-should: once an account has a factor, Auth refuses a session without the code
-a password or email change and a new factor, and the dashboard refuses it the
-consent screen, account deletion and the provider key. On an account without
-a factor an agent's session could set up one of its own, so the advice to
-people is to turn two-factor on before connecting agents.
+asks for a six-digit code before the dashboard opens. Until the code is
+given, the sign-in reaches no data at all: the dashboard sends it to the code
+step and refuses its requests, the memory server answers `401` with
+`insufficient_aal`, and the database itself shows it no row and accepts no
+write, because the row-level policies apply the same rule. The same code
+guards the consent screen that lets an agent in, a password reset, and
+deleting the account, which cannot be done at all until the account has a
+second factor. Agents keep working: the session each one receives from the
+consent screen is recorded by the authorization server as an agent's at the
+moment it is opened, and a recorded session is complete without a code.
+Turning two-factor on ends the agent sessions opened before it, so each
+connected agent authorizes once more. The code is also what stops an agent
+from acting as the person where only the person should: once an account has
+a factor, Auth refuses a session without the code a password or email change
+and a new factor, and the dashboard refuses an agent's session everywhere. On
+an account without a factor an agent's session could set up one of its own,
+so the advice to people is to turn two-factor on before connecting agents.
 
 Auth must allow TOTP enrolment, or turning it on fails in Settings:
 

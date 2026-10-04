@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -35,6 +35,7 @@ const sessionOf = (userId: string): AuthSession => ({
   accessToken: `agent-access-${randomBytes(4).toString('hex')}`,
   refreshToken: `agent-refresh-${randomBytes(4).toString('hex')}`,
   expiresIn: 3600,
+  sessionId: randomUUID(),
 });
 
 /** Two signed-in people, each holding a dashboard token. */
@@ -289,6 +290,13 @@ describe('deciding', () => {
       access_token: (minted as AuthSession).accessToken,
       refresh_token: (minted as AuthSession).refreshToken,
     });
+    // The minted session is on record as an agent's, which is what admits it
+    // to the data on an account with a second factor it cannot give.
+    expect(
+      (deps.store as InMemoryOAuthStore)
+        .agentSessions()
+        .get((minted as AuthSession).sessionId ?? '')
+    ).toEqual({ authUserId: ALICE, clientId });
   });
 
   it('a second authorization of an approved client, to the same return address, needs no screen', async () => {

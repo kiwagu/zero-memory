@@ -1,77 +1,80 @@
 import { redirect } from 'next/navigation';
 
-import { safeNext } from './safe-next';
+import {
+  AGENT_SESSION_REFUSAL,
+  ASSURANCE_UNAVAILABLE,
+  SECOND_FACTOR_REFUSAL,
+  assuranceGap,
+  sessionAssuranceSchema,
+  verifyPathFor,
+} from './session-assurance';
 import type { createServerSupabaseClient } from './supabase/server';
+
+export {
+  assuranceGap,
+  verifyPathFor,
+  type AssuranceGap,
+} from './session-assurance';
 
 /**
  * The second factor, as the dashboard enforces it.
  *
- * Enforcement lives here, in the pages people use, and never in row-level
- * security: the sessions agents receive are opened without a person and stay
- * at the first level (`aal1`) by design, so a database rule demanding `aal2`
- * would stop every agent. What the factor protects is the person's own way
- * in: the dashboard, the consent screen that grants agents, and the changes
- * only a person should make.
+ * The database holds the rule: on an account with a verified factor, a
+ * session reaches the data once it has given the code (`aal2`), and a session
+ * the authorization server opened for an agent reaches it without one. The
+ * dashboard asks for that standing before it renders or acts, so a person
+ * who still owes the code is sent to give it instead of seeing empty pages,
+ * and an agent's session presented to the dashboard is refused outright.
  */
-
-export type AssuranceGap = 'none' | 'verify';
-
-/**
- * Whether this session still owes the code: only an account that has a
- * verified factor, and only until the session presented it (`aal2`).
- */
-export function assuranceGap(
-  aal: string | undefined,
-  verifiedFactors: number
-): AssuranceGap {
-  return verifiedFactors > 0 && aal !== 'aal2' ? 'verify' : 'none';
-}
-
-/** Where the code is asked for, with the page to return to afterwards. */
-export function verifyPathFor(nextPath: string): string {
-  const next = safeNext(nextPath);
-  return next === '/'
-    ? '/mfa/verify'
-    : `/mfa/verify?next=${encodeURIComponent(next)}`;
-}
 
 type ServerSupabase = Awaited<ReturnType<typeof createServerSupabaseClient>>;
 
+export interface Assurance {
+  aal: string | undefined;
+  verifiedFactors: number;
+  /** Opened by the authorization server for an agent; never a person's. */
+  agent: boolean;
+  /** May reach the data: the code was given, or none is owed. */
+  complete: boolean;
+}
+
 /**
- * The session's level and the account's verified factors, both asked of Auth
- * now: the factors come from the user record rather than the session cookie,
- * so a factor added in another browser applies here at once. When Auth cannot
- * say, this throws rather than report "no factor" — a lookup that fails must
- * never open what the factor guards.
+ * The session's standing, asked of the database now: the factors come from
+ * the account rather than from the session cookie, so a factor added in
+ * another browser applies here at once. When the database cannot say, this
+ * throws rather than report "no factor" — a lookup that fails must never open
+ * what the factor guards.
  */
 export async function readAssurance(
   supabase: ServerSupabase
-): Promise<{ aal: string | undefined; verifiedFactors: number }> {
-  const [{ data: claimsData }, { data: factors, error }] = await Promise.all([
-    supabase.auth.getClaims(),
-    supabase.auth.mfa.listFactors(),
-  ]);
-  if (error || !factors) {
-    throw new Error('The second factor could not be checked right now.');
+): Promise<Assurance> {
+  const { data, error } = await supabase.rpc('session_assurance');
+  const parsed = error ? null : sessionAssuranceSchema.safeParse(data);
+  if (!parsed?.success) {
+    throw new Error(ASSURANCE_UNAVAILABLE);
   }
-  const aal = claimsData?.claims?.aal;
   return {
-    aal: typeof aal === 'string' ? aal : undefined,
-    verifiedFactors: factors.totp.filter(
-      (factor) => factor.status === 'verified'
-    ).length,
+    aal: parsed.data.aal,
+    verifiedFactors: parsed.data.verified_factors,
+    agent: parsed.data.agent,
+    complete: parsed.data.complete,
   };
 }
 
 /**
  * For pages behind the second factor: sends a session that owes the code to
- * `/mfa/verify`, which brings it back to `nextPath` afterwards.
+ * `/mfa/verify`, which brings it back to `nextPath` afterwards. The request
+ * proxy already did this for every dashboard path; a page that renders
+ * through another route keeps the same check here.
  */
 export async function requireAssurance(
   supabase: ServerSupabase,
   nextPath: string
 ): Promise<void> {
-  const { aal, verifiedFactors } = await readAssurance(supabase);
+  const { aal, verifiedFactors, agent } = await readAssurance(supabase);
+  if (agent) {
+    throw new Error(AGENT_SESSION_REFUSAL);
+  }
   if (assuranceGap(aal, verifiedFactors) === 'verify') {
     redirect(verifyPathFor(nextPath));
   }
@@ -80,24 +83,22 @@ export async function requireAssurance(
 /**
  * For route handlers that change the account with the service role, where
  * the page gate does not reach: a session that owes the code is refused, and
- * so is one whose factors cannot be checked right now. Null means go ahead.
+ * so is one whose standing cannot be checked right now. Null means go ahead.
  */
 export async function secondFactorRefusal(
   supabase: ServerSupabase
 ): Promise<Response | null> {
-  let assurance: Awaited<ReturnType<typeof readAssurance>>;
+  let assurance: Assurance;
   try {
     assurance = await readAssurance(supabase);
   } catch {
-    return new Response(
-      'Your second factor could not be checked right now. Try again.',
-      { status: 503 }
-    );
+    return new Response(ASSURANCE_UNAVAILABLE, { status: 503 });
+  }
+  if (assurance.agent) {
+    return new Response(AGENT_SESSION_REFUSAL, { status: 403 });
   }
   if (assuranceGap(assurance.aal, assurance.verifiedFactors) === 'verify') {
-    return new Response('Enter the code from your authenticator app first.', {
-      status: 403,
-    });
+    return new Response(SECOND_FACTOR_REFUSAL, { status: 403 });
   }
   return null;
 }

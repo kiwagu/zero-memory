@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -37,6 +37,7 @@ const makeSession = (): AuthSession => ({
   accessToken: makeJwt(),
   refreshToken: randomBytes(16).toString('base64url'),
   expiresIn: 3600,
+  sessionId: randomUUID(),
 });
 
 const makeAuthGateway = (session: AuthSession | null = makeSession()) =>

@@ -303,6 +303,26 @@ export class SupabaseOAuthStore implements IOAuthStore {
     }
   }
 
+  async recordAgentSession(session: {
+    sessionId: string;
+    authUserId: string;
+    clientId: string;
+  }): Promise<void> {
+    // agent_sessions keeps Auth's own ids: the row is compared against the
+    // session's claims, not against a domain row.
+    const { error } = await this.#client().from('agent_sessions').upsert(
+      {
+        session_id: session.sessionId,
+        user_id: session.authUserId,
+        client_id: session.clientId,
+      },
+      { onConflict: 'session_id', ignoreDuplicates: true }
+    );
+    if (error) {
+      throw new Error(`Failed to record the agent session: ${error.message}`);
+    }
+  }
+
   #client(): SupabaseClient<Database> {
     const { url, serviceRoleKey } = resolveServiceEnv();
     return createClient<Database>(url, serviceRoleKey, {

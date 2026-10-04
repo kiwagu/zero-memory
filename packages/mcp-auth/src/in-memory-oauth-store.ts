@@ -28,6 +28,10 @@ export class InMemoryOAuthStore implements IOAuthStore {
   readonly #codes = new Map<string, OAuthCodeRecord>();
   readonly #authorizations = new Map<string, StoredAuthorization>();
   readonly #consents = new Map<string, OAuthConsentRecord>();
+  readonly #agentSessions = new Map<
+    string,
+    { authUserId: string; clientId: string }
+  >();
 
   async insertClient(
     client: Omit<OAuthClientRecord, 'clientId'>
@@ -131,5 +135,24 @@ export class InMemoryOAuthStore implements IOAuthStore {
     redirectUri: string
   ): Promise<void> {
     this.#consents.set(`${authUserId} ${clientId}`, { scope, redirectUri });
+  }
+
+  async recordAgentSession(session: {
+    sessionId: string;
+    authUserId: string;
+    clientId: string;
+  }): Promise<void> {
+    this.#agentSessions.set(session.sessionId, {
+      authUserId: session.authUserId,
+      clientId: session.clientId,
+    });
+  }
+
+  /** The agent sessions recorded so far, for tests. */
+  agentSessions(): ReadonlyMap<
+    string,
+    { authUserId: string; clientId: string }
+  > {
+    return this.#agentSessions;
   }
 }

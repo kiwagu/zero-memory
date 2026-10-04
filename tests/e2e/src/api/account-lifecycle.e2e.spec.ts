@@ -14,6 +14,8 @@
  * is not vacuous. The exhaustive numeric proof over a full corpus is a rehearsal
  * on a database clone; this is the standing regression.
  */
+import { randomUUID } from 'node:crypto';
+
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
@@ -27,6 +29,7 @@ import {
 
 import { e2eEnv } from '../helpers/env.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
+import { readSeedState } from '../helpers/runtime-state.js';
 import {
   passwordGrantToken,
   provisionE2EUser,
@@ -398,6 +401,14 @@ test.describe('account lifecycle: hard_delete_user', () => {
       memory_id: m1,
       verdict: 'current',
     });
+    // A session the authorization server opened for one of the person's
+    // agents. Keyed by Auth's ids, so the map excludes it; it goes with the
+    // Auth user, which the cascade check below proves rather than assumes.
+    await insertOrThrow(db, 'agent_sessions', {
+      session_id: randomUUID(),
+      user_id: departing.user.id,
+      client_id: null,
+    });
     await insertOrThrow(db, 'portability_candidates', {
       owner_id: userId,
       memory_id: m2,
@@ -429,6 +440,7 @@ test.describe('account lifecycle: hard_delete_user', () => {
     // than collide with it. Insert-if-absent rather than upsert: eval_runs is
     // append-only (the service role is granted select and insert, nothing
     // else), so an upsert is refused outright.
+    const seeds = await readSeedState();
     const excludedMarkers: Record<
       string,
       {
@@ -436,6 +448,16 @@ test.describe('account lifecycle: hard_delete_user', () => {
         readonly row: Record<string, unknown>;
       }
     > = {
+      // Another person's agent session: the departing account's erasure must
+      // not touch it. The seeded user A outlives every spec of the run.
+      agent_sessions: {
+        key: { session_id: '00000000-0000-4000-8000-00000000e2e1' },
+        row: {
+          session_id: '00000000-0000-4000-8000-00000000e2e1',
+          user_id: seeds.userA.id,
+          client_id: null,
+        },
+      },
       oauth_clients: {
         key: { client_id: 'oac_e2eerasezzzz1234.0000000000' },
         row: {
@@ -777,6 +799,14 @@ test.describe('account lifecycle: hard_delete_user', () => {
       );
       expect(remaining, `expected zero user rows left in ${table}`).toBe(0);
     }
+    // The agent sessions went with the Auth user (foreign-key cascade): the
+    // map excludes the table, so this is asserted here by hand.
+    const { count: agentRows, error: agentError } = await db
+      .from('agent_sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', departing.user.id);
+    expect(agentError).toBeNull();
+    expect(agentRows, 'agent sessions of the erased account remain').toBe(0);
 
     // The other user's rows are still here, with every reference to the erased
     // account severed rather than the row carried off with it.
