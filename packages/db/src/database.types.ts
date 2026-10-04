@@ -9,6 +9,35 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      agent_sessions: {
+        Row: {
+          client_id: string | null;
+          created_at: string;
+          session_id: string;
+          user_id: string;
+        };
+        Insert: {
+          client_id?: string | null;
+          created_at?: string;
+          session_id: string;
+          user_id: string;
+        };
+        Update: {
+          client_id?: string | null;
+          created_at?: string;
+          session_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'agent_sessions_client_id_fkey';
+            columns: ['client_id'];
+            isOneToOne: false;
+            referencedRelation: 'oauth_clients';
+            referencedColumns: ['client_id'];
+          },
+        ];
+      };
       audit_log: {
         Row: {
           actor_id: string | null;
@@ -2721,6 +2750,7 @@ export type Database = {
           visibility: string;
         }[];
       };
+      session_assurance: { Args: never; Returns: Json };
       session_receipt: { Args: { p_since: string }; Returns: Json };
       set_provider_credential: {
         Args: {

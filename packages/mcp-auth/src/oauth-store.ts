@@ -115,6 +115,18 @@ export interface IOAuthStore {
   /** Housekeeping: drops authorizations whose TTL elapsed. */
   deleteExpiredAuthorizations(now: Date): Promise<void>;
 
+  /**
+   * Records a session the authorization server opened for an agent, at the
+   * moment it is minted and before anyone can hold it. The record is what
+   * tells that session apart from a person's own sign-in that has not given
+   * its second factor: a recorded session reaches the data without one.
+   */
+  recordAgentSession(session: {
+    sessionId: string;
+    authUserId: string;
+    clientId: string;
+  }): Promise<void>;
+
   /** The person's live (not revoked) consent for this client, if any. */
   findConsent(
     authUserId: string,

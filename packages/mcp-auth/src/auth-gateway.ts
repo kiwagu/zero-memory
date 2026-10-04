@@ -11,6 +11,12 @@ export interface AuthSession {
   refreshToken: string;
   /** Seconds until the access token expires. */
   expiresIn: number;
+  /**
+   * The provider's id of this session (the `session_id` claim), the same on
+   * every token the session issues, refreshes included. Null when the token
+   * carried none.
+   */
+  sessionId: string | null;
 }
 
 export interface IAuthGateway {

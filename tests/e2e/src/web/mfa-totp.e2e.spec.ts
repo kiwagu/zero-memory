@@ -11,7 +11,8 @@ import { createClient } from '@supabase/supabase-js';
 import { expect, test, type Page } from '@playwright/test';
 
 import { e2eEnv } from '../helpers/env.js';
-import { enrollTotp, totpCode } from '../helpers/mfa.js';
+import { claimsOf, enrollTotp, totpCode } from '../helpers/mfa.js';
+import { dashboardSessionCookies } from '../helpers/session-cookie.js';
 import {
   passwordGrantToken,
   provisionE2EUser,
@@ -50,6 +51,38 @@ const giveCode = async (
   await page.getByTestId('mfa-verify-code').fill(code);
   await page.getByTestId('mfa-verify-submit').click();
   return code;
+};
+
+/** A session opened the way the authorization server opens an agent's, on record as one. */
+const recordedAgentSession = async (user: E2EUser) => {
+  const { data: link, error } = await admin().auth.admin.generateLink({
+    type: 'magiclink',
+    email: user.email,
+  });
+  if (error || !link.properties?.hashed_token) {
+    throw new Error(`generateLink failed: ${error?.message}`);
+  }
+  const anon = createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error: verifyError } = await anon.auth.verifyOtp({
+    type: 'magiclink',
+    token_hash: link.properties.hashed_token,
+  });
+  if (verifyError || !data.session) {
+    throw new Error(`verifyOtp failed: ${verifyError?.message}`);
+  }
+  const { error: recordError } = await admin()
+    .from('agent_sessions')
+    .insert({
+      session_id: claimsOf(data.session.access_token).session_id as string,
+      user_id: user.id,
+      client_id: null,
+    });
+  if (recordError) {
+    throw new Error(`recording failed: ${recordError.message}`);
+  }
+  return data.session;
 };
 
 const verifiedFactors = async (userId: string): Promise<number> => {
@@ -229,5 +262,53 @@ test.describe('two-factor authentication', () => {
     await expect(page).toHaveURL(/\/login/);
     const { data: gone } = await admin().auth.admin.getUserById(user.id);
     expect(gone.user).toBeNull();
+  });
+
+  test('@smoke before the code, every dashboard path is behind the step, not only the pages', async ({
+    page,
+  }) => {
+    const { user } = await userWithFactor('every-path');
+    await signIn(page, user);
+    await expect(page).toHaveURL(/\/mfa\/verify$/);
+    // A page: sent to give the code, with the way back kept.
+    await page.goto('/memories');
+    await expect(page).toHaveURL(/\/mfa\/verify\?next=%2Fmemories$/);
+    // Requests made by code get the refusal itself rather than a sign-in page.
+    const panel = await page.request.get(
+      '/api/panels/memory/mem_0000000000000000.0000000000'
+    );
+    expect(panel.status()).toBe(403);
+    expect(await panel.text()).toContain('code');
+    const action = await page.request.post('/settings', {
+      headers: {
+        'next-action': 'not-a-real-action',
+        accept: 'text/x-component',
+      },
+      data: '[]',
+    });
+    expect(action.status()).toBe(403);
+  });
+
+  test('@smoke a session opened for an agent is refused by the dashboard', async ({
+    page,
+  }) => {
+    const user = await freshUser('agent-session');
+    const session = await recordedAgentSession(user);
+    await page.context().addCookies(dashboardSessionCookies(session));
+    const response = await page.goto('/settings');
+    expect(response?.status()).toBe(403);
+    expect(await page.textContent('body')).toContain('connected agent');
+    // Nor does the code step take it: it is not a person's session at all.
+    const step = await page.goto('/mfa/verify');
+    expect(step?.status()).toBe(403);
+    const keyWrite = await page.request.post('/settings/provider-key', {
+      headers: { 'sec-fetch-site': 'same-origin' },
+      data: {
+        provider: 'openai',
+        apiKey: 'e2e-fixture-not-a-real-key-0123456789',
+      },
+    });
+    expect(keyWrite.status()).toBe(403);
+    expect(await keyWrite.text()).toContain('connected agent');
   });
 });

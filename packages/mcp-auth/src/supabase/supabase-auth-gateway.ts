@@ -20,18 +20,33 @@ const toAuthSession = (session: Session): AuthSession => ({
   accessToken: session.access_token,
   refreshToken: session.refresh_token,
   expiresIn: session.expires_in ?? DEFAULT_EXPIRES_IN_SECONDS,
+  sessionId: sessionIdOf(session.access_token),
 });
+
+/** The claims of a token Auth has already verified; none when unreadable. */
+const claimsOf = (accessToken: string): Record<string, unknown> => {
+  try {
+    const payload: unknown = JSON.parse(
+      Buffer.from(accessToken.split('.')[1] ?? '', 'base64url').toString('utf8')
+    );
+    return payload !== null && typeof payload === 'object'
+      ? (payload as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+};
 
 /** The `aal` claim of a token Auth has already verified. */
 const assuranceLevelOf = (accessToken: string): string | undefined => {
-  try {
-    const payload = JSON.parse(
-      Buffer.from(accessToken.split('.')[1] ?? '', 'base64url').toString('utf8')
-    ) as { aal?: unknown };
-    return typeof payload.aal === 'string' ? payload.aal : undefined;
-  } catch {
-    return undefined;
-  }
+  const aal = claimsOf(accessToken).aal;
+  return typeof aal === 'string' ? aal : undefined;
+};
+
+/** The `session_id` claim: Auth's id of the session the token belongs to. */
+const sessionIdOf = (accessToken: string): string | null => {
+  const id = claimsOf(accessToken).session_id;
+  return typeof id === 'string' && id !== '' ? id : null;
 };
 
 /**

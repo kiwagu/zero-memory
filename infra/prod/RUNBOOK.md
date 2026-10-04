@@ -735,6 +735,17 @@ What is enforced, and where:
   Account deletion and the provider-key route require the browser's
   `Sec-Fetch-Site: same-origin` mark and, for a body, `application/json`; a
   same-site sibling origin or a plain form post is refused unread.
+- **Two-factor protects the data, not only the pages.** On an account with a
+  verified factor, a session that has not given the code identifies nobody:
+  the identity function returns null and a restrictive policy on every table
+  admits complete sessions only, so the database API shows it no row; the
+  memory server answers `401 insufficient_aal`; the dashboard proxy sends a
+  navigation to the code step and refuses other requests, on every path, not
+  only in a layout. Agent sessions are recorded by the authorization server
+  the moment they are minted (`public.agent_sessions`) and stay complete
+  without a code; the dashboard refuses a recorded agent session outright.
+  Sessions open at the time this shipped were back-filled from Auth's
+  sign-in record (a session with the `otp` method alone is an agent's).
 - **The login page never shows text from a URL.** A failed callback or a
   refusal in the URL fragment is reduced to a code, and the page says why in
   its own words; a description planted in a link reaches nobody.

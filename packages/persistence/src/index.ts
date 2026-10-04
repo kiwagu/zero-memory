@@ -27,4 +27,5 @@ export * from './supabase.auth.js';
 export * from './supabase.client.js';
 export * from './usage/usage-recorder.js';
 export * from './usage/usage-upkeep.js';
+export * from './user/session-assurance.js';
 export * from './user/user-identity.resolver.js';

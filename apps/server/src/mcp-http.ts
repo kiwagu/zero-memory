@@ -8,12 +8,17 @@ import { CommandBus, QueryBus } from '@workspace/cqrs';
 import { container } from '@workspace/di';
 import { createLogger } from '@workspace/logger';
 import { buildMcpServer } from '@workspace/mcp';
-import { unauthorizedResponse } from '@workspace/mcp-auth';
+import {
+  incompleteSessionResponse,
+  unauthorizedResponse,
+} from '@workspace/mcp-auth';
 import {
   createAnonClient,
   createUserClient,
+  fetchSessionAssurance,
   listPromotedUserRules,
   fetchUserEntityId,
+  type SessionAssurance,
 } from '@workspace/persistence';
 import { USAGE_RECORDER, type IUsageRecorder } from '@workspace/usage';
 import { AUDIT_RECORDER, type IAuditRecorder } from '@workspace/audit';
@@ -243,6 +248,27 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
         options.issuer,
         'Invalid or expired access token'
       );
+    }
+    // A live token is not yet a complete sign-in. An account with a second
+    // factor admits a session to its data once the code was given, or when
+    // the authorization server opened the session for an agent; the database
+    // applies that rule to every row. Asking first turns what would be empty
+    // answers into a refusal that says why.
+    let assurance: SessionAssurance;
+    try {
+      assurance = await fetchSessionAssurance(createUserClient(token));
+    } catch (thrown) {
+      logger.error('session assurance check failed', {
+        error: thrown instanceof Error ? thrown.message : String(thrown),
+      });
+      return jsonRpcError(
+        503,
+        -32000,
+        'The session could not be checked. Try again.'
+      );
+    }
+    if (!assurance.complete) {
+      return incompleteSessionResponse(options.issuer);
     }
 
     // Resolve the caller's domain user id (usr_) once, so tool execution can

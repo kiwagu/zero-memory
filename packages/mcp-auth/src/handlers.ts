@@ -359,11 +359,14 @@ const approve = async (
       'The agent session could not be created. Connect the client again.'
     );
   }
-  // What follows the mint is what makes the session reachable: the code the
-  // client redeems, and the consent for next time. If either fails, the
-  // session would stay alive with no one to hold it, so it is ended first.
+  // What follows the mint is what makes the session reachable: the record
+  // that marks it as an agent's (without it, an account with a second factor
+  // would refuse the session its data), the code the client redeems, and the
+  // consent for next time. If any of them fails, the session would stay
+  // alive with no one to hold it, so it is ended first.
   let code: string;
   try {
+    await recordAgentSession(deps, decided, session);
     code = await issueCode(deps, decided, session, now);
     await deps.store.upsertConsent(
       userId,
@@ -376,6 +379,27 @@ const approve = async (
     throw thrown;
   }
   return backToClient(decided, { code });
+};
+
+/**
+ * Marks the minted session as an agent's. A session whose token names no
+ * session id cannot be marked, and an unmarked session on an account with a
+ * second factor would be refused its data; failing here, before the code is
+ * issued, is what keeps that from being discovered by the agent.
+ */
+const recordAgentSession = async (
+  deps: OAuthDeps,
+  authorization: OAuthAuthorizationRecord,
+  session: AuthSession
+): Promise<void> => {
+  if (session.sessionId === null) {
+    throw new Error('The minted session carries no session id.');
+  }
+  await deps.store.recordAgentSession({
+    sessionId: session.sessionId,
+    authUserId: session.userId,
+    clientId: authorization.clientId,
+  });
 };
 
 const issueCode = async (

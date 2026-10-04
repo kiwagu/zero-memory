@@ -15,6 +15,7 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 
+import { createClient } from '@supabase/supabase-js';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { e2eEnv } from '../helpers/env.js';
@@ -284,6 +285,24 @@ test.describe('OAuth: DCR → dashboard consent → token', () => {
     expect(agent.sub).toBe(browser.sub);
     expect(agent.session_id).not.toBe(browser.session_id);
     expect(JSON.stringify(agent.amr)).not.toContain('password');
+
+    // The authorization server put the agent's session on record the moment
+    // it minted it: on an account with a second factor, that record is what
+    // admits the session to the data without a code.
+    const service = createClient(
+      e2eEnv.supabaseUrl,
+      e2eEnv.supabaseServiceRoleKey,
+      { auth: { persistSession: false, autoRefreshToken: false } }
+    );
+    const { data: recorded } = await service
+      .from('agent_sessions')
+      .select('session_id, client_id')
+      .eq('session_id', agent.session_id as string)
+      .maybeSingle();
+    expect(recorded).toEqual({
+      session_id: agent.session_id,
+      client_id: clientId,
+    });
 
     // The issued token must open a real MCP session (end of the chain).
     const mcp = await McpTestClient.connect(body.access_token);
