@@ -738,6 +738,11 @@ What is enforced, and where:
 - **The login page never shows text from a URL.** A failed callback or a
   refusal in the URL fragment is reduced to a code, and the page says why in
   its own words; a description planted in a link reaches nobody.
+- **A user's model endpoint never reaches a private address.** The one
+  endpoint a person may choose (Ollama's base URL) is re-checked, and for
+  plain http pinned, on every call; private, loopback and link-local targets
+  are refused by default. A one-person instance with Ollama on such an
+  address sets `ZM_POLICY_DENY_PRIVATE_ENDPOINTS=false`.
 
 Residual risks and deferred items (honest list):
 
@@ -752,6 +757,12 @@ Residual risks and deferred items (honest list):
   rotation is the manual procedure above ("Key & secret rotation").
 - **Refresh tokens are Supabase's** — revocation is per-session via
   Supabase Auth; there is no client-facing token-revocation endpoint (RFC 7009) yet.
+- **A user's https model endpoint is checked, not pinned** — pinning would
+  send the raw address as the TLS server name, which no certificate for a
+  named host covers, so a DNS answer that changes between the check and the
+  connection is not caught for https. Plain http is pinned. The endpoint's
+  own error text is relayed to the person who configured it, which with the
+  private-address refusal in place tells them only what their own server said.
 - **Advisor residue (accepted):** `public.create_scope` is an intentionally
   authenticated-callable `security definer` RPC (bootstraps scope creation
   past the admin-only RLS insert; validates roots, pins `search_path`);

@@ -37,18 +37,20 @@ host on an IPv4-only Docker network.
 
 ## Deployment-mode policy
 
-Denying is **off by default** — the self-host default, since a self-hoster
-legitimately points Ollama at `127.0.0.1` and a blanket deny would break
-that:
+Denying is **on by default**: a user-supplied endpoint on a shared server is
+a way into another user's network unless the server refuses private,
+loopback and link-local addresses, and an instance cannot tell from the
+inside whether it is shared. A self-hoster whose Ollama runs on such an
+address opts out explicitly:
 
 ```sh
-ZM_POLICY_DENY_PRIVATE_ENDPOINTS=true   # shared-server deployments only
+ZM_POLICY_DENY_PRIVATE_ENDPOINTS=false   # one person's instance, Ollama on the LAN or localhost
 ```
 
-Unset or unparseable reads as `false`, matching every other `ZM_POLICY_*`
-value's fail-open convention. A deployment that sets it must also pass it
-into the container — `infra/prod/docker-compose.yml` names it explicitly,
-since those services take no `env_file`.
+Unset or unparseable reads as deny. Only `false`, `0`, `off` and `no` turn
+the guard off. A deployment that sets it must also pass it into the
+container — `infra/prod/docker-compose.yml` names it explicitly, since those
+services take no `env_file`.
 
 ## Fetch-time enforcement
 
