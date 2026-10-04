@@ -5,6 +5,7 @@ import type {
   IOAuthStore,
   OAuthAuthorizationRecord,
   OAuthClientRecord,
+  OAuthConsentRecord,
 } from './oauth-store.js';
 import {
   authorizationDetailsSchema,
@@ -24,6 +25,7 @@ import { verifyPkceS256 } from './pkce.js';
 import {
   isAllowedRedirectUri,
   isRegisteredRedirectUri,
+  mixesRemoteAndLocal,
 } from './redirect-uri.js';
 
 const DEFAULT_CODE_TTL_MS = 5 * 60 * 1000;
@@ -110,6 +112,13 @@ export const handleRegister = async (
       400,
       'invalid_redirect_uri',
       `redirect_uri "${invalidUri}" must be https, loopback http, or a private-use URI scheme`
+    );
+  }
+  if (mixesRemoteAndLocal(parsed.data.redirect_uris)) {
+    return oauthError(
+      400,
+      'invalid_redirect_uri',
+      'redirect_uris must be all https, or all loopback http and private-use schemes: a client returns either to a remote host or to the local machine'
     );
   }
   const client = await deps.store.insertClient({
@@ -219,6 +228,14 @@ export interface AuthorizationRequestInput {
   authorizationId: string;
   /** The raw `Authorization` header: the person's dashboard session. */
   authorization: string | null | undefined;
+  /**
+   * Whether a client the person already approved may be sent straight back
+   * without a screen. The dashboard says so only when the browser arrived on
+   * its own, as it does when a client opens the authorize URL, or from the
+   * dashboard's own origin; a navigation another site set off gets the screen
+   * and the person's click, however often it comes. Absent reads as false.
+   */
+  screenless?: boolean;
 }
 
 const NOT_FOUND = oauthError(
@@ -268,10 +285,27 @@ const authenticate = async (
   return { kind: 'ok', userId: verified.userId };
 };
 
-/** Every scope the request asks for is one the person already approved. */
-const consentCovers = (granted: string, requested: string): boolean => {
-  const grantedScopes = new Set(granted.split(' ').filter(Boolean));
-  return requested
+/**
+ * The person already approved this request: every scope it asks for, and the
+ * return address it names. The address is what the consent screen shows to
+ * tell a genuine client from one that merely took its name, so an approval
+ * given for one address never carries over to another the same client
+ * registered. Loopback addresses compare without the port, as registration
+ * does. A consent recorded before addresses were kept covers nothing; the
+ * client asks once more and the address is recorded then.
+ */
+const consentCovers = (
+  consent: OAuthConsentRecord,
+  authorization: OAuthAuthorizationRecord
+): boolean => {
+  if (
+    consent.redirectUri === null ||
+    !isRegisteredRedirectUri(authorization.redirectUri, [consent.redirectUri])
+  ) {
+    return false;
+  }
+  const grantedScopes = new Set(consent.scope.split(' ').filter(Boolean));
+  return authorization.scope
     .split(' ')
     .filter(Boolean)
     .every((scope) => grantedScopes.has(scope));
@@ -294,8 +328,9 @@ const backToClient = (
 /**
  * Approves on the person's behalf: the decision is taken first (exactly once),
  * then a session of the agent's own is minted and parked behind a one-time
- * code, and the consent is remembered for next time. A mint failure leaves the
- * request approved without a code; the client simply starts over.
+ * code, and the consent is remembered for next time, for the return address
+ * the person approved. A mint failure leaves the request approved without a
+ * code; the client simply starts over.
  */
 const approve = async (
   deps: OAuthDeps,
@@ -324,8 +359,22 @@ const approve = async (
       'The agent session could not be created. Connect the client again.'
     );
   }
-  const code = await issueCode(deps, decided, session, now);
-  await deps.store.upsertConsent(userId, decided.clientId, decided.scope);
+  // What follows the mint is what makes the session reachable: the code the
+  // client redeems, and the consent for next time. If either fails, the
+  // session would stay alive with no one to hold it, so it is ended first.
+  let code: string;
+  try {
+    code = await issueCode(deps, decided, session, now);
+    await deps.store.upsertConsent(
+      userId,
+      decided.clientId,
+      decided.scope,
+      decided.redirectUri
+    );
+  } catch (thrown) {
+    await deps.auth.revokeSession(session);
+    throw thrown;
+  }
   return backToClient(decided, { code });
 };
 
@@ -388,7 +437,11 @@ export const handleAuthorizationRead = async (
     return NOT_FOUND;
   }
   const consent = await deps.store.findConsent(userId, client.clientId);
-  if (consent && consentCovers(consent.scope, authorization.scope)) {
+  if (
+    input.screenless === true &&
+    consent &&
+    consentCovers(consent, authorization)
+  ) {
     return approve(deps, authorization, userId, now);
   }
   return {

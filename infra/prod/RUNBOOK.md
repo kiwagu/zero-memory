@@ -330,12 +330,15 @@ nothing else about the account.
 ### Which clients an account has approved
 
 Approving a client on the consent screen records a row in
-`public.oauth_consents` (person × client, with the scope and when), and it is
-what lets the same client reconnect without the screen. Read it with the
-service role:
+`public.oauth_consents` (person × client, with the scope, the return address
+the person approved, and when), and it is what lets the same client reconnect
+to that address without the screen, when the browser arrived on its own rather
+than sent by another site. A row without a return address was recorded before
+addresses were kept; that client asks once more. Read it with the service role:
 
 ```sql
-select c.user_id, k.client_name, c.client_id, c.scope, c.granted_at, c.revoked_at
+select c.user_id, k.client_name, c.client_id, c.scope, c.redirect_uri,
+       c.granted_at, c.revoked_at
 from public.oauth_consents c
 join public.oauth_clients k using (client_id)
 order by c.granted_at desc;
@@ -694,6 +697,13 @@ What is enforced, and where:
   the browser returns and which account is deciding. Approval mints a
   separate session for the agent, pinned to the approving account; the
   person's browser session is never handed out.
+- **A remembered consent is as narrow as what the screen showed.** It covers
+  the one return address the person approved (loopback compared without the
+  port), and it skips the screen only when the browser arrived on its own or
+  from the dashboard (`Sec-Fetch-Site` none or same-origin); a navigation some
+  other site set off shows the screen every time. A client registers return
+  addresses on remote hosts or on the local machine, never both, so a client
+  whose screen looks local cannot also return to a remote host.
 - **Authorization codes are single-use and short-lived.** Redemption is an
   atomic `DELETE … RETURNING` (a replayed or raced code loses), TTL 5
   minutes, expired codes swept opportunistically.

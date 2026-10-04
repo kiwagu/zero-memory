@@ -1,3 +1,4 @@
+import { headers } from 'next/headers';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
@@ -17,6 +18,7 @@ import {
   AUTHORIZATION_ID_RE,
   readAuthorization,
   returnHost,
+  screenlessArrival,
 } from '@/lib/oauth-consent';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { requireAssurance } from '@/lib/mfa';
@@ -59,7 +61,11 @@ export default async function OAuthConsentPage({
     redirect(`/login?next=${encodeURIComponent(here)}`);
   }
 
-  const result = await readAuthorization(accessToken, raw);
+  // A client the person approved before is let through without a screen only
+  // when the browser came here on its own or from this dashboard, never when
+  // another site sent it.
+  const screenless = screenlessArrival((await headers()).get('sec-fetch-site'));
+  const result = await readAuthorization(accessToken, raw, { screenless });
   if (result.kind === 'redirect') {
     redirect(result.url);
   }
@@ -84,6 +90,7 @@ export default async function OAuthConsentPage({
         labels={{
           title: t('oauth.consent.title', { client: '{client}' }),
           unnamedClient: t('oauth.consent.unnamedClient'),
+          nameNote: t('oauth.consent.nameNote'),
           description: t('oauth.consent.description'),
           // Everything an allowed client can do as the person, one entry per
           // area of the server's tools; the MCP package's consent-area spec

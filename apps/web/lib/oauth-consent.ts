@@ -151,12 +151,28 @@ const settle = (
 const pathOf = (authorizationId: string): string =>
   `/oauth/authorizations/${encodeURIComponent(authorizationId)}`;
 
+/**
+ * Whether the browser arrived at the consent page on its own, as it does when
+ * a client opens the authorize URL (`Sec-Fetch-Site: none`), or from this
+ * dashboard (`same-origin`). Only then may a client the person already
+ * approved be sent straight back without a screen. A navigation another site
+ * set off (`cross-site`, `same-site`), or one the browser does not describe,
+ * shows the screen: an approval given once must not become a way for a page
+ * elsewhere to obtain new sessions as often as it likes.
+ */
+export const screenlessArrival = (secFetchSite: string | null): boolean =>
+  secFetchSite === 'none' || secFetchSite === 'same-origin';
+
 export async function readAuthorization(
   accessToken: string,
   authorizationId: string,
+  options: { screenless: boolean },
   fetchImpl: Fetch = fetch
 ): Promise<ConsentReadResult> {
-  return settle(await call(fetchImpl, accessToken, pathOf(authorizationId)));
+  const path = options.screenless
+    ? `${pathOf(authorizationId)}?screenless=1`
+    : pathOf(authorizationId);
+  return settle(await call(fetchImpl, accessToken, path));
 }
 
 export async function decideAuthorization(
@@ -177,9 +193,11 @@ export async function decideAuthorization(
 }
 
 /**
- * Where the browser goes after the decision, as the screen names it: the
- * host for a web or loopback address, the scheme and host for an app's own
- * URI scheme — what tells a genuine local client from a look-alike.
+ * Where the browser goes after the decision, as the screen names it — what
+ * tells a genuine local client from a look-alike. For a web or loopback
+ * address that is the host. An app's own URI scheme is shown whole: the
+ * browser hands the entire URI to whatever program owns the scheme, and the
+ * part after the scheme can carry anything, so the person sees all of it.
  */
 export function returnHost(redirectUri: string): string {
   try {
@@ -187,7 +205,7 @@ export function returnHost(redirectUri: string): string {
     if (url.protocol === 'http:' || url.protocol === 'https:') {
       return url.hostname;
     }
-    return url.host ? `${url.protocol}//${url.host}` : url.protocol;
+    return redirectUri;
   } catch {
     return redirectUri;
   }

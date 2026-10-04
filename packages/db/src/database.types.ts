@@ -1254,6 +1254,7 @@ export type Database = {
         Row: {
           client_id: string;
           granted_at: string;
+          redirect_uri: string | null;
           revoked_at: string | null;
           scope: string;
           user_id: string;
@@ -1261,6 +1262,7 @@ export type Database = {
         Insert: {
           client_id: string;
           granted_at?: string;
+          redirect_uri?: string | null;
           revoked_at?: string | null;
           scope: string;
           user_id: string;
@@ -1268,6 +1270,7 @@ export type Database = {
         Update: {
           client_id?: string;
           granted_at?: string;
+          redirect_uri?: string | null;
           revoked_at?: string | null;
           scope?: string;
           user_id?: string;

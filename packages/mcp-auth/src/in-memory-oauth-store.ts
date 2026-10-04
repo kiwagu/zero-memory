@@ -127,8 +127,9 @@ export class InMemoryOAuthStore implements IOAuthStore {
   async upsertConsent(
     authUserId: string,
     clientId: string,
-    scope: string
+    scope: string,
+    redirectUri: string
   ): Promise<void> {
-    this.#consents.set(`${authUserId} ${clientId}`, { scope });
+    this.#consents.set(`${authUserId} ${clientId}`, { scope, redirectUri });
   }
 }

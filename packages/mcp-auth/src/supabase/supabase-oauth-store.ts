@@ -267,7 +267,7 @@ export class SupabaseOAuthStore implements IOAuthStore {
     const userEntityId = await this.#resolveUserEntityId(authUserId);
     const { data, error } = await this.#client()
       .from('oauth_consents')
-      .select('scope')
+      .select('scope, redirect_uri')
       .eq('user_id', userEntityId)
       .eq('client_id', clientId)
       .is('revoked_at', null)
@@ -275,13 +275,16 @@ export class SupabaseOAuthStore implements IOAuthStore {
     if (error) {
       throw new Error(`Failed to load consent: ${error.message}`);
     }
-    return data ? { scope: data.scope } : null;
+    return data
+      ? { scope: data.scope, redirectUri: data.redirect_uri ?? null }
+      : null;
   }
 
   async upsertConsent(
     authUserId: string,
     clientId: string,
-    scope: string
+    scope: string,
+    redirectUri: string
   ): Promise<void> {
     const userEntityId = await this.#resolveUserEntityId(authUserId);
     const { error } = await this.#client().from('oauth_consents').upsert(
@@ -289,6 +292,7 @@ export class SupabaseOAuthStore implements IOAuthStore {
         user_id: userEntityId,
         client_id: clientId,
         scope,
+        redirect_uri: redirectUri,
         granted_at: new Date().toISOString(),
         revoked_at: null,
       },
