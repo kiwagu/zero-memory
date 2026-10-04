@@ -14,12 +14,13 @@ export type ClientId = z.infer<typeof clientIdSchema>;
 /** RFC 7591 dynamic client registration request (public clients only). */
 export const clientRegistrationRequestSchema = z.object({
   client_name: z.string().min(1).max(256).optional(),
-  redirect_uris: z.array(z.string().min(1)).min(1),
+  // Bounded: a registration is anyone's to send, and each one is stored.
+  redirect_uris: z.array(z.string().min(1).max(2048)).min(1).max(8),
   token_endpoint_auth_method: z.literal('none').default('none'),
   // Advisory fields some clients send; accepted and ignored.
   grant_types: z.array(z.string()).optional(),
   response_types: z.array(z.string()).optional(),
-  scope: z.string().optional(),
+  scope: z.string().max(512).optional(),
 });
 export type ClientRegistrationRequest = z.infer<
   typeof clientRegistrationRequestSchema
@@ -35,8 +36,8 @@ export const authorizeRequestSchema = z.object({
   code_challenge_method: z.literal('S256'),
   state: z.string().max(2048).optional(),
   // RFC 8707 resource indicator (the MCP endpoint URL).
-  resource: z.string().optional(),
-  scope: z.string().optional(),
+  resource: z.string().max(2048).optional(),
+  scope: z.string().max(512).optional(),
 });
 export type AuthorizeRequest = z.infer<typeof authorizeRequestSchema>;
 
@@ -85,7 +86,7 @@ export const authorizationCodeGrantSchema = z.object({
   code_verifier: z.string().min(1),
   client_id: clientIdSchema,
   redirect_uri: z.string().min(1),
-  resource: z.string().optional(),
+  resource: z.string().max(2048).optional(),
 });
 
 /** POST /oauth/token — refresh_token grant. */
@@ -93,8 +94,8 @@ export const refreshTokenGrantSchema = z.object({
   grant_type: z.literal('refresh_token'),
   refresh_token: z.string().min(1),
   client_id: clientIdSchema.optional(),
-  scope: z.string().optional(),
-  resource: z.string().optional(),
+  scope: z.string().max(512).optional(),
+  resource: z.string().max(2048).optional(),
 });
 
 export const tokenRequestSchema = z.discriminatedUnion('grant_type', [
