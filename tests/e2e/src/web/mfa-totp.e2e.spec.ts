@@ -198,13 +198,17 @@ test.describe('two-factor authentication', () => {
     // The other change the dashboard makes with the service role, the
     // person's model-provider key, is refused to that session as well.
     const keyWrite = await page.request.post('/settings/provider-key', {
+      headers: { 'sec-fetch-site': 'same-origin' },
       data: {
         provider: 'openai',
         apiKey: 'e2e-fixture-not-a-real-key-0123456789',
       },
     });
     expect(keyWrite.status()).toBe(403);
-    const keyRevoke = await page.request.delete('/settings/provider-key');
+    expect(await keyWrite.text()).toContain('code');
+    const keyRevoke = await page.request.delete('/settings/provider-key', {
+      headers: { 'sec-fetch-site': 'same-origin' },
+    });
     expect(keyRevoke.status()).toBe(403);
     const { data: still } = await admin().auth.admin.getUserById(user.id);
     expect(still.user?.id).toBe(user.id);
