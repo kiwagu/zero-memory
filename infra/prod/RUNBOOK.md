@@ -531,6 +531,20 @@ loads as `abc`. Escape it as `abc\$Def`, or avoid `$` in passwords
 entirely. When verifying, never print the password — compare length or a
 masked form.
 
+## The edge at deploy
+
+The edge's Caddyfile is one bind-mounted file. A release that changes it
+makes `git pull` write a new inode, and the running container keeps the old
+one: `up -d` leaves Caddy alone (its compose config did not change) and a
+`caddy reload` inside the container re-reads the stale mount, so the change
+never goes live on its own. The deploy script therefore hashes the template
+before the pull and, when the hash differs afterwards, recreates the edge
+container (`up -d --force-recreate --wait caddy`) once the rest of the stack
+is up. That is a few seconds of edge restart on the releases that touch it,
+and nothing on the others. The same applies to a template edited by hand on
+the host with an editor that writes a new file: restart the edge, do not
+reload it.
+
 ## Migrations at deploy
 
 With `ZM_MIGRATE_ON_DEPLOY=1` in `infra/prod/.env`, `upgrade.sh` manages the

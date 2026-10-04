@@ -16,6 +16,14 @@ set -euo pipefail
 checkout_dir="${ZM_CHECKOUT_DIR:-/opt/zero-memory}"
 cd "$checkout_dir"
 
+# The edge's Caddyfile is a single bind-mounted file. A pull that changes it
+# writes a NEW inode, and the running container keeps the old one: neither
+# `up -d` (the compose config is unchanged) nor `caddy reload` (it reads the
+# stale mount) brings the new template live. Remember what the file said
+# before the pull; a change recreates the edge container after the stack is
+# up, which is what re-binds the mount.
+caddy_template="infra/prod/caddy/Caddyfile.template"
+caddy_before="$(sha256sum "$caddy_template" 2>/dev/null | cut -d' ' -f1 || true)"
 echo "→ updating the checkout"
 git pull --ff-only
 
@@ -133,3 +141,9 @@ echo "→ applying"
 # meets a service that is still starting and reads it as a failed release.
 "${compose[@]}" up -d --wait
 "${compose[@]}" ps
+
+caddy_after="$(sha256sum "$caddy_template" 2>/dev/null | cut -d' ' -f1 || true)"
+if [ -n "$caddy_before" ] && [ "$caddy_before" != "$caddy_after" ]; then
+  echo "→ the edge template changed in this release; recreating the edge so it mounts the new file"
+  "${compose[@]}" up -d --force-recreate --wait caddy
+fi
