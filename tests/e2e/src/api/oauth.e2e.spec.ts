@@ -514,7 +514,9 @@ test.describe('OAuth: DCR → dashboard consent → token', () => {
       clientId,
       challenge
     );
-    const read = await readAuthorization(request, tokenA, authorizationId);
+    const read = await readAuthorization(request, tokenA, authorizationId, {
+      screenless: true,
+    });
     const code = (await redirectOf(read)).searchParams.get('code');
 
     const token = await redeem(request, {
