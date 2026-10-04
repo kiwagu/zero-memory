@@ -151,12 +151,28 @@ const settle = (
 const pathOf = (authorizationId: string): string =>
   `/oauth/authorizations/${encodeURIComponent(authorizationId)}`;
 
+/**
+ * Whether the browser arrived at the consent page on its own, as it does when
+ * a client opens the authorize URL (`Sec-Fetch-Site: none`), or from this
+ * dashboard (`same-origin`). Only then may a client the person already
+ * approved be sent straight back without a screen. A navigation another site
+ * set off (`cross-site`, `same-site`), or one the browser does not describe,
+ * shows the screen: an approval given once must not become a way for a page
+ * elsewhere to obtain new sessions as often as it likes.
+ */
+export const screenlessArrival = (secFetchSite: string | null): boolean =>
+  secFetchSite === 'none' || secFetchSite === 'same-origin';
+
 export async function readAuthorization(
   accessToken: string,
   authorizationId: string,
+  options: { screenless: boolean },
   fetchImpl: Fetch = fetch
 ): Promise<ConsentReadResult> {
-  return settle(await call(fetchImpl, accessToken, pathOf(authorizationId)));
+  const path = options.screenless
+    ? `${pathOf(authorizationId)}?screenless=1`
+    : pathOf(authorizationId);
+  return settle(await call(fetchImpl, accessToken, path));
 }
 
 export async function decideAuthorization(

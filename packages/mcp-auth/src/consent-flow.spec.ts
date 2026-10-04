@@ -294,6 +294,7 @@ describe('deciding', () => {
     const read = await handleAuthorizationRead(deps, {
       authorizationId: second,
       authorization: BEARER.alice,
+      screenless: true,
     });
     expect(read.status).toBe(200);
     expect(redirectOf(read.body).searchParams.get('code')).toBeTruthy();
@@ -302,8 +303,30 @@ describe('deciding', () => {
     const bobRead = await handleAuthorizationRead(deps, {
       authorizationId: third,
       authorization: BEARER.bob,
+      screenless: true,
     });
     expect(bobRead.body).toHaveProperty('authorization_id', third);
+  });
+
+  it('an arrival sent by another site shows the screen, approved client or not', async () => {
+    const { deps, clientId } = await setup();
+    const first = await start(deps, clientId);
+    await handleConsentDecision(deps, {
+      authorizationId: first,
+      authorization: BEARER.alice,
+      body: { decision: 'approve' },
+    });
+    // The dashboard says whether the browser arrived on its own, as it does
+    // when a client opens the URL; a page elsewhere that sent it here gets
+    // the screen, and the person's click, every time.
+    const second = await start(deps, clientId);
+    const read = await handleAuthorizationRead(deps, {
+      authorizationId: second,
+      authorization: BEARER.alice,
+      screenless: false,
+    });
+    expect(read.status).toBe(200);
+    expect(read.body).toHaveProperty('authorization_id', second);
   });
 
   it('a return address the person has not approved asks again, even for an approved client', async () => {
@@ -323,6 +346,7 @@ describe('deciding', () => {
     const read = await handleAuthorizationRead(deps, {
       authorizationId: elsewhere,
       authorization: BEARER.alice,
+      screenless: true,
     });
     expect(read.status).toBe(200);
     expect(read.body).toMatchObject({
@@ -357,6 +381,7 @@ describe('deciding', () => {
     const read = await handleAuthorizationRead(deps, {
       authorizationId: second,
       authorization: BEARER.alice,
+      screenless: true,
     });
     expect(read.body).toHaveProperty('authorization_id', second);
   });

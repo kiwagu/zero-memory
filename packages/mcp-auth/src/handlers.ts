@@ -228,6 +228,14 @@ export interface AuthorizationRequestInput {
   authorizationId: string;
   /** The raw `Authorization` header: the person's dashboard session. */
   authorization: string | null | undefined;
+  /**
+   * Whether a client the person already approved may be sent straight back
+   * without a screen. The dashboard says so only when the browser arrived on
+   * its own, as it does when a client opens the authorize URL, or from the
+   * dashboard's own origin; a navigation another site set off gets the screen
+   * and the person's click, however often it comes. Absent reads as false.
+   */
+  screenless?: boolean;
 }
 
 const NOT_FOUND = oauthError(
@@ -420,7 +428,11 @@ export const handleAuthorizationRead = async (
     return NOT_FOUND;
   }
   const consent = await deps.store.findConsent(userId, client.clientId);
-  if (consent && consentCovers(consent, authorization)) {
+  if (
+    input.screenless === true &&
+    consent &&
+    consentCovers(consent, authorization)
+  ) {
     return approve(deps, authorization, userId, now);
   }
   return {

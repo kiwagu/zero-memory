@@ -155,10 +155,13 @@ export const mcpAuthPlugin = (options: McpAuthPluginOptions) => {
       })
       // The dashboard's consent page calls these with the person's own session
       // as the bearer; they are not part of the OAuth protocol surface.
-      .get('/oauth/authorizations/:id', async ({ params, request }) => {
+      .get('/oauth/authorizations/:id', async ({ params, query, request }) => {
         const result = await handleAuthorizationRead(deps, {
           authorizationId: params.id,
           authorization: request.headers.get('authorization'),
+          // The dashboard sets it from how the browser arrived; see the input's
+          // doc. Anything but the one value reads as "show the screen".
+          screenless: query.screenless === '1',
         });
         return json(result.body, result.status);
       })

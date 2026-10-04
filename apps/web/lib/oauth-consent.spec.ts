@@ -6,6 +6,7 @@ import {
   decideAuthorization,
   readAuthorization,
   returnHost,
+  screenlessArrival,
 } from './oauth-consent';
 
 const ID = 'oaa_a1b2c3d4e5f6g7h8.01jd8x2p4q';
@@ -43,10 +44,33 @@ describe('the authorization id from the consent URL', () => {
   });
 });
 
+describe('screenlessArrival', () => {
+  it('skips the screen only when the browser arrived on its own or from this origin', () => {
+    expect(screenlessArrival('none')).toBe(true);
+    expect(screenlessArrival('same-origin')).toBe(true);
+    expect(screenlessArrival('same-site')).toBe(false);
+    expect(screenlessArrival('cross-site')).toBe(false);
+    expect(screenlessArrival(null)).toBe(false);
+  });
+});
+
 describe('readAuthorization', () => {
+  it('tells the server when the screen may be skipped', async () => {
+    const skip = respond(200, details);
+    await readAuthorization('tok', ID, { screenless: true }, skip);
+    expect(String(skip.mock.calls[0]![0])).toMatch(/\?screenless=1$/);
+    const show = respond(200, details);
+    await readAuthorization('tok', ID, { screenless: false }, show);
+    expect(String(show.mock.calls[0]![0])).not.toContain('screenless');
+  });
   it('sends the dashboard session as the bearer and reads the details', async () => {
     const fetchImpl = respond(200, details);
-    const result = await readAuthorization('tok', ID, fetchImpl);
+    const result = await readAuthorization(
+      'tok',
+      ID,
+      { screenless: false },
+      fetchImpl
+    );
     expect(result).toEqual({ kind: 'details', details });
     const [url, init] = fetchImpl.mock.calls[0]!;
     expect(String(url)).toMatch(new RegExp(`/oauth/authorizations/${ID}$`));
@@ -59,6 +83,7 @@ describe('readAuthorization', () => {
     const result = await readAuthorization(
       'tok',
       ID,
+      { screenless: false },
       respond(200, { redirect_url: url })
     );
     expect(result).toEqual({ kind: 'redirect', url });
@@ -71,14 +96,24 @@ describe('readAuthorization', () => {
       'data:text/html,<script>alert(1)</script>',
     ]) {
       expect(
-        await readAuthorization('tok', ID, respond(200, { redirect_url: url }))
+        await readAuthorization(
+          'tok',
+          ID,
+          { screenless: false },
+          respond(200, { redirect_url: url })
+        )
       ).toEqual({ kind: 'failed' });
     }
   });
 
   it('maps a missing request, and anything unexpected, to typed outcomes', async () => {
     expect(
-      await readAuthorization('tok', ID, respond(404, { error: 'not_found' }))
+      await readAuthorization(
+        'tok',
+        ID,
+        { screenless: false },
+        respond(404, { error: 'not_found' })
+      )
     ).toEqual({ kind: 'gone' });
     // A server without the consent API answers its own 404 shape: that is a
     // dashboard pointed at the wrong server, not an expired request.
@@ -86,14 +121,25 @@ describe('readAuthorization', () => {
       await readAuthorization(
         'tok',
         ID,
+        { screenless: false },
         respond(404, { error: { code: 'not_found', message: 'No route' } })
       )
     ).toEqual({ kind: 'failed' });
     expect(
-      await readAuthorization('tok', ID, respond(200, { surprise: true }))
+      await readAuthorization(
+        'tok',
+        ID,
+        { screenless: false },
+        respond(200, { surprise: true })
+      )
     ).toEqual({ kind: 'failed' });
     expect(
-      await readAuthorization('tok', ID, respond(503, { error: 'x' }))
+      await readAuthorization(
+        'tok',
+        ID,
+        { screenless: false },
+        respond(503, { error: 'x' })
+      )
     ).toEqual({ kind: 'failed' });
   });
 });
