@@ -107,14 +107,23 @@ const startAuthorization = async (
 
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
+/**
+ * The read the dashboard makes for the consent screen. `screenless` is what
+ * the dashboard adds when the browser arrived on its own, as a client opening
+ * the authorize URL makes it; only then may an approved client skip the screen.
+ */
 const readAuthorization = (
   request: APIRequestContext,
   token: string,
-  authorizationId: string
+  authorizationId: string,
+  options: { screenless?: boolean } = {}
 ) =>
-  request.get(`${base}/oauth/authorizations/${authorizationId}`, {
-    headers: bearer(token),
-  });
+  request.get(
+    `${base}/oauth/authorizations/${authorizationId}${
+      options.screenless ? '?screenless=1' : ''
+    }`,
+    { headers: bearer(token) }
+  );
 
 const decide = (
   request: APIRequestContext,
@@ -303,7 +312,18 @@ test.describe('OAuth: DCR → dashboard consent → token', () => {
       clientId,
       challenge
     );
-    const read = await readAuthorization(request, tokenA, authorizationId);
+    // Sent here by some other page, the person still sees the screen.
+    const shown = await readAuthorization(request, tokenA, authorizationId);
+    expect(shown.status()).toBe(200);
+    expect(await shown.json()).toHaveProperty(
+      'authorization_id',
+      authorizationId
+    );
+    // Arriving on their own, as a client opening the URL makes them, they go
+    // straight back.
+    const read = await readAuthorization(request, tokenA, authorizationId, {
+      screenless: true,
+    });
     expect(read.status()).toBe(200);
     const location = await redirectOf(read);
     expect(location.searchParams.get('state')).toBe(state);
@@ -411,7 +431,8 @@ test.describe('OAuth: DCR → dashboard consent → token', () => {
     const read = await readAuthorization(
       request,
       browserToken,
-      authorizationId
+      authorizationId,
+      { screenless: true }
     );
     const location = await redirectOf(read);
     const token = await redeem(request, {
