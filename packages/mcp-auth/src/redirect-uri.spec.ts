@@ -3,7 +3,44 @@ import { describe, expect, it } from 'vitest';
 import {
   isAllowedRedirectUri,
   isRegisteredRedirectUri,
+  mixesRemoteAndLocal,
 } from './redirect-uri.js';
+
+describe('mixesRemoteAndLocal', () => {
+  it('a client returns to remote hosts, or to the local machine, not both', () => {
+    expect(
+      mixesRemoteAndLocal([
+        'https://claude.ai/api/mcp/auth_callback',
+        'https://example.com/cb',
+      ])
+    ).toBe(false);
+    expect(
+      mixesRemoteAndLocal([
+        'http://127.0.0.1/callback',
+        'http://localhost:41241/callback',
+      ])
+    ).toBe(false);
+    // Two shapes of the same machine: a port and an app deep-link.
+    expect(
+      mixesRemoteAndLocal([
+        'http://127.0.0.1/callback',
+        'cursor://anysphere.cursor-mcp/oauth/callback',
+      ])
+    ).toBe(false);
+    expect(
+      mixesRemoteAndLocal([
+        'http://127.0.0.1/callback',
+        'https://example.com/cb',
+      ])
+    ).toBe(true);
+    expect(
+      mixesRemoteAndLocal([
+        'vscode://ms.something/cb',
+        'https://example.com/cb',
+      ])
+    ).toBe(true);
+  });
+});
 
 describe('isAllowedRedirectUri', () => {
   it('allows https anywhere', () => {

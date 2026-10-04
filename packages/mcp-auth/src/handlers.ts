@@ -25,6 +25,7 @@ import { verifyPkceS256 } from './pkce.js';
 import {
   isAllowedRedirectUri,
   isRegisteredRedirectUri,
+  mixesRemoteAndLocal,
 } from './redirect-uri.js';
 
 const DEFAULT_CODE_TTL_MS = 5 * 60 * 1000;
@@ -111,6 +112,13 @@ export const handleRegister = async (
       400,
       'invalid_redirect_uri',
       `redirect_uri "${invalidUri}" must be https, loopback http, or a private-use URI scheme`
+    );
+  }
+  if (mixesRemoteAndLocal(parsed.data.redirect_uris)) {
+    return oauthError(
+      400,
+      'invalid_redirect_uri',
+      'redirect_uris must be all https, or all loopback http and private-use schemes: a client returns either to a remote host or to the local machine'
     );
   }
   const client = await deps.store.insertClient({

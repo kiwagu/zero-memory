@@ -109,6 +109,30 @@ const start = async (
 const redirectOf = (body: unknown): URL =>
   new URL((body as ConsentResult).redirect_url);
 
+describe('registration', () => {
+  it('a client returns either to remote hosts or to the local machine, not both', async () => {
+    const { deps } = await setup();
+    const mixed = await handleRegister(deps, {
+      client_name: 'zm-unit-mixed',
+      redirect_uris: [REDIRECT_URI, 'https://example.com/cb'],
+    });
+    expect(mixed.status).toBe(400);
+    expect(mixed.body).toHaveProperty('error', 'invalid_redirect_uri');
+
+    const remote = await handleRegister(deps, {
+      client_name: 'zm-unit-remote',
+      redirect_uris: ['https://example.com/cb', 'https://example.org/cb'],
+    });
+    expect(remote.status).toBe(201);
+
+    const local = await handleRegister(deps, {
+      client_name: 'zm-unit-local',
+      redirect_uris: [REDIRECT_URI, 'cursor://anysphere.cursor-mcp/callback'],
+    });
+    expect(local.status).toBe(201);
+  });
+});
+
 describe('authorization start', () => {
   it('parks the request and sends the person to the dashboard', async () => {
     const { deps, clientId } = await setup();
