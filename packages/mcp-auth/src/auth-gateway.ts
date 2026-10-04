@@ -33,4 +33,11 @@ export interface IAuthGateway {
 
   /** Rotates a refresh token; null when it is invalid/revoked. */
   refreshSession(refreshToken: string): Promise<AuthSession | null>;
+
+  /**
+   * Ends a session this gateway minted that nobody will ever hold, because
+   * the steps after minting failed. Best effort: a failure is logged, never
+   * thrown.
+   */
+  revokeSession(session: AuthSession): Promise<void>;
 }

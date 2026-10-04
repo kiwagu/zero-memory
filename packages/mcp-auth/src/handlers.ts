@@ -359,13 +359,22 @@ const approve = async (
       'The agent session could not be created. Connect the client again.'
     );
   }
-  const code = await issueCode(deps, decided, session, now);
-  await deps.store.upsertConsent(
-    userId,
-    decided.clientId,
-    decided.scope,
-    decided.redirectUri
-  );
+  // What follows the mint is what makes the session reachable: the code the
+  // client redeems, and the consent for next time. If either fails, the
+  // session would stay alive with no one to hold it, so it is ended first.
+  let code: string;
+  try {
+    code = await issueCode(deps, decided, session, now);
+    await deps.store.upsertConsent(
+      userId,
+      decided.clientId,
+      decided.scope,
+      decided.redirectUri
+    );
+  } catch (thrown) {
+    await deps.auth.revokeSession(session);
+    throw thrown;
+  }
   return backToClient(decided, { code });
 };
 

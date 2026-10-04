@@ -95,6 +95,21 @@ export class SupabaseAuthGateway implements IAuthGateway {
    * and revoking it is attempted on the spot (best effort: a failed revocation
    * is logged, and the session's tokens never leave this method either way).
    */
+  async revokeSession(session: AuthSession): Promise<void> {
+    const revoked = await this.#service()
+      .auth.admin.signOut(session.accessToken, 'local')
+      .catch((thrown: unknown) => ({
+        error: {
+          message: thrown instanceof Error ? thrown.message : 'thrown',
+        },
+      }));
+    if (revoked.error) {
+      this.#logger.warn('session revoke: ending the minted session failed', {
+        error: revoked.error.message,
+      });
+    }
+  }
+
   async mintSession(userId: string): Promise<AuthSession | null> {
     const admin = this.#service().auth.admin;
     const { data: found, error: findError } = await admin.getUserById(userId);

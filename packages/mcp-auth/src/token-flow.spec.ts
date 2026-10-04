@@ -48,6 +48,7 @@ const makeAuthGateway = (session: AuthSession | null = makeSession()) =>
       ),
     mintSession: vi.fn().mockResolvedValue(session),
     refreshSession: vi.fn().mockResolvedValue(session),
+    revokeSession: vi.fn().mockResolvedValue(undefined),
   }) satisfies IAuthGateway;
 
 const makeDeps = (auth: IAuthGateway = makeAuthGateway()): OAuthDeps => ({

@@ -56,6 +56,7 @@ const makeAuthGateway = () =>
       sessionOf(userId)
     ),
     refreshSession: vi.fn().mockResolvedValue(null),
+    revokeSession: vi.fn().mockResolvedValue(undefined),
   }) satisfies IAuthGateway;
 
 const setup = async () => {
@@ -327,6 +328,26 @@ describe('deciding', () => {
     });
     expect(read.status).toBe(200);
     expect(read.body).toHaveProperty('authorization_id', second);
+  });
+
+  it('ends the session it minted when the steps after minting fail', async () => {
+    const { deps, auth, clientId } = await setup();
+    const id = await start(deps, clientId);
+    vi.spyOn(deps.store, 'insertCode').mockRejectedValueOnce(
+      new Error('store down')
+    );
+    await expect(
+      handleConsentDecision(deps, {
+        authorizationId: id,
+        authorization: BEARER.alice,
+        body: { decision: 'approve' },
+      })
+    ).rejects.toThrow('store down');
+    // A session nobody will ever use is not left alive.
+    expect(auth.revokeSession).toHaveBeenCalledTimes(1);
+    expect(auth.revokeSession).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: ALICE })
+    );
   });
 
   it('a return address the person has not approved asks again, even for an approved client', async () => {
