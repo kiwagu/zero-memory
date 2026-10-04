@@ -914,6 +914,14 @@ const sessionStateLine = (state: SessionAttachment): string => {
 const footerOf = (...segments: Array<string | null | undefined>): string =>
   segments.filter(Boolean).join('\n\n');
 
+// Owners with a background hygiene scan currently running (see scan_hygiene):
+// a full scan far outlives a request round-trip, so it is fire-and-forget and
+// must not stack on repeated triggers. Held per PROCESS, not per MCP session:
+// one owner opening several sessions still gets one scan at a time.
+const scansInFlight = new Set<string>();
+// Same guard for the ROI benchmark (see benchmark_memory).
+const benchmarksInFlight = new Set<string>();
+
 export const buildMcpServer = (deps: McpServerDeps): McpServer => {
   const logger = createLogger('mcp-server');
   const composed = composeInstructions(
@@ -957,13 +965,6 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
 
   const readLinks = (links: ResourceLink[]): ResourceLink[] =>
     resourceLinksForClient(links, clientName());
-
-  // Owners with a background hygiene scan currently running (see scan_hygiene):
-  // a full scan far outlives a request round-trip, so it is fire-and-forget and
-  // must not stack on repeated triggers.
-  const scansInFlight = new Set<string>();
-  // Same guard for the ROI benchmark (see benchmark_memory).
-  const benchmarksInFlight = new Set<string>();
 
   server.registerTool(
     'remember',
