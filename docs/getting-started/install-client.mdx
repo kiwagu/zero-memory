@@ -37,8 +37,10 @@ opens the instance's dashboard: sign in there the way you always do (password,
 or GitHub or Google when the instance offers them), and allow the client on the
 consent screen, which names the client, what it may do and where the browser
 returns. On success the client stores a token and refreshes it on its own; the
-next time the same client reconnects, a signed-in browser sends it straight
-back without the screen. No API key is issued and no password is shared with
+next time the same client reconnects to the same return address, a signed-in
+browser that the client opened sends it straight back without the screen. The
+screen comes back when a page elsewhere sends the browser there, or when the
+client asks to return somewhere else. No API key is issued and no password is shared with
 the client: the server is an OAuth 2.1 authorization server, and the client
 registers itself dynamically with PKCE. The agent gets a session of its own,
 so signing out of the dashboard does not disconnect it.
