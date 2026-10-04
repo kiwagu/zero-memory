@@ -29,7 +29,12 @@ import {
   recordToolResult,
 } from './metering.js';
 import { incrementCounter } from './metrics.js';
-import { evictSessionsOverCap, maxSessionsFromEnv } from './session-cap.js';
+import {
+  evictSessionsOverCap,
+  evictUserSessionsOverCap,
+  maxSessionsFromEnv,
+  maxSessionsPerUserFromEnv,
+} from './session-cap.js';
 
 /** Idle sessions are evicted after this long without a request. */
 const SESSION_IDLE_TTL_MS = 30 * 60 * 1000;
@@ -87,6 +92,7 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
   const logger = createLogger('mcp-http');
   const sessions = new Map<string, McpSession>();
   const maxSessions = maxSessionsFromEnv();
+  const maxSessionsPerUser = maxSessionsPerUserFromEnv();
 
   const usageRecorder = container.resolve<IUsageRecorder>(USAGE_RECORDER);
   const auditRecorder = container.resolve<IAuditRecorder>(AUDIT_RECORDER);
@@ -135,6 +141,19 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
         onsessioninitialized: (sessionId) => {
           sessions.set(sessionId, session);
           logger.info('mcp session initialized', { sessionId });
+          // The caller's own cap comes first: a client that opens sessions in
+          // a loop displaces its own oldest, never another user's.
+          for (const [evictedId, evicted] of evictUserSessionsOverCap(
+            sessions,
+            ownerUserEntityId,
+            maxSessionsPerUser
+          )) {
+            void evicted.transport.close().catch(() => undefined);
+            logger.warn('evicted own mcp session over per-user cap', {
+              sessionId: evictedId,
+              maxSessionsPerUser,
+            });
+          }
           // Bounded session map (memory-DoS guard): past the cap, the
           // least-recently-used sessions are evicted and their transports
           // closed. Evicted clients reconnect via a fresh initialize.

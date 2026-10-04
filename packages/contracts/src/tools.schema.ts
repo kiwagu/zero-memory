@@ -283,7 +283,7 @@ export const recallInputSchema = z.object({
         'decision.'
     ),
   kinds: z.array(memoryKindSchema).optional(),
-  k: z.number().int().positive().optional(),
+  k: z.number().int().positive().max(100).optional(),
   include_graph: z.boolean().optional(),
   project_hint: z
     .string()
@@ -789,7 +789,7 @@ export type IngestSourceKind = z.infer<typeof ingestSourceKindSchema>;
 export const ingestConversationInputSchema = z.object({
   /** Required for a real ingest; may be empty only when `probe` is set (a
    * ledger lookup needs the hash, not the content). Enforced server-side. */
-  transcript_chunk: z.string(),
+  transcript_chunk: z.string().max(200_000),
   chunk_hash: z.string().min(1),
   client: z.string().min(1),
   conversation_id: z.string().min(1),
@@ -807,7 +807,7 @@ export const ingestConversationInputSchema = z.object({
    * agent actually used in the chunk; content-free (ids only). Loosely typed so
    * a malformed id never fails ingest of the (critical) transcript chunk — the
    * judge validates each id individually. */
-  recalled_ids: z.array(z.string().min(1)).optional(),
+  recalled_ids: z.array(z.string().min(1)).max(200).optional(),
   /**
    * Ledger LOOKUP only: answers whether this chunk_hash was already ingested
    * and returns immediately — no claim, no extraction, no tokens, no writes.

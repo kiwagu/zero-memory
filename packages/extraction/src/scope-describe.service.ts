@@ -1,6 +1,7 @@
 import { injectContext, type IContext } from '@workspace/context';
 import {
   conflictFailure,
+  forbidden,
   internalFailure,
   validationFailed,
   type DescribeScopeInput,
@@ -86,6 +87,18 @@ export class ScopeDescribeService {
     const scope = parsed.isLegacyProject
       ? Scope.project(ownerId, parsed.slug)
       : parsed;
+
+    // Admin-only, decided before anything is spent: the write at the end is
+    // admin-gated by RLS, and a refusal must not cost a model call first.
+    const admin = await this.scopeMeta.isScopeAdmin(scope, ownerId);
+    if (admin.isErr()) {
+      return Err(internalFailure(admin.unwrapErr()));
+    }
+    if (!admin.unwrap()) {
+      return Err(
+        forbidden(`Only an admin of scope "${scope.path}" can describe it.`)
+      );
+    }
 
     const samples = await this.searchService.listRecentByScope(
       scope,

@@ -1,4 +1,4 @@
-import { mcpAuthPlugin } from '@workspace/mcp-auth';
+import { mcpAuthPlugin, type McpAuthPluginOptions } from '@workspace/mcp-auth';
 import { Elysia } from 'elysia';
 
 import { buildVersion, checkoutRevision } from './build-version.js';
@@ -18,6 +18,11 @@ export interface AppOptions {
   webUrl: string;
   /** Downstream probes for /readyz; defaults read env + the DI container. */
   readiness?: ReadinessProbes;
+  /**
+   * Where the OAuth rate limiter learns the client's socket address when this
+   * app is reached through a forwarding app that does the listening.
+   */
+  requestIp?: McpAuthPluginOptions['requestIp'];
 }
 
 export const createApp = (options: AppOptions) =>
@@ -55,7 +60,13 @@ export const createApp = (options: AppOptions) =>
     .use(
       createReadinessRoutes(options.readiness ?? createDefaultReadinessProbes())
     )
-    .use(mcpAuthPlugin({ issuer: options.publicUrl, webUrl: options.webUrl }))
+    .use(
+      mcpAuthPlugin({
+        issuer: options.publicUrl,
+        webUrl: options.webUrl,
+        requestIp: options.requestIp,
+      })
+    )
     .use(createMcpHttpRoutes({ issuer: options.publicUrl }));
 
 export type App = ReturnType<typeof createApp>;

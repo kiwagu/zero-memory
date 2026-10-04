@@ -679,9 +679,11 @@ What is enforced, and where:
 /oauth/authorize` (each request parks a pending row), `POST /oauth/register`
   — the only unauthenticated endpoints — share an in-memory fixed-window limiter keyed
   by client IP + route (`ZM_RATELIMIT_MAX` per `ZM_RATELIMIT_WINDOW_S`,
-  default 30/60 s; over-limit → 429 + `Retry-After`). Client IP is the first
-  `X-Forwarded-For` hop — only trustworthy behind our caddy/nginx edge, with
-  the socket address as fallback.
+  default 30/60 s; over-limit → 429 + `Retry-After`). The key is the socket
+  address, which the listening app hands the limiter; with `ZM_TRUST_PROXY`
+  on it is the first `X-Forwarded-For` hop instead, which is only right behind
+  an edge that sets that header itself rather than appending to what the
+  client sent (Caddy does; the nginx example sets `$remote_addr`).
 - **OAuth tables are deny-all.** `oauth_clients`, `oauth_codes`,
   `oauth_authorizations` and `oauth_consents` grant nothing to API roles and
   carry an explicit deny-all policy; only the service-role adapter behind the
@@ -713,9 +715,12 @@ What is enforced, and where:
   the dashboard through Supabase Auth.
 - **Memories are ADD-only** on the agent path: `remember`/`ingest` append;
   supersede/forget are explicit, provenance-tracked operations.
-- **Bounded server state.** MCP sessions are capped (`ZM_MAX_SESSIONS`,
-  default 200; LRU eviction closes the transport) on top of the 30-minute
-  idle TTL.
+- **Bounded server state.** MCP sessions are capped per account first
+  (`ZM_MAX_SESSIONS_PER_USER`, default 20: a caller opening sessions in a loop
+  displaces only their own oldest) and then overall (`ZM_MAX_SESSIONS`,
+  default 200; LRU eviction closes the transport), on top of the 30-minute
+  idle TTL. Request bodies are capped at 4 MiB; a client registration takes
+  at most 8 return addresses of 2048 characters.
 - **Headers.** OAuth HTML pages and all web responses send
   `X-Content-Type-Options: nosniff`, a `Referrer-Policy`, CSP
   `frame-ancestors 'none'` and `Strict-Transport-Security` (two years,

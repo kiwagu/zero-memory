@@ -41,6 +41,14 @@ export interface McpAuthPluginOptions {
   codeTtlMs?: number;
   /** Rate-limiter override (defaults read ZM_RATELIMIT_MAX / _WINDOW_S). */
   rateLimit?: RateLimiterOptions;
+  /**
+   * Where the client's socket address comes from. Elysia hands a route the
+   * server of its own app, which is null when this plugin's app does not
+   * listen itself but is reached through a forwarding app; that app's server
+   * is the one that knows the socket. Without it every caller would share one
+   * rate-limit bucket.
+   */
+  requestIp?: () => RequestIpSource | null | undefined;
 }
 
 const json = (body: unknown, status = 200): Response =>
@@ -113,7 +121,7 @@ export const mcpAuthPlugin = (options: McpAuthPluginOptions) => {
     server: RequestIpSource | null
   ): Response | null => {
     const decision = limiter.hit(
-      `${resolveClientIp(request, server)}:${route}`
+      `${resolveClientIp(request, options.requestIp?.() ?? server)}:${route}`
     );
     return decision.allowed
       ? null

@@ -1,3 +1,3 @@
-# zero-memory-watcher — version 0.34.8 (binary = plugin manifest) — built from git 4129e89-dirty (feature/account-deletion-web-only)  commit=4129e891a585ffdd813012e36f2c2c73f9f95904-dirty
+# zero-memory-watcher — version 0.34.9 (binary = plugin manifest) — built from git 9f25bf1-dirty (fix/abuse-limits)  commit=9f25bf1213dc6febbc0ac084dcd7fba3d6e21819-dirty
 # build-env: bun=1.3.14  target=linux-x64  arch=x86_64  os=Ubuntu 26.04.1 LTS
-7d5db44ff92e64f50e464112518a223ed6d95c20a684c8e6cd28904e5858feb4  zero-memory-watcher
+002f2eed06ce881ae029f4ba1da08227aed0968a0183b2c270a2a52beefb6a86  zero-memory-watcher

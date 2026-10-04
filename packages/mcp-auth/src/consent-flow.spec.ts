@@ -132,6 +132,21 @@ describe('registration', () => {
     });
     expect(local.status).toBe(201);
   });
+
+  it('takes a bounded registration: at most eight return addresses, none longer than a URL has any reason to be', async () => {
+    const { deps } = await setup();
+    const many = await handleRegister(deps, {
+      redirect_uris: Array.from(
+        { length: 9 },
+        (_, i) => `http://127.0.0.1/cb${i}`
+      ),
+    });
+    expect(many.status).toBe(400);
+    const long = await handleRegister(deps, {
+      redirect_uris: [`http://127.0.0.1/${'x'.repeat(2100)}`],
+    });
+    expect(long.status).toBe(400);
+  });
 });
 
 describe('authorization start', () => {

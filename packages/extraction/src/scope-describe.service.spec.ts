@@ -40,6 +40,7 @@ const makeSearch = (
 };
 
 const makeMeta = (): IScopeMetaRepository => ({
+  isScopeAdmin: vi.fn().mockResolvedValue(Ok(true)),
   upsertModelDescription: vi.fn().mockResolvedValue(Ok(undefined)),
 });
 
@@ -58,6 +59,21 @@ const collectingRecorder = () => {
 const settled = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 describe('ScopeDescribeService', () => {
+  it('refuses a non-admin before sampling the scope or asking the model', async () => {
+    const search = makeSearch([]);
+    const meta = makeMeta();
+    vi.mocked(meta.isScopeAdmin).mockResolvedValue(Ok(false));
+    const { recorder } = collectingRecorder();
+    const service = new ScopeDescribeService(context, search, meta, recorder);
+
+    const result = await service.describe({ scope: CANONICAL });
+
+    expect(result.isErr()).toBe(true);
+    expect(result.unwrapErr().code).toBe('forbidden');
+    expect(search.listRecentByScope).not.toHaveBeenCalled();
+    expect(meta.upsertModelDescription).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     setLlmGateway(gateway('A project scope about the memory engine.'));
   });

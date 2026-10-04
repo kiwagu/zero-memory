@@ -37,6 +37,33 @@ export class SupabaseScopeMetaRepository implements IScopeMetaRepository {
     return Ok(undefined);
   }
 
+  async isScopeAdmin(
+    scope: Scope,
+    userEntityId: string
+  ): Promise<Result<boolean, string>> {
+    // A member always sees their own rows under RLS. An admin of an ancestor
+    // scope administers the whole subtree, so the match is by path prefix.
+    const { data, error } = await this.#client()
+      .from('scope_members')
+      .select('scope')
+      .eq('user_id', userEntityId)
+      .eq('role', 'admin')
+      .not('accepted_at', 'is', null);
+    if (error) {
+      return Err(`scope membership read failed: ${error.message}`);
+    }
+    const target = scope.path.split('.');
+    return Ok(
+      (data ?? []).some((row) => {
+        const own = String(row.scope).split('.');
+        return (
+          own.length <= target.length &&
+          own.every((label, index) => label === target[index])
+        );
+      })
+    );
+  }
+
   #client(): Client {
     const accessToken = this.context.getAccessToken();
     if (!accessToken) {

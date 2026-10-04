@@ -39,14 +39,19 @@ register();
 // A thin outer app owns listening and wraps every request in the correlation
 // context before delegating to the real routes (`inner.handle`). This keeps the
 // ALS boundary in one place and out of Elysia's per-route lifecycle.
-const inner = createApp({ publicUrl, webUrl });
+// Only the outer app knows the client's socket; the OAuth rate limiter asks
+// for it through this callback (its own app never listens).
+const inner = createApp({ publicUrl, webUrl, requestIp: () => app.server });
 const handle = withRequestObservability(
   (request) => inner.handle(request),
   logger
 );
+// A body larger than this serves no tool or OAuth request; the runtime's own
+// default (128 MB) would let one anonymous client fill memory.
+const MAX_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
 const app = new Elysia()
   .all('*', ({ request }) => handle(request))
-  .listen(port);
+  .listen({ port, maxRequestBodySize: MAX_REQUEST_BODY_BYTES });
 
 for (const warning of publicUrlWarnings) {
   logger.warn('public url', { warning });

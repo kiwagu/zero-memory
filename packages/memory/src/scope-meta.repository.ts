@@ -8,6 +8,16 @@ import type { Scope } from './scope.vo.js';
  * dashboard writes. RLS gates the upsert to scope admins.
  */
 export interface IScopeMetaRepository {
+  /**
+   * Whether the user administers the scope: an accepted admin membership of
+   * it or of an ancestor. Asked before anything is spent on an admin-only
+   * operation; the write itself stays gated by RLS.
+   */
+  isScopeAdmin(
+    scope: Scope,
+    userEntityId: string
+  ): Promise<Result<boolean, string>>;
+
   upsertModelDescription(
     scope: Scope,
     description: string
