@@ -91,9 +91,9 @@ describe('OAuthConsentCard', () => {
 
   it('drops invisible format characters from the name', () => {
     // A direction override could make a name read as another; it is not text.
-    const html = render({ clientName: 'Claude‮ Code​' });
-    expect(html).not.toContain('‮');
-    expect(html).not.toContain('​');
+    const html = render({ clientName: 'Claude\u202E Code\u200B' });
+    expect(html).not.toContain('\u202E');
+    expect(html).not.toContain('\u200B');
     expect(html).toContain('Claude Code');
   });
 
