@@ -151,6 +151,11 @@ export class HygieneResolver {
       .eq('id', queueId)
       .maybeSingle();
     if (!row) {
+      await this.#audit(
+        'AgentResolveRefused',
+        { conflict: queueId, code: 'not_found' },
+        ownerId
+      );
       return { ok: false, code: 'not_found', error: 'Conflict not found.' };
     }
     // Ownership is checked BEFORE the state of the row is reported. Splitting
@@ -158,6 +163,11 @@ export class HygieneResolver {
     // NON-owner which of the two it is would answer a question they may not
     // ask: whether someone else's conflict is still open.
     if (!(await this.#ownsAll(row.memory_a, row.memory_b, ownerId))) {
+      await this.#audit(
+        'AgentResolveRefused',
+        { conflict: queueId, code: 'forbidden' },
+        ownerId
+      );
       return {
         ok: false,
         code: 'forbidden',
@@ -178,7 +188,11 @@ export class HygieneResolver {
     if (row.memory_b === null) {
       if (decision.kind === 'retire') {
         await this.#invalidate(row.memory_a, ownerId);
-        await this.#audit('AgentRetireMemory', { memory: row.memory_a });
+        await this.#audit(
+          'AgentRetireMemory',
+          { memory: row.memory_a },
+          ownerId
+        );
         await this.#finish(queueId, 'resolved', 'retired', null, ownerId);
         return { ok: true };
       }
@@ -216,10 +230,11 @@ export class HygieneResolver {
         decision.winnerId === row.memory_a ? row.memory_b : row.memory_a;
       await this.#supersede(loser, decision.winnerId, ownerId);
       await this.#link(decision.winnerId, loser);
-      await this.#audit('AgentResolveSupersede', {
-        winner: decision.winnerId,
-        loser,
-      });
+      await this.#audit(
+        'AgentResolveSupersede',
+        { winner: decision.winnerId, loser },
+        ownerId
+      );
       await this.#finish(
         queueId,
         'resolved',
@@ -324,7 +339,11 @@ export class HygieneResolver {
         const loser = winner === row.memory_a ? memoryB : row.memory_a;
         await this.#supersede(loser, winner, ownerId);
         await this.#link(winner, loser);
-        await this.#audit('AgentResolveBulk', { policy, winner, loser });
+        await this.#audit(
+          'AgentResolveBulk',
+          { policy, winner, loser },
+          ownerId
+        );
         await this.#finish(row.id, 'resolved', 'supersedes', winner, ownerId);
       }
       resolved += 1;
@@ -360,6 +379,11 @@ export class HygieneResolver {
       throw new Error(`restore lookup failed: ${lookupError.message}`);
     }
     if (!memory || memory.owner_id !== ownerId) {
+      await this.#audit(
+        'AgentRestoreRefused',
+        { memory: memoryId, code: 'not_found' },
+        ownerId
+      );
       return {
         ok: false,
         code: 'not_found',
@@ -405,10 +429,11 @@ export class HygieneResolver {
       );
     }
 
-    await this.#audit('AgentRestoreMemory', {
-      memory: memoryId,
-      superseded_by: memory.superseded_by ?? '',
-    });
+    await this.#audit(
+      'AgentRestoreMemory',
+      { memory: memoryId, superseded_by: memory.superseded_by ?? '' },
+      ownerId
+    );
     this.#logger.info('memory restored', { memoryId, ownerId });
     return { ok: true };
   }
@@ -469,6 +494,11 @@ export class HygieneResolver {
       throw new Error(`challenge lookup failed: ${lookupError.message}`);
     }
     if (!memory || memory.owner_id !== ownerId) {
+      await this.#audit(
+        'AgentChallengeRefused',
+        { memory: memoryId, code: 'not_found' },
+        ownerId
+      );
       return {
         ok: false,
         code: 'not_found',
@@ -535,7 +565,7 @@ export class HygieneResolver {
       throw new Error(`challenge insert failed: ${insertError.message}`);
     }
 
-    await this.#audit('AgentChallengeMemory', { memory: memoryId });
+    await this.#audit('AgentChallengeMemory', { memory: memoryId }, ownerId);
     this.#logger.info('memory challenged', { memoryId, ownerId });
     return { ok: true, disputeId: inserted.id, alreadyPending: false };
   }
@@ -706,14 +736,21 @@ export class HygieneResolver {
       );
   }
 
+  /**
+   * One audit row for an agent's hygiene action, in the caller's name. A
+   * refused attempt is recorded too (`*Refused` with its code): probing other
+   * people's conflicts or memories must leave a trace.
+   */
   async #audit(
     command: string,
-    payload: Record<string, string | number>
+    payload: Record<string, string | number>,
+    actorId: string
   ): Promise<void> {
     const { error } = await this.client.from('audit_log').insert({
       command,
       payload,
       outcome: 'ok',
+      actor_id: actorId,
       author_kind: 'agent',
       agent_name: 'chat-agent',
     });
