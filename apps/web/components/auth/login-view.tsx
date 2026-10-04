@@ -14,12 +14,14 @@ import {
   type MailSentNoticeLabels,
 } from '@workspace/ui/components/auth/mail-sent-notice';
 
+import { authFailureOf, type AuthFailure } from '@/lib/auth-failure';
 import type { SocialProvider } from '@/lib/auth-providers';
 import { createClient } from '@/lib/supabase/client';
 import type { LegalLinks } from '@/lib/legal';
 
 export function LoginView({
   initialError,
+  failureLabels,
   next,
   providers,
   providerLabels,
@@ -30,6 +32,8 @@ export function LoginView({
 }: {
   /** Reason a redirect landed here, e.g. a callback that could not complete. */
   initialError?: string;
+  /** The reasons a sign-in may not complete, translated, by code. */
+  failureLabels: Record<AuthFailure, string>;
   /** Where to go after sign-in; already cleaned by the page. */
   next: string;
   /** The social providers this instance enables, in display order. */
@@ -71,17 +75,24 @@ export function LoginView({
 
   // Auth puts a refusal in the URL FRAGMENT when there is no code to exchange
   // — a spent or expired link, an implicit-flow error. The server never sees
-  // a fragment, so only the browser can turn it into the message it is.
+  // a fragment, so only the browser can turn it into a message: the one for
+  // its code, never the description, which anyone can write into a link.
   useEffect(() => {
     const hash = window.location.hash.replace(/^#/, '');
     if (!hash) {
       return;
     }
     const params = new URLSearchParams(hash);
-    const reason = params.get('error_description') ?? params.get('error');
-    if (!reason) {
+    if (!params.has('error') && !params.has('error_code')) {
       return;
     }
+    const reason =
+      failureLabels[
+        authFailureOf({
+          error: params.get('error'),
+          errorCode: params.get('error_code'),
+        })
+      ];
     // Deferred, as the reset view does: a state write that is part of the
     // effect's own tick would re-render in the same pass it synchronises.
     const timer = setTimeout(() => {
@@ -89,7 +100,8 @@ export function LoginView({
       window.history.replaceState(null, '', window.location.pathname);
     }, 0);
     return () => clearTimeout(timer);
-  }, []);
+    // The hash is gone after the first run, so a later run finds nothing.
+  }, [failureLabels]);
 
   function switchMode(next: LoginMode) {
     setMode(next);

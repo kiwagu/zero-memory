@@ -1,5 +1,6 @@
 import { BuildVersion } from '@/components/build-version';
 import { LoginView } from '@/components/auth/login-view';
+import { isAuthFailure, type AuthFailure } from '@/lib/auth-failure';
 import { readEnabledProviders } from '@/lib/auth-providers';
 import { getRequestMessages } from '@/lib/i18n';
 import { legalLinks } from '@/lib/legal';
@@ -14,8 +15,20 @@ export default async function LoginPage({
   // A failed auth callback redirects here with its reason. Dropping it is how
   // a broken recovery link becomes "clicking the mail did nothing".
   const params = await searchParams;
+  // The reason arrives as a code and is said in the page's own words; the URL
+  // is anyone's to craft, so no text from it is ever shown.
+  const failureLabels: Record<AuthFailure, string> = {
+    provider_denied: t('auth.failure.provider_denied'),
+    link_expired: t('auth.failure.link_expired'),
+    missing_code: t('auth.failure.missing_code'),
+    exchange_failed: t('auth.failure.exchange_failed'),
+    unknown: t('auth.failure.unknown'),
+  };
   const failure = params.error;
-  const initialError = typeof failure === 'string' ? failure : undefined;
+  const initialError =
+    typeof failure === 'string'
+      ? failureLabels[isAuthFailure(failure) ? failure : 'unknown']
+      : undefined;
   // Where the guard sent the guest from; cleaned, because it is URL input.
   const next = safeNext(params.next);
   // Which social buttons to draw — this instance's Auth settings decide, at
@@ -38,6 +51,7 @@ export default async function LoginPage({
     <main className="flex min-h-screen items-center justify-center p-4">
       <LoginView
         initialError={initialError}
+        failureLabels={failureLabels}
         next={next}
         providers={providers}
         providerLabels={{
