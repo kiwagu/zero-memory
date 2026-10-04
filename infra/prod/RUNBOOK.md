@@ -717,8 +717,22 @@ What is enforced, and where:
   default 200; LRU eviction closes the transport) on top of the 30-minute
   idle TTL.
 - **Headers.** OAuth HTML pages and all web responses send
-  `X-Content-Type-Options: nosniff`, a `Referrer-Policy`, and CSP
-  `frame-ancestors 'none'`; OAuth responses are `Cache-Control: no-store`.
+  `X-Content-Type-Options: nosniff`, a `Referrer-Policy`, CSP
+  `frame-ancestors 'none'` and `Strict-Transport-Security` (two years,
+  subdomains included; the edge adds it for the API and docs hosts too); the
+  framework's `X-Powered-By` is off; OAuth responses are
+  `Cache-Control: no-store`.
+- **The session cookie is `Secure` behind https.** The dashboard marks it from
+  the scheme the browser used (`X-Forwarded-Proto` behind the edge), so a
+  local stand over plain http keeps a working cookie and production never
+  sends the session in clear.
+- **Dashboard routes that use the service role answer only the dashboard.**
+  Account deletion and the provider-key route require the browser's
+  `Sec-Fetch-Site: same-origin` mark and, for a body, `application/json`; a
+  same-site sibling origin or a plain form post is refused unread.
+- **The login page never shows text from a URL.** A failed callback or a
+  refusal in the URL fragment is reduced to a code, and the page says why in
+  its own words; a description planted in a link reaches nobody.
 
 Residual risks and deferred items (honest list):
 
