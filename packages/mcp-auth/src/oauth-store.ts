@@ -55,6 +55,12 @@ export type NewOAuthAuthorization = Omit<
 
 export interface OAuthConsentRecord {
   scope: string;
+  /**
+   * The return address the person saw when they approved. Null on a consent
+   * recorded before addresses were kept; such a consent covers no request, so
+   * the client is asked once more and the address is recorded then.
+   */
+  redirectUri: string | null;
 }
 
 export interface IOAuthStore {
@@ -115,10 +121,14 @@ export interface IOAuthStore {
     clientId: string
   ): Promise<OAuthConsentRecord | null>;
 
-  /** Records, or renews, the person's consent for this client and scope. */
+  /**
+   * Records, or renews, the person's consent for this client: the scope they
+   * approved and the return address they approved it for.
+   */
   upsertConsent(
     authUserId: string,
     clientId: string,
-    scope: string
+    scope: string,
+    redirectUri: string
   ): Promise<void>;
 }

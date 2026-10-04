@@ -101,13 +101,26 @@ describe('pending authorizations', () => {
 });
 
 describe('stored consents', () => {
-  it('records, finds and renews a consent per person and client', async () => {
+  it('records, finds and renews a consent per person and client, with the return address approved', async () => {
     const store = new InMemoryOAuthStore();
     expect(await store.findConsent(ALICE, 'oac_x')).toBeNull();
-    await store.upsertConsent(ALICE, 'oac_x', 'mcp:read');
-    await store.upsertConsent(ALICE, 'oac_x', MCP_SCOPES);
+    await store.upsertConsent(
+      ALICE,
+      'oac_x',
+      'mcp:read',
+      'http://127.0.0.1:41241/callback'
+    );
+    await store.upsertConsent(
+      ALICE,
+      'oac_x',
+      MCP_SCOPES,
+      'http://127.0.0.1:41241/other'
+    );
+    // One live consent per person and client: the latest approval, with the
+    // address it was given for.
     expect(await store.findConsent(ALICE, 'oac_x')).toEqual({
       scope: MCP_SCOPES,
+      redirectUri: 'http://127.0.0.1:41241/other',
     });
     expect(await store.findConsent(BOB, 'oac_x')).toBeNull();
     expect(await store.findConsent(ALICE, 'oac_y')).toBeNull();

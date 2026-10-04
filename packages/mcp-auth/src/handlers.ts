@@ -5,6 +5,7 @@ import type {
   IOAuthStore,
   OAuthAuthorizationRecord,
   OAuthClientRecord,
+  OAuthConsentRecord,
 } from './oauth-store.js';
 import {
   authorizationDetailsSchema,
@@ -268,10 +269,27 @@ const authenticate = async (
   return { kind: 'ok', userId: verified.userId };
 };
 
-/** Every scope the request asks for is one the person already approved. */
-const consentCovers = (granted: string, requested: string): boolean => {
-  const grantedScopes = new Set(granted.split(' ').filter(Boolean));
-  return requested
+/**
+ * The person already approved this request: every scope it asks for, and the
+ * return address it names. The address is what the consent screen shows to
+ * tell a genuine client from one that merely took its name, so an approval
+ * given for one address never carries over to another the same client
+ * registered. Loopback addresses compare without the port, as registration
+ * does. A consent recorded before addresses were kept covers nothing; the
+ * client asks once more and the address is recorded then.
+ */
+const consentCovers = (
+  consent: OAuthConsentRecord,
+  authorization: OAuthAuthorizationRecord
+): boolean => {
+  if (
+    consent.redirectUri === null ||
+    !isRegisteredRedirectUri(authorization.redirectUri, [consent.redirectUri])
+  ) {
+    return false;
+  }
+  const grantedScopes = new Set(consent.scope.split(' ').filter(Boolean));
+  return authorization.scope
     .split(' ')
     .filter(Boolean)
     .every((scope) => grantedScopes.has(scope));
@@ -294,8 +312,9 @@ const backToClient = (
 /**
  * Approves on the person's behalf: the decision is taken first (exactly once),
  * then a session of the agent's own is minted and parked behind a one-time
- * code, and the consent is remembered for next time. A mint failure leaves the
- * request approved without a code; the client simply starts over.
+ * code, and the consent is remembered for next time, for the return address
+ * the person approved. A mint failure leaves the request approved without a
+ * code; the client simply starts over.
  */
 const approve = async (
   deps: OAuthDeps,
@@ -325,7 +344,12 @@ const approve = async (
     );
   }
   const code = await issueCode(deps, decided, session, now);
-  await deps.store.upsertConsent(userId, decided.clientId, decided.scope);
+  await deps.store.upsertConsent(
+    userId,
+    decided.clientId,
+    decided.scope,
+    decided.redirectUri
+  );
   return backToClient(decided, { code });
 };
 
@@ -388,7 +412,7 @@ export const handleAuthorizationRead = async (
     return NOT_FOUND;
   }
   const consent = await deps.store.findConsent(userId, client.clientId);
-  if (consent && consentCovers(consent.scope, authorization.scope)) {
+  if (consent && consentCovers(consent, authorization)) {
     return approve(deps, authorization, userId, now);
   }
   return {

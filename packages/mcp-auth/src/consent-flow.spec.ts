@@ -18,6 +18,8 @@ import { computeS256Challenge } from './pkce.js';
 const ISSUER = 'http://localhost:8787';
 const WEB_URL = 'http://localhost:3100';
 const REDIRECT_URI = 'http://127.0.0.1:41241/callback';
+// A second return address of the same client: same machine, another path.
+const OTHER_REDIRECT_URI = 'http://127.0.0.1:41241/other';
 const ALICE = 'a0000000-0000-4000-8000-00000000000a';
 const BOB = 'b0000000-0000-4000-8000-00000000000b';
 const CAROL = 'c0000000-0000-4000-8000-00000000000c';
@@ -66,15 +68,19 @@ const setup = async () => {
   };
   const registered = await handleRegister(deps, {
     client_name: 'zm-unit',
-    redirect_uris: [REDIRECT_URI],
+    redirect_uris: [REDIRECT_URI, OTHER_REDIRECT_URI],
   });
   const clientId = (registered.body as { client_id: string }).client_id;
   return { deps, auth, clientId };
 };
 
-const authorizeQuery = (clientId: string, challenge: string) => ({
+const authorizeQuery = (
+  clientId: string,
+  challenge: string,
+  redirectUri = REDIRECT_URI
+) => ({
   client_id: clientId,
-  redirect_uri: REDIRECT_URI,
+  redirect_uri: redirectUri,
   response_type: 'code',
   code_challenge: challenge,
   code_challenge_method: 'S256',
@@ -85,11 +91,12 @@ const authorizeQuery = (clientId: string, challenge: string) => ({
 const start = async (
   deps: OAuthDeps,
   clientId: string,
-  challenge = computeS256Challenge(randomBytes(48).toString('base64url'))
+  challenge = computeS256Challenge(randomBytes(48).toString('base64url')),
+  redirectUri = REDIRECT_URI
 ): Promise<string> => {
   const started = await handleAuthorizeStart(
     deps,
-    authorizeQuery(clientId, challenge)
+    authorizeQuery(clientId, challenge, redirectUri)
   );
   if (started.kind !== 'redirect') {
     throw new Error(`expected a redirect, got ${started.message}`);
@@ -244,7 +251,7 @@ describe('deciding', () => {
     });
   });
 
-  it('a second authorization of an approved client needs no screen', async () => {
+  it('a second authorization of an approved client, to the same return address, needs no screen', async () => {
     const { deps, clientId } = await setup();
     const first = await start(deps, clientId);
     await handleConsentDecision(deps, {
@@ -252,7 +259,14 @@ describe('deciding', () => {
       authorization: BEARER.alice,
       body: { decision: 'approve' },
     });
-    const second = await start(deps, clientId);
+    // Native clients bind a fresh port per authorization; the address is the
+    // same one in every way that matters.
+    const second = await start(
+      deps,
+      clientId,
+      undefined,
+      REDIRECT_URI.replace(':41241', ':53682')
+    );
     const read = await handleAuthorizationRead(deps, {
       authorizationId: second,
       authorization: BEARER.alice,
@@ -266,6 +280,61 @@ describe('deciding', () => {
       authorization: BEARER.bob,
     });
     expect(bobRead.body).toHaveProperty('authorization_id', third);
+  });
+
+  it('a return address the person has not approved asks again, even for an approved client', async () => {
+    const { deps, clientId } = await setup();
+    const first = await start(deps, clientId);
+    await handleConsentDecision(deps, {
+      authorizationId: first,
+      authorization: BEARER.alice,
+      body: { decision: 'approve' },
+    });
+    const elsewhere = await start(
+      deps,
+      clientId,
+      undefined,
+      OTHER_REDIRECT_URI
+    );
+    const read = await handleAuthorizationRead(deps, {
+      authorizationId: elsewhere,
+      authorization: BEARER.alice,
+    });
+    expect(read.status).toBe(200);
+    expect(read.body).toMatchObject({
+      authorization_id: elsewhere,
+      redirect_uri: OTHER_REDIRECT_URI,
+    });
+    // Approving there is remembered for that address from now on.
+    await handleConsentDecision(deps, {
+      authorizationId: elsewhere,
+      authorization: BEARER.alice,
+      body: { decision: 'approve' },
+    });
+    expect(await deps.store.findConsent(ALICE, clientId)).toMatchObject({
+      redirectUri: OTHER_REDIRECT_URI,
+    });
+  });
+
+  it('a consent recorded before return addresses were kept asks once more', async () => {
+    const { deps, clientId } = await setup();
+    const first = await start(deps, clientId);
+    await handleConsentDecision(deps, {
+      authorizationId: first,
+      authorization: BEARER.alice,
+      body: { decision: 'approve' },
+    });
+    const recorded = await deps.store.findConsent(ALICE, clientId);
+    vi.spyOn(deps.store, 'findConsent').mockResolvedValueOnce({
+      scope: recorded?.scope ?? '',
+      redirectUri: null,
+    });
+    const second = await start(deps, clientId);
+    const read = await handleAuthorizationRead(deps, {
+      authorizationId: second,
+      authorization: BEARER.alice,
+    });
+    expect(read.body).toHaveProperty('authorization_id', second);
   });
 
   it('denial returns access_denied to the client and records no consent', async () => {
