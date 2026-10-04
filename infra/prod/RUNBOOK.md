@@ -533,14 +533,17 @@ masked form.
 
 ## The edge at deploy
 
-The deploy script ends by reloading Caddy (`docker compose … exec -T caddy
-caddy reload --config /etc/caddy/Caddyfile`). The Caddyfile is a mounted
-file, not compose config, so `up -d` leaves a running Caddy on the config it
-started with even when a release changed the template; the reload is what
-makes a header or site-block change go live. Caddy treats an unchanged config
-as a no-op, so the step costs nothing on a release that touched no edge
-config, and a reload never drops connections the way a container restart
-would.
+The edge's Caddyfile is one bind-mounted file. A release that changes it
+makes `git pull` write a new inode, and the running container keeps the old
+one: `up -d` leaves Caddy alone (its compose config did not change) and a
+`caddy reload` inside the container re-reads the stale mount, so the change
+never goes live on its own. The deploy script therefore hashes the template
+before the pull and, when the hash differs afterwards, recreates the edge
+container (`up -d --force-recreate --wait caddy`) once the rest of the stack
+is up. That is a few seconds of edge restart on the releases that touch it,
+and nothing on the others. The same applies to a template edited by hand on
+the host with an editor that writes a new file: restart the edge, do not
+reload it.
 
 ## Migrations at deploy
 
