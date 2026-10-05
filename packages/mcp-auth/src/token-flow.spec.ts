@@ -379,7 +379,10 @@ describe("refreshing an agent's grant", () => {
 
   it('answers two refreshes that raced with the same pair', async () => {
     const auth = makeAuthGateway();
-    const deps = makeDeps(auth);
+    // One instant for both, as for two requests that truly raced: the second
+    // pair's expires_in is counted from the clock.
+    const now = new Date();
+    const deps = { ...makeDeps(auth), now: () => now };
     const { tokens } = await connect(deps);
 
     const first = await refresh(deps, tokens.refresh_token);
