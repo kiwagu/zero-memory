@@ -24,8 +24,10 @@ function normalizeTotpPaste(text: string): string {
 }
 
 interface TotpCodeFieldProps {
-  /** The input's id, for the label that names it. */
+  /** The input's id, for a label that names it. */
   id: string;
+  /** The field's name for screen readers when no visible label names it. */
+  ariaLabel?: string;
   testId: string;
   value: string;
   onChange: (value: string) => void;
@@ -51,6 +53,7 @@ interface TotpCodeFieldProps {
  */
 function TotpCodeField({
   id,
+  ariaLabel,
   testId,
   value,
   onChange,
@@ -100,6 +103,7 @@ function TotpCodeField({
     <InputOTP
       ref={inputRef}
       id={id}
+      aria-label={ariaLabel}
       data-testid={testId}
       maxLength={TOTP_CODE_LENGTH}
       value={value}

@@ -10,25 +10,28 @@ import {
   CardHeader,
   CardTitle,
 } from '@workspace/ui/components/card';
-import { Field, FieldLabel } from '@workspace/ui/components/field';
-import { TotpCodeField } from '@workspace/ui/components/auth/totp-code-field';
+import {
+  TOTP_CODE_LENGTH,
+  TotpCodeField,
+} from '@workspace/ui/components/auth/totp-code-field';
 
 interface MfaVerifyLabels {
   title: string;
   description: string;
+  /** The field's name for screen readers; no visible label repeats it. */
   code: string;
-  verify: string;
-  verifying: string;
   /** The way out for someone who cannot produce the code. */
   signOut: string;
 }
 
 /**
  * MfaVerifyCard — the second-factor step: six digits from the person's
- * authenticator app, sent by themselves when the last one lands. Mechanism
- * only: copy arrives translated, the check and the way out are injected. A
- * refused code clears the cells and puts focus back on the first, and the
- * message goes away as soon as the next code is being typed.
+ * authenticator app, centred, sent by themselves when the last one lands (or
+ * on Enter once all six are in) — there is no button to press. While the code
+ * is checked the cells are dimmed and locked. Mechanism only: copy arrives
+ * translated, the check and the way out are injected. A refused code clears
+ * the cells and puts focus back on the first, and the message goes away as
+ * soon as the next code is being typed.
  */
 function MfaVerifyCard({
   labels,
@@ -66,13 +69,16 @@ function MfaVerifyCard({
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
-            onSubmit(code);
+            // Enter sends a complete code; an incomplete one waits for more.
+            if (!pending && code.length === TOTP_CODE_LENGTH) {
+              onSubmit(code);
+            }
           }}
         >
-          <Field>
-            <FieldLabel htmlFor="mfa-verify-code">{labels.code}</FieldLabel>
+          <div className="flex justify-center">
             <TotpCodeField
               id="mfa-verify-code"
+              ariaLabel={labels.code}
               testId="mfa-verify-code"
               value={code}
               onChange={(next) => {
@@ -86,24 +92,16 @@ function MfaVerifyCard({
               invalid={visibleError !== null}
               autoFocus
             />
-          </Field>
+          </div>
           {visibleError ? (
             <p
               data-testid="mfa-verify-error"
               role="alert"
-              className="text-destructive text-sm"
+              className="text-destructive text-center text-sm"
             >
               {visibleError}
             </p>
           ) : null}
-          <Button
-            type="submit"
-            data-testid="mfa-verify-submit"
-            disabled={pending || code.length !== 6}
-            className="w-full"
-          >
-            {pending ? labels.verifying : labels.verify}
-          </Button>
           <p className="text-center text-sm">
             <Button
               type="button"

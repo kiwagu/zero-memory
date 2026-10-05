@@ -34,8 +34,6 @@ export default async function MfaVerifyPage({
           title: t('auth.mfa.title'),
           description: t('auth.mfa.description'),
           code: t('auth.mfa.code'),
-          verify: t('auth.mfa.verify'),
-          verifying: t('auth.mfa.verifying'),
           signOut: t('auth.mfa.signOut'),
         }}
         messages={{

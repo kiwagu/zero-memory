@@ -10,8 +10,6 @@ const labels: MfaVerifyLabels = {
   title: 'Two-factor authentication',
   description: 'Enter the code from your authenticator app.',
   code: 'Code',
-  verify: 'Verify',
-  verifying: 'Verifying…',
   signOut: 'Sign out',
 };
 
@@ -36,11 +34,22 @@ describe('MfaVerifyCard', () => {
     expect(html).toContain('maxLength="6"');
   });
 
-  it('cannot be submitted before six digits are in', () => {
-    const button = /<button[^>]*data-testid="mfa-verify-submit"[^>]*>/.exec(
-      render()
+  it('has no button to press and no visible label over the cells', () => {
+    const html = render();
+    expect(html).not.toContain('type="submit"');
+    expect(html).not.toContain('<label');
+    expect(html).not.toContain('>Code<');
+  });
+
+  it('still names the field for screen readers', () => {
+    expect(render()).toContain('aria-label="Code"');
+  });
+
+  it('dims and locks the cells while the code is checked', () => {
+    const input = /<input[^>]*data-testid="mfa-verify-code"[^>]*>/.exec(
+      render({ pending: true })
     )?.[0];
-    expect(button).toContain('disabled=""');
+    expect(input).toContain('disabled=""');
   });
 
   it('shows a refusal and offers a way out', () => {
