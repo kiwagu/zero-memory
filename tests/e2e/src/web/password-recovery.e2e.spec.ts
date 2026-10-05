@@ -102,7 +102,6 @@ test.describe('password recovery', () => {
     await page
       .getByTestId('mfa-verify-code')
       .fill(await totpCode(factor.secret, factor.lastCode));
-    await page.getByTestId('mfa-verify-submit').click();
 
     await expect(page.getByTestId('auth-reset-form')).toBeVisible();
     await page.getByTestId('auth-reset-password').fill(NEW_PASSWORD);
