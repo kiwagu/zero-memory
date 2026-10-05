@@ -22,7 +22,7 @@ import {
   ReleaseCommand,
   ShareMemoryCommand,
 } from '@workspace/commands';
-import { mustGetCurrentUserEntityId } from '@workspace/context';
+import { getAccessToken, mustGetCurrentUserEntityId } from '@workspace/context';
 import { RULE_DELIVERY } from '@workspace/db';
 import {
   boardInputSchema,
@@ -1257,7 +1257,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
       try {
         const conflicts = await deps.runInToolContext(() => {
           deps.onToolInvocation?.('list_conflicts');
-          return new HygieneResolver().listConflicts(
+          return HygieneResolver.forCaller(getAccessToken()).listConflicts(
             mustGetCurrentUserEntityId(),
             { status, verdict, limit }
           );
@@ -1287,7 +1287,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
       try {
         const conflict = await deps.runInToolContext(() => {
           deps.onToolInvocation?.('get_conflict');
-          return new HygieneResolver().getConflict(
+          return HygieneResolver.forCaller(getAccessToken()).getConflict(
             mustGetCurrentUserEntityId(),
             dispute_id
           );
@@ -1470,7 +1470,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           TriageResult | BulkResolveResult
         >(() => {
           deps.onToolInvocation?.('resolve_conflicts');
-          const resolver = new HygieneResolver();
+          const resolver = HygieneResolver.forCaller(getAccessToken());
           const ownerId = mustGetCurrentUserEntityId();
           return resolutions?.length
             ? resolver.resolveMany(ownerId, resolutions)
