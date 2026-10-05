@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import {
@@ -18,6 +17,18 @@ import { authFailureOf, type AuthFailure } from '@/lib/auth-failure';
 import type { SocialProvider } from '@/lib/auth-providers';
 import { createClient } from '@/lib/supabase/client';
 import type { LegalLinks } from '@/lib/legal';
+
+/**
+ * Leaves the sign-in page for `next` with a full page load. A sign-in changes
+ * who the browser is, and on an account with a second factor the dashboard
+ * answers a new session with a redirect to the code step. A page load is a
+ * navigation, which gets that redirect; a router move is a fetch the
+ * dashboard cannot tell from code asking for data, so it would be refused and
+ * the router would reload anyway, with an error on the console on the way.
+ */
+function enterDashboard(next: string): void {
+  window.location.replace(next);
+}
 
 export function LoginView({
   initialError,
@@ -58,7 +69,6 @@ export function LoginView({
     descriptionTemplate: string;
   };
 }) {
-  const router = useRouter();
   const [mode, setMode] = useState<LoginMode>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -161,8 +171,7 @@ export function LoginView({
         setPending(false);
         return;
       }
-      router.replace(next);
-      router.refresh();
+      enterDashboard(next);
       return;
     }
 
@@ -175,8 +184,7 @@ export function LoginView({
       setPending(false);
       return;
     }
-    router.replace(next);
-    router.refresh();
+    enterDashboard(next);
   }
 
   async function handleProvider(provider: SocialProvider) {
