@@ -156,6 +156,25 @@ test.describe('two-factor authentication', () => {
     await expect(page.getByTestId('insights-page')).toBeVisible();
   });
 
+  test('@smoke from the password to the code step nothing is refused on the way', async ({
+    page,
+  }) => {
+    const { user } = await userWithFactor('no-refusal');
+    // A sign-in leaves the login page with a page load, which the dashboard
+    // answers with a redirect to the code step; a refused request on the way
+    // would mean a router fetch was turned away and the page reloaded.
+    const refused: string[] = [];
+    page.on('response', (response) => {
+      if (response.status() === 403) {
+        refused.push(response.url());
+      }
+    });
+    await signIn(page, user);
+    await expect(page).toHaveURL(/\/mfa\/verify$/);
+    await expect(page.getByTestId('mfa-verify-code')).toBeFocused();
+    expect(refused).toEqual([]);
+  });
+
   test('@smoke the code field: digits typed one by one move along and the last one sends', async ({
     page,
   }) => {
