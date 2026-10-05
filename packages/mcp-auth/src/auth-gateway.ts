@@ -1,7 +1,8 @@
 /**
- * Port: the identity provider behind the authorization server. This AS mints
- * no tokens of its own — a session IS a Supabase session, so the gateway
- * returns the provider's access/refresh pair verbatim.
+ * Port: the identity provider behind the authorization server. An agent's
+ * access token IS a Supabase session token, so the data's own row-level
+ * rules apply to it unchanged; the refresh token the agent holds is the
+ * authorization server's own, standing for a grant (see handlers).
  */
 
 export interface AuthSession {
@@ -18,6 +19,11 @@ export interface AuthSession {
    */
   sessionId: string | null;
 }
+
+export type RefreshOutcome =
+  | { kind: 'refreshed'; session: AuthSession }
+  | { kind: 'ended' }
+  | { kind: 'unavailable' };
 
 export interface IAuthGateway {
   /**
@@ -37,8 +43,13 @@ export interface IAuthGateway {
    */
   mintSession(userId: string): Promise<AuthSession | null>;
 
-  /** Rotates a refresh token; null when it is invalid/revoked. */
-  refreshSession(refreshToken: string): Promise<AuthSession | null>;
+  /**
+   * Rotates a session's refresh token. `ended` when Auth no longer knows the
+   * session (signed out, or deleted when the person gave a second factor);
+   * `unavailable` when Auth could not be asked, which must never read as an
+   * ended session.
+   */
+  refreshSession(refreshToken: string): Promise<RefreshOutcome>;
 
   /**
    * Ends a session this gateway minted that nobody will ever hold, because

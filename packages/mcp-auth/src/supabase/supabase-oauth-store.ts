@@ -2,7 +2,10 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@workspace/db';
 
 import type {
+  AgentGrantRecord,
+  AgentGrantRenewal,
   IOAuthStore,
+  NewAgentGrant,
   NewOAuthAuthorization,
   OAuthAuthorizationRecord,
   OAuthAuthorizationStatus,
@@ -16,6 +19,23 @@ type ClientRow = Database['public']['Tables']['oauth_clients']['Row'];
 type CodeRow = Database['public']['Tables']['oauth_codes']['Row'];
 type AuthorizationRow =
   Database['public']['Tables']['oauth_authorizations']['Row'];
+type GrantRow = Database['public']['Tables']['agent_grants']['Row'];
+
+const toGrantRecord = (row: GrantRow): AgentGrantRecord => ({
+  id: row.id,
+  authUserId: row.user_id,
+  clientId: row.client_id,
+  scope: row.scope,
+  generation: row.generation,
+  tokenSecret: row.token_secret,
+  accessToken: row.access_token,
+  accessExpiresAt: new Date(row.access_expires_at),
+  authRefreshToken: row.auth_refresh_token,
+  sessionId: row.session_id,
+  credentialsFingerprint: row.credentials_fingerprint,
+  rotatedAt: new Date(row.rotated_at),
+  revokedAt: row.revoked_at ? new Date(row.revoked_at) : null,
+});
 
 const toClientRecord = (row: ClientRow): OAuthClientRecord => ({
   clientId: row.client_id,
@@ -319,6 +339,116 @@ export class SupabaseOAuthStore implements IOAuthStore {
     if (error) {
       throw new Error(`Failed to record the agent session: ${error.message}`);
     }
+  }
+
+  async forgetAgentSession(sessionId: string): Promise<void> {
+    const { error } = await this.#client()
+      .from('agent_sessions')
+      .delete()
+      .eq('session_id', sessionId);
+    if (error) {
+      throw new Error(`Failed to forget the agent session: ${error.message}`);
+    }
+  }
+
+  async revokeClientGrants(
+    authUserId: string,
+    clientId: string,
+    now: Date
+  ): Promise<void> {
+    const { error } = await this.#client()
+      .from('agent_grants')
+      .update({ revoked_at: now.toISOString() })
+      .eq('user_id', authUserId)
+      .eq('client_id', clientId)
+      .is('revoked_at', null);
+    if (error) {
+      throw new Error(`Failed to end earlier grants: ${error.message}`);
+    }
+  }
+
+  async insertGrant(grant: NewAgentGrant): Promise<AgentGrantRecord> {
+    const { data, error } = await this.#client()
+      .from('agent_grants')
+      .insert({
+        user_id: grant.authUserId,
+        client_id: grant.clientId,
+        scope: grant.scope,
+        token_secret: grant.tokenSecret,
+        access_token: grant.accessToken,
+        access_expires_at: grant.accessExpiresAt.toISOString(),
+        auth_refresh_token: grant.authRefreshToken,
+        session_id: grant.sessionId,
+        credentials_fingerprint: grant.credentialsFingerprint,
+      })
+      .select('*')
+      .single();
+    if (error || !data) {
+      throw new Error(`Failed to store the grant: ${error?.message}`);
+    }
+    return toGrantRecord(data);
+  }
+
+  async findGrant(id: string): Promise<AgentGrantRecord | null> {
+    const { data, error } = await this.#client()
+      .from('agent_grants')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) {
+      throw new Error(`Failed to load the grant: ${error.message}`);
+    }
+    return data ? toGrantRecord(data) : null;
+  }
+
+  async advanceGrant(
+    id: string,
+    fromGeneration: number,
+    renewal: AgentGrantRenewal,
+    now: Date
+  ): Promise<boolean> {
+    // Compare-and-set on the generation: of two refreshes that raced, exactly
+    // one moves the grant on.
+    const { data, error } = await this.#client()
+      .from('agent_grants')
+      .update({
+        generation: fromGeneration + 1,
+        access_token: renewal.accessToken,
+        access_expires_at: renewal.accessExpiresAt.toISOString(),
+        auth_refresh_token: renewal.authRefreshToken,
+        session_id: renewal.sessionId,
+        rotated_at: now.toISOString(),
+      })
+      .eq('id', id)
+      .eq('generation', fromGeneration)
+      .is('revoked_at', null)
+      .select('id');
+    if (error) {
+      throw new Error(`Failed to renew the grant: ${error.message}`);
+    }
+    return (data ?? []).length === 1;
+  }
+
+  async revokeGrant(id: string, now: Date): Promise<void> {
+    const { error } = await this.#client()
+      .from('agent_grants')
+      .update({ revoked_at: now.toISOString() })
+      .eq('id', id)
+      .is('revoked_at', null);
+    if (error) {
+      throw new Error(`Failed to end the grant: ${error.message}`);
+    }
+  }
+
+  async credentialsFingerprint(authUserId: string): Promise<string | null> {
+    const { data, error } = await this.#client().rpc(
+      'agent_credentials_fingerprint',
+      { p_user_id: authUserId }
+    );
+    if (error) {
+      throw new Error(`Failed to read the credentials: ${error.message}`);
+    }
+    return typeof data === 'string' && data !== '' ? data : null;
   }
 
   #client(): SupabaseClient<Database> {

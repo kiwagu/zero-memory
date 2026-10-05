@@ -23,7 +23,10 @@ export interface OAuthCodeRecord {
   codeChallenge: string;
   redirectUri: string;
   resource: string | null;
-  /** Supabase session captured at login, returned by /token on redemption. */
+  /**
+   * What /token hands out on redemption: the agent's Supabase access token
+   * and the authorization server's own refresh token for the grant.
+   */
   accessToken: string;
   refreshToken: string;
   expiresAt: Date;
@@ -57,6 +60,42 @@ export interface OAuthConsentRecord {
   scope: string;
   /** The return address the person saw when they approved. */
   redirectUri: string;
+}
+
+/**
+ * A person's approval of one client as the authorization server carries it
+ * between refreshes: the Auth session it stands for now, and the generation
+ * of the refresh token last handed to the client.
+ */
+export interface AgentGrantRecord {
+  id: string;
+  authUserId: string;
+  clientId: string;
+  scope: string;
+  generation: number;
+  /** Signs the refresh tokens of this grant (see grant-token). */
+  tokenSecret: string;
+  /** The access token last handed out, for a refresh that raced it. */
+  accessToken: string;
+  accessExpiresAt: Date;
+  authRefreshToken: string;
+  sessionId: string;
+  credentialsFingerprint: string;
+  rotatedAt: Date;
+  revokedAt: Date | null;
+}
+
+export type NewAgentGrant = Omit<
+  AgentGrantRecord,
+  'id' | 'generation' | 'rotatedAt' | 'revokedAt'
+>;
+
+/** What a refresh writes when it moves a grant to its next generation. */
+export interface AgentGrantRenewal {
+  accessToken: string;
+  accessExpiresAt: Date;
+  authRefreshToken: string;
+  sessionId: string;
 }
 
 export interface IOAuthStore {
@@ -122,6 +161,42 @@ export interface IOAuthStore {
     authUserId: string;
     clientId: string;
   }): Promise<void>;
+
+  /** Forgets the record of an agent session Auth has ended. */
+  forgetAgentSession(sessionId: string): Promise<void>;
+
+  /** Ends every live grant this person gave this client. */
+  revokeClientGrants(
+    authUserId: string,
+    clientId: string,
+    now: Date
+  ): Promise<void>;
+
+  /** Stores a new grant; the store assigns the `agg_` id. */
+  insertGrant(grant: NewAgentGrant): Promise<AgentGrantRecord>;
+
+  findGrant(id: string): Promise<AgentGrantRecord | null>;
+
+  /**
+   * Moves a live grant from `fromGeneration` to the next one, with the
+   * session it now stands for. False when the grant is revoked or another
+   * refresh moved it first: exactly one refresh wins each generation.
+   */
+  advanceGrant(
+    id: string,
+    fromGeneration: number,
+    renewal: AgentGrantRenewal,
+    now: Date
+  ): Promise<boolean>;
+
+  /** Ends a grant for good. */
+  revokeGrant(id: string, now: Date): Promise<void>;
+
+  /**
+   * A digest of the account's password and verified second factors; null for
+   * an unknown account. A grant is renewed only while it is unchanged.
+   */
+  credentialsFingerprint(authUserId: string): Promise<string | null>;
 
   /** The person's live (not revoked) consent for this client, if any. */
   findConsent(

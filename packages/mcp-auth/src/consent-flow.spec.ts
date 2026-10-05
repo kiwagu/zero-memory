@@ -288,8 +288,12 @@ describe('deciding', () => {
     expect(token.status).toBe(200);
     expect(token.body).toMatchObject({
       access_token: (minted as AuthSession).accessToken,
-      refresh_token: (minted as AuthSession).refreshToken,
     });
+    // The agent holds the server's own refresh token for its grant, never
+    // Auth's: Auth's would die the next time the person gives the code.
+    expect((token.body as { refresh_token: string }).refresh_token).not.toBe(
+      (minted as AuthSession).refreshToken
+    );
     // The minted session is on record as an agent's, which is what admits it
     // to the data on an account with a second factor it cannot give.
     expect(

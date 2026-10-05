@@ -5,7 +5,13 @@ import {
 } from '@supabase/supabase-js';
 import { createLogger } from '@workspace/logger';
 
-import type { AuthSession, IAuthGateway } from '../auth-gateway.js';
+import { isAuthApiError } from '@supabase/supabase-js';
+
+import type {
+  AuthSession,
+  IAuthGateway,
+  RefreshOutcome,
+} from '../auth-gateway.js';
 import {
   ONE_SHOT_AUTH,
   resolveAnonEnv,
@@ -182,15 +188,30 @@ export class SupabaseAuthGateway implements IAuthGateway {
     return toAuthSession(verified.session);
   }
 
-  async refreshSession(refreshToken: string): Promise<AuthSession | null> {
+  async refreshSession(refreshToken: string): Promise<RefreshOutcome> {
     const { data, error } = await this.#anon().auth.refreshSession({
       refresh_token: refreshToken,
     });
-    if (error || !data.session) {
-      this.#logger.warn('refresh token rejected', { error: error?.message });
-      return null;
+    if (!error && data.session) {
+      return { kind: 'refreshed', session: toAuthSession(data.session) };
     }
-    return toAuthSession(data.session);
+    // Auth answering 4xx is Auth saying the session is gone; anything else
+    // (a 5xx, a network failure) says nothing about the session.
+    if (
+      error &&
+      isAuthApiError(error) &&
+      error.status >= 400 &&
+      error.status < 500
+    ) {
+      this.#logger.info('refresh: the session has ended', {
+        code: error.code,
+      });
+      return { kind: 'ended' };
+    }
+    this.#logger.warn('refresh: Auth could not be asked', {
+      error: error?.message,
+    });
+    return { kind: 'unavailable' };
   }
 
   #anon(): SupabaseClient {

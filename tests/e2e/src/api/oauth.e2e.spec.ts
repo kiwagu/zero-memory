@@ -13,7 +13,7 @@
  * window for up to a minute, and `awaitRouteCooldown` at suite start makes an
  * immediate rerun deterministic instead of flaky.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
 import { createClient } from '@supabase/supabase-js';
 import { expect, test, type APIRequestContext } from '@playwright/test';
@@ -22,7 +22,13 @@ import { e2eEnv } from '../helpers/env.js';
 import { McpTestClient } from '../helpers/mcp.js';
 import {
   awaitRouteCooldown,
+  decide,
+  pkcePair,
+  readAuthorization,
+  redeem as redeemFor,
+  redirectOf,
   registerClient as registerFor,
+  startAuthorization as startFor,
 } from '../helpers/oauth-client.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
@@ -30,111 +36,28 @@ import { passwordGrantToken } from '../helpers/users.js';
 const base = e2eEnv.serverUrl;
 const REDIRECT_URI = 'http://127.0.0.1:45789/callback';
 
-const pkcePair = (): { verifier: string; challenge: string } => {
-  const verifier = randomBytes(32).toString('base64url');
-  const challenge = createHash('sha256').update(verifier).digest('base64url');
-  return { verifier, challenge };
-};
-
 const registerClient = (
   request: APIRequestContext,
   clientName: string,
   redirectUri = REDIRECT_URI
 ): Promise<string> => registerFor(request, clientName, redirectUri);
 
-/**
- * GET /oauth/authorize, the browser's first stop: answered with a hand-off to
- * the dashboard's consent page carrying only the parked request's id.
- */
-const startAuthorization = async (
+const startAuthorization = (
   request: APIRequestContext,
   clientId: string,
   challenge: string,
   redirectUri = REDIRECT_URI
-): Promise<{ state: string; authorizationId: string }> => {
-  const state = randomBytes(8).toString('base64url');
-  const response = await request.get(`${base}/oauth/authorize`, {
-    maxRedirects: 0,
-    params: {
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      response_type: 'code',
-      code_challenge: challenge,
-      code_challenge_method: 'S256',
-      state,
-    },
-  });
-  expect(response.status()).toBe(302);
-  const location = new URL(response.headers()['location'] ?? '');
-  expect(location.origin + location.pathname).toBe(
-    `${e2eEnv.webUrl}/oauth/consent`
-  );
-  expect([...location.searchParams.keys()]).toEqual(['authorization_id']);
-  const authorizationId = location.searchParams.get('authorization_id') ?? '';
-  expect(authorizationId).toMatch(/^oaa_/);
-  return { state, authorizationId };
-};
-
-const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
-
-/**
- * The read the dashboard makes for the consent screen. `screenless` is what
- * the dashboard adds when the browser arrived on its own, as a client opening
- * the authorize URL makes it; only then may an approved client skip the screen.
- */
-const readAuthorization = (
-  request: APIRequestContext,
-  token: string,
-  authorizationId: string,
-  options: { screenless?: boolean } = {}
-) =>
-  request.get(
-    `${base}/oauth/authorizations/${authorizationId}${
-      options.screenless ? '?screenless=1' : ''
-    }`,
-    { headers: bearer(token) }
-  );
-
-const decide = (
-  request: APIRequestContext,
-  token: string,
-  authorizationId: string,
-  decision: 'approve' | 'deny'
-) =>
-  request.post(`${base}/oauth/authorizations/${authorizationId}/consent`, {
-    headers: bearer(token),
-    data: { decision },
-  });
-
-/** The client's redirect URI as the consent API returned it. */
-const redirectOf = async (response: {
-  json(): Promise<unknown>;
-}): Promise<URL> =>
-  new URL(((await response.json()) as { redirect_url: string }).redirect_url);
+) => startFor(request, clientId, challenge, redirectUri);
 
 const redeem = (
   request: APIRequestContext,
-  {
-    code,
-    verifier,
-    clientId,
-    redirectUri = REDIRECT_URI,
-  }: {
+  args: {
     code: string;
     verifier: string;
     clientId: string;
     redirectUri?: string;
   }
-) =>
-  request.post(`${base}/oauth/token`, {
-    form: {
-      grant_type: 'authorization_code',
-      code,
-      code_verifier: verifier,
-      client_id: clientId,
-      redirect_uri: redirectUri,
-    },
-  });
+) => redeemFor(request, { redirectUri: REDIRECT_URI, ...args });
 
 /** The agent's JWT claims, read without verification (the server did that). */
 const claimsOf = (accessToken: string): Record<string, unknown> =>

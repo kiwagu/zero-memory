@@ -9,6 +9,65 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      agent_grants: {
+        Row: {
+          access_expires_at: string;
+          access_token: string;
+          auth_refresh_token: string;
+          client_id: string;
+          created_at: string;
+          credentials_fingerprint: string;
+          generation: number;
+          id: string;
+          revoked_at: string | null;
+          rotated_at: string;
+          scope: string;
+          session_id: string;
+          token_secret: string;
+          user_id: string;
+        };
+        Insert: {
+          access_expires_at: string;
+          access_token: string;
+          auth_refresh_token: string;
+          client_id: string;
+          created_at?: string;
+          credentials_fingerprint: string;
+          generation?: number;
+          id?: string;
+          revoked_at?: string | null;
+          rotated_at?: string;
+          scope: string;
+          session_id: string;
+          token_secret: string;
+          user_id: string;
+        };
+        Update: {
+          access_expires_at?: string;
+          access_token?: string;
+          auth_refresh_token?: string;
+          client_id?: string;
+          created_at?: string;
+          credentials_fingerprint?: string;
+          generation?: number;
+          id?: string;
+          revoked_at?: string | null;
+          rotated_at?: string;
+          scope?: string;
+          session_id?: string;
+          token_secret?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'agent_grants_client_id_fkey';
+            columns: ['client_id'];
+            isOneToOne: false;
+            referencedRelation: 'oauth_clients';
+            referencedColumns: ['client_id'];
+          },
+        ];
+      };
       agent_sessions: {
         Row: {
           client_id: string;
@@ -2141,6 +2200,10 @@ export type Database = {
       add_scope_member: {
         Args: { p_role: string; p_scope: unknown; p_user: string };
         Returns: undefined;
+      };
+      agent_credentials_fingerprint: {
+        Args: { p_user_id: string };
+        Returns: string;
       };
       board_continuation: { Args: { p_scope?: string }; Returns: Json };
       board_list: {

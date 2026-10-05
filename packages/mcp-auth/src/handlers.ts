@@ -1,7 +1,14 @@
 import { randomBytes } from 'node:crypto';
 
 import type { AuthSession, IAuthGateway } from './auth-gateway.js';
+import {
+  grantToken,
+  grantTokenIsSigned,
+  newGrantSecret,
+  parseGrantToken,
+} from './grant-token.js';
 import type {
+  AgentGrantRecord,
   IOAuthStore,
   OAuthAuthorizationRecord,
   OAuthClientRecord,
@@ -32,6 +39,12 @@ const DEFAULT_CODE_TTL_MS = 5 * 60 * 1000;
 /** Long enough to sign in with a provider and read the screen, no longer. */
 const DEFAULT_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_EXPIRES_IN_SECONDS = 3600;
+/**
+ * How long the refresh token one generation behind is still honoured: two
+ * refreshes of the same agent that raced (a hook and a long-running process
+ * on one machine) both leave with the pair of the one that won.
+ */
+const REFRESH_RACE_WINDOW_MS = 60 * 1000;
 
 export interface OAuthDeps {
   store: IOAuthStore;
@@ -365,7 +378,8 @@ const approve = async (
   let code: string;
   try {
     await recordAgentSession(deps, decided, session);
-    code = await issueCode(deps, decided, session, now);
+    const refreshToken = await openGrant(deps, decided, session, now);
+    code = await issueCode(deps, decided, session, refreshToken, now);
     await deps.store.upsertConsent(
       userId,
       decided.clientId,
@@ -400,10 +414,45 @@ const recordAgentSession = async (
   });
 };
 
+/**
+ * Opens the grant the agent's refresh token will stand for, and returns that
+ * token. A client that authorizes again leaves its earlier grant behind for
+ * good: whatever held that token is no longer this client's.
+ */
+const openGrant = async (
+  deps: OAuthDeps,
+  authorization: OAuthAuthorizationRecord,
+  session: AuthSession,
+  now: Date
+): Promise<string> => {
+  const fingerprint = await deps.store.credentialsFingerprint(session.userId);
+  if (fingerprint === null || session.sessionId === null) {
+    throw new Error('The minted session cannot be held by a grant.');
+  }
+  await deps.store.revokeClientGrants(
+    session.userId,
+    authorization.clientId,
+    now
+  );
+  const grant = await deps.store.insertGrant({
+    authUserId: session.userId,
+    clientId: authorization.clientId,
+    scope: authorization.scope,
+    tokenSecret: newGrantSecret(),
+    accessToken: session.accessToken,
+    accessExpiresAt: new Date(now.getTime() + session.expiresIn * 1000),
+    authRefreshToken: session.refreshToken,
+    sessionId: session.sessionId,
+    credentialsFingerprint: fingerprint,
+  });
+  return grantToken(grant.id, grant.generation, grant.tokenSecret);
+};
+
 const issueCode = async (
   deps: OAuthDeps,
   authorization: OAuthAuthorizationRecord,
   session: AuthSession,
+  refreshToken: string,
   now: Date
 ): Promise<string> => {
   const code = randomBytes(32).toString('base64url');
@@ -415,7 +464,7 @@ const issueCode = async (
     redirectUri: authorization.redirectUri,
     resource: authorization.resource,
     accessToken: session.accessToken,
-    refreshToken: session.refreshToken,
+    refreshToken,
     expiresAt: new Date(
       now.getTime() + (deps.codeTtlMs ?? DEFAULT_CODE_TTL_MS)
     ),
@@ -532,11 +581,173 @@ export const handleConsentDecision = async (
 
 // ── POST /oauth/token ────────────────────────────────────────────────────────
 
+const refusedGrant = (description: string): HandlerResult<OAuthErrorBody> =>
+  oauthError(400, 'invalid_grant', description);
+
+/** The pair a grant last handed out, for a refresh that raced it. */
+const currentPair = (
+  grant: AgentGrantRecord,
+  now: Date
+): HandlerResult<TokenResponse> =>
+  tokenResponse(
+    grant.accessToken,
+    grantToken(grant.id, grant.generation, grant.tokenSecret),
+    Math.max(
+      Math.floor((grant.accessExpiresAt.getTime() - now.getTime()) / 1000),
+      0
+    )
+  );
+
+type Renewal =
+  | { kind: 'renewed'; session: AuthSession; minted: boolean }
+  | { kind: 'ended' }
+  | { kind: 'unavailable' };
+
+/**
+ * A fresh session for the grant. Auth's own refresh first; when Auth has
+ * ended the session, a new one is opened — unless the account's password or
+ * verified factors changed since, which is when a person means to shut out
+ * whoever held its sessions. The ending that remains is the person giving a
+ * second factor, which makes Auth delete every weaker session, an agent's
+ * included; the agent should not notice that.
+ */
+const renewSession = async (
+  deps: OAuthDeps,
+  grant: AgentGrantRecord
+): Promise<Renewal> => {
+  const refreshed = await deps.auth.refreshSession(grant.authRefreshToken);
+  if (refreshed.kind === 'refreshed') {
+    return { kind: 'renewed', session: refreshed.session, minted: false };
+  }
+  if (refreshed.kind === 'unavailable') {
+    return refreshed;
+  }
+  const fingerprint = await deps.store.credentialsFingerprint(grant.authUserId);
+  if (fingerprint === null || fingerprint !== grant.credentialsFingerprint) {
+    return { kind: 'ended' };
+  }
+  const minted = await deps.auth.mintSession(grant.authUserId);
+  if (!minted) {
+    return { kind: 'unavailable' };
+  }
+  if (minted.sessionId === null) {
+    await deps.auth.revokeSession(minted);
+    return { kind: 'unavailable' };
+  }
+  try {
+    await deps.store.recordAgentSession({
+      sessionId: minted.sessionId,
+      authUserId: grant.authUserId,
+      clientId: grant.clientId,
+    });
+    await deps.store.forgetAgentSession(grant.sessionId);
+  } catch (thrown) {
+    await deps.auth.revokeSession(minted);
+    throw thrown;
+  }
+  return { kind: 'renewed', session: minted, minted: true };
+};
+
+/**
+ * refresh_token grant. The token is the authorization server's own: it names
+ * a grant and its generation, signed with the grant's secret. Only the token
+ * of the grant's current generation renews it (one generation behind is
+ * answered with the current pair within a short window, for two refreshes
+ * that raced); an older one was copied, and the grant ends rather than being
+ * shared. A grant whose consent was withdrawn ends too.
+ */
+const refreshGrant = async (
+  deps: OAuthDeps,
+  request: { refresh_token: string; client_id?: string },
+  now: Date
+): Promise<HandlerResult<TokenResponse | OAuthErrorBody>> => {
+  const presented = parseGrantToken(request.refresh_token);
+  const grant = presented
+    ? await deps.store.findGrant(presented.grantId)
+    : null;
+  if (
+    !presented ||
+    !grant ||
+    !grantTokenIsSigned(presented, grant.tokenSecret) ||
+    grant.revokedAt !== null
+  ) {
+    return refusedGrant('Refresh token was rejected.');
+  }
+  if (request.client_id !== undefined && request.client_id !== grant.clientId) {
+    return refusedGrant('Refresh token was issued to a different client.');
+  }
+  if (
+    presented.generation === grant.generation - 1 &&
+    now.getTime() - grant.rotatedAt.getTime() < REFRESH_RACE_WINDOW_MS
+  ) {
+    return currentPair(grant, now);
+  }
+  if (presented.generation !== grant.generation) {
+    await deps.store.revokeGrant(grant.id, now);
+    return refusedGrant('Refresh token was already used.');
+  }
+  const consent = await deps.store.findConsent(
+    grant.authUserId,
+    grant.clientId
+  );
+  if (!consent) {
+    await deps.store.revokeGrant(grant.id, now);
+    return refusedGrant(
+      'The person no longer allows this client. Authorize it again.'
+    );
+  }
+
+  const renewal = await renewSession(deps, grant);
+  if (renewal.kind === 'unavailable') {
+    return oauthError(
+      503,
+      'temporarily_unavailable',
+      'The sign-in service could not be reached. Try again.'
+    );
+  }
+  if (renewal.kind === 'ended') {
+    await deps.store.revokeGrant(grant.id, now);
+    return refusedGrant(
+      "The account's password or second factor changed. Authorize the client again."
+    );
+  }
+
+  const { session } = renewal;
+  const advanced = await deps.store.advanceGrant(
+    grant.id,
+    grant.generation,
+    {
+      accessToken: session.accessToken,
+      accessExpiresAt: new Date(now.getTime() + session.expiresIn * 1000),
+      authRefreshToken: session.refreshToken,
+      sessionId: session.sessionId ?? grant.sessionId,
+    },
+    now
+  );
+  if (!advanced) {
+    // Another refresh moved the grant first; hand back what it got.
+    if (renewal.minted) {
+      await deps.auth.revokeSession(session);
+    }
+    const current = await deps.store.findGrant(grant.id);
+    return current &&
+      current.revokedAt === null &&
+      current.generation === grant.generation + 1
+      ? currentPair(current, now)
+      : refusedGrant('Refresh token was rejected.');
+  }
+  return tokenResponse(
+    session.accessToken,
+    grantToken(grant.id, grant.generation + 1, grant.tokenSecret),
+    session.expiresIn
+  );
+};
+
 /**
  * Token endpoint. authorization_code: single-use redemption (atomic in the
- * store) + PKCE S256 + client/redirect binding, then the SUPABASE session
- * captured at login is returned verbatim. refresh_token: proxied to the
- * identity gateway, returning the rotated Supabase pair.
+ * store) + PKCE S256 + client/redirect binding, then the agent's Supabase
+ * access token and the server's own refresh token for its grant.
+ * refresh_token: the grant is renewed (see refreshGrant).
  */
 export const handleToken = async (
   deps: OAuthDeps,
@@ -557,15 +768,7 @@ export const handleToken = async (
   const now = deps.now?.() ?? new Date();
 
   if (parsed.data.grant_type === 'refresh_token') {
-    const session = await deps.auth.refreshSession(parsed.data.refresh_token);
-    if (!session) {
-      return oauthError(400, 'invalid_grant', 'Refresh token was rejected.');
-    }
-    return tokenResponse(
-      session.accessToken,
-      session.refreshToken,
-      session.expiresIn
-    );
+    return refreshGrant(deps, parsed.data, now);
   }
 
   const record = await deps.store.consumeCode(parsed.data.code);
