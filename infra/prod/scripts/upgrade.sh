@@ -16,14 +16,6 @@ set -euo pipefail
 checkout_dir="${ZM_CHECKOUT_DIR:-/opt/zero-memory}"
 cd "$checkout_dir"
 
-# The edge's Caddyfile is a single bind-mounted file. A pull that changes it
-# writes a NEW inode, and the running container keeps the old one: neither
-# `up -d` (the compose config is unchanged) nor `caddy reload` (it reads the
-# stale mount) brings the new template live. Remember what the file said
-# before the pull; a change recreates the edge container after the stack is
-# up, which is what re-binds the mount.
-caddy_template="infra/prod/caddy/Caddyfile.template"
-caddy_before="$(sha256sum "$caddy_template" 2>/dev/null | cut -d' ' -f1 || true)"
 echo "→ updating the checkout"
 git pull --ff-only
 
@@ -142,8 +134,24 @@ echo "→ applying"
 "${compose[@]}" up -d --wait
 "${compose[@]}" ps
 
-caddy_after="$(sha256sum "$caddy_template" 2>/dev/null | cut -d' ' -f1 || true)"
-if [ -n "$caddy_before" ] && [ "$caddy_before" != "$caddy_after" ]; then
-  echo "→ the edge template changed in this release; recreating the edge so it mounts the new file"
+# The edge's Caddyfile is a single bind-mounted file. A pull that changes it
+# writes a new inode and the running container keeps the old one, so neither
+# `up -d` (the compose config is unchanged) nor `caddy reload` (it reads the
+# stale mount) brings the new file live. Compare what the running edge
+# actually reads with the file on disk and recreate the edge when they
+# differ. Comparing contents, rather than asking whether this run's pull
+# changed the file, also covers a pull done before this script started —
+# which is what the deploy hook does.
+caddyfile="$(grep -E '^CADDYFILE_PATH=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+caddyfile="${caddyfile:-./caddy/Caddyfile.template}"
+case "$caddyfile" in
+  /*) ;;
+  *) caddyfile="infra/prod/${caddyfile#./}" ;;
+esac
+caddy_on_disk="$(sha256sum "$caddyfile" 2>/dev/null | cut -d' ' -f1 || true)"
+caddy_served="$("${compose[@]}" exec -T caddy sha256sum /etc/caddy/Caddyfile 2>/dev/null | cut -d' ' -f1 || true)"
+if [ -n "$caddy_on_disk" ] && [ -n "$caddy_served" ] &&
+  [ "$caddy_on_disk" != "$caddy_served" ]; then
+  echo "→ the edge reads an older Caddyfile than the checkout holds; recreating the edge so it mounts the current one"
   "${compose[@]}" up -d --force-recreate --wait caddy
 fi
