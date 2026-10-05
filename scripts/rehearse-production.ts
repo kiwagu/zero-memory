@@ -404,33 +404,40 @@ function sleepSync(ms: number): void {
  * Retrying the transport closes that window precisely. A blanket sleep before
  * verification would not: it would have to be long enough for the worst case
  * and would then cost every run that time, while still being a guess.
+ *
+ * The retry runs to a deadline, not a count: ten tries 300 ms apart gave the
+ * edge about three seconds, and a slow runner once needed longer for a name
+ * that had not been touched yet. A request that is answered — even with an
+ * HTTP error — returns at once; only a transport that is not ready waits.
  */
+const TRANSPORT_DEADLINE_MS = 30_000;
+const TRANSPORT_POLL_MS = 500;
+
 function curl(args: string[], allowHttpError = false): string {
   const full = ['--silent', '--show-error', '--insecure', ...args];
-  const attempts = 10;
-  let result = spawnSync('curl', full, {
-    cwd: root,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  for (
-    let attempt = 2;
-    attempt <= attempts && TRANSIENT_CURL_EXITS.has(result.status ?? -1);
-    attempt += 1
-  ) {
-    sleepSync(300);
-    result = spawnSync('curl', full, {
+  const run = () =>
+    spawnSync('curl', full, {
       cwd: root,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+  const started = Date.now();
+  let result = run();
+  while (
+    TRANSIENT_CURL_EXITS.has(result.status ?? -1) &&
+    Date.now() - started < TRANSPORT_DEADLINE_MS
+  ) {
+    sleepSync(TRANSPORT_POLL_MS);
+    result = run();
   }
 
   if (result.status !== 0 && !allowHttpError) {
     const detail = (result.stderr || result.stdout || '').trim();
+    const waited = TRANSIENT_CURL_EXITS.has(result.status ?? -1)
+      ? ` after waiting ${Math.round((Date.now() - started) / 1000)} s for the transport`
+      : '';
     throw new Error(
-      `curl ${full.join(' ')} failed (exit ${result.status})` +
+      `curl ${full.join(' ')} failed (exit ${result.status})${waited}` +
         (detail ? `: ${detail}` : '')
     );
   }
