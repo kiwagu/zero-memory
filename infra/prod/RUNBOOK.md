@@ -537,13 +537,16 @@ The edge's Caddyfile is one bind-mounted file. A release that changes it
 makes `git pull` write a new inode, and the running container keeps the old
 one: `up -d` leaves Caddy alone (its compose config did not change) and a
 `caddy reload` inside the container re-reads the stale mount, so the change
-never goes live on its own. The deploy script therefore hashes the template
-before the pull and, when the hash differs afterwards, recreates the edge
-container (`up -d --force-recreate --wait caddy`) once the rest of the stack
-is up. That is a few seconds of edge restart on the releases that touch it,
-and nothing on the others. The same applies to a template edited by hand on
-the host with an editor that writes a new file: restart the edge, do not
-reload it.
+never goes live on its own. At the end of every deploy the script therefore
+compares the file the running edge reads (`/etc/caddy/Caddyfile` inside the
+container) with the one on disk (`CADDYFILE_PATH`, the production template by
+default) and, when they differ, recreates the edge container
+(`up -d --force-recreate --wait caddy`). It compares contents rather than
+asking whether its own pull changed anything, because the deploy hook pulls
+before the script starts. That is a few seconds of edge restart on the
+releases that touch the file, and nothing on the others. The same applies to
+a template edited by hand on the host with an editor that writes a new file:
+restart the edge, do not reload it.
 
 ## Migrations at deploy
 
