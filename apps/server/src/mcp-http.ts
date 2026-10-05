@@ -267,6 +267,14 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
         'The session could not be checked. Try again.'
       );
     }
+    // A token outlives its session by up to an hour; a revoked or signed-out
+    // session is told so, which sends the client to authorize again.
+    if (!assurance.live) {
+      return unauthorizedResponse(
+        options.issuer,
+        'The session has ended. Authorize the client again.'
+      );
+    }
     if (!assurance.complete) {
       return incompleteSessionResponse(options.issuer);
     }

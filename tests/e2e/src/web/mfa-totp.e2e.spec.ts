@@ -12,6 +12,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { e2eEnv } from '../helpers/env.js';
 import { claimsOf, enrollTotp, totpCode } from '../helpers/mfa.js';
+import { insertTestClient } from '../helpers/oauth-client.js';
 import { dashboardSessionCookies } from '../helpers/session-cookie.js';
 import {
   passwordGrantToken,
@@ -77,7 +78,7 @@ const recordedAgentSession = async (user: E2EUser) => {
     .insert({
       session_id: claimsOf(data.session.access_token).session_id as string,
       user_id: user.id,
-      client_id: null,
+      client_id: await insertTestClient('mfa'),
     });
   if (recordError) {
     throw new Error(`recording failed: ${recordError.message}`);

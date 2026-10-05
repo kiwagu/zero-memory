@@ -41,6 +41,10 @@ Components live under `src/components`, global styles under
   - `board/board-column-fold` — one column with the cards past the horizon
     folded behind an arrow in the right of its header; the arrow shows only
     when there are such cards, and its hint says how many and why.
+  - `settings/connected-agents-panel` — the agents an account approved, one
+    row per client with the return address it was approved for, when, and
+    when it was last active; Revoke asks once and hands the work to the
+    caller.
   - `panels/panel-strip` — the controlled strip of panels a dialog opens:
     equal-width panels in one snapping row, paged by arrows at the screen
     edges, each with its source and its ×.
