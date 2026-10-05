@@ -65,7 +65,7 @@ import {
 import { createLogger } from '@workspace/logger';
 import { Err, Ok, type Result } from 'oxide.ts';
 
-import { guardMemoryWrite } from './content-guard.js';
+import { guardMemoryWrite, guardTextFields } from './content-guard.js';
 import type {
   IPortabilityJudge,
   PortabilityOpinion,
@@ -1190,6 +1190,16 @@ export class MemoryService {
       return Err(validationFailed(edgeTypeResult.unwrapErr()));
     }
     const edgeType = edgeTypeResult.unwrap();
+
+    // An unknown name becomes a new entity row, readable by everyone who can
+    // see the scope — the same reason entity mentions on a memory are guarded.
+    const secret = guardTextFields([
+      { path: 'src', text: input.src },
+      { path: 'dst', text: input.dst },
+    ]);
+    if (secret) {
+      return Err(validationFailed(secretContentRejectedMessage(secret)));
+    }
 
     const scope = Scope.user(this.context.mustGetCurrentUserEntityId());
 
