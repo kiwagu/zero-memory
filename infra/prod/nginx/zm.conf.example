@@ -80,6 +80,9 @@ server {
     location / {
         proxy_pass http://127.0.0.1:3100;
         proxy_http_version 1.1;
+        # The dashboard sends this header itself and `add_header` above sends
+        # it too; hiding the app's copy keeps the response to one.
+        proxy_hide_header Strict-Transport-Security;
 
         proxy_set_header Host              $host;
         proxy_set_header X-Forwarded-For   $remote_addr; # the client's address, never what the client sent
