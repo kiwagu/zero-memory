@@ -153,7 +153,6 @@ test.describe('account self-deletion', () => {
     await page
       .getByTestId('mfa-verify-code')
       .fill(await totpCode(factor.secret, factor.lastCode));
-    await page.getByTestId('mfa-verify-submit').click();
     await expect(page.getByTestId('insights-page')).toBeVisible();
     await page.goto('/settings');
     const erased = page.waitForResponse(

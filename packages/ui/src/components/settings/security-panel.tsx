@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@workspace/ui/components/card';
-import { Input } from '@workspace/ui/components/input';
+import { TotpCodeField } from '@workspace/ui/components/auth/totp-code-field';
 import { Label } from '@workspace/ui/components/label';
 
 export interface SecurityLabels {
@@ -76,6 +76,18 @@ function SecurityPanel({
   onRemove,
 }: SecurityPanelProps) {
   const [code, setCode] = React.useState('');
+  // A refused code clears the cells so the next one starts empty, and its
+  // message goes away once the next code is being typed.
+  const [shownError, setShownError] = React.useState(error);
+  const [errorDismissed, setErrorDismissed] = React.useState(false);
+  if (error !== shownError) {
+    setShownError(error);
+    setErrorDismissed(false);
+    if (error) {
+      setCode('');
+    }
+  }
+  const visibleError = errorDismissed ? null : error;
 
   return (
     <Card data-testid="settings-security">
@@ -123,18 +135,20 @@ function SecurityPanel({
             </p>
             <div className="flex flex-col gap-2">
               <Label htmlFor="mfa-code">{labels.code}</Label>
-              <Input
+              <TotpCodeField
                 id="mfa-code"
-                data-testid="mfa-code"
+                testId="mfa-code"
                 value={code}
-                onChange={(event) =>
-                  setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
-                }
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={6}
-                className="max-w-40"
-                required
+                onChange={(next) => {
+                  setCode(next);
+                  if (next !== '') {
+                    setErrorDismissed(true);
+                  }
+                }}
+                onComplete={onConfirm}
+                disabled={pending}
+                invalid={visibleError !== null}
+                autoFocus
               />
             </div>
             <div className="flex gap-2">
@@ -197,13 +211,13 @@ function SecurityPanel({
           </div>
         ) : null}
 
-        {error ? (
+        {visibleError ? (
           <p
             data-testid="mfa-error"
             role="alert"
             className="text-destructive text-sm"
           >
-            {error}
+            {visibleError}
           </p>
         ) : null}
       </CardContent>

@@ -11,7 +11,7 @@ import {
   CardTitle,
 } from '@workspace/ui/components/card';
 import { Field, FieldLabel } from '@workspace/ui/components/field';
-import { Input } from '@workspace/ui/components/input';
+import { TotpCodeField } from '@workspace/ui/components/auth/totp-code-field';
 
 interface MfaVerifyLabels {
   title: string;
@@ -25,9 +25,10 @@ interface MfaVerifyLabels {
 
 /**
  * MfaVerifyCard — the second-factor step: six digits from the person's
- * authenticator app. Mechanism only: copy arrives translated, the check and
- * the way out are injected. The field clears itself when a code is refused,
- * so the next attempt starts empty.
+ * authenticator app, sent by themselves when the last one lands. Mechanism
+ * only: copy arrives translated, the check and the way out are injected. A
+ * refused code clears the cells and puts focus back on the first, and the
+ * message goes away as soon as the next code is being typed.
  */
 function MfaVerifyCard({
   labels,
@@ -44,12 +45,15 @@ function MfaVerifyCard({
 }) {
   const [code, setCode] = React.useState('');
   const [shownError, setShownError] = React.useState(error);
+  const [errorDismissed, setErrorDismissed] = React.useState(false);
   if (error !== shownError) {
     setShownError(error);
+    setErrorDismissed(false);
     if (error) {
       setCode('');
     }
   }
+  const visibleError = errorDismissed ? null : error;
   return (
     <Card className="w-full max-w-sm">
       <CardHeader>
@@ -67,28 +71,29 @@ function MfaVerifyCard({
         >
           <Field>
             <FieldLabel htmlFor="mfa-verify-code">{labels.code}</FieldLabel>
-            <Input
+            <TotpCodeField
               id="mfa-verify-code"
-              data-testid="mfa-verify-code"
+              testId="mfa-verify-code"
               value={code}
-              onChange={(event) =>
-                setCode(event.target.value.replace(/\D/g, '').slice(0, 6))
-              }
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              required
+              onChange={(next) => {
+                setCode(next);
+                if (next !== '') {
+                  setErrorDismissed(true);
+                }
+              }}
+              onComplete={onSubmit}
+              disabled={pending}
+              invalid={visibleError !== null}
               autoFocus
             />
           </Field>
-          {error ? (
+          {visibleError ? (
             <p
               data-testid="mfa-verify-error"
               role="alert"
               className="text-destructive text-sm"
             >
-              {error}
+              {visibleError}
             </p>
           ) : null}
           <Button

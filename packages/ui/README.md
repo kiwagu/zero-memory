@@ -45,6 +45,13 @@ Components live under `src/components`, global styles under
     equal-width panels in one snapping row, paged by arrows at the screen
     edges, each with its source and its ×.
   - `entity/entity-edge-list` — an entity's edges as `src —type→ dst` lines.
+  - `auth/totp-code-field` — the one field for a code from an authenticator
+    app, used wherever a code is typed: six cells, three and three around a
+    dash, on shadcn's `input-otp`. Focus moves to the next cell with each
+    digit, a paste fills every cell (spaces and dashes in a copied code are
+    dropped), the last digit submits by itself, once, and after a refused code
+    the cells clear and focus returns to the first. One real input underneath,
+    so one-time-code autofill and password managers keep working.
 - `@workspace/ui/hooks/*` — shared client hooks such as the mobile breakpoint
   helper.
 - `@workspace/ui/lib/*` — class-name utilities, scope formatting,
@@ -61,6 +68,13 @@ components so changes honor `components.json`:
 ```sh
 bunx --bun shadcn@latest add <component>
 ```
+
+Check what the CLI wrote before committing: with this monorepo's aliases it
+can import the class helper from a stray `cn` npm package (and add that
+package as a dependency) instead of `@workspace/ui/lib/utils`, and it can
+leave a style-registry class name that nothing defines. A component that uses
+an animation the shared stylesheet does not ship (the code cell's blinking
+caret) needs its keyframes added to `src/styles/globals.css`.
 
 Run `bun run typecheck`, `bun run lint:strict` and `bun run test:vitest` from
 this package, or the corresponding root workspace checks. The unit tests cover

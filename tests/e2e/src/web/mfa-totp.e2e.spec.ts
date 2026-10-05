@@ -48,8 +48,8 @@ const giveCode = async (
   notThis?: string
 ): Promise<string> => {
   const code = await totpCode(secret, notThis);
+  // The sixth digit sends the code by itself.
   await page.getByTestId('mfa-verify-code').fill(code);
-  await page.getByTestId('mfa-verify-submit').click();
   return code;
 };
 
@@ -115,7 +115,6 @@ test.describe('two-factor authentication', () => {
     const secret = (await page.getByTestId('mfa-secret').textContent()) ?? '';
     const first = await totpCode(secret);
     await page.getByTestId('mfa-code').fill(first);
-    await page.getByTestId('mfa-confirm').click();
     await expect(page.getByTestId('mfa-enabled')).toBeVisible();
     expect(await verifiedFactors(user.id)).toBe(1);
 
@@ -124,10 +123,66 @@ test.describe('two-factor authentication', () => {
     await signIn(page, user);
     await expect(page).toHaveURL(/\/mfa\/verify$/);
     await page.getByTestId('mfa-verify-code').fill('000000');
-    await page.getByTestId('mfa-verify-submit').click();
     await expect(page.getByTestId('mfa-verify-error')).toBeVisible();
     await expect(page).toHaveURL(/\/mfa\/verify$/);
     await giveCode(page, secret, first);
+    await expect(page.getByTestId('insights-page')).toBeVisible();
+  });
+
+  test('@smoke the code field: a pasted code fills every cell and sends itself', async ({
+    page,
+  }) => {
+    const { user, secret, lastCode } = await userWithFactor('paste');
+    await signIn(page, user);
+    await expect(page).toHaveURL(/\/mfa\/verify$/);
+    const code = await totpCode(secret, lastCode);
+    // As an authenticator app copies it: three digits, a space, three more.
+    await page.getByTestId('mfa-verify-code').focus();
+    await page.getByTestId('mfa-verify-code').evaluate(
+      (input, text) => {
+        const data = new DataTransfer();
+        data.setData('text/plain', text);
+        input.dispatchEvent(
+          new ClipboardEvent('paste', {
+            clipboardData: data,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+      },
+      `${code.slice(0, 3)} ${code.slice(3)}`
+    );
+    // No button pressed: the sixth digit sent it.
+    await expect(page.getByTestId('insights-page')).toBeVisible();
+  });
+
+  test('@smoke the code field: digits typed one by one move along and the last one sends', async ({
+    page,
+  }) => {
+    const { user, secret, lastCode } = await userWithFactor('type');
+    await signIn(page, user);
+    await expect(page).toHaveURL(/\/mfa\/verify$/);
+    // The field has focus when the step opens: no click, no Tab.
+    await expect(page.getByTestId('mfa-verify-code')).toBeFocused();
+    await page.keyboard.type(await totpCode(secret, lastCode), { delay: 30 });
+    await expect(page.getByTestId('insights-page')).toBeVisible();
+  });
+
+  test('@smoke the code field: a refused code clears the cells and keeps focus', async ({
+    page,
+  }) => {
+    const { user, secret, lastCode } = await userWithFactor('refused');
+    await signIn(page, user);
+    await expect(page).toHaveURL(/\/mfa\/verify$/);
+    await page.keyboard.type('000000', { delay: 30 });
+    await expect(page.getByTestId('mfa-verify-error')).toBeVisible();
+    await expect(page.getByTestId('mfa-verify-code')).toHaveValue('');
+    await expect(page.getByTestId('mfa-verify-code')).toBeFocused();
+    // The next code clears the message as it is typed, and goes through.
+    const code = await totpCode(secret, lastCode);
+    await page.keyboard.type(code.slice(0, 1));
+    await expect(page.getByTestId('mfa-verify-error')).toBeHidden();
+    await page.keyboard.type(code.slice(1), { delay: 30 });
     await expect(page.getByTestId('insights-page')).toBeVisible();
   });
 
