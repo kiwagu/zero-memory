@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -24,6 +25,65 @@ const openBrowser = (url: string): void => {
   }
 };
 
+/** What the loopback callback answers, and what it means for the login. */
+export interface CallbackOutcome {
+  status: number;
+  /** Plain text: nothing from the request is ever written back into it. */
+  body: string;
+  /** Absent when the request is not an answer to this login at all. */
+  result?: { code: string } | { error: string };
+}
+
+/**
+ * Reads one request to the loopback callback.
+ *
+ * Only an answer carrying this login's own `state` counts. Anything else —
+ * a page or a script on the same machine sending a code, or an error, it made
+ * up — is refused and the login keeps waiting for the real answer instead of
+ * finishing on someone else's code or giving up on someone else's error. The
+ * page the browser shows is fixed text; the error a server sent is reduced to
+ * a plain token before it reaches the terminal.
+ */
+export const callbackOutcome = (
+  url: URL,
+  expectedState: string
+): CallbackOutcome => {
+  if (url.pathname !== '/callback') {
+    return { status: 404, body: 'Not found.' };
+  }
+  if (url.searchParams.get('state') !== expectedState) {
+    return {
+      status: 400,
+      body:
+        'This response does not belong to the login waiting here. ' +
+        'You can close this tab.',
+    };
+  }
+  const error = url.searchParams.get('error');
+  if (error) {
+    return {
+      status: 200,
+      body: 'zero-memory was not authorized. You can close this tab.',
+      result: {
+        error: /^[a-z_]{1,64}$/.test(error) ? error : 'unrecognized_error',
+      },
+    };
+  }
+  const code = url.searchParams.get('code');
+  if (!code) {
+    return {
+      status: 400,
+      body: 'The response carried no authorization code. You can close this tab.',
+      result: { error: 'missing_code' },
+    };
+  }
+  return {
+    status: 200,
+    body: 'zero-memory authorized. You can close this tab.',
+    result: { code },
+  };
+};
+
 /**
  * Interactive one-time login: dynamic client registration + PKCE authorization
  * code against the MCP server's embedded OAuth server, capturing the redirect
@@ -40,28 +100,26 @@ export const runLogin = async (serverUrl: string): Promise<void> => {
     rejectCode = reject;
   });
 
+  // A fresh value per login: the callback must carry it back.
+  const expectedState = randomBytes(32).toString('base64url');
+
   const server = createServer((req, res) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    if (url.pathname !== '/callback') {
-      res.statusCode = 404;
-      res.end('not found');
+    const outcome = callbackOutcome(
+      new URL(req.url ?? '/', 'http://127.0.0.1'),
+      expectedState
+    );
+    res.statusCode = outcome.status;
+    res.setHeader('content-type', 'text/plain; charset=utf-8');
+    res.setHeader('x-content-type-options', 'nosniff');
+    res.end(outcome.body);
+    if (!outcome.result) {
       return;
     }
-    res.setHeader('content-type', 'text/html; charset=utf-8');
-    const error = url.searchParams.get('error');
-    const code = url.searchParams.get('code');
-    if (error) {
-      res.end(`<p>Authorization failed: ${error}. You can close this tab.</p>`);
-      rejectCode(new Error(`authorization error: ${error}`));
-      return;
+    if ('code' in outcome.result) {
+      resolveCode(outcome.result.code);
+    } else {
+      rejectCode(new Error(`authorization error: ${outcome.result.error}`));
     }
-    if (!code) {
-      res.end('<p>Missing authorization code. You can close this tab.</p>');
-      rejectCode(new Error('callback carried no authorization code'));
-      return;
-    }
-    res.end('<p>zero-memory authorized. You can close this tab.</p>');
-    resolveCode(code);
   });
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -72,6 +130,7 @@ export const runLogin = async (serverUrl: string): Promise<void> => {
     serverUrl,
     redirectUri,
     store,
+    state: expectedState,
     onAuthorizationRequired: (authorizationUrl) => {
       console.log(
         `\nOpen this URL to authorize zero-memory:\n\n  ${authorizationUrl.toString()}\n`

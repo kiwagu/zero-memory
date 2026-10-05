@@ -20,6 +20,12 @@ export interface FileOAuthProviderOptions {
    * needing to authorize is a hard error, not a browser pop.
    */
   onAuthorizationRequired?: (authorizationUrl: URL) => void | Promise<void>;
+  /**
+   * The OAuth `state` sent with the authorization request. Set only by the
+   * login flow, which checks the callback carries it back: a response to a
+   * login this machine did not start is then refused.
+   */
+  state?: string;
 }
 
 /**
@@ -92,6 +98,15 @@ export class FileOAuthProvider implements OAuthClientProvider {
       throw new Error('No PKCE code verifier stored — re-run the login flow.');
     }
     return verifier;
+  }
+
+  state(): string {
+    if (!this.#options.state) {
+      // The SDK asks for a state only when it is about to send the person to
+      // authorize, which only the login flow should ever do.
+      throw this.#notAuthenticatedError();
+    }
+    return this.#options.state;
   }
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {

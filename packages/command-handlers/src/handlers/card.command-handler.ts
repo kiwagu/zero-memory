@@ -3,12 +3,13 @@ import { CardCommand } from '@workspace/commands';
 import {
   FailureError,
   failure,
+  secretContentRejectedMessage,
   type CardOutput,
   type CardState,
 } from '@workspace/contracts';
 import { commandHandler, type ICommandHandler } from '@workspace/cqrs';
 import { inject, singleton } from '@workspace/di';
-import { ProjectTargetService } from '@workspace/memory';
+import { ProjectTargetService, guardTextFields } from '@workspace/memory';
 import type { Result } from 'oxide.ts';
 import type { CardFailure, CardWrite } from '@workspace/board';
 
@@ -35,6 +36,26 @@ export class CardCommandHandler implements ICommandHandler<
   ) {}
 
   async execute(command: CardCommand): Promise<CardOutput> {
+    // A card is read by every member of its project and briefed into their
+    // sessions, so its text is held to the same rule as a memory's: a secret
+    // is refused before anything is stored.
+    const secret = guardTextFields([
+      { path: 'title', text: command.title },
+      { path: 'body', text: command.body },
+      { path: 'reason', text: command.reason },
+      { path: 'no_branch', text: command.no_branch },
+      { path: 'not_landed', text: command.not_landed },
+      { path: 'no_links', text: command.no_links },
+      ...(command.links ?? []).map((link, index) => ({
+        path: `links[${index}].reason`,
+        text: link.reason,
+      })),
+    ]);
+    if (secret) {
+      throw new FailureError(
+        failure('validation_failed', secretContentRejectedMessage(secret))
+      );
+    }
     const authorship = {
       thread: command.thread,
       agentLabel: command.agent_label,

@@ -1,4 +1,10 @@
+import {
+  FailureError,
+  failure,
+  secretContentRejectedMessage,
+} from '@workspace/contracts';
 import { createLogger } from '@workspace/logger';
+import { guardTextFields } from '@workspace/memory';
 import {
   createServiceRoleClient,
   readAllPages,
@@ -195,6 +201,16 @@ export class RuleCandidateDetector {
     status: 'promoted';
   }> {
     const { memoryId, ownerId, appliesScope, ruleText, force } = params;
+
+    // A rule's text is delivered into every session of its layer, so a text
+    // the caller supplies is held to the same rule as memory content. A text
+    // distilled from the memory needs no check: the memory passed it.
+    const secret = guardTextFields([{ path: 'rule_text', text: ruleText }]);
+    if (secret) {
+      throw new FailureError(
+        failure('validation_failed', secretContentRejectedMessage(secret))
+      );
+    }
 
     const { data: memory, error: memErr } = await this.client
       .from('memories')

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { detectSecrets, guardMemoryWrite } from './content-guard.js';
+import {
+  detectSecrets,
+  guardMemoryWrite,
+  guardTextFields,
+} from './content-guard.js';
 
 /** A representative full-length fake per known secret format. */
 const SECRET_SAMPLES: Array<{ detector: string; text: string }> = [
@@ -129,5 +133,32 @@ describe('guardMemoryWrite', () => {
     });
     expect(finding?.field).toBe('source.extra.dsn');
     expect(finding?.detector).toBe('url-credentials');
+  });
+});
+
+describe('guardTextFields', () => {
+  const token = SECRET_SAMPLES.find(
+    (sample) => sample.detector === 'github-token'
+  )!.text;
+
+  it('reports the first field that holds a secret, under its own name', () => {
+    expect(
+      guardTextFields([
+        { path: 'title', text: 'Rotate the deploy token' },
+        { path: 'body', text: token },
+        { path: 'reason', text: token },
+      ])
+    ).toMatchObject({ detector: 'github-token', field: 'body' });
+  });
+
+  it('skips absent and empty fields and passes clean text', () => {
+    expect(
+      guardTextFields([
+        { path: 'title', text: 'Rotate the deploy token' },
+        { path: 'body', text: undefined },
+        { path: 'reason', text: null },
+        { path: 'no_links', text: '' },
+      ])
+    ).toBeNull();
   });
 });

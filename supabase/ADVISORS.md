@@ -58,7 +58,26 @@ reversing a deliberate design, so they are the irreducible residue.
 explicit deny-all policies (`for all … using (false) with check (false)`) — the
 tables were already deny-all via revoked grants, so the policy just makes the
 intent legible and clears the advisor. `service_role` and the DEFINER readers
-are unaffected (they bypass RLS).
+are unaffected (they bypass RLS). `usage_events` lost its policy when it was
+rebuilt as a partitioned table and got it back (with the restrictive
+"complete sessions only" policy every RLS table carries) in 2026-10. The
+server-only tables that had row-level security and no policy at all —
+`eval_runs`, `loop_closure_checks`, `memory_judge_checks`, `usage_daily` — no
+longer trip `0008` either: each now carries the restrictive "complete sessions
+only" policy, and a restrictive policy with no permissive one still admits
+nothing.
+
+## Info — accepted (`0008`, INFO)
+
+| Lint                         | Object                                                                   | Why it is acceptable                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0008` rls_enabled_no_policy | `partitions.usage_events_<yyyy>_<mm>`, `partitions.usage_events_default` | The monthly partitions of `usage_events`. Row-level security is on and no policy is attached on purpose: the `partitions` schema is not exposed through the API, `anon` and `authenticated` hold no grant on any partition, and the partition maintenance function creates a new one every month — a policy added by hand would be missing from the next. Reads go through the parent, which carries the deny-all and complete-sessions policies. |
+
+## Auth configuration (hosted project only)
+
+| Lint                            | Status                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| auth_leaked_password_protection | **Not accepted — an operator setting to turn on.** The hosted Auth project can refuse passwords that appear in known breach corpora (Authentication → Policies → leaked-password protection). It is a toggle on the hosted project, not something a migration or this repository can set, so it stays listed here until the operator enables it. |
 
 > `memory_version_history` (added 2026-07-09) is **absent** from this list by
 > design: it is SECURITY INVOKER, so lint `0029` does not flag it and the

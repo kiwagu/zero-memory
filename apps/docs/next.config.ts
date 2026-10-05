@@ -7,6 +7,9 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   // Workspace packages ship TypeScript sources.
   transpilePackages: ['@workspace/ui'],
+  // No `X-Powered-By: Next.js` banner: it tells a visitor nothing they need
+  // and tells a scanner which framework and release line to try.
+  poweredByHeader: false,
   // Reaching a dev server from another machine goes through a LAN alias, and
   // Next blocks cross-origin dev-resource requests unless the host is
   // allowlisted. `zm.local` is one such alias (mDNS on the maintainer's

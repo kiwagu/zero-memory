@@ -8,11 +8,13 @@ import {
   FailureError,
   failure,
   parseBranchRef,
+  secretContentRejectedMessage,
   type CardLogOutput,
   type CardRef,
 } from '@workspace/contracts';
 import { commandHandler, type ICommandHandler } from '@workspace/cqrs';
 import { inject, singleton } from '@workspace/di';
+import { guardTextFields } from '@workspace/memory';
 
 const invalid = (message: string): FailureError =>
   new FailureError(failure('validation_failed', message));
@@ -65,6 +67,10 @@ export class CardLogCommandHandler implements ICommandHandler<
     if (command.action === 'note') {
       if (!command.text) {
         throw invalid('`text` is required to add a note.');
+      }
+      const secret = guardTextFields([{ path: 'text', text: command.text }]);
+      if (secret) {
+        throw invalid(secretContentRejectedMessage(secret));
       }
       const noted = await this.service.noteCard({
         ...authorship,

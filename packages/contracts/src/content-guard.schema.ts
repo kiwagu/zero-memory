@@ -40,5 +40,6 @@ export type SecretFinding = z.infer<typeof secretFindingSchema>;
  */
 export const secretContentRejectedMessage = (finding: SecretFinding): string =>
   `${SECRET_CONTENT_REJECTED}: ${finding.field} contains what looks like a ` +
-  `secret (${finding.detector}, "${finding.sample}"). Memories must never ` +
-  'store secrets or credentials — rephrase the fact without the secret value.';
+  `secret (${finding.detector}, "${finding.sample}"). Nothing written to the ` +
+  'memory server may hold a secret or credential — rephrase it without the ' +
+  'secret value.';

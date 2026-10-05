@@ -28,8 +28,10 @@
 	respond /metrics 404
 
 	# Once a browser has seen the site over https it never tries plain http
-	# again, not even for the first request of a later visit.
-	header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+	# again, not even for the first request of a later visit. The `>` sets
+	# the header as the response leaves, replacing any value the app behind
+	# already sent: a plain `header` would add a second copy next to it.
+	header >Strict-Transport-Security "max-age=63072000; includeSubDomains"
 
 	reverse_proxy zm-server:8787 {
 		# Streamable HTTP MCP responds with text/event-stream; never
@@ -41,7 +43,8 @@
 
 # ── Web dashboard ───────────────────────────────────────────────────────────
 {$ZM_WEB_HOST} {
-	header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+	# The dashboard sends this header itself; `>` keeps it to one copy.
+	header >Strict-Transport-Security "max-age=63072000; includeSubDomains"
 
 	# Legal texts, for a deployment that publishes any: whatever is bound at
 	# /srv/legal (ZM_LEGAL_DIR, empty by default) is served here, so a file
@@ -82,7 +85,7 @@
 	# over the internet.
 	respond /upload* 404
 
-	header Strict-Transport-Security "max-age=63072000; includeSubDomains"
+	header >Strict-Transport-Security "max-age=63072000; includeSubDomains"
 
 	reverse_proxy zm-docs:3200
 }

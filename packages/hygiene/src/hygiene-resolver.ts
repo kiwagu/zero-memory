@@ -8,6 +8,7 @@ import { createLogger } from '@workspace/logger';
 import { guardMemoryWrite } from '@workspace/memory';
 import {
   createServiceRoleClient,
+  createUserClient,
   readAllPages,
   type Client,
 } from '@workspace/persistence';
@@ -130,14 +131,39 @@ const META_LOOKUP_CHUNK = 100;
 
 /**
  * Owner-scoped resolution of review-queue conflicts, shared by the agent MCP
- * tools (single + bulk). Uses the service-role client but explicitly checks
- * ownership, so a caller only ever resolves their own conflicts. Every
- * resolution is reversible (supersede = invalidation) and audited.
+ * tools (single + bulk). Writes use the service-role client and check
+ * ownership explicitly, so a caller only ever resolves their own conflicts.
+ * Every resolution is reversible (supersede = invalidation) and audited.
+ *
+ * Reads that LIST the queue go through `reader`, which for an agent is the
+ * caller's own session: the queue's row policy admits only conflicts whose
+ * memories the caller owns, so a page limit counts the caller's conflicts
+ * rather than the whole instance's, and a bulk resolve never sees — or counts
+ * — anyone else's. Use {@link HygieneResolver.forCaller} at a tool boundary.
  */
 export class HygieneResolver {
   readonly #logger = createLogger('HygieneResolver');
 
-  constructor(private readonly client: Client = createServiceRoleClient()) {}
+  constructor(
+    private readonly client: Client = createServiceRoleClient(),
+    private readonly reader: Client = client
+  ) {}
+
+  /**
+   * A resolver acting for the signed-in caller: queue listings run under the
+   * caller's session, writes under the service role with explicit ownership
+   * checks. Refuses to run without a session rather than fall back to reading
+   * the whole instance.
+   */
+  static forCaller(accessToken: string | undefined): HygieneResolver {
+    if (!accessToken) {
+      throw new Error('No access token in the execution context.');
+    }
+    return new HygieneResolver(
+      createServiceRoleClient(),
+      createUserClient(accessToken)
+    );
+  }
 
   /** Resolve one pending conflict the caller owns. */
   async resolveOne(
@@ -258,7 +284,7 @@ export class HygieneResolver {
     // would leave rows pending while the count claims the queue was cleared.
     const list = (await readAllPages(
       (from, to) => {
-        let query = this.client
+        let query = this.reader
           .from('memory_review_queue')
           .select('id, memory_a, memory_b')
           .eq('status', 'pending');
@@ -310,7 +336,7 @@ export class HygieneResolver {
     const meta = new Map<string, MemoryMeta>();
     for (let i = 0; i < memIds.length; i += META_LOOKUP_CHUNK) {
       const chunk = memIds.slice(i, i + META_LOOKUP_CHUNK);
-      const { data: mems, error } = await this.client
+      const { data: mems, error } = await this.reader
         .from('memories')
         .select('id, owner_id, created_at')
         .in('id', chunk);
@@ -413,12 +439,11 @@ export class HygieneResolver {
       throw new Error(`restore ${memoryId} failed: ${error.message}`);
     }
 
-    // A lingering supersedes link would keep claiming the memory is replaced.
-    await this.client
-      .from('memory_links')
-      .delete()
-      .eq('dst', memoryId)
-      .eq('type', 'supersedes');
+    // A lingering supersedes link of the caller's would keep claiming the
+    // memory is replaced, so those go. A link from another member's memory is
+    // that member's statement and stays: restoring your memory does not get
+    // to erase what someone else recorded about it.
+    await this.#dropOwnSupersedesLinks(memoryId, ownerId);
 
     // Reopening a loop is a person saying "not done": the closure judge must
     // not close it again on the evidence they have just overruled.
@@ -575,7 +600,7 @@ export class HygieneResolver {
     ownerId: string,
     filter: ConflictFilter = {}
   ): Promise<ConflictView[]> {
-    let query = this.client
+    let query = this.reader
       .from('memory_review_queue')
       .select(QUEUE_COLUMNS)
       .eq('status', filter.status ?? 'pending')
@@ -596,7 +621,7 @@ export class HygieneResolver {
     ownerId: string,
     disputeId: string
   ): Promise<ConflictView | null> {
-    const { data: row, error } = await this.client
+    const { data: row, error } = await this.reader
       .from('memory_review_queue')
       .select(QUEUE_COLUMNS)
       .eq('id', disputeId)
@@ -609,6 +634,51 @@ export class HygieneResolver {
     }
     const [view] = await this.#assemble([row as QueueDetailRow], ownerId);
     return view ?? null;
+  }
+
+  /**
+   * Deletes the `supersedes` links pointing at `memoryId` whose source memory
+   * the caller owns, and only those.
+   */
+  async #dropOwnSupersedesLinks(
+    memoryId: string,
+    ownerId: string
+  ): Promise<void> {
+    const { data: links, error: linkError } = await this.client
+      .from('memory_links')
+      .select('src')
+      .eq('dst', memoryId)
+      .eq('type', 'supersedes');
+    if (linkError) {
+      throw new Error(`restore link lookup failed: ${linkError.message}`);
+    }
+    const sources = [...new Set((links ?? []).map((link) => link.src))];
+    if (sources.length === 0) {
+      return;
+    }
+    const { data: owned, error: ownerError } = await this.client
+      .from('memories')
+      .select('id')
+      .in('id', sources)
+      .eq('owner_id', ownerId);
+    if (ownerError) {
+      throw new Error(
+        `restore link owner lookup failed: ${ownerError.message}`
+      );
+    }
+    const ownSources = (owned ?? []).map((memory) => memory.id);
+    if (ownSources.length === 0) {
+      return;
+    }
+    const { error } = await this.client
+      .from('memory_links')
+      .delete()
+      .eq('dst', memoryId)
+      .eq('type', 'supersedes')
+      .in('src', ownSources);
+    if (error) {
+      throw new Error(`restore link cleanup failed: ${error.message}`);
+    }
   }
 
   /**
@@ -633,7 +703,7 @@ export class HygieneResolver {
     const details = new Map<string, MemoryDetail>();
     for (let i = 0; i < memIds.length; i += META_LOOKUP_CHUNK) {
       const chunk = memIds.slice(i, i + META_LOOKUP_CHUNK);
-      const { data, error } = await this.client
+      const { data, error } = await this.reader
         .from('memories')
         .select('id, owner_id, kind, scope, content, created_at')
         .in('id', chunk);
