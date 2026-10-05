@@ -22,18 +22,25 @@ watcher and the hooks on a machine (shared token store, keyed by server URL).
   wired to the file-backed provider; hand it to an SDK `Client`.
 - `runLogin(serverUrl)` — one-time interactive bootstrap: dynamic client
   registration + PKCE authorization code, capturing the redirect on a loopback
-  port, printing (and best-effort opening) the URL. Exposed as
-  `zero-memory-watcher login` and `bun scripts/zm-login.ts`.
+  port, printing (and best-effort opening) the URL. Each login sends a fresh
+  OAuth `state` and the loopback callback accepts only an answer that carries
+  it back; anything else is refused and the login keeps waiting. The page the
+  browser lands on is fixed plain text, never built from the request. Exposed
+  as `zero-memory-watcher login` and `bun scripts/zm-login.ts`.
+- `callbackOutcome(url, expectedState)` — the callback's decision for one
+  request, separated out so it is testable without a socket.
 - `FileOAuthProvider` — the `OAuthClientProvider` implementation.
 - `OAuthStateStore`, `defaultStatePath`, `oauthEntrySchema`, `oauthStateSchema`
   — the token store and its zod contracts.
 
 ## Token store
 
-State lives at `${XDG_STATE_HOME:-~/.local/state}/zero-memory/oauth.json`
-(written `0600`), a map of server URL → `{ redirectUri, clientInformation,
-tokens, codeVerifier }`. Reads never throw: a missing or corrupt file reads as
-"not logged in".
+State lives at `${XDG_STATE_HOME:-~/.local/state}/zero-memory/oauth.json`, a
+map of server URL → `{ redirectUri, clientInformation, tokens, codeVerifier }`.
+Every write replaces the file whole: a temporary file created `0600` is renamed
+over it, so a file that once had wider permissions is narrowed on the next
+write and a reader never sees half of one. Reads never throw: a missing or
+corrupt file reads as "not logged in".
 
 ## Environment variables
 

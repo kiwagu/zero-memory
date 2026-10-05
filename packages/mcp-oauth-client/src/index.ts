@@ -1,7 +1,8 @@
 export { createAuthedTransport } from './mcp-client.js';
 export { FileOAuthProvider } from './file-oauth-provider.js';
 export type { FileOAuthProviderOptions } from './file-oauth-provider.js';
-export { runLogin } from './login.js';
+export { callbackOutcome, runLogin } from './login.js';
+export type { CallbackOutcome } from './login.js';
 export {
   defaultStatePath,
   OAuthStateStore,
