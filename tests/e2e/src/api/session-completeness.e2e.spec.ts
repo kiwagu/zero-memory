@@ -4,7 +4,9 @@
  * the database API and through the memory server — once it has given the code,
  * or when the authorization server opened it for an agent and recorded it. A
  * person's own sign-in that has not given the code sees nothing and changes
- * nothing, and an unrecorded first-level session is treated the same way.
+ * nothing, and an unrecorded first-level session is treated the same way. A
+ * session that has ended — signed out, or revoked with its agent — reaches
+ * nothing either, though its token has not expired yet.
  */
 import { createClient, type Session } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
@@ -12,6 +14,7 @@ import { expect, test } from '@playwright/test';
 import { e2eEnv } from '../helpers/env.js';
 import { McpTestClient } from '../helpers/mcp.js';
 import { claimsOf, enrollTotp } from '../helpers/mfa.js';
+import { insertTestClient } from '../helpers/oauth-client.js';
 import {
   passwordGrantToken,
   provisionE2EUser,
@@ -53,7 +56,7 @@ const recordAgentSession = async (session: Session, userId: string) => {
     .insert({
       session_id: claimsOf(session.access_token).session_id as string,
       user_id: userId,
-      client_id: null,
+      client_id: await insertTestClient('completeness'),
     });
   if (error) {
     throw new Error(`recording the agent session failed: ${error.message}`);
@@ -91,6 +94,7 @@ const assuranceOf = async (accessToken: string) => {
     aal: string;
     verified_factors: number;
     agent: boolean;
+    live: boolean;
     complete: boolean;
   };
 };
@@ -126,6 +130,7 @@ test.describe('a session reaches the data only once it is complete', () => {
       aal: 'aal2',
       verified_factors: 1,
       agent: false,
+      live: true,
       complete: true,
     });
     const { data: profile } = await userRestClient(aal2Token)
@@ -234,5 +239,34 @@ test.describe('a session reaches the data only once it is complete', () => {
       complete: true,
     });
     expect((await mcpInitialize(token)).status).toBe(200);
+  });
+
+  test('@smoke a session that has ended reaches nothing while its token is still valid', async () => {
+    const plain = await provisionE2EUser(
+      `completeness-ended-${Date.now()}@zm.e2e`
+    );
+    const token = await passwordGrantToken(plain);
+    const { data: before } = await userRestClient(token)
+      .from('profiles')
+      .select('id')
+      .eq('user_id', plain.id);
+    expect(before).toHaveLength(1);
+
+    // Signed out on the server, the way a sign-out elsewhere, a password
+    // change or a revoked agent ends a session. The token itself has not
+    // expired and still verifies.
+    const { error } = await admin().auth.admin.signOut(token, 'local');
+    expect(error).toBeNull();
+
+    expect(await assuranceOf(token)).toMatchObject({
+      live: false,
+      complete: false,
+    });
+    const { data: after } = await userRestClient(token)
+      .from('profiles')
+      .select('id')
+      .eq('user_id', plain.id);
+    expect(after).toEqual([]);
+    expect((await mcpInitialize(token)).status).toBe(401);
   });
 });

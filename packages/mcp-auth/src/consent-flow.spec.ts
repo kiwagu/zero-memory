@@ -408,28 +408,6 @@ describe('deciding', () => {
     });
   });
 
-  it('a consent recorded before return addresses were kept asks once more', async () => {
-    const { deps, clientId } = await setup();
-    const first = await start(deps, clientId);
-    await handleConsentDecision(deps, {
-      authorizationId: first,
-      authorization: BEARER.alice,
-      body: { decision: 'approve' },
-    });
-    const recorded = await deps.store.findConsent(ALICE, clientId);
-    vi.spyOn(deps.store, 'findConsent').mockResolvedValueOnce({
-      scope: recorded?.scope ?? '',
-      redirectUri: null,
-    });
-    const second = await start(deps, clientId);
-    const read = await handleAuthorizationRead(deps, {
-      authorizationId: second,
-      authorization: BEARER.alice,
-      screenless: true,
-    });
-    expect(read.body).toHaveProperty('authorization_id', second);
-  });
-
   it('denial returns access_denied to the client and records no consent', async () => {
     const { deps, auth, clientId } = await setup();
     const id = await start(deps, clientId);

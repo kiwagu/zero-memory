@@ -275,9 +275,7 @@ export class SupabaseOAuthStore implements IOAuthStore {
     if (error) {
       throw new Error(`Failed to load consent: ${error.message}`);
     }
-    return data
-      ? { scope: data.scope, redirectUri: data.redirect_uri ?? null }
-      : null;
+    return data ? { scope: data.scope, redirectUri: data.redirect_uri } : null;
   }
 
   async upsertConsent(

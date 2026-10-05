@@ -291,15 +291,13 @@ const authenticate = async (
  * tell a genuine client from one that merely took its name, so an approval
  * given for one address never carries over to another the same client
  * registered. Loopback addresses compare without the port, as registration
- * does. A consent recorded before addresses were kept covers nothing; the
- * client asks once more and the address is recorded then.
+ * does.
  */
 const consentCovers = (
   consent: OAuthConsentRecord,
   authorization: OAuthAuthorizationRecord
 ): boolean => {
   if (
-    consent.redirectUri === null ||
     !isRegisteredRedirectUri(authorization.redirectUri, [consent.redirectUri])
   ) {
     return false;

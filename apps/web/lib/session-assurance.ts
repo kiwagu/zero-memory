@@ -6,14 +6,17 @@ import { safeNext } from './safe-next';
  * The calling session's standing, as the database states it: the assurance
  * level of its token, how many verified factors the account has (every type,
  * counted the same way the memory server counts them), whether the
- * authorization server opened the session for an agent, and whether it may
- * reach the data at all. Pure helpers only, so the request proxy can use
- * them without pulling in the server-only modules.
+ * authorization server opened the session for an agent, whether the session
+ * still exists (its token outlives a sign-out or a revocation by up to an
+ * hour, but reaches nothing), and whether it may reach the data at all. Pure
+ * helpers only, so the request proxy can use them without pulling in the
+ * server-only modules.
  */
 export const sessionAssuranceSchema = z.object({
   aal: z.string(),
   verified_factors: z.number().int().nonnegative(),
   agent: z.boolean(),
+  live: z.boolean(),
   complete: z.boolean(),
 });
 
@@ -48,6 +51,9 @@ export const AGENT_SESSION_REFUSAL =
 /** The answer a request made by code gets while the session owes the code. */
 export const SECOND_FACTOR_REFUSAL =
   'Enter the code from your authenticator app first.';
+
+/** The answer a request made by code gets once its session has ended. */
+export const SESSION_ENDED = 'Your session has ended. Sign in again.';
 
 /** The answer a request gets when the session cannot be checked. */
 export const ASSURANCE_UNAVAILABLE =

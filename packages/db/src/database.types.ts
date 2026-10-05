@@ -11,19 +11,19 @@ export type Database = {
     Tables: {
       agent_sessions: {
         Row: {
-          client_id: string | null;
+          client_id: string;
           created_at: string;
           session_id: string;
           user_id: string;
         };
         Insert: {
-          client_id?: string | null;
+          client_id: string;
           created_at?: string;
           session_id: string;
           user_id: string;
         };
         Update: {
-          client_id?: string | null;
+          client_id?: string;
           created_at?: string;
           session_id?: string;
           user_id?: string;
@@ -1283,7 +1283,7 @@ export type Database = {
         Row: {
           client_id: string;
           granted_at: string;
-          redirect_uri: string | null;
+          redirect_uri: string;
           revoked_at: string | null;
           scope: string;
           user_id: string;
@@ -1291,7 +1291,7 @@ export type Database = {
         Insert: {
           client_id: string;
           granted_at?: string;
-          redirect_uri?: string | null;
+          redirect_uri: string;
           revoked_at?: string | null;
           scope: string;
           user_id: string;
@@ -1299,7 +1299,7 @@ export type Database = {
         Update: {
           client_id?: string;
           granted_at?: string;
-          redirect_uri?: string | null;
+          redirect_uri?: string;
           revoked_at?: string | null;
           scope?: string;
           user_id?: string;
@@ -2336,6 +2336,17 @@ export type Database = {
         };
         Returns: Json;
       };
+      connected_agents: {
+        Args: { p_user_id: string };
+        Returns: {
+          client_id: string;
+          client_name: string;
+          granted_at: string;
+          last_used_at: string;
+          redirect_uri: string;
+          sessions: number;
+        }[];
+      };
       create_scope: { Args: { p_scope: unknown }; Returns: undefined };
       dashboard_activity: {
         Args: {
@@ -2707,6 +2718,10 @@ export type Database = {
       resolve_scope_member_candidate: {
         Args: { p_email: string; p_scope: unknown };
         Returns: string;
+      };
+      revoke_connected_agent: {
+        Args: { p_client_id: string; p_user_id: string };
+        Returns: Json;
       };
       revoke_provider_credential: {
         Args: { p_subject_id: string };

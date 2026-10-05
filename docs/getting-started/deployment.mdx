@@ -257,7 +257,11 @@ second factor. Agents keep working: the session each one receives from the
 consent screen is recorded by the authorization server as an agent's at the
 moment it is opened, and a recorded session is complete without a code.
 Turning two-factor on ends the agent sessions opened before it, so each
-connected agent authorizes once more. The code is also what stops an agent
+connected agent authorizes once more. A session reaches the data only while
+it exists: once it ends — signed out, ended by a password change or a new
+factor, or revoked with its agent under Connected agents in Settings — its
+token is refused by the memory server and shown no row by the database, even
+before it expires, and the dashboard sends that browser to sign in. The code is also what stops an agent
 from acting as the person where only the person should: once an account has
 a factor, Auth refuses a session without the code a password or email change
 and a new factor, and the dashboard refuses an agent's session everywhere. On

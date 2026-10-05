@@ -10,17 +10,18 @@
  * Each test uses its own fresh account, so the consents one test stores never
  * let another skip its screen.
  */
-import { createHash, randomBytes } from 'node:crypto';
-import { createServer, type Server } from 'node:http';
+import type { Server } from 'node:http';
 
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { e2eEnv } from '../helpers/env.js';
+import {
+  authorizeRequest as authorizeFor,
+  awaitRouteCooldown,
+  loopbackRedirectUri,
+  registerClient as registerFor,
+  startLoopbackListener,
+} from '../helpers/oauth-client.js';
 import {
   passwordGrantToken,
   provisionE2EUser,
@@ -28,50 +29,18 @@ import {
 } from '../helpers/users.js';
 
 const LISTENER_PORT = 45790;
-const REDIRECT_URI = `http://127.0.0.1:${LISTENER_PORT}/callback`;
+const REDIRECT_URI = loopbackRedirectUri(LISTENER_PORT);
 
-const registerClient = async (
-  request: APIRequestContext,
+const registerClient = (
+  request: Parameters<typeof registerFor>[0],
   clientName: string,
   redirectUri = REDIRECT_URI
-): Promise<string> => {
-  const response = await request.post(`${e2eEnv.serverUrl}/oauth/register`, {
-    data: {
-      client_name: clientName,
-      redirect_uris: [redirectUri],
-      token_endpoint_auth_method: 'none',
-    },
-  });
-  expect(response.status()).toBe(201);
-  return (await response.json()).client_id as string;
-};
+) => registerFor(request, clientName, redirectUri);
 
-/** A fresh authorization request, as a client would open it. */
-const authorizeRequest = (clientId: string, redirectUri = REDIRECT_URI) => {
-  const verifier = randomBytes(32).toString('base64url');
-  const state = randomBytes(8).toString('base64url');
-  const url = new URL(`${e2eEnv.serverUrl}/oauth/authorize`);
-  url.search = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    code_challenge: createHash('sha256').update(verifier).digest('base64url'),
-    code_challenge_method: 'S256',
-    state,
-  }).toString();
-  return { url: url.toString(), verifier, state };
-};
+const authorizeRequest = (clientId: string, redirectUri = REDIRECT_URI) =>
+  authorizeFor(clientId, redirectUri);
 
-/** The client's loopback listener: whatever reaches it is answered with 200. */
-const startListener = (): Promise<Server> =>
-  new Promise((resolve, reject) => {
-    const server = createServer((_request, response) => {
-      response.writeHead(200, { 'content-type': 'text/plain' });
-      response.end('ok');
-    });
-    server.once('error', reject);
-    server.listen(LISTENER_PORT, '127.0.0.1', () => resolve(server));
-  });
+const startListener = () => startLoopbackListener(LISTENER_PORT);
 
 const signIn = async (page: Page, user: E2EUser) => {
   await page.getByTestId('auth-login-email').fill(user.email);
@@ -85,7 +54,12 @@ const freshUser = (label: string, acceptedTerms = true) =>
 test.describe('agent authorization in the browser', () => {
   let listener: Server | undefined;
 
-  test.beforeAll(async () => {
+  test.beforeAll(async ({ request }) => {
+    // The API spec's rate-limit burst may still hold the token route's
+    // window; start in a fresh one.
+    test.setTimeout(90_000);
+    await awaitRouteCooldown(request, '/oauth/register');
+    await awaitRouteCooldown(request, '/oauth/token');
     listener = await startListener();
   });
 

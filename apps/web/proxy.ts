@@ -6,6 +6,7 @@ import {
   AGENT_SESSION_REFUSAL,
   ASSURANCE_UNAVAILABLE,
   SECOND_FACTOR_REFUSAL,
+  SESSION_ENDED,
   assuranceGap,
   sessionAssuranceSchema,
 } from './lib/session-assurance';
@@ -20,6 +21,22 @@ import { serverSupabaseEnvironment } from './lib/supabase/env';
 const navigates = (request: NextRequest): boolean =>
   request.headers.get('sec-fetch-mode') === 'navigate' ||
   (request.headers.get('accept') ?? '').includes('text/html');
+
+/**
+ * The login page, keeping where the visitor was going: after sign-in the
+ * login page sends them back there. The dashboard root is the default and
+ * needs no parameter.
+ */
+const loginUrlFor = (request: NextRequest): URL => {
+  const destination = request.nextUrl.pathname + request.nextUrl.search;
+  const url = request.nextUrl.clone();
+  url.pathname = '/login';
+  url.search = '';
+  if (destination !== '/') {
+    url.searchParams.set('next', destination);
+  }
+  return url;
+};
 
 /**
  * Session refresh + route protection. Everything except /login requires a
@@ -75,16 +92,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/auth/');
 
   if (!isAuthenticated && !isPublic) {
-    // Keep where the guest was going: after sign-in the login page sends them
-    // back there. The dashboard root is the default and needs no parameter.
-    const destination = pathname + request.nextUrl.search;
-    const url = request.nextUrl.clone();
-    url.pathname = '/login';
-    url.search = '';
-    if (destination !== '/') {
-      url.searchParams.set('next', destination);
-    }
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(loginUrlFor(request));
   }
 
   if (isAuthenticated && isLoginPage) {
@@ -112,6 +120,19 @@ export async function proxy(request: NextRequest) {
     const assurance = error ? null : sessionAssuranceSchema.safeParse(data);
     if (!assurance?.success) {
       return new NextResponse(ASSURANCE_UNAVAILABLE, { status: 503 });
+    }
+    // The session behind a still-valid token is gone: signed out elsewhere,
+    // ended by a password change or a new second factor. It reaches no data,
+    // so it is treated as signed out rather than shown an empty dashboard.
+    // Clearing this browser's cookies first keeps /login from sending the
+    // person straight back here.
+    if (!assurance.data.live) {
+      await supabase.auth.signOut({ scope: 'local' });
+      const ended = navigates(request)
+        ? NextResponse.redirect(loginUrlFor(request))
+        : new NextResponse(SESSION_ENDED, { status: 401 });
+      response.cookies.getAll().forEach((cookie) => ended.cookies.set(cookie));
+      return ended;
     }
     if (assurance.data.agent) {
       return new NextResponse(AGENT_SESSION_REFUSAL, { status: 403 });

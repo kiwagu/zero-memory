@@ -20,6 +20,10 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { e2eEnv } from '../helpers/env.js';
 import { McpTestClient } from '../helpers/mcp.js';
+import {
+  awaitRouteCooldown,
+  registerClient as registerFor,
+} from '../helpers/oauth-client.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
 
@@ -32,46 +36,11 @@ const pkcePair = (): { verifier: string; challenge: string } => {
   return { verifier, challenge };
 };
 
-/**
- * A previous run's rate-limit burst may still hold the route's window. Probe
- * with a harmless invalid request and wait out Retry-After once, so reruns
- * within the window pass instead of flaking on 429.
- */
-const awaitRouteCooldown = async (
-  request: APIRequestContext,
-  path: string,
-  method: 'get' | 'post' = 'post'
-): Promise<void> => {
-  const probe =
-    method === 'get'
-      ? await request.get(`${base}${path}`, { maxRedirects: 0 })
-      : await request.post(`${base}${path}`, { data: {} });
-  if (probe.status() === 429) {
-    const retryAfter = Number.parseInt(
-      probe.headers()['retry-after'] ?? '60',
-      10
-    );
-    await new Promise((resolve) =>
-      setTimeout(resolve, (retryAfter + 1) * 1000)
-    );
-  }
-};
-
-const registerClient = async (
+const registerClient = (
   request: APIRequestContext,
   clientName: string,
   redirectUri = REDIRECT_URI
-): Promise<string> => {
-  const response = await request.post(`${base}/oauth/register`, {
-    data: {
-      client_name: clientName,
-      redirect_uris: [redirectUri],
-      token_endpoint_auth_method: 'none',
-    },
-  });
-  expect(response.status()).toBe(201);
-  return (await response.json()).client_id as string;
-};
+): Promise<string> => registerFor(request, clientName, redirectUri);
 
 /**
  * GET /oauth/authorize, the browser's first stop: answered with a hand-off to

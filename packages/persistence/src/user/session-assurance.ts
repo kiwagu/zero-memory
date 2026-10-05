@@ -5,13 +5,16 @@ import type { Client } from '../supabase.client.js';
 /**
  * The calling session's standing, as the database states it in one answer:
  * the assurance level of its token, how many verified factors its account
- * has, whether the authorization server opened it for an agent, and whether
- * it may reach the data at all.
+ * has, whether the authorization server opened it for an agent, whether the
+ * session still exists (a revoked or signed-out session's token stays valid
+ * until it expires, but reaches nothing), and whether it may reach the data
+ * at all.
  */
 export const sessionAssuranceSchema = z.object({
   aal: z.string(),
   verified_factors: z.number().int().nonnegative(),
   agent: z.boolean(),
+  live: z.boolean(),
   complete: z.boolean(),
 });
 

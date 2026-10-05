@@ -401,14 +401,6 @@ test.describe('account lifecycle: hard_delete_user', () => {
       memory_id: m1,
       verdict: 'current',
     });
-    // A session the authorization server opened for one of the person's
-    // agents. Keyed by Auth's ids, so the map excludes it; it goes with the
-    // Auth user, which the cascade check below proves rather than assumes.
-    await insertOrThrow(db, 'agent_sessions', {
-      session_id: randomUUID(),
-      user_id: departing.user.id,
-      client_id: null,
-    });
     await insertOrThrow(db, 'portability_candidates', {
       owner_id: userId,
       memory_id: m2,
@@ -448,22 +440,23 @@ test.describe('account lifecycle: hard_delete_user', () => {
         readonly row: Record<string, unknown>;
       }
     > = {
-      // Another person's agent session: the departing account's erasure must
-      // not touch it. The seeded user A outlives every spec of the run.
-      agent_sessions: {
-        key: { session_id: '00000000-0000-4000-8000-00000000e2e1' },
-        row: {
-          session_id: '00000000-0000-4000-8000-00000000e2e1',
-          user_id: seeds.userA.id,
-          client_id: null,
-        },
-      },
       oauth_clients: {
         key: { client_id: 'oac_e2eerasezzzz1234.0000000000' },
         row: {
           client_id: 'oac_e2eerasezzzz1234.0000000000',
           client_name: 'e2e erasure marker',
           redirect_uris: ['https://e2e.invalid/callback'],
+        },
+      },
+      // Another person's agent session: the departing account's erasure must
+      // not touch it. The seeded user A outlives every spec of the run. After
+      // the marker client, which it names and which must exist first.
+      agent_sessions: {
+        key: { session_id: '00000000-0000-4000-8000-00000000e2e1' },
+        row: {
+          session_id: '00000000-0000-4000-8000-00000000e2e1',
+          user_id: seeds.userA.id,
+          client_id: 'oac_e2eerasezzzz1234.0000000000',
         },
       },
       ranking_config: {
@@ -528,6 +521,15 @@ test.describe('account lifecycle: hard_delete_user', () => {
       user_id: userId,
       client_id: markerClientId,
       scope: 'mcp:read mcp:write',
+      redirect_uri: 'https://e2e.invalid/callback',
+    });
+    // A session the authorization server opened for one of the person's
+    // agents. Keyed by Auth's ids, so the map excludes it; it goes with the
+    // Auth user, which the cascade check below proves rather than assumes.
+    await insertOrThrow(db, 'agent_sessions', {
+      session_id: randomUUID(),
+      user_id: departing.user.id,
+      client_id: markerClientId,
     });
 
     // ---- The cross-user half of erasure.

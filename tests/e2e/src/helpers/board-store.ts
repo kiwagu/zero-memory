@@ -4,6 +4,7 @@
  * scope made the way an agent makes one.
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 import { expect } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -90,24 +91,39 @@ export const psqlInBackground = (
 /**
  * One statement as a signed-in user, with session settings of its own: the
  * way to read what a setting changes without touching the database default.
- * The whole string runs as one implicit transaction, so `set local` ends
- * with it. psql prints every statement's result, so the answer is the last
- * line.
+ * A real token always names its session, and a session reaches the data only
+ * while it exists, so the statement runs under a session opened for it here.
+ * Everything runs in one transaction that is rolled back, so neither the
+ * session nor `set local` outlives it. psql prints every statement's result
+ * and the rollback's tag last, so the answer is the line before it.
  */
 export const asOwnerSql = (
   authUserId: string,
   statement: string,
   settings: Record<string, string> = {}
 ): string => {
-  const claims = JSON.stringify({ sub: authUserId, role: 'authenticated' });
+  const sessionId = randomUUID();
+  const claims = JSON.stringify({
+    sub: authUserId,
+    role: 'authenticated',
+    session_id: sessionId,
+  });
   const sets = Object.entries(settings)
     .map(([key, value]) => `set local ${key} = '${value}';`)
     .join(' ');
   const output = psql(
-    `${sets} select set_config('request.jwt.claims', '${claims}', true); ` +
-      `set local role authenticated; ${statement}`
+    `begin; ${sets} ` +
+      `insert into auth.sessions (id, user_id, created_at, updated_at) ` +
+      `values ('${sessionId}', '${authUserId}', now(), now()); ` +
+      `select set_config('request.jwt.claims', '${claims}', true); ` +
+      `set local role authenticated; ${statement}; rollback;`
   );
-  return output.split('\n').at(-1) ?? '';
+  return (
+    output
+      .split('\n')
+      .filter((line) => line !== 'ROLLBACK')
+      .at(-1) ?? ''
+  );
 };
 
 /**
