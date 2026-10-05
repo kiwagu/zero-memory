@@ -78,6 +78,111 @@ export const awaitRouteCooldown = async (
   }
 };
 
+/** A PKCE pair (S256), as a client makes one per authorization. */
+export const pkcePair = (): { verifier: string; challenge: string } => {
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
+};
+
+/**
+ * GET /oauth/authorize, the browser's first stop: answered with a hand-off to
+ * the dashboard's consent page carrying only the parked request's id.
+ */
+export const startAuthorization = async (
+  request: APIRequestContext,
+  clientId: string,
+  challenge: string,
+  redirectUri: string
+): Promise<{ state: string; authorizationId: string }> => {
+  const state = randomBytes(8).toString('base64url');
+  const response = await request.get(`${e2eEnv.serverUrl}/oauth/authorize`, {
+    maxRedirects: 0,
+    params: {
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state,
+    },
+  });
+  expect(response.status()).toBe(302);
+  const location = new URL(response.headers()['location'] ?? '');
+  expect(location.origin + location.pathname).toBe(
+    `${e2eEnv.webUrl}/oauth/consent`
+  );
+  expect([...location.searchParams.keys()]).toEqual(['authorization_id']);
+  const authorizationId = location.searchParams.get('authorization_id') ?? '';
+  expect(authorizationId).toMatch(/^oaa_/);
+  return { state, authorizationId };
+};
+
+export const bearer = (token: string) => ({
+  authorization: `Bearer ${token}`,
+});
+
+/**
+ * The read the dashboard makes for the consent screen. `screenless` is what
+ * the dashboard adds when the browser arrived on its own, as a client opening
+ * the authorize URL makes it; only then may an approved client skip the screen.
+ */
+export const readAuthorization = (
+  request: APIRequestContext,
+  token: string,
+  authorizationId: string,
+  options: { screenless?: boolean } = {}
+) =>
+  request.get(
+    `${e2eEnv.serverUrl}/oauth/authorizations/${authorizationId}${
+      options.screenless ? '?screenless=1' : ''
+    }`,
+    { headers: bearer(token) }
+  );
+
+/** The person's decision on the consent screen, as the dashboard sends it. */
+export const decide = (
+  request: APIRequestContext,
+  token: string,
+  authorizationId: string,
+  decision: 'approve' | 'deny'
+) =>
+  request.post(
+    `${e2eEnv.serverUrl}/oauth/authorizations/${authorizationId}/consent`,
+    { headers: bearer(token), data: { decision } }
+  );
+
+/** The client's redirect URI as the consent API returned it. */
+export const redirectOf = async (response: {
+  json(): Promise<unknown>;
+}): Promise<URL> =>
+  new URL(((await response.json()) as { redirect_url: string }).redirect_url);
+
+/** The client's code redemption at the token endpoint. */
+export const redeem = (
+  request: APIRequestContext,
+  {
+    code,
+    verifier,
+    clientId,
+    redirectUri,
+  }: {
+    code: string;
+    verifier: string;
+    clientId: string;
+    redirectUri: string;
+  }
+) =>
+  request.post(`${e2eEnv.serverUrl}/oauth/token`, {
+    form: {
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: verifier,
+      client_id: clientId,
+      redirect_uri: redirectUri,
+    },
+  });
+
 /** The client's loopback listener: whatever reaches it is answered with 200. */
 export const startLoopbackListener = (port: number): Promise<Server> =>
   new Promise((resolve, reject) => {

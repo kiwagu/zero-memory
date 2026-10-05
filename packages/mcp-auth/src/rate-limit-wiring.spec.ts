@@ -8,7 +8,7 @@ import { mcpAuthPlugin } from './plugin.js';
 const auth: IAuthGateway = {
   verifyAccessToken: async () => null,
   mintSession: async () => null,
-  refreshSession: async () => null,
+  refreshSession: async () => ({ kind: 'ended' }),
   revokeSession: async () => undefined,
 };
 

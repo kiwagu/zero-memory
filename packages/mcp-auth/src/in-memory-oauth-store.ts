@@ -1,7 +1,10 @@
 import { entityIdSchemas } from '@workspace/contracts';
 
 import type {
+  AgentGrantRecord,
+  AgentGrantRenewal,
   IOAuthStore,
+  NewAgentGrant,
   NewOAuthAuthorization,
   OAuthAuthorizationRecord,
   OAuthAuthorizationStatus,
@@ -32,6 +35,8 @@ export class InMemoryOAuthStore implements IOAuthStore {
     string,
     { authUserId: string; clientId: string }
   >();
+  readonly #grants = new Map<string, AgentGrantRecord>();
+  readonly #fingerprints = new Map<string, string>();
 
   async insertClient(
     client: Omit<OAuthClientRecord, 'clientId'>
@@ -146,6 +151,88 @@ export class InMemoryOAuthStore implements IOAuthStore {
       authUserId: session.authUserId,
       clientId: session.clientId,
     });
+  }
+
+  async forgetAgentSession(sessionId: string): Promise<void> {
+    this.#agentSessions.delete(sessionId);
+  }
+
+  async revokeClientGrants(
+    authUserId: string,
+    clientId: string,
+    now: Date
+  ): Promise<void> {
+    for (const grant of this.#grants.values()) {
+      if (
+        grant.authUserId === authUserId &&
+        grant.clientId === clientId &&
+        grant.revokedAt === null
+      ) {
+        grant.revokedAt = now;
+      }
+    }
+  }
+
+  async insertGrant(grant: NewAgentGrant): Promise<AgentGrantRecord> {
+    const record: AgentGrantRecord = {
+      ...grant,
+      id: entityIdSchemas.agent_grant.create(),
+      generation: 0,
+      rotatedAt: new Date(),
+      revokedAt: null,
+    };
+    this.#grants.set(record.id, record);
+    return { ...record };
+  }
+
+  async findGrant(id: string): Promise<AgentGrantRecord | null> {
+    const grant = this.#grants.get(id);
+    return grant ? { ...grant } : null;
+  }
+
+  async advanceGrant(
+    id: string,
+    fromGeneration: number,
+    renewal: AgentGrantRenewal,
+    now: Date
+  ): Promise<boolean> {
+    const grant = this.#grants.get(id);
+    if (
+      !grant ||
+      grant.revokedAt !== null ||
+      grant.generation !== fromGeneration
+    ) {
+      return false;
+    }
+    Object.assign(grant, renewal, {
+      generation: fromGeneration + 1,
+      rotatedAt: now,
+    });
+    return true;
+  }
+
+  async revokeGrant(id: string, now: Date): Promise<void> {
+    const grant = this.#grants.get(id);
+    if (grant && grant.revokedAt === null) {
+      grant.revokedAt = now;
+    }
+  }
+
+  async credentialsFingerprint(authUserId: string): Promise<string | null> {
+    return this.#fingerprints.get(authUserId) ?? 'initial-credentials';
+  }
+
+  /** Makes the account's credentials read as changed, for tests. */
+  changeCredentials(authUserId: string): void {
+    this.#fingerprints.set(
+      authUserId,
+      `changed-${Date.now()}-${Math.random()}`
+    );
+  }
+
+  /** Withdraws the person's consent, for tests. */
+  withdrawConsent(authUserId: string, clientId: string): void {
+    this.#consents.delete(`${authUserId} ${clientId}`);
   }
 
   /** The agent sessions recorded so far, for tests. */

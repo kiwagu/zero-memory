@@ -98,16 +98,17 @@ works.
   agents and a password reset; removing the app asks for a code from it.
   Agents you have allowed keep working without a code: the session each one
   received from the consent screen is on record as an agent's. Turning
-  two-factor on signs out the agents connected before it, so each of them
-  authorizes once more and gets a session of its own. Account deletion
-  happens only here — the memory server offers agents no tool for it — and
-  needs two-factor turned on and the code given in this session, besides the
-  exact address. An agent you allow acts with a real session of your account,
-  so what keeps it from deleting the account, changing your password or
-  connecting more agents is a code it does not have, and the dashboard
-  refuses an agent's session outright: turn two-factor on before you connect
-  agents. On an account without it, an agent's session could set up a factor
-  of its own.
+  two-factor on, or changing your password, signs out the agents connected
+  before it, so each of them authorizes once more and gets a session of its
+  own; giving the code when you sign in does not sign them out. Account
+  deletion happens only here — the memory server offers agents no tool for
+  it — and needs two-factor turned on and the code given in this session,
+  besides the exact address. An agent you allow acts with a real session of
+  your account, so what keeps it from deleting the account, changing your
+  password or connecting more agents is a code it does not have, and the
+  dashboard refuses an agent's session outright: turn two-factor on before
+  you connect agents. On an account without it, an agent's session could set
+  up a factor of its own.
 
 Activity and Settings sit at the bottom of the sidebar; the rest are the
 primary navigation.

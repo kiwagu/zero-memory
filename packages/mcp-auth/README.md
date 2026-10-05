@@ -25,13 +25,20 @@ adapters. Depends on `elysia`, `@supabase/supabase-js`, `@workspace/db`,
    bearer. The first signed-in reader binds the request; anyone else gets 404.
 4. The person allows or denies on the consent screen
    (`POST /oauth/authorizations/:id/consent`). Allowing mints a separate
-   Supabase session for the agent, parks it behind a one-time code, and
-   remembers the consent; the answer is the client's redirect URI with the
-   code (or `error=access_denied`).
+   Supabase session for the agent, opens a grant for it, parks both behind a
+   one-time code, and remembers the consent; the answer is the client's
+   redirect URI with the code (or `error=access_denied`).
 5. A later authorization of a client the person already approved is answered
    at step 3 with that redirect, with no screen.
-6. The client redeems the code at `POST /oauth/token`; refresh tokens rotate
-   through the same endpoint.
+6. The client redeems the code at `POST /oauth/token` for the agent's
+   Supabase access token and a refresh token of the server's own.
+7. A refresh renews the grant: the token names the grant and its generation,
+   signed with the grant's secret, and only the latest generation renews it
+   (the one before is answered with the same pair for a minute, for two
+   refreshes that raced; anything older ends the grant). When Auth has ended
+   the agent's session — as it does with every weaker session when the person
+   gives a second factor — a new one is opened, unless the consent was
+   withdrawn or the account's password or verified factors changed since.
 
 The agent's session is its own: signing out of the dashboard does not end it,
 and it does not sign the person out of the dashboard.
@@ -46,9 +53,11 @@ and it does not sign the person out of the dashboard.
 - `unauthorizedResponse(issuer, description?)` / `buildWwwAuthenticate` —
   401 challenge pointing at the protected-resource metadata.
 - Ports: `IAuthGateway` (verify a bearer token, mint a session for a user,
-  refresh), `IOAuthStore` (clients, pending authorizations, consents and
-  one-time codes; single use and first-reader binding are enforced in the
-  store by conditional writes).
+  refresh), `IOAuthStore` (clients, pending authorizations, consents,
+  one-time codes and agent grants; single use, first-reader binding and one
+  winner per grant generation are enforced in the store by conditional
+  writes).
+- `grant-token.ts` — the refresh token format: `<grant id>~<generation>~<signature>`.
 - Adapters: `SupabaseAuthGateway`, `SupabaseOAuthStore` (service role — every
   table is deny-all under RLS), `InMemoryOAuthStore` (tests).
 - `oauth.schema.ts` — zod schemas for every request and response, including

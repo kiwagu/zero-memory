@@ -47,6 +47,10 @@ export const ENTITY_PREFIXES = {
   // parked while the person signs in to the dashboard and decides. Ours to
   // shape for the same reason as the client id.
   oauth_authorization: 'oaa',
+  // an agent's grant on our OAuth server: what a client holds once the person
+  // approved it, renewed on every refresh and ended with the agent. Its
+  // refresh token names it, so it is ours to shape like the client id.
+  agent_grant: 'agg',
   // MCP streamable-HTTP session id, minted by our transport (SoR rule), even
   // though it is ephemeral transport state.
   mcp_session: 'ses',

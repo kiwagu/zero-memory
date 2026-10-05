@@ -459,6 +459,22 @@ test.describe('account lifecycle: hard_delete_user', () => {
           client_id: 'oac_e2eerasezzzz1234.0000000000',
         },
       },
+      // Another person's agent grant, likewise untouched by the erasure.
+      agent_grants: {
+        key: { id: 'agg_e2eerasezzzz1234.0000000000' },
+        row: {
+          id: 'agg_e2eerasezzzz1234.0000000000',
+          user_id: seeds.userA.id,
+          client_id: 'oac_e2eerasezzzz1234.0000000000',
+          scope: 'mcp:read mcp:write',
+          token_secret: 'e2e-marker',
+          access_token: 'e2e-marker',
+          access_expires_at: '2099-01-01T00:00:00Z',
+          auth_refresh_token: 'e2e-marker',
+          session_id: '00000000-0000-4000-8000-00000000e2e1',
+          credentials_fingerprint: 'e2e-marker',
+        },
+      },
       ranking_config: {
         key: { kind: 'e2e-erase-untouched' },
         row: { kind: 'e2e-erase-untouched', weight: 1, half_life_days: 365 },
@@ -526,10 +542,23 @@ test.describe('account lifecycle: hard_delete_user', () => {
     // A session the authorization server opened for one of the person's
     // agents. Keyed by Auth's ids, so the map excludes it; it goes with the
     // Auth user, which the cascade check below proves rather than assumes.
+    const departingSessionId = randomUUID();
     await insertOrThrow(db, 'agent_sessions', {
-      session_id: randomUUID(),
+      session_id: departingSessionId,
       user_id: departing.user.id,
       client_id: markerClientId,
+    });
+    // And the grant that agent refreshes through, keyed the same way.
+    await insertOrThrow(db, 'agent_grants', {
+      user_id: departing.user.id,
+      client_id: markerClientId,
+      scope: 'mcp:read mcp:write',
+      token_secret: 'e2e-departing',
+      access_token: 'e2e-departing',
+      access_expires_at: '2099-01-01T00:00:00Z',
+      auth_refresh_token: 'e2e-departing',
+      session_id: departingSessionId,
+      credentials_fingerprint: 'e2e-departing',
     });
 
     // ---- The cross-user half of erasure.
@@ -809,6 +838,12 @@ test.describe('account lifecycle: hard_delete_user', () => {
       .eq('user_id', departing.user.id);
     expect(agentError).toBeNull();
     expect(agentRows, 'agent sessions of the erased account remain').toBe(0);
+    const { count: grantRows, error: grantError } = await db
+      .from('agent_grants')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', departing.user.id);
+    expect(grantError).toBeNull();
+    expect(grantRows, 'agent grants of the erased account remain').toBe(0);
 
     // The other user's rows are still here, with every reference to the erased
     // account severed rather than the row carried off with it.
