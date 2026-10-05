@@ -205,6 +205,72 @@ test.describe('two-factor authentication', () => {
     await expect(page.getByTestId('insights-page')).toBeVisible();
   });
 
+  test('@smoke the code step: centred cells, no button, Enter waits for six digits, cells dimmed while checked', async ({
+    page,
+  }) => {
+    const { user, secret, lastCode } = await userWithFactor('layout');
+    await signIn(page, user);
+    await expect(page).toHaveURL(/\/mfa\/verify$/);
+    const form = page.getByTestId('mfa-verify-form');
+    const field = page.getByTestId('mfa-verify-code');
+    await expect(field).toBeFocused();
+
+    // Nothing to press and no label over the cells: the digits are the step.
+    await expect(form.locator('button[type="submit"]')).toHaveCount(0);
+    await expect(form.locator('label')).toHaveCount(0);
+
+    // The six cells sit in the middle of the card, not at its left edge.
+    const slots = form.locator('[data-slot="input-otp-slot"]');
+    await expect(slots).toHaveCount(6);
+    const formBox = await form.boundingBox();
+    const firstBox = await slots.first().boundingBox();
+    const lastBox = await slots.last().boundingBox();
+    if (!formBox || !firstBox || !lastBox) {
+      throw new Error('the code step did not lay out');
+    }
+    const cellsCentre = (firstBox.x + lastBox.x + lastBox.width) / 2;
+    const formCentre = formBox.x + formBox.width / 2;
+    expect(Math.abs(cellsCentre - formCentre)).toBeLessThan(2);
+
+    // Enter reaches the form, but five digits are not a code: nothing is sent.
+    const code = await totpCode(secret, lastCode);
+    const checks: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/auth/v1/factors/')) {
+        checks.push(request.url());
+      }
+    });
+    await form.evaluate((element) => {
+      element.addEventListener('submit', () => {
+        element.setAttribute('data-entered', 'yes');
+      });
+    });
+    await page.keyboard.type(code.slice(0, 5), { delay: 30 });
+    await page.keyboard.press('Enter');
+    await expect(form).toHaveAttribute('data-entered', 'yes');
+    await expect(field).toHaveValue(code.slice(0, 5));
+    await expect(page.getByTestId('mfa-verify-error')).toBeHidden();
+    expect(checks).toEqual([]);
+
+    // While the code is checked the cells are dimmed and take no input.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route('**/auth/v1/factors/*/challenge', async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.keyboard.type(code.slice(5));
+    await expect(field).toBeDisabled();
+    const opacity = await form
+      .locator('[data-input-otp-container]')
+      .evaluate((element) => getComputedStyle(element).opacity);
+    expect(Number(opacity)).toBeLessThan(1);
+    release();
+    await expect(page.getByTestId('insights-page')).toBeVisible();
+  });
+
   test('@smoke cancelling the set-up leaves no factor', async ({ page }) => {
     const user = await freshUser('cancel');
     await signIn(page, user);

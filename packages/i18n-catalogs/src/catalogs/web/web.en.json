@@ -433,8 +433,6 @@
   "auth.mfa.title": "Two-factor authentication",
   "auth.mfa.description": "Enter the six-digit code from your authenticator app.",
   "auth.mfa.code": "Code",
-  "auth.mfa.verify": "Verify",
-  "auth.mfa.verifying": "Verifying…",
   "auth.mfa.signOut": "Can't get a code? Sign out",
   "auth.mfa.refused": "That code did not work. Wait for the next one and try again.",
   "auth.mfa.failed": "The code could not be checked right now. Try again.",

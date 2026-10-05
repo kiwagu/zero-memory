@@ -433,8 +433,6 @@
   "auth.mfa.title": "Autenticación en dos pasos",
   "auth.mfa.description": "Introduce el código de seis dígitos de tu aplicación de autenticación.",
   "auth.mfa.code": "Código",
-  "auth.mfa.verify": "Verificar",
-  "auth.mfa.verifying": "Verificando…",
   "auth.mfa.signOut": "¿No puedes obtener un código? Cerrar sesión",
   "auth.mfa.refused": "Ese código no ha funcionado. Espera al siguiente e inténtalo de nuevo.",
   "auth.mfa.failed": "No se ha podido comprobar el código ahora. Inténtalo de nuevo.",
