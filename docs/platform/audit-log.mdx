@@ -86,7 +86,9 @@ An account erasure is the one thing that touches existing rows, and it does
 not remove them: the actor reference is severed (`actor_id` becomes null), the
 payload is replaced by an erasure marker, and the entry survives as the fact
 that a command ran. The erasure itself is recorded as a content-free entry
-carrying the counts of what was deleted.
+carrying the counts of what was deleted. It is the same erasure whether the
+person deleted the account in Settings or an operator deleted the user in
+Supabase Auth.
 
 ### Payload sanitization
 

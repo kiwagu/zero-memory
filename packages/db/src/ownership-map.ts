@@ -11,9 +11,11 @@
  * tables and impossible to read off the schema. This registry states it once.
  *
  * Consumers:
- *   - `public.hard_delete_user()` — the deletion cascade is authored to mirror
+ *   - `private.erase_account()` — the deletion cascade is authored to mirror
  *     this map (children before parents), and the e2e completeness guard proves
  *     the two agree by asserting zero user rows remain in every mapped table.
+ *     It runs from `public.hard_delete_user()` and from the delete trigger on
+ *     `auth.users`, so deleting the user in Auth erases the same rows.
  *   - takeout — export completeness is audited against this same map.
  *   - relocation — extract an account's data by the map, import it elsewhere.
  *   - the e2e drift guard — every `public` base/partitioned table must appear
