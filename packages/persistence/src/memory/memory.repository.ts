@@ -5,9 +5,11 @@ import { createLogger } from '@workspace/logger';
 import {
   MemoryMapper,
   memoryFragmentRecordSchema,
+  supersededPredecessorSchema,
   type IMemoryRepository,
   type MemoryFragment,
   type PassageVectors,
+  type SupersededPredecessor,
 } from '@workspace/memory';
 import { Err, None, Ok, Some, type Option, type Result } from 'oxide.ts';
 
@@ -129,6 +131,19 @@ export class SupabaseMemoryRepository implements IMemoryRepository {
     }
     const record = memoryFragmentRecordSchema.parse(data);
     return Some(this.#mapper.toDomain(record));
+  }
+
+  async findPredecessors(id: string): Promise<SupersededPredecessor[]> {
+    const { data, error } = await this.#client()
+      .from('memories')
+      .select('id, kind')
+      .eq('superseded_by', id);
+    if (error) {
+      throw new Error(
+        `Failed to load predecessors of memory ${id}: ${error.message}`
+      );
+    }
+    return supersededPredecessorSchema.array().parse(data ?? []);
   }
 
   async update(fragment: MemoryFragment): Promise<Result<void, string>> {

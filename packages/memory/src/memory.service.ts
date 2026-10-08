@@ -91,11 +91,15 @@ import { injectGraphService } from './graph.service.provider.js';
 import type { IGraphService } from './graph.service.js';
 import { MemoryContent } from './memory-content.vo.js';
 import { oversizeDirective } from './oversize-directive.js';
+import { shouldHintStatus, statusHint } from './status-hint.js';
 import { MemoryFragment } from './memory-fragment.do.js';
 import { injectMemorySearchService } from './memory-search.provider.js';
 import type { IMemorySearchService } from './memory-search.service.js';
 import { injectMemoryRepository } from './memory.repository.provider.js';
-import type { IMemoryRepository } from './memory.repository.js';
+import type {
+  IMemoryRepository,
+  SupersededPredecessor,
+} from './memory.repository.js';
 import { Provenance } from './provenance.vo.js';
 import { injectProjectRulesReader } from './project-rules.reader.provider.js';
 import type {
@@ -153,6 +157,13 @@ const isMemoryEndpoint = (value: string): boolean =>
  * mass-invalidate a store.
  */
 const MAX_DECLARED_SUPERSEDES = 10;
+
+/**
+ * How far back a re-cut write walks its loop's supersede chain to number the
+ * cut. The longest chain measured on production was eight cuts, so this only
+ * bounds a corrupt or cyclic chain.
+ */
+const MAX_LOOP_CUT_STEPS = 50;
 
 /** Chars of candidate content shown — enough to recognise, not a full read. */
 const SUPERSEDE_CONTENT_PREVIEW = 200;
@@ -670,6 +681,13 @@ export class MemoryService {
     // the new one (the store moves it); the writer hears whether it did.
     const rules = await this.#ruleFates(retired, fragment.id);
 
+    // A task loop that keeps being re-cut is the running status of ongoing
+    // work, so the writer is pointed at the work's card. Interactive writers
+    // only, like the other hints: a provisional extraction cannot act on it.
+    const statusHintText = isProvisionalAgentName(provenance?.agentName ?? null)
+      ? null
+      : await this.#statusHint(content.kind, retired, thread);
+
     return Ok({
       memory_id: fragment.id,
       scope: scope.path,
@@ -709,7 +727,95 @@ export class MemoryService {
         !isProvisionalAgentName(provenance?.agentName ?? null) && {
           anchor_hint: ANCHOR_HINT,
         }),
+      ...(statusHintText && { status_hint: statusHintText }),
     });
+  }
+
+  /**
+   * The re-cut hint for a task write that retired an earlier task loop, or
+   * null. Best-effort: a failed read costs the cut number or the card's name,
+   * never the write.
+   */
+  async #statusHint(
+    kind: MemoryKind,
+    retired: readonly SupersededPredecessor[],
+    thread: SessionThread | null
+  ): Promise<string | null> {
+    if (
+      !shouldHintStatus(
+        kind,
+        retired.map((memory) => memory.kind)
+      )
+    ) {
+      return null;
+    }
+    const loops = retired
+      .filter((memory) => memory.kind === 'task')
+      .map((memory) => memory.id);
+    const [cut, boundCard] = await Promise.all([
+      this.#loopCut(loops),
+      this.#boundCardNumber(thread),
+    ]);
+    return statusHint(cut, boundCard);
+  }
+
+  /**
+   * Which cut of one loop a write is: 2 for the first re-cut, plus one for
+   * every earlier task loop behind the ones it retired. Walks the
+   * `superseded_by` chain backwards, bounded so a corrupt cycle cannot spin.
+   */
+  async #loopCut(retiredLoops: readonly string[]): Promise<number> {
+    let cut = 2;
+    let frontier = [...retiredLoops];
+    const seen = new Set(frontier);
+    try {
+      for (
+        let step = 0;
+        step < MAX_LOOP_CUT_STEPS && frontier.length > 0;
+        step += 1
+      ) {
+        const earlier: string[] = [];
+        for (const id of frontier) {
+          for (const predecessor of await this.repository.findPredecessors(
+            id
+          )) {
+            if (predecessor.kind === 'task' && !seen.has(predecessor.id)) {
+              seen.add(predecessor.id);
+              earlier.push(predecessor.id);
+            }
+          }
+        }
+        if (earlier.length === 0) {
+          break;
+        }
+        cut += 1;
+        frontier = earlier;
+      }
+    } catch (error) {
+      this.#logger.warn('loop cut lookup failed; reporting the cuts found', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return cut;
+  }
+
+  /** The number of the card this conversation is bound to, or null. */
+  async #boundCardNumber(thread: SessionThread | null): Promise<number | null> {
+    if (!thread) {
+      return null;
+    }
+    try {
+      const read = await this.briefingWork.forBriefing(
+        thread.scope.path,
+        thread.token
+      );
+      return read?.work.bound_card?.number ?? null;
+    } catch (error) {
+      this.#logger.warn('bound card lookup failed; hint names no card', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   /**
@@ -1894,14 +2000,17 @@ export class MemoryService {
    * costs the report, never the write.
    */
   async #ruleFates(
-    retired: readonly string[],
+    retired: readonly SupersededPredecessor[],
     successorId: string
   ): Promise<RuleFate[]> {
     if (retired.length === 0) {
       return [];
     }
     try {
-      const facts = await this.ruleFates.afterSupersede(retired, successorId);
+      const facts = await this.ruleFates.afterSupersede(
+        retired.map((memory) => memory.id),
+        successorId
+      );
       return facts.map(ruleFateReport);
     } catch (error) {
       this.#logger.warn('rule fate lookup failed; supersede unreported', {
@@ -1929,7 +2038,7 @@ export class MemoryService {
     successorId: string,
     byUserId: UserId,
     links: RememberInput['links']
-  ): Promise<string[]> {
+  ): Promise<SupersededPredecessor[]> {
     const targets = (links ?? [])
       .filter((link) => link.type === 'supersedes')
       .map((link) => link.dst);
@@ -1944,13 +2053,13 @@ export class MemoryService {
    * lifecycle as forget. Best-effort per target: a missing, foreign,
    * already-invalidated, duplicate, or self target is skipped with a log — a
    * bad target must never fail the write. Capped to MAX_DECLARED_SUPERSEDES
-   * per call. Returns the targets that were actually retired.
+   * per call. Returns the targets that were actually retired, with their kinds.
    */
   async #supersedeTargets(
     successorId: string,
     byUserId: UserId,
     targetIds: string[]
-  ): Promise<string[]> {
+  ): Promise<SupersededPredecessor[]> {
     const targets = [
       ...new Set(
         targetIds.filter((dst) => isMemoryEndpoint(dst) && dst !== successorId)
@@ -1960,7 +2069,7 @@ export class MemoryService {
       return [];
     }
     const successor = memoryIdSchema.parse(successorId);
-    const applied: string[] = [];
+    const applied: SupersededPredecessor[] = [];
 
     for (const target of targets) {
       const found = await this.repository.findOneById(target);
@@ -1993,7 +2102,7 @@ export class MemoryService {
         });
         continue;
       }
-      applied.push(target);
+      applied.push({ id: target, kind: fragment.content.kind });
       this.#logger.info('supersede applied', {
         target,
         successor: successorId,

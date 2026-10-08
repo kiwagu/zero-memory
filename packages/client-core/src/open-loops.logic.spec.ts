@@ -30,12 +30,17 @@ const payload = (loops: ReturnType<typeof loop>[], total = loops.length) => ({
 
 describe('splitOpenLoops', () => {
   it('drains the loops out of a briefing payload', () => {
-    const split = splitOpenLoops(payload([loop(1)], 3));
+    const split = splitOpenLoops({
+      ...payload([loop(1)], 3),
+      open_loops_aged: 4,
+    });
     expect(split.loops.map((l) => l.id)).toEqual([memId(1)]);
     expect(split.total).toBe(3);
+    expect(split.aged).toBe(4);
     expect(split.payload).toMatchObject({
       open_loops: [],
       open_loops_total: 0,
+      open_loops_aged: 0,
     });
   });
 
@@ -74,7 +79,12 @@ describe('mergeOpenLoops', () => {
   });
 
   it('handles the no-splits case', () => {
-    expect(mergeOpenLoops([])).toEqual({ loops: [], total: 0, work: null });
+    expect(mergeOpenLoops([])).toEqual({
+      loops: [],
+      total: 0,
+      aged: 0,
+      work: null,
+    });
   });
 
   it('drains the board summary so the JSON pack does not repeat it', () => {
@@ -93,6 +103,39 @@ describe('renderOpenLoopsSection', () => {
 
   it('renders nothing when there are no loops', () => {
     expect(renderOpenLoopsSection([], 0, now)).toBeNull();
+  });
+
+  it('says how many older loops it does not list, after the listed ones', () => {
+    const section = renderOpenLoopsSection(
+      [loop(1)],
+      1,
+      now,
+      Number.POSITIVE_INFINITY,
+      3
+    )!;
+    const lines = section.split('\n');
+    expect(lines.at(-1)).toBe(
+      '(3 older open loops, past the briefing window and on no card, not ' +
+        'listed here; recall with kinds task and open-question lists them)'
+    );
+  });
+
+  it('keeps the older-loops line when no loop is inside the window', () => {
+    // Before the line existed this case rendered nothing at all, so loops
+    // past the window disappeared from every briefing without a trace.
+    expect(
+      renderOpenLoopsSection([], 0, now, Number.POSITIVE_INFINITY, 1)
+    ).toBe(
+      '(1 older open loop, past the briefing window and on no card, not ' +
+        'listed here; recall with kinds task and open-question lists them)'
+    );
+  });
+
+  it('reserves room for the older-loops line inside the budget', () => {
+    const loops = [1, 2, 3, 4, 5, 6].map((n) => loop(n));
+    const section = renderOpenLoopsSection(loops, 6, now, 400, 2)!;
+    expect(section.length).toBeLessThanOrEqual(400);
+    expect(section).toContain('(2 older open loops,');
   });
 
   it('renders loops with kind and staleness badge, plus the beyond-cap count', () => {

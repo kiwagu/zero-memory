@@ -56,7 +56,13 @@ briefing.
 The briefing TTL is soft. By default, loops older than 14 days stop appearing
 in `open_loops` and its total, and the instance knob `zm.open_loop_ttl_days`
 changes that window. Aging out does not close or invalidate the memory: it
-remains recallable, visible in the dashboard, and closable by id.
+remains recallable, visible in the dashboard, and closable by id. It does not
+vanish from the briefing without a trace either. `build_context` also returns
+`open_loops_aged`, the number of open loops past the window that sit on no
+card, and the hook briefing ends the section with one line saying how many
+there are and how to list them. The line appears even when no loop is inside
+the window. A loop promoted into a live card or attached to one is not
+counted, because the board already reaches it.
 
 The `close_loop` tool closes a loop the moment it is done or answered. The
 memory is invalidated (add-only, so it is kept in history and audited) and
@@ -80,6 +86,26 @@ Two exclusions keep loops out of the knowledge machinery. They never become
 [rules incubator](/docs/guides/rules-incubator) candidates, and they are kept
 out of long-term knowledge metrics, because they are work items rather than
 durable knowledge.
+
+## A hand-off, not a status report
+
+A loop is for a one-off hand-off or a question: written once, closed once.
+The running status of ongoing work (the branch, what is done, what comes
+next) is different. It changes every session, so a status kept in a loop gets
+re-cut again and again, each version retiring the one before. That status
+belongs on the work's [card](/docs/concepts/project-board) as a note
+(`card_log note`). There the next session is offered it together with the
+card, and the notes accumulate as the card's history instead of replacing
+each other.
+
+The `remember` response points this out at the moment it happens. When a
+`task` write retires an earlier `task` loop, whether through a `supersedes`
+link or the same-session collapse, the response carries `status_hint`. It
+says which cut of the loop this is and where the next update goes: the card
+the conversation is bound to, by its label, or, when there is none, an
+instruction to run `card promote_loop` on the loop. A first cut gets no hint.
+Neither does a re-cut `open-question`, which adds evidence to the question
+rather than reporting progress.
 
 A loop is a pointer, not a payload. Logs and dumps do not belong in memory. A
 task carries a path or URL to the artifact plus a distilled summary of what to
