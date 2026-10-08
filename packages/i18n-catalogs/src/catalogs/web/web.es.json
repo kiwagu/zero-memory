@@ -1,6 +1,7 @@
 {
   "app.title": "zero-memory",
   "app.description": "Memoria compartida para agentes de código — panel del equipo",
+  "app.syncing": "Sincronizando con el servidor",
   "nav.memories": "Memorias",
   "nav.entities": "Entidades",
   "nav.scopes": "Ámbitos",
