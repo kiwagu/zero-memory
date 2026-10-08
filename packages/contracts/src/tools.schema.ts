@@ -234,6 +234,15 @@ export const rememberOutputSchema = z.object({
    */
   anchor_hint: z.string().optional(),
   /**
+   * Present only when a `task` write retired an earlier `task` loop: a loop
+   * that keeps being re-cut is the running status of ongoing work, which
+   * belongs on the work's card as a note rather than in another loop. Names
+   * the card the conversation is bound to when there is one. Separate from
+   * `hint` on purpose: the two fire independently and ask for different
+   * things.
+   */
+  status_hint: z.string().optional(),
+  /**
    * Present when a `core` / `personal` request did NOT clear the
    * portable-layer gate: the memory was stored in the project instead, and
    * this says where and why. The write succeeded — this is a routing report,
@@ -561,13 +570,21 @@ export const buildContextOutputSchema = z.object({
   rules: z.array(contextRuleSchema).default([]),
   /**
    * Active open loops (kind task/open-question) of the briefed scopes,
-   * oldest first, capped — surfaced on EVERY briefing regardless of topic
-   * relevance until closed with `close_loop`. Defaulted so packs from older
+   * oldest first, capped — surfaced on every briefing regardless of topic
+   * relevance while they are inside the soft-TTL window (14 days by
+   * default), until closed with `close_loop`. Defaulted so packs from older
    * servers (no open-loops support) still parse.
    */
   open_loops: z.array(contextMemorySchema).default([]),
   /** Total active open loops, so a capped list can say "and N more". */
   open_loops_total: z.number().int().min(0).default(0),
+  /**
+   * Open loops past the soft-TTL window that sit on no live card (neither a
+   * card's origin nor attached to one). They are not listed, so the briefing
+   * states how many there are instead of hiding them. Defaulted so packs
+   * from older servers still parse.
+   */
+  open_loops_aged: z.number().int().min(0).default(0),
   /**
    * The project board's work in progress (briefing calls pinned to a
    * project that name a `max_tokens` budget — what the session hooks send):

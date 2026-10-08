@@ -1,4 +1,6 @@
+import { memoryKindSchema } from '@workspace/contracts';
 import type { Option, Result } from 'oxide.ts';
+import { z } from 'zod';
 
 import type { MemoryFragment } from './memory-fragment.do.js';
 
@@ -27,6 +29,13 @@ export interface PassageVectors {
   overflow: Array<{ embedding: number[]; charStart: number }>;
 }
 
+/** A memory another one superseded: its id and kind. */
+export const supersededPredecessorSchema = z.object({
+  id: z.string(),
+  kind: memoryKindSchema,
+});
+export type SupersededPredecessor = z.infer<typeof supersededPredecessorSchema>;
+
 /**
  * Port: persistence of memory fragments (write side).
  *
@@ -41,6 +50,13 @@ export interface IMemoryRepository {
   ): Promise<Result<void, string>>;
 
   findOneById(id: string): Promise<Option<MemoryFragment>>;
+
+  /**
+   * The memories `id` directly superseded (their `superseded_by` points at
+   * it), with their kinds, read under the caller's RLS. Lets a write tell
+   * how many times one loop has been re-cut.
+   */
+  findPredecessors(id: string): Promise<SupersededPredecessor[]>;
 
   /** Persists mutated aggregate state (lifecycle, sharing). */
   update(fragment: MemoryFragment): Promise<Result<void, string>>;

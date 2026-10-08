@@ -64,6 +64,7 @@ export const makeContext = (overrides: Partial<IContext> = {}): IContext => ({
 export const makeRepository = (): IMemoryRepository => ({
   insert: vi.fn().mockResolvedValue(Ok(undefined)),
   findOneById: vi.fn().mockResolvedValue(None),
+  findPredecessors: vi.fn().mockResolvedValue([]),
   update: vi.fn().mockResolvedValue(Ok(undefined)),
   applyTranslation: vi.fn().mockResolvedValue(Ok(undefined)),
   markTranslationSkipped: vi.fn().mockResolvedValue(Ok(undefined)),

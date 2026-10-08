@@ -493,7 +493,7 @@ const runSessionStart = async (
   const plan = planSectionBudgets(
     budget,
     projectLine?.length ?? 0,
-    merged.loops.length > 0 || boardBlock !== null,
+    merged.loops.length > 0 || merged.aged > 0 || boardBlock !== null,
     projectMemories
   );
   const rulesSection = renderStandingRulesSection(rules, plan.rules);
@@ -519,7 +519,8 @@ const runSessionStart = async (
         (boardBlock?.length ?? 0) -
         SECTION_GAPS_CHARS -
         plan.memoryFloor
-    )
+    ),
+    merged.aged
   );
   const workSection = joinWorkSection(boardBlock, loopSection);
 
@@ -1030,7 +1031,7 @@ const runTask = async (
   const plan = planSectionBudgets(
     budget,
     leadChars,
-    split.loops.length > 0 || boardBlock !== null,
+    split.loops.length > 0 || split.aged > 0 || boardBlock !== null,
     packMemories
   );
   const rulesSection = rulesNeedDelivery({
@@ -1058,7 +1059,8 @@ const runTask = async (
         (boardBlock?.length ?? 0) -
         SECTION_GAPS_CHARS -
         plan.memoryFloor
-    )
+    ),
+    split.aged
   );
   const workSection = joinWorkSection(boardBlock, loopSection);
   // The pack gets what the composer will actually leave it: every section it

@@ -983,10 +983,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'your project is the DEFAULT — omit `scope` (pass project_hint or ' +
         '`thread` while it has none). "core"/"personal" REQUEST to leave it ' +
         'and are VERIFIED; unconfirmed, it lands in the project. ' +
-        'OPEN LOOPS: kind "task" (work handed over) and "open-question" ' +
-        '(awaiting an answer) surface in every briefing until closed with ' +
-        'close_loop; a task carries a pointer plus a distilled note, never ' +
-        'logs or dumps. ' +
+        'OPEN LOOPS: "task" (a one-off handover) and "open-question" show in ' +
+        'briefings for 14 days or until close_loop: a pointer plus a short ' +
+        'note, never logs. Ongoing work STATUS goes on its card as ' +
+        '`card_log note`, not a re-cut loop. ' +
         'REDISCOVERY GUARD: before storing something you just "discovered", ' +
         'recall it first — if a memory already covers it, follow or ' +
         'explicitly challenge that memory instead of writing a second one. ' +
