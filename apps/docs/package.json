@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "lint:strict": "eslint . --max-warnings 0",
     "format": "bunx prettier --write .",
-    "typecheck": "fumadocs-mdx && tsc --noEmit",
+    "typecheck": "fumadocs-mdx && bun scripts/check-mdx.ts && tsc --noEmit",
     "postinstall": "fumadocs-mdx",
     "test:vitest": "vitest run"
   },
@@ -27,6 +27,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@mdx-js/mdx": "^3.1.1",
     "@tailwindcss/postcss": "catalog:",
     "@types/mdx": "^2.0.13",
     "@types/node": "catalog:",
