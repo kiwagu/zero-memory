@@ -37,9 +37,34 @@ export interface FetchHost {
   [INSTALLED]?: RequestActivity;
 }
 
+/**
+ * Whether `headers` carries `name`, read without using up what the caller is
+ * about to send: headers given as a one-shot iterable (a generator) are not
+ * inspected at all, because reading them here would send the request without
+ * them.
+ */
+const hasHeader = (headers: HeadersInit | undefined, name: string): boolean => {
+  if (!headers) {
+    return false;
+  }
+  if (headers instanceof Headers) {
+    return headers.has(name);
+  }
+  if (Array.isArray(headers)) {
+    return headers.some(([key]) => key.toLowerCase() === name);
+  }
+  if (
+    typeof (headers as Partial<Iterable<unknown>>)[Symbol.iterator] ===
+    'function'
+  ) {
+    return false;
+  }
+  return Object.keys(headers).some((key) => key.toLowerCase() === name);
+};
+
 const isPrefetch = (input: RequestInfo | URL, init?: RequestInit): boolean =>
   (input instanceof Request && input.headers.has(PREFETCH_HEADER)) ||
-  new Headers(init?.headers).has(PREFETCH_HEADER);
+  hasHeader(init?.headers, PREFETCH_HEADER);
 
 /** Reads `body` to its end; a failed or aborted body ends the wait too. */
 const drain = async (body: ReadableStream<Uint8Array>): Promise<void> => {

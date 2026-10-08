@@ -83,6 +83,27 @@ describe('installRequestActivity', () => {
     await Promise.all([byInit, byRequest]);
   });
 
+  it('passes headers given as a one-shot iterable on unread', async () => {
+    const sent: RequestInit[] = [];
+    const host = hostWith(async (_input: unknown, init?: RequestInit) => {
+      sent.push(init ?? {});
+      return new Response('ok');
+    });
+    installRequestActivity(host);
+    function* headers(): Generator<[string, string]> {
+      yield ['x-probe', '1'];
+    }
+    const iterable = headers();
+
+    await host.fetch('/memories', {
+      headers: iterable as unknown as HeadersInit,
+    });
+    // The request still carries every header the caller gave it.
+    expect([...(sent[0]!.headers as Iterable<[string, string]>)]).toEqual([
+      ['x-probe', '1'],
+    ]);
+  });
+
   it('ends the count when the request fails', async () => {
     const host = hostWith(async () => {
       throw new TypeError('network down');
