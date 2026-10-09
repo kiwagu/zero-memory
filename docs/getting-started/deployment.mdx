@@ -7,7 +7,8 @@ A production(-ish) zero-memory install is one server host running three
 things — the MCP server, the dashboard, and Supabase — behind a TLS edge,
 plus a small client footprint (MCP registration, hooks, optionally a watcher
 daemon) on each developer machine. Detail lives next to the artifacts in the
-repository; this page is the map.
+repository; this page is the map. The MCP server can also run on AWS Lambda
+instead of the host; see [Deploy the server to AWS](/docs/getting-started/deploy-aws).
 
 ```
 developer machines                        server host
