@@ -1,0 +1,30 @@
+# The deploy the stack's CodePipeline runs on CodeBuild (src/pipeline.stack.ts)
+# for a release tag: apply the database migrations, then deploy and warm up the
+# server exactly as scripts/deploy.sh does when an operator runs it by hand.
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    commands:
+      - npm install --global bun@1.3.11
+      - bun install --frozen-lockfile
+  pre_build:
+    commands:
+      - |
+        if [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+          echo "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+        fi
+      - |
+        case "$DATABASE_URL" in
+          postgres://* | postgresql://*) ;;
+          *) echo "zero-memory/$STAGE/database-url holds no Postgres URL yet" >&2; exit 1 ;;
+        esac
+      - bunx supabase db push --db-url "$DATABASE_URL" --yes
+  build:
+    commands:
+      - export ZM_BUILD_COMMIT="$(git rev-parse HEAD)"
+      - export ZM_BUILD_VERSION="$(git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)"
+      - CDK_REQUIRE_APPROVAL=never CDK_DEFAULT_REGION="$AWS_REGION" bash infra/aws/scripts/deploy.sh "$STAGE"

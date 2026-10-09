@@ -8,6 +8,9 @@
 # CDK asks before widening IAM permissions; a run without a terminal, after
 # `cdk diff` was read, passes CDK_REQUIRE_APPROVAL=never.
 #
+# ZM_BUILD_VERSION and ZM_BUILD_COMMIT, when set, name the build that /healthz
+# reports (the pipeline sets them from the release tag).
+#
 # After the deploy, one direct invocation makes an instance load the embedding
 # model. The first read of a new image's model files is slow (close to a
 # minute measured); this pays it before anyone searches. Needs the AWS CLI.
@@ -18,12 +21,15 @@ shift || true
 repo="$(cd "$(dirname "$0")/../../.." && pwd)"
 image="zero-memory-server:aws-${stage}"
 
-docker build -f "$repo/apps/server/Dockerfile" -t "$image" "$repo"
+docker build -f "$repo/apps/server/Dockerfile" -t "$image" \
+  --build-arg ZM_BUILD_VERSION="${ZM_BUILD_VERSION:-}" \
+  --build-arg ZM_BUILD_COMMIT="${ZM_BUILD_COMMIT:-}" \
+  "$repo"
 image_id="$(docker image inspect --format '{{.Id}}' "$image")"
 
 cd "$repo/infra/aws"
 outputs="cdk.out/outputs-${stage}.json"
-bunx cdk deploy \
+bunx cdk deploy "zero-memory-${stage}" \
   --require-approval "${CDK_REQUIRE_APPROVAL:-broadening}" \
   --outputs-file "$outputs" \
   -c stage="$stage" \

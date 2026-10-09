@@ -101,6 +101,41 @@ The script keeps the keys it does not overwrite, among them the edge header
 value. An instance reads the secret once, when it starts; instances already
 running keep what they read.
 
+## Deploy from release tags
+
+A second stack runs the same deploy inside the AWS account, from a release
+tag pushed to GitHub: CodePipeline takes the tagged commit through a
+CodeConnections connection, and CodeBuild applies the database migrations and
+runs `scripts/deploy.sh` (`buildspec.yml`). No AWS key leaves AWS; the build's
+role can only assume the CDK bootstrap roles, invoke the stage's function for
+its warm-up, and read its own secrets.
+
+```sh
+AWS_PROFILE=<profile> bunx cdk deploy zero-memory-pipeline-stand \
+  -c stage=stand -c githubRepo=<owner>/<repo>
+```
+
+Context: `githubRepo` (required), `githubBranch` (default `main`; the
+pipeline follows it besides tags), `releaseTags` (comma-separated patterns,
+default `v*`), `dockerHubSecret` (a secret with `username` and `token`, when
+Docker Hub's anonymous pull limit stops the build).
+
+Then, once:
+
+1. Approve the connection: CodePipeline console → Settings → Connections →
+   `zero-memory-<stage>` → Update pending connection. This installs the AWS
+   Connector app on the GitHub repository.
+2. Put the database URL the migrations go through. CodeBuild has no IPv6, so
+   for a Supabase project use the session pooler's address:
+
+   ```sh
+   echo 'DATABASE_URL=postgresql://postgres.<ref>:<password>@<pooler-host>:5432/postgres' > db.env
+   AWS_PROFILE=<profile> bun scripts/secret-value.put.ts zero-memory/stand/database-url db.env DATABASE_URL
+   ```
+
+A pushed tag that matches starts a deploy; the build names the release by the
+tag, which `/healthz` then reports.
+
 ## Alarms
 
 Five alarms, all in the function's Region, notify one SNS topic:
@@ -145,5 +180,7 @@ Point an MCP client at `McpUrl`.
 AWS_PROFILE=<profile> bunx cdk destroy -c stage=stand
 ```
 
-This deletes the function, the table, the secret, the parameter and the logs.
-The CDK bootstrap stack and the images it pushed stay.
+This deletes the function, the tables, the secret, the parameter, the alarms
+and the logs; `bunx cdk destroy zero-memory-pipeline-stand -c stage=stand -c
+githubRepo=<owner>/<repo>` removes the pipeline. The CDK bootstrap stack and
+the images it pushed stay.
