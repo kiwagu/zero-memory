@@ -45,6 +45,9 @@ const POST_RESERVE_MS = 500;
 
 const reportInitError = async (error: unknown): Promise<never> => {
   const message = error instanceof Error ? error.message : String(error);
+  // Lambda records only the error type of a failed start; the reason is
+  // visible in the function's logs only if the runtime writes it there.
+  logger.error('lambda runtime failed to start', { error: message });
   await fetch(`http://${runtimeApi}/2018-06-01/runtime/init/error`, {
     method: 'POST',
     headers: { 'lambda-runtime-function-error-type': 'Runtime.InitError' },
