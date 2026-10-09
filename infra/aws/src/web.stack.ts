@@ -14,6 +14,7 @@ import {
   aws_lambda as lambda,
   aws_logs as logs,
   aws_secretsmanager as secretsmanager,
+  aws_ses as ses,
   aws_ssm as ssm,
   type StackProps,
 } from 'aws-cdk-lib';
@@ -40,6 +41,8 @@ export interface WebAppProps {
   appImageId: string;
   /** SSM parameters the app reads at start, as environment variable → name. */
   parameters?: Record<string, string>;
+  /** Plain settings for the app, set on the function. */
+  environment?: Record<string, string>;
   /** The function that names the viewer's address and host at the edge. */
   edgeFunction: cloudfront.IFunction;
   /** A host name of its own, with an ACM certificate for it in us-east-1. */
@@ -59,6 +62,7 @@ export interface WebAppProps {
  * parameter for the other stacks to read.
  */
 export class WebApp extends Construct {
+  readonly fn: lambda.DockerImageFunction;
   readonly url: string;
   readonly secret: secretsmanager.Secret;
   readonly urlParameterName: string;
@@ -84,7 +88,7 @@ export class WebApp extends Construct {
     });
 
     const parameters = Object.entries(props.parameters ?? {});
-    const fn = new lambda.DockerImageFunction(this, 'Function', {
+    const fn = (this.fn = new lambda.DockerImageFunction(this, 'Function', {
       code: lambda.DockerImageCode.fromImageAsset(runtimeDir, {
         file: 'web-app.Dockerfile',
         buildArgs: { APP_IMAGE: props.appImage, APP_DIR: props.appDir },
@@ -100,6 +104,7 @@ export class WebApp extends Construct {
         removalPolicy: RemovalPolicy.DESTROY,
       }),
       environment: {
+        ...props.environment,
         ZM_ENV_SECRET_ID: this.secret.secretArn,
         ...(parameters.length > 0
           ? {
@@ -109,7 +114,7 @@ export class WebApp extends Construct {
             }
           : {}),
       },
-    });
+    }));
     this.secret.grantRead(fn);
     if (parameters.length > 0) {
       fn.addToRolePolicy(
@@ -200,6 +205,15 @@ export interface WebStackProps extends StackProps {
   webCertificateArn?: string;
   docsDomainName?: string;
   docsCertificateArn?: string;
+  /**
+   * A domain to send authentication mail from through Amazon SES. The stack
+   * creates its SES identity with Easy DKIM and prints the DNS records the
+   * domain needs; the dashboard then sends Supabase Auth's mail through the
+   * send-email hook, once the hook's secret is in its environment.
+   */
+  mailDomain?: string;
+  /** The sender, e.g. `zero-memory <noreply@example.com>`; default noreply@<mailDomain>. */
+  mailFrom?: string;
 }
 
 /**
@@ -223,6 +237,13 @@ export class WebStack extends Stack {
       appImage: props.webImage,
       appImageId: props.webImageId,
       parameters: { ZM_SERVER_URL: `/zero-memory/${stage}/mcp-url` },
+      environment: props.mailDomain
+        ? {
+            ZM_MAIL_TRANSPORT: 'ses',
+            ZM_MAIL_FROM:
+              props.mailFrom ?? `zero-memory <noreply@${props.mailDomain}>`,
+          }
+        : undefined,
       edgeFunction,
       domainName: props.webDomainName,
       certificateArn: props.webCertificateArn,
@@ -237,6 +258,21 @@ export class WebStack extends Stack {
       domainName: props.docsDomainName,
       certificateArn: props.docsCertificateArn,
     });
+
+    if (props.mailDomain) {
+      const identity = new ses.EmailIdentity(this, 'MailIdentity', {
+        identity: ses.Identity.domain(props.mailDomain),
+      });
+      identity.grantSendEmail(dashboard.fn);
+      identity.dkimRecords.forEach((record, index) => {
+        new CfnOutput(this, `MailDkim${index + 1}`, {
+          value: `${record.name} CNAME ${record.value}`,
+        });
+      });
+      new CfnOutput(this, 'MailHookUrl', {
+        value: `${dashboard.url}/auth/hooks/send-email`,
+      });
+    }
 
     new CfnOutput(this, 'DashboardUrl', { value: dashboard.url });
     new CfnOutput(this, 'DashboardSecret', {

@@ -126,6 +126,27 @@ parameters, ahead of the secrets.
 In the Supabase project's Auth settings, set the site URL to `DashboardUrl`
 and add `<DashboardUrl>/**` to the redirect URLs.
 
+## Stage settings
+
+Every `-c key=value` above can live in `stages/<stage>.json` instead (git
+ignores the folder: it describes one deployment). `bin/app.ts` reads it for
+every deploy of the stage, and the pipeline stack hands it to its builds, so a
+pipeline deploy keeps the same domains and mail settings as one by hand. A
+`-c` on the command line wins over the file.
+
+## Mail through Amazon SES
+
+With `mailDomain` set (and optionally `mailFrom`, default
+`zero-memory <noreply@<mailDomain>>`), the web stack creates an SES identity
+for the domain with Easy DKIM, lets the dashboard send through it, and sets
+the dashboard's `ZM_MAIL_TRANSPORT=ses` and `ZM_MAIL_FROM`. It outputs three
+`MailDkim<n>` records (`<name> CNAME <value>`) for the domain's DNS and the
+`MailHookUrl`. Enable the Send Email hook in the Supabase project with that
+URL and put the secret Supabase generates into the dashboard's secret as
+`ZM_AUTH_HOOK_SECRET`; Auth then sends its mail through the dashboard instead
+of SMTP. The SES sandbox delivers only to verified addresses until production
+access is granted.
+
 ## Deploy from release tags
 
 A second stack runs the same deploy inside the AWS account, from a release

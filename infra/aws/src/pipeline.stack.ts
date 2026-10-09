@@ -29,6 +29,11 @@ export interface PipelineStackProps extends StackProps {
    * when its anonymous pull limit gets in the way of the build.
    */
   dockerHubSecretName?: string;
+  /**
+   * The stage's settings (`stages/<stage>.json`), handed to every build so a
+   * pipeline deploy uses the same ones a deploy by hand does.
+   */
+  deploySettings?: Record<string, string>;
 }
 
 /**
@@ -90,6 +95,7 @@ export class PipelineStack extends Stack {
       },
       environmentVariables: {
         STAGE: { value: stage },
+        DEPLOY_SETTINGS: { value: JSON.stringify(props.deploySettings ?? {}) },
         DATABASE_URL: {
           type: codebuild.BuildEnvironmentVariableType.SECRETS_MANAGER,
           value: databaseUrlName,

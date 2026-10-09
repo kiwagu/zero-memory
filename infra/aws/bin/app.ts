@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { App } from 'aws-cdk-lib';
 
 import { PipelineStack } from '../src/pipeline.stack.js';
@@ -6,17 +10,36 @@ import { WebStack } from '../src/web.stack.js';
 
 const app = new App();
 
-const context = (key: string, fallback: string): string => {
+const contextValue = (key: string): string | undefined => {
   const value: unknown = app.node.tryGetContext(key);
-  return typeof value === 'string' && value !== '' ? value : fallback;
+  return typeof value === 'string' && value !== '' ? value : undefined;
 };
+
+/**
+ * A stage's settings live in `stages/<stage>.json` (git-ignored: they
+ * describe one deployment), so every deploy of the stage — by hand or by its
+ * pipeline — gets the same domains, mail sender and sizes. A `-c key=value`
+ * on the command line wins over the file.
+ */
+const stageName = contextValue('stage') ?? 'stand';
+const stageFile = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../stages',
+  `${stageName}.json`
+);
+const stageSettings: Record<string, string> = existsSync(stageFile)
+  ? (JSON.parse(readFileSync(stageFile, 'utf8')) as Record<string, string>)
+  : {};
+
+const context = (key: string, fallback: string): string =>
+  contextValue(key) ?? stageSettings[key] ?? fallback;
 
 const optional = (key: string): string | undefined => {
   const value = context(key, '');
   return value === '' ? undefined : value;
 };
 
-const stage = context('stage', 'stand');
+const stage = stageName;
 const memorySize = optional('memorySize');
 
 const env = {
@@ -36,6 +59,8 @@ const web = new WebStack(app, `zero-memory-web-${stage}`, {
   webCertificateArn: optional('webCertificateArn'),
   docsDomainName: optional('docsDomainName'),
   docsCertificateArn: optional('docsCertificateArn'),
+  mailDomain: optional('mailDomain'),
+  mailFrom: optional('mailFrom'),
   env,
 });
 
@@ -61,6 +86,7 @@ if (githubRepo) {
     branch: context('githubBranch', 'main'),
     tagPatterns: context('releaseTags', 'v*').split(','),
     dockerHubSecretName: optional('dockerHubSecret'),
+    deploySettings: stageSettings,
     env,
   });
 }

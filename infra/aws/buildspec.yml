@@ -25,6 +25,7 @@ phases:
       - bunx supabase db push --db-url "$DATABASE_URL" --yes
   build:
     commands:
+      - mkdir -p infra/aws/stages && printf '%s' "$DEPLOY_SETTINGS" > "infra/aws/stages/$STAGE.json"
       - export ZM_BUILD_COMMIT="$(git rev-parse HEAD)"
       - export ZM_BUILD_VERSION="$(git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)"
       - CDK_REQUIRE_APPROVAL=never CDK_DEFAULT_REGION="$AWS_REGION" bash infra/aws/scripts/deploy.sh "$STAGE"

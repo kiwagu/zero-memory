@@ -72,6 +72,36 @@ describe('WebStack', () => {
     });
   });
 
+  it('sends mail through SES only for a domain it was given, and prints its DKIM records', () => {
+    const silent = synth();
+    silent.resourceCountIs('AWS::SES::EmailIdentity', 0);
+
+    const template = synth({ mailDomain: 'example.com' });
+    template.hasResourceProperties('AWS::SES::EmailIdentity', {
+      EmailIdentity: 'example.com',
+    });
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          ZM_MAIL_TRANSPORT: 'ses',
+          ZM_MAIL_FROM: 'zero-memory <noreply@example.com>',
+        }),
+      },
+    });
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({ Action: ['ses:SendEmail', 'ses:SendRawEmail'] }),
+        ]),
+      }),
+    });
+    expect(
+      Object.keys(template.findOutputs('*')).filter((key) =>
+        key.startsWith('MailDkim')
+      )
+    ).toHaveLength(3);
+  });
+
   it('refuses a domain without a certificate', () => {
     expect(() => synth({ webDomainName: 'app.example.com' })).toThrow(
       'web: domainName and certificateArn go together.'
