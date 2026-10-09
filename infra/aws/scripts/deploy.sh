@@ -5,6 +5,8 @@
 #
 # The Lambda image is built FROM the server image, so the server image is
 # built first and its id is handed to CDK: a new server build is a new asset.
+# CDK asks before widening IAM permissions; a run without a terminal, after
+# `cdk diff` was read, passes CDK_REQUIRE_APPROVAL=never.
 set -euo pipefail
 
 stage="${1:-stand}"
@@ -17,7 +19,7 @@ image_id="$(docker image inspect --format '{{.Id}}' "$image")"
 
 cd "$repo/infra/aws"
 bunx cdk deploy \
-  --require-approval broadening \
+  --require-approval "${CDK_REQUIRE_APPROVAL:-broadening}" \
   -c stage="$stage" \
   -c serverImage="$image" \
   -c serverImageId="$image_id" \
