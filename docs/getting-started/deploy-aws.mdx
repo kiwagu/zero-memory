@@ -71,6 +71,25 @@ AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/server-env 
 `ZM_WEB_URL` must be the dashboard's HTTPS address. An instance reads the
 secret when it starts.
 
+## Deploy on every release
+
+To deploy from release tags instead of by hand, create the pipeline stack
+once. CodePipeline takes a tagged commit from GitHub through a CodeConnections
+connection, and CodeBuild applies the migrations and runs the same deploy
+script, inside your account, with no AWS key stored anywhere else:
+
+```sh
+AWS_PROFILE=<profile> bunx cdk deploy zero-memory-pipeline-prod \
+  -c stage=prod -c githubRepo=<owner>/<repo>
+```
+
+Approve the connection in the CodePipeline console (Settings → Connections),
+which installs the AWS Connector app on the repository, and put the database
+URL the migrations use into the `zero-memory/prod/database-url` secret
+(`scripts/secret-value.put.ts`). CodeBuild reaches the database over IPv4, so
+for a Supabase project give the session pooler's address. From then on, every
+pushed tag matching `v*` deploys.
+
 ## Your own domain
 
 By default the server answers on the CloudFront address, which the stack
