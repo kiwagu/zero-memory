@@ -1,6 +1,6 @@
 import type { Translator } from '@workspace/i18n-catalogs';
 
-import type { AuthNoticeProps } from './auth-notice.template.js';
+import type { AuthNoticeProps } from './auth-notice.template';
 
 /**
  * Template names as Supabase Auth knows them: the CLI's

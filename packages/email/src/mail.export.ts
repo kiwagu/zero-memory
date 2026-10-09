@@ -24,8 +24,8 @@ import { fileURLToPath } from 'node:url';
 
 import { MAIL_LOCALES, type MailLocale } from '@workspace/i18n-catalogs';
 
-import { AUTH_TEMPLATES } from './auth-template.registry.js';
-import { renderAuthTemplate } from './mail.render.js';
+import { AUTH_TEMPLATES } from './auth-template.registry';
+import { renderAuthTemplate } from './mail.render';
 
 const repoRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 

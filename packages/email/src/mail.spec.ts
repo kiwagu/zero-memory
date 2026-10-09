@@ -1,9 +1,9 @@
 import { MAIL_LOCALES } from '@workspace/i18n-catalogs';
 import { describe, expect, it } from 'vitest';
 
-import { AUTH_TEMPLATES } from './auth-template.registry.js';
-import { findMissingPlaceholders, gotrueVariable } from './gotrue.constants.js';
-import { renderAuthTemplate, renderDigest } from './mail.render.js';
+import { AUTH_TEMPLATES } from './auth-template.registry';
+import { findMissingPlaceholders, gotrueVariable } from './gotrue.constants';
+import { renderAuthTemplate, renderDigest } from './mail.render';
 
 /**
  * An unsubstituted catalog placeholder — `{email}` rather than GoTrue's

@@ -14,13 +14,15 @@
     "mail:check": "bun src/mail.export.ts --check"
   },
   "dependencies": {
+    "@aws-sdk/client-sesv2": "catalog:",
     "@react-email/components": "catalog:",
     "@react-email/render": "catalog:",
     "@workspace/i18n-catalogs": "workspace:*",
     "@workspace/logger": "workspace:*",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "resend": "catalog:"
+    "resend": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
