@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { runDetached, type Logger } from './index.js';
+import { drainDetached, runDetached, type Logger } from './index.js';
 
 const spyLogger = (): Logger => {
   const logger: Logger = {
@@ -63,5 +63,45 @@ describe('runDetached', () => {
     expect(logger.warn).toHaveBeenCalledWith('failed to record audit event', {
       error: 'boom',
     });
+  });
+});
+
+describe('drainDetached', () => {
+  it('returns only after a write still in flight has finished', async () => {
+    let finished = false;
+    runDetached(
+      () =>
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            finished = true;
+            resolve();
+          }, 20)
+        ),
+      spyLogger(),
+      'failed to record'
+    );
+
+    const left = await drainDetached(1_000);
+
+    expect(finished).toBe(true);
+    expect(left).toBe(0);
+  });
+
+  it('gives up at the deadline and reports how many writes are still pending', async () => {
+    let release: () => void = () => undefined;
+    runDetached(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      spyLogger(),
+      'failed to record'
+    );
+
+    const left = await drainDetached(10);
+    release();
+    await drainDetached(1_000);
+
+    expect(left).toBe(1);
   });
 });

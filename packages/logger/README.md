@@ -21,6 +21,10 @@ app for one-line-per-entry JSON logs.
   `recordUsage` (`@workspace/usage`) and `recordAudit` (`@workspace/audit`)
   are thin wrappers over it; its fire-and-forget contract is tested here, once
   (`src/run-detached.spec.ts`).
+- `drainDetached(timeoutMs)` — waits for every write `runDetached` started,
+  up to the timeout, and returns how many were still pending. Only a runtime
+  that freezes the process once a response is out (a serverless function)
+  needs it; it drains before handing the response over.
 - Types: `Logger`, `LogLevel`, `LogContext`, `LogContextResolver`.
 
 ## Environment variables

@@ -155,12 +155,51 @@ export const runDetached = (
   message: string,
   context: LogContext = {}
 ): void => {
-  void Promise.resolve()
+  const pending: Promise<void> = Promise.resolve()
     .then(task)
-    .catch((error: unknown) => {
-      logger.warn(message, {
-        ...context,
-        error: error instanceof Error ? error.message : String(error),
-      });
+    .then(
+      () => undefined,
+      (error: unknown) => {
+        logger.warn(message, {
+          ...context,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    )
+    .finally(() => {
+      detached.delete(pending);
     });
+  detached.add(pending);
+};
+
+/** Side writes started by {@link runDetached} that have not settled yet. */
+const detached = new Set<Promise<void>>();
+
+/**
+ * Waits for every side write {@link runDetached} has started, up to
+ * `timeoutMs`, and returns how many were still pending when it gave up.
+ *
+ * A long-lived process never needs this. A runtime that freezes the process
+ * the moment a response is handed back (a serverless function) does: a write
+ * still in flight at that moment resumes only on the next invocation, or
+ * never, when the instance is recycled first. Such a runtime drains before it
+ * hands the response over. Writes started while draining are awaited too.
+ */
+export const drainDetached = async (timeoutMs: number): Promise<number> => {
+  const deadline = Date.now() + timeoutMs;
+  while (detached.size > 0) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      return detached.size;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      Promise.allSettled([...detached]),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, remaining);
+      }),
+    ]);
+    clearTimeout(timer);
+  }
+  return 0;
 };
