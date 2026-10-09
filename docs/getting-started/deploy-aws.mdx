@@ -1,34 +1,34 @@
 ---
-title: Deploy the server to AWS
-description: Run the MCP server on AWS Lambda behind CloudFront with the CDK app in infra/aws, next to a Supabase project you already have.
+title: Deploy to AWS
+description: Run the MCP server, the dashboard and this documentation site on AWS Lambda behind CloudFront with the CDK app in infra/aws, next to a Supabase project you already have.
 ---
 
-The MCP server can run on AWS Lambda instead of a container host. The CDK
-app in `infra/aws/` deploys it behind CloudFront, keeps MCP sessions and
-rate-limit counts in DynamoDB, and watches it with CloudWatch alarms. The
-server code is the same one the container runs; only the way requests reach
-it differs.
+The whole instance except its database can run on AWS Lambda instead of a
+container host. The CDK app in `infra/aws/` deploys the MCP server, the
+dashboard and this documentation site, each behind its own CloudFront
+distribution; keeps MCP sessions and rate-limit counts in DynamoDB; and
+watches the server with CloudWatch alarms. Each app runs from the same image
+the container host runs; only the way requests reach it differs.
 
 ```
-MCP clients (OAuth)           AWS (one Region)
-┌──────────────────┐  HTTPS  ┌─────────────────────────────────────────────┐
-│ watcher, agents  │────────►│ CloudFront ── function URL ── Lambda        │
-└──────────────────┘         │  (adds the       (refuses      (server,     │
-                             │   edge header)    anything      3 GB, own   │
-                             │                   else)         runtime)    │
-                             │                      │                      │
-                             │   DynamoDB: sessions, rate limits           │
-                             │   Secrets Manager, SSM, CloudWatch          │
-                             └──────────────────────┼──────────────────────┘
-                                                    ▼
-                                        Supabase project (HTTPS)
+MCP clients (OAuth)   browsers               AWS (one Region)
+┌──────────────────┐ ┌──────────┐  HTTPS  ┌──────────────────────────────────┐
+│ watcher, agents  │ │ people   │────────►│ CloudFront ── function URL ──    │
+└────────┬─────────┘ └──────────┘         │   (adds the      (refuses        │
+         │                                │    edge header)   anything else) │
+         └───────────────────────────────►│                                  │
+                                          │ Lambda: server (own runtime,     │
+                                          │   3 GB), dashboard and docs      │
+                                          │   (Next.js + Web Adapter)        │
+                                          │ DynamoDB: sessions, rate limits  │
+                                          │ Secrets Manager, SSM, CloudWatch │
+                                          └────────────────┬─────────────────┘
+                                                           ▼
+                                               Supabase project (HTTPS)
 ```
 
-Only the MCP server moves. The dashboard, which agents need to sign in and
-approve access, and this documentation site still run as described in
-[Deployment](/docs/getting-started/deployment). Place the Supabase project
-in the same Region as the function: every tool call makes several round
-trips to it.
+Place the Supabase project in the same Region as the functions: every tool
+call makes several round trips to it.
 
 ## Prerequisites
 
@@ -37,8 +37,7 @@ trips to it.
 - Docker, Bun, the AWS CLI and `jq` on the machine that deploys. The images
   are built there.
 - A Supabase project with this repository's migrations applied
-  (`supabase db push`), and the dashboard running somewhere reachable over
-  HTTPS.
+  (`supabase db push`).
 
 ## Deploy
 
@@ -54,22 +53,34 @@ Then deploy a stage (its name is part of every resource):
 AWS_PROFILE=<profile> bash scripts/deploy.sh prod -c alarmEmail=ops@example.com
 ```
 
-The script builds the server image and the Lambda image on top of it,
-deploys the stack, and then invokes the function once to load the embedding
-model. The first read of a new image's model files can take close to a
-minute; paid there, it stays off the first search.
+The script builds the images of the server, the dashboard and the docs, and
+deploys two stacks: `zero-memory-web-prod` (dashboard and docs) first, then
+`zero-memory-prod` (the server). Then it wakes the dashboard and the docs
+with one request each and invokes the server once to load the embedding
+model. The first read of a new image can take close to a minute; paid there,
+it stays off the first visitor.
 
-Write the server's environment into the stack's secret from a file of
-`KEY=value` lines (`SUPABASE_URL`, `SUPABASE_ANON_KEY`,
-`SUPABASE_SERVICE_ROLE_KEY`, `ZM_WEB_URL`, and a model key if you use
-model-backed features):
+Each stack publishes its address in SSM, and each app reads the others' at
+start: the server sends people to the dashboard to sign in, and the
+dashboard calls the server's MCP endpoint. You configure neither address.
+
+Write each app's environment into its secret from a file of `KEY=value`
+lines. The server needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`, and a model key if you use model-backed
+features; the dashboard needs `NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`:
 
 ```sh
 AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/server-env server.env
+AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/web-env web.env
 ```
 
-`ZM_WEB_URL` must be the dashboard's HTTPS address. An instance reads the
-secret when it starts.
+An instance reads its secret when it starts; the next deploy restarts them
+all.
+
+In the Supabase project's Auth settings, set the site URL to the dashboard's
+address (the `DashboardUrl` output) and add `<DashboardUrl>/**` to the
+redirect URLs, so confirmation, recovery and social sign-in come back to it.
 
 ## Deploy on every release
 
@@ -90,59 +101,63 @@ URL the migrations use into the `zero-memory/prod/database-url` secret
 for a Supabase project give the session pooler's address. From then on, every
 pushed tag matching `v*` deploys.
 
-## Your own domain
+## Your own domains
 
-By default the server answers on the CloudFront address, which the stack
-prints as `PublicUrl`. To use a host name of your own, issue a certificate
-for it in ACM in `us-east-1` (CloudFront takes certificates only from
-there), deploy with both values, and point the name at the `EdgeDomain`
-output:
+By default each app answers on its CloudFront address. To use host names of
+your own, issue certificates for them in ACM in `us-east-1` (CloudFront takes
+certificates only from there), deploy with the names and certificates, and
+point each name at its distribution's address (the `EdgeDomain` outputs):
 
 ```sh
 AWS_PROFILE=<profile> bash scripts/deploy.sh prod \
-  -c domainName=zm.example.com -c certificateArn=arn:aws:acm:us-east-1:…
+  -c domainName=zm.example.com -c certificateArn=arn:aws:acm:us-east-1:… \
+  -c webDomainName=memory.example.com -c webCertificateArn=arn:aws:acm:us-east-1:… \
+  -c docsDomainName=docs.example.com -c docsCertificateArn=arn:aws:acm:us-east-1:…
 ```
 
-The public URL is the OAuth issuer. Changing it later makes every connected
-client authorize again, so choose the domain before clients connect.
+The server's public URL is the OAuth issuer. Changing it later makes every
+connected client authorize again, so choose that domain before clients
+connect.
 
 ## Check it
 
 ```sh
-curl https://<PublicUrl>/healthz      # 200 and the build version
-curl https://<FunctionUrl>/healthz    # 403: the function answers only CloudFront
+curl https://<PublicUrl>/healthz         # 200 and the build version
+curl https://<FunctionUrl>/healthz       # 403: the function answers only CloudFront
+curl --compressed https://<DashboardUrl>/login   # 200, the sign-in page
 ```
 
 Then point an MCP client or the watcher at `<PublicUrl>/mcp` and sign in.
 
 ## Operations
 
-- **Alarms.** Five alarms notify one SNS topic: failed or timed-out
-  invocations, throttling, an invocation near the 60-second timeout, an
-  instance that failed to start, and repeated 5xx answers. With
-  `alarmEmail`, confirm the subscription from the first mail. The dashboard
-  `zero-memory-<stage>` shows the same metrics.
-- **Spending.** The stack sets no spending limit; set one for the account.
-- **Logs.** The function's log group keeps one week. A failed start writes
+- **Alarms.** Five alarms on the server notify one SNS topic: failed or
+  timed-out invocations, throttling, an invocation near the 60-second
+  timeout, an instance that failed to start, and repeated 5xx answers. With
+  `alarmEmail`, confirm the subscription from the first mail. The CloudWatch
+  dashboard `zero-memory-<stage>` shows the same metrics.
+- **Spending.** The stacks set no spending limit; set one for the account.
+- **Logs.** Each function's log group keeps one week. A failed start writes
   its reason there.
 - **Client addresses.** CloudFront writes the address it saw into its own
-  header, and the function rate-limits on that, never on the
-  `X-Forwarded-For` a client sends.
+  header, and the apps read that, never the `X-Forwarded-For` a client sends.
 
 ## Limits
 
 - A request that runs longer than 60 seconds is cut by CloudFront, so the
-  function's timeout is 60 seconds too.
+  server's timeout is 60 seconds too.
 - An instance's first search waits for the embedding model to load
   (seconds).
 - The background jobs the container runs on a timer — hygiene scans, usage
   roll-ups, translation — do not run on Lambda yet.
+- Uploading pages to this site from its `/upload` form is off: the pages are
+  compiled into the image.
 
 ## Remove
 
 ```sh
-AWS_PROFILE=<profile> bunx cdk destroy -c stage=prod
+AWS_PROFILE=<profile> bunx cdk destroy zero-memory-prod zero-memory-web-prod -c stage=prod
 ```
 
-This deletes the function, the tables, the secret, the parameter, the alarms
-and the logs. The CDK bootstrap stack and the images it pushed stay.
+This deletes the functions, the tables, the secrets, the parameters, the
+alarms and the logs. The CDK bootstrap stack and the images it pushed stay.
