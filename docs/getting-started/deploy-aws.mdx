@@ -82,6 +82,41 @@ In the Supabase project's Auth settings, set the site URL to the dashboard's
 address (the `DashboardUrl` output) and add `<DashboardUrl>/**` to the
 redirect URLs, so confirmation, recovery and social sign-in come back to it.
 
+## Settings of a stage
+
+Options passed as `-c key=value` hold for that one deploy. To keep a stage's
+settings, put them in `infra/aws/stages/<stage>.json` (not tracked by git):
+every deploy of the stage reads it, its pipeline included, and a `-c` on the
+command line still wins.
+
+```json
+{
+  "mailDomain": "example.com",
+  "mailFrom": "Example <noreply@example.com>",
+  "githubRepo": "<owner>/<repo>"
+}
+```
+
+## Mail through Amazon SES
+
+Supabase Auth sends the sign-up confirmation, recovery, address-change and
+invitation mail. On AWS it can send them through Amazon SES instead of SMTP,
+with no mail credential stored anywhere: Auth calls the dashboard's
+send-email hook, and the dashboard renders the mail from the product's own
+templates and sends it under its function's AWS role.
+
+1. Set `mailDomain` (and optionally `mailFrom`) and deploy. The web stack
+   creates the SES identity for the domain and prints three `MailDkim` DNS
+   records and the `MailHookUrl`.
+2. Add the three CNAME records to the domain's DNS. SES verifies the domain
+   once it sees them.
+3. In the Supabase project, enable the Send Email hook (Auth → Hooks) with
+   the `MailHookUrl`, and copy the secret it generates into the dashboard's
+   secret as `ZM_AUTH_HOOK_SECRET`. With the hook on, Auth stops using SMTP.
+4. A new SES account sends only to addresses it has verified (the SES
+   sandbox). Request production access in the SES console before real users
+   sign up.
+
 ## Deploy on every release
 
 To deploy from release tags instead of by hand, create the pipeline stack
