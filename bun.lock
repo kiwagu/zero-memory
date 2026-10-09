@@ -164,6 +164,7 @@
         "constructs": "catalog:",
       },
       "devDependencies": {
+        "@aws-sdk/client-ssm": "catalog:",
         "@types/node": "catalog:",
         "@workspace/eslint-config": "workspace:^",
         "@workspace/typescript-config": "workspace:^",

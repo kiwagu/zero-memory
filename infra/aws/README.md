@@ -1,11 +1,13 @@
 # infra/aws
 
-Runs the zero-memory MCP server on AWS Lambda behind CloudFront, with an
-existing Supabase project as its database and auth. It is a second way to
-deploy the server, next to `infra/prod` (Docker Compose on a host); the
-server code is the same.
+Runs zero-memory on AWS: the MCP server, the dashboard and the documentation
+site on Lambda behind CloudFront, with an existing Supabase project as the
+database and auth. It is a second way to deploy, next to `infra/prod` (Docker
+Compose on a host); the apps and their images are the same.
 
-An AWS CDK app in TypeScript. The dashboard is not part of it.
+An AWS CDK app in TypeScript with three stacks: `zero-memory-<stage>` (the
+server), `zero-memory-web-<stage>` (dashboard and docs) and, optionally,
+`zero-memory-pipeline-<stage>` (deploys from release tags).
 
 ## What it creates
 
@@ -19,6 +21,16 @@ An AWS CDK app in TypeScript. The dashboard is not part of it.
 | Secrets Manager secret                          | The server's environment as JSON (Supabase keys, dashboard URL, model keys), plus the edge header value it generates                                                   |
 | SSM parameter                                   | The public URL (OAuth issuer), read by the function at start                                                                                                           |
 | CloudWatch log group, alarms, dashboard         | Function logs kept one week; five alarms into one SNS topic; one dashboard (see [Alarms](#alarms))                                                                     |
+
+The web stack holds the dashboard and the docs, each as a Lambda function
+from `runtime/web-app.Dockerfile` — the app's own image plus the Lambda Web
+Adapter and `runtime/web-app.entry.ts`, which loads the app's secret and SSM
+parameters, starts its Next.js server, and answers only requests that carry
+the edge header — with a function URL, a secret
+(`zero-memory/<stage>/<web|docs>-env`) and a CloudFront distribution that
+caches only `/_next/static/*`. Each stack publishes its address in SSM
+(`/zero-memory/<stage>/{mcp,web,docs}-url`) and the apps read each other's
+at start, so neither stack refers to the other when deployed.
 
 Why the function URL takes no IAM auth: CloudFront's origin access control
 signs each request itself, which replaces the client's bearer token, and it
@@ -56,10 +68,12 @@ Then, for a deployment named `stand` (the name is part of every resource):
 AWS_PROFILE=<profile> bash scripts/deploy.sh stand
 ```
 
-The script builds the server image, then runs `cdk deploy`, which builds the
-Lambda image on top of it and pushes it. The stack outputs `McpUrl`,
-`PublicUrl`, `FunctionUrl`, `FunctionName`, `ServerEnvSecret`,
-`SessionTable`, `EdgeDomain` and `AlarmTopic`.
+The script builds the images of the server, the dashboard and the docs,
+then runs `cdk deploy` for the web stack and the server's, which build the
+Lambda images on top of them and push them. The server stack outputs
+`McpUrl`, `PublicUrl`, `FunctionUrl`, `FunctionName`, `ServerEnvSecret`,
+`SessionTable`, `EdgeDomain` and `AlarmTopic`; the web stack `DashboardUrl`,
+`DashboardSecret` and `DocsUrl`.
 
 Last, the script invokes the function directly once with
 `{"zeroMemory":"warm-up"}`, and the instance loads the embedding model. The
@@ -82,9 +96,9 @@ AWS_PROFILE=<profile> bash scripts/deploy.sh stand -c alarmEmail=ops@example.com
 A custom domain changes the public URL, which is the OAuth issuer: every
 client authorized against the old address has to authorize again.
 
-## Configure the server
+## Configure the apps
 
-Write the server's environment into the secret, from a file of `KEY=value`
+Write each app's environment into its secret, from a file of `KEY=value`
 lines:
 
 ```sh
@@ -92,14 +106,25 @@ cat > server.env <<'EOT'
 SUPABASE_URL=https://<project>.supabase.co
 SUPABASE_ANON_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...
-ZM_WEB_URL=https://<dashboard>
 EOT
 AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/stand/server-env server.env
+
+cat > web.env <<'EOT'
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+EOT
+AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/stand/web-env web.env
 ```
 
 The script keeps the keys it does not overwrite, among them the edge header
-value. An instance reads the secret once, when it starts; instances already
-running keep what they read.
+value. An instance reads its secret once, when it starts; instances already
+running keep what they read, and the next deploy restarts them. The server's
+`ZM_WEB_URL` and the dashboard's `ZM_SERVER_URL` come from the SSM
+parameters, ahead of the secrets.
+
+In the Supabase project's Auth settings, set the site URL to `DashboardUrl`
+and add `<DashboardUrl>/**` to the redirect URLs.
 
 ## Deploy from release tags
 
@@ -177,10 +202,10 @@ Point an MCP client at `McpUrl`.
 ## Remove
 
 ```sh
-AWS_PROFILE=<profile> bunx cdk destroy -c stage=stand
+AWS_PROFILE=<profile> bunx cdk destroy zero-memory-stand zero-memory-web-stand -c stage=stand
 ```
 
-This deletes the function, the tables, the secret, the parameter, the alarms
-and the logs; `bunx cdk destroy zero-memory-pipeline-stand -c stage=stand -c
+This deletes the functions, the tables, the secrets, the parameters, the
+alarms and the logs; `bunx cdk destroy zero-memory-pipeline-stand -c stage=stand -c
 githubRepo=<owner>/<repo>` removes the pipeline. The CDK bootstrap stack and
 the images it pushed stay.

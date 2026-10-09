@@ -20,6 +20,7 @@ import {
 } from 'aws-cdk-lib';
 import type { Construct } from 'constructs';
 
+import { viewerRequestFunction } from './edge.function.js';
 import { ServerObservability } from './server.observability.js';
 
 export interface ServerStackProps extends StackProps {
@@ -75,7 +76,10 @@ const RESPONSE_TIMEOUT = Duration.seconds(60);
  *   published in an SSM parameter the function reads at start: it cannot be
  *   set on the function, which exists before the distribution;
  * - the edge names the address it saw each request come from in its own
- *   header, so a client's X-Forwarded-For never reaches the rate limiter;
+ *   header, so a client's X-Forwarded-For never reaches the rate limiter
+ *   (see edge.function.ts);
+ * - the dashboard's address comes from the parameter the web stack publishes,
+ *   and this stack publishes the MCP URL the dashboard calls;
  * - alarms and a dashboard watch the function (see ServerObservability).
  */
 export class ServerStack extends Stack {
@@ -124,6 +128,8 @@ export class ServerStack extends Stack {
     });
 
     const publicUrlParameterName = `/zero-memory/${stage}/public-url`;
+    // Published by the web stack; read at start when it exists.
+    const webUrlParameterName = `/zero-memory/${stage}/web-url`;
 
     const logGroup = new logs.LogGroup(this, 'ServerLogs', {
       retention: logs.RetentionDays.ONE_WEEK,
@@ -151,6 +157,7 @@ export class ServerStack extends Stack {
         ZM_RATE_LIMIT_TABLE: rateLimits.tableName,
         ZM_ENV_SECRET_ID: serverEnv.secretArn,
         ZM_PUBLIC_URL_PARAMETER: publicUrlParameterName,
+        ZM_WEB_URL_PARAMETER: webUrlParameterName,
       },
     });
     sessions.grantReadWriteData(server);
@@ -161,13 +168,13 @@ export class ServerStack extends Stack {
     server.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['ssm:GetParameter'],
-        resources: [
+        resources: [publicUrlParameterName, webUrlParameterName].map((name) =>
           this.formatArn({
             service: 'ssm',
             resource: 'parameter',
-            resourceName: publicUrlParameterName.slice(1),
-          }),
-        ],
+            resourceName: name.slice(1),
+          })
+        ),
       })
     );
 
@@ -176,21 +183,7 @@ export class ServerStack extends Stack {
       invokeMode: lambda.InvokeMode.BUFFERED,
     });
 
-    // CloudFront forwards a client's X-Forwarded-For with the real address
-    // appended; this header carries only the address CloudFront saw, and a
-    // value a client sent under the same name is overwritten.
-    const viewerAddress = new cloudfront.Function(this, 'ViewerAddress', {
-      runtime: cloudfront.FunctionRuntime.JS_2_0,
-      comment: 'Sets x-viewer-address to the address CloudFront saw',
-      code: cloudfront.FunctionCode.fromInline(
-        [
-          'function handler(event) {',
-          "  event.request.headers['x-viewer-address'] = { value: event.viewer.ip };",
-          '  return event.request;',
-          '}',
-        ].join('\n')
-      ),
-    });
+    const viewerAddress = viewerRequestFunction(this, 'ViewerAddress');
 
     const edge = new cloudfront.Distribution(this, 'Edge', {
       comment: `zero-memory ${stage}`,
@@ -236,6 +229,12 @@ export class ServerStack extends Stack {
       parameterName: publicUrlParameterName,
       stringValue: publicUrl,
       description: 'Public URL (OAuth issuer) of the zero-memory server',
+    });
+    // What the dashboard calls the server at.
+    new ssm.StringParameter(this, 'McpUrlParameter', {
+      parameterName: `/zero-memory/${stage}/mcp-url`,
+      stringValue: `${publicUrl}/mcp`,
+      description: 'MCP endpoint of the zero-memory server',
     });
 
     const observability = new ServerObservability(this, 'Observability', {

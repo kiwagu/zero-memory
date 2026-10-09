@@ -102,6 +102,9 @@ describe('ServerStack', () => {
         "headers\\['x-viewer-address'\\] = \\{ value: event\\.viewer\\.ip \\}"
       ),
     });
+    template.hasResourceProperties('AWS::CloudFront::Function', {
+      FunctionCode: Match.stringLikeRegexp("headers\\['x-forwarded-host'\\]"),
+    });
     template.hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({
         DefaultCacheBehavior: Match.objectLike({

@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "lint:strict": "eslint . --max-warnings 0",
     "format": "bunx prettier --write .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p runtime",
     "synth": "cdk synth --quiet",
     "deploy": "bash scripts/deploy.sh",
     "test:vitest": "vitest run"
@@ -19,6 +19,7 @@
     "constructs": "catalog:"
   },
   "devDependencies": {
+    "@aws-sdk/client-ssm": "catalog:",
     "@types/node": "catalog:",
     "@workspace/eslint-config": "workspace:^",
     "@workspace/typescript-config": "workspace:^",
