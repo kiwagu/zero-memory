@@ -4,7 +4,11 @@ import {
   GetSecretValueCommand,
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
-import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+import {
+  GetParameterCommand,
+  ParameterNotFound,
+  SSMClient,
+} from '@aws-sdk/client-ssm';
 
 /** The header the edge adds to every request it forwards to the function. */
 export const EDGE_HEADER = 'x-origin-verify';
@@ -19,21 +23,59 @@ export const VIEWER_HEADER = 'x-viewer-address';
  * Loads the function's configuration from where it lives on AWS, once per
  * instance and before the server is composed:
  *
- * - `ZM_ENV_SECRET_ID` names a Secrets Manager secret holding a JSON object
- *   of environment variables (the Supabase keys, the dashboard URL, the edge
- *   header's value), so no secret is part of the function's configuration;
  * - `ZM_PUBLIC_URL_PARAMETER` names an SSM parameter holding the public URL.
  *   That URL is the edge's address, which exists only after the function
- *   does, so it cannot be set on the function itself.
+ *   does, so it cannot be set on the function itself;
+ * - `ZM_WEB_URL_PARAMETER` names the parameter holding the dashboard's
+ *   address, published by the stack that runs the dashboard. Until that
+ *   stack exists the parameter does not either, and ZM_WEB_URL comes from
+ *   the secret instead;
+ * - `ZM_ENV_SECRET_ID` names a Secrets Manager secret holding a JSON object
+ *   of environment variables (the Supabase keys, the edge header's value), so
+ *   no secret is part of the function's configuration.
  *
- * A variable already set in the environment wins over the secret.
+ * A variable set on the function wins, then a parameter, then the secret.
  */
+export interface RuntimeConfigClients {
+  ssm: Pick<SSMClient, 'send'>;
+  secrets: Pick<SecretsManagerClient, 'send'>;
+}
+
 export const loadRuntimeConfig = async (
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  clients: RuntimeConfigClients = {
+    ssm: new SSMClient({}),
+    secrets: new SecretsManagerClient({}),
+  }
 ): Promise<void> => {
+  const { ssm, secrets } = clients;
+  const fromParameter = async (
+    variable: string,
+    name: string | undefined,
+    required: boolean
+  ): Promise<void> => {
+    if (!name || env[variable]) {
+      return;
+    }
+    try {
+      const { Parameter } = await ssm.send(
+        new GetParameterCommand({ Name: name })
+      );
+      if (Parameter?.Value) {
+        env[variable] = Parameter.Value;
+      }
+    } catch (error) {
+      if (required || !(error instanceof ParameterNotFound)) {
+        throw error;
+      }
+    }
+  };
+  await fromParameter('ZM_PUBLIC_URL', env.ZM_PUBLIC_URL_PARAMETER, true);
+  await fromParameter('ZM_WEB_URL', env.ZM_WEB_URL_PARAMETER, false);
+
   const secretId = env.ZM_ENV_SECRET_ID;
   if (secretId) {
-    const { SecretString } = await new SecretsManagerClient({}).send(
+    const { SecretString } = await secrets.send(
       new GetSecretValueCommand({ SecretId: secretId })
     );
     const values = JSON.parse(SecretString ?? '{}') as Record<string, unknown>;
@@ -41,15 +83,6 @@ export const loadRuntimeConfig = async (
       if (typeof value === 'string' && env[name] === undefined) {
         env[name] = value;
       }
-    }
-  }
-  const parameter = env.ZM_PUBLIC_URL_PARAMETER;
-  if (parameter && !env.ZM_PUBLIC_URL) {
-    const { Parameter } = await new SSMClient({}).send(
-      new GetParameterCommand({ Name: parameter })
-    );
-    if (Parameter?.Value) {
-      env.ZM_PUBLIC_URL = Parameter.Value;
     }
   }
 };
