@@ -170,6 +170,7 @@
         "aws-cdk": "catalog:",
         "eslint": "catalog:",
         "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/audit": {

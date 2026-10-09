@@ -10,7 +10,8 @@
     "format": "bunx prettier --write .",
     "typecheck": "tsc --noEmit",
     "synth": "cdk synth --quiet",
-    "deploy": "bash scripts/deploy.sh"
+    "deploy": "bash scripts/deploy.sh",
+    "test:vitest": "vitest run"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "catalog:",
@@ -23,6 +24,7 @@
     "@workspace/typescript-config": "workspace:^",
     "aws-cdk": "catalog:",
     "eslint": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   }
 }
