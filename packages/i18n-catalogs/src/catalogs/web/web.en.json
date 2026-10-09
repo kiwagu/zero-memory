@@ -1,6 +1,7 @@
 {
   "app.title": "zero-memory",
   "app.description": "Shared memory for coding agents — team dashboard",
+  "app.syncing": "Syncing with the server",
   "nav.memories": "Memories",
   "nav.entities": "Entities",
   "nav.scopes": "Scopes",
