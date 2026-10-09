@@ -10,6 +10,12 @@ import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 export const EDGE_HEADER = 'x-origin-verify';
 
 /**
+ * The header the edge sets to the address it saw the request come from,
+ * overwriting any value a client sent under that name.
+ */
+export const VIEWER_HEADER = 'x-viewer-address';
+
+/**
  * Loads the function's configuration from where it lives on AWS, once per
  * instance and before the server is composed:
  *
@@ -68,4 +74,23 @@ export const cameThroughEdge = (
   const a = Buffer.from(presented);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
+};
+
+/**
+ * Makes X-Forwarded-For say what the edge saw, and nothing a client wrote.
+ * The edge forwards a client's own X-Forwarded-For with the real address
+ * appended, and the server reads the first hop, so trusting the header as it
+ * arrives would let anyone pick a fresh rate-limit bucket per request. The
+ * header is replaced with the edge's observation, or removed when there is
+ * none, which leaves every such request in one shared bucket.
+ */
+export const forwardedForFromEdge = (
+  headers: Record<string, string | undefined>
+): void => {
+  const viewer = headers[VIEWER_HEADER];
+  delete headers[VIEWER_HEADER];
+  delete headers['x-forwarded-for'];
+  if (viewer) {
+    headers['x-forwarded-for'] = viewer;
+  }
 };

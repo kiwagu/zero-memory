@@ -28,11 +28,17 @@ CQRS buses. Nothing depends on this app; it depends on almost every package.
 - `src/lambda.ts` — the same HTTP handler as an AWS Lambda function behind a
   function URL: a custom runtime on the Lambda Runtime API, which drains the
   request's side writes (`drainDetached`) before posting each response,
-  because Lambda freezes the process once a response is out. Built as a
-  container image by `lambda.Dockerfile` (`runtime-api` target; the
-  `web-adapter` target runs `src/index.ts` behind the Lambda Web Adapter).
-  `scripts/lambda-spike/` runs it locally under the AWS Runtime Interface
-  Emulator with DynamoDB Local.
+  because Lambda freezes the process once a response is out. Sessions and
+  the OAuth rate limiter's counts live in DynamoDB
+  (`src/rate-limit.dynamodb-limiter.ts`), shared by every instance. Behind
+  the edge it answers only requests carrying `x-origin-verify`, and takes the
+  client's address from the edge's `x-viewer-address`, never from the
+  `X-Forwarded-For` a client sent (`src/lambda.config.ts`). A direct
+  invocation with `{"zeroMemory":"warm-up"}` loads the embedding model.
+  Built as a container image by `lambda.Dockerfile` (`runtime-api` target;
+  the `web-adapter` target runs `src/index.ts` behind the Lambda Web
+  Adapter). `scripts/lambda-spike/` runs it locally under the AWS Runtime
+  Interface Emulator with DynamoDB Local.
 - `src/mcp-stdio.ts` — stdio transport (also exposed as the
   `zero-memory-mcp` bin). Signs in with `ZM_EMAIL`/`ZM_PASSWORD` and derives
   the default scope from the process cwd (overridden by the client's MCP
@@ -62,9 +68,16 @@ Read directly by this app:
 | `ZM_PUBLIC_URL`        | Public base URL / OAuth issuer (default `http://localhost:<port>`) |
 | `ZM_EXTRACTOR`         | `deterministic` swaps in the test extractor (no API key needed)    |
 | `ZM_MCP_SESSION_TABLE` | DynamoDB table for MCP sessions; unset keeps them in memory        |
+| `ZM_RATE_LIMIT_TABLE`  | DynamoDB table for rate-limit counts (Lambda only, required there) |
 | `ZM_MCP_JSON_RESPONSE` | `on` answers MCP POSTs with one JSON body instead of SSE           |
 
 The wired adapters read their own variables — `SUPABASE_URL`,
 `SUPABASE_ANON_KEY`, `ZM_EMAIL`, `ZM_PASSWORD`, `ANTHROPIC_API_KEY`, … — see
 the READMEs of `@workspace/persistence`, `@workspace/extraction`,
 `@workspace/embedding`, `@workspace/mcp-auth`, and `@workspace/logger`.
+
+## Testing
+
+- `bun run test:vitest` — unit specs.
+- `bun run test:dynamodb` — the DynamoDB adapters (MCP sessions, rate-limit
+  counts) against DynamoDB Local in a throwaway container; needs Docker.

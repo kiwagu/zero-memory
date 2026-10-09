@@ -12,7 +12,9 @@ consumes the port; the app host binds the adapter.
 ## Key exports
 
 - `IEmbeddingService` — the port: `dims` and `embed(texts, kind?)`, where
-  `kind` is `'query' | 'passage'` (the e5 prefix; defaults to `'query'`).
+  `kind` is `'query' | 'passage'` (the e5 prefix; defaults to `'query'`), and
+  an optional `warmUp()` that loads the model ahead of the first call without
+  metering anything.
 - `EMBEDDING_SERVICE`, `injectEmbeddingService()` — DI token and helper.
 - `E5SmallEmbeddingService` — transformers.js (ONNX) adapter, model
   `Xenova/e5-large-v2` (intfloat/e5-large-v2), 1024 dims. English-specialized,

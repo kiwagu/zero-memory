@@ -101,6 +101,15 @@ export class E5SmallEmbeddingService implements IEmbeddingService {
     return output.tolist();
   }
 
+  /**
+   * Loads the model and runs one throwaway inference, whose first run is
+   * slower than the rest. Not metered: nothing is embedded for anyone.
+   */
+  async warmUp(): Promise<void> {
+    const pipeline = await this.#init();
+    await pipeline(['query: warm-up'], { pooling: 'mean', normalize: true });
+  }
+
   #init(): Promise<FeatureExtractionPipeline> {
     // Lazy singleton: the ONNX session is built once and shared; a failed
     // init is not cached so the next call can retry.

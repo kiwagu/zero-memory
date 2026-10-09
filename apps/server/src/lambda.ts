@@ -1,10 +1,17 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { container } from '@workspace/di';
+import {
+  EMBEDDING_SERVICE,
+  type IEmbeddingService,
+} from '@workspace/embedding';
 import { createLogger, drainDetached } from '@workspace/logger';
+import { rateLimiterOptionsFromEnv } from '@workspace/mcp-auth';
 
 import { createHttpHandler } from './http-handler.js';
 import {
   cameThroughEdge,
   EDGE_HEADER,
+  forwardedForFromEdge,
   loadRuntimeConfig,
 } from './lambda.config.js';
 import {
@@ -14,13 +21,14 @@ import {
   type FunctionUrlResult,
 } from './lambda.function-url.js';
 import { DynamoDbMcpSessionStore } from './mcp-session.dynamodb-store.js';
+import { DynamoDbRateLimiter } from './rate-limit.dynamodb-limiter.js';
 
 /**
  * The server as an AWS Lambda function behind a function URL: a custom
  * runtime that pulls invocations from the Lambda Runtime API and hands each
  * one to the same HTTP handler the listening server uses. Sessions live in
  * DynamoDB, because consecutive requests of one session can land on
- * different instances.
+ * different instances; so does the OAuth rate limiter's count.
  *
  * Lambda freezes the process as soon as a response is posted, so the side
  * writes started during the request (metering, audit, the session's project)
@@ -64,11 +72,18 @@ const start = async (): Promise<ReturnType<typeof createHttpHandler>> => {
   if (!tableName) {
     throw new Error('ZM_MCP_SESSION_TABLE must name the session table.');
   }
+  const rateLimitTable = process.env.ZM_RATE_LIMIT_TABLE;
+  if (!rateLimitTable) {
+    throw new Error('ZM_RATE_LIMIT_TABLE must name the rate-limit table.');
+  }
+  const client = new DynamoDBClient({});
   return createHttpHandler({
     port: Number(process.env.PORT ?? 8787),
-    sessions: new DynamoDbMcpSessionStore({
-      tableName,
-      client: new DynamoDBClient({}),
+    sessions: new DynamoDbMcpSessionStore({ tableName, client }),
+    rateLimiter: new DynamoDbRateLimiter({
+      tableName: rateLimitTable,
+      client,
+      ...rateLimiterOptionsFromEnv(),
     }),
     jsonResponse: process.env.ZM_MCP_JSON_RESPONSE === 'on',
     // Behind CloudFront the viewer's address arrives in X-Forwarded-For
@@ -97,12 +112,48 @@ try {
 }
 logger.info('lambda runtime ready', { publicUrl: handler!.publicUrl });
 
+/**
+ * The event a deployment sends by invoking the function directly, right after
+ * it deployed a new image: the instance loads the embedding model and says
+ * how long that took. The first read of a new image's model files is slow
+ * (close to a minute measured), and paying it here keeps it off the first
+ * search a person makes. Only a caller with AWS credentials can invoke the
+ * function directly; anything from the function URL carries `requestContext`.
+ *
+ * The model is not loaded in the background of ordinary starts: while it
+ * loads, the instance answers nothing else on time.
+ */
+interface WarmUpEvent {
+  zeroMemory: 'warm-up';
+}
+
+const isWarmUp = (event: unknown): event is WarmUpEvent =>
+  typeof event === 'object' &&
+  event !== null &&
+  !('requestContext' in event) &&
+  (event as Partial<WarmUpEvent>).zeroMemory === 'warm-up';
+
+const warmUp = async (): Promise<{ warm: true; duration_ms: number }> => {
+  const startedAt = performance.now();
+  await container.resolve<IEmbeddingService>(EMBEDDING_SERVICE).warmUp?.();
+  const duration_ms = Math.round(performance.now() - startedAt);
+  logger.info('embedding model warm', { duration_ms });
+  return { warm: true, duration_ms };
+};
+
 for (;;) {
   const next = await fetch(`${invocationUrl}/next`);
   const invocationId = next.headers.get('lambda-runtime-aws-request-id');
   const deadline = Number(next.headers.get('lambda-runtime-deadline-ms'));
-  const event = (await next.json()) as FunctionUrlEvent;
+  const event = (await next.json()) as FunctionUrlEvent | WarmUpEvent;
   try {
+    if (isWarmUp(event)) {
+      await fetch(`${invocationUrl}/${invocationId}/response`, {
+        method: 'POST',
+        body: JSON.stringify(await warmUp()),
+      });
+      continue;
+    }
     const presented = event.headers?.[EDGE_HEADER];
     if (!cameThroughEdge(presented, process.env.ZM_ORIGIN_VERIFY)) {
       await fetch(`${invocationUrl}/${invocationId}/response`, {
@@ -113,6 +164,9 @@ for (;;) {
     }
     // The shared value is the edge's business only; the server never sees it.
     delete event.headers?.[EDGE_HEADER];
+    if (process.env.ZM_ORIGIN_VERIFY && event.headers) {
+      forwardedForFromEdge(event.headers);
+    }
     const request = requestFromFunctionUrlEvent(event);
     sourceIps.set(request, event.requestContext.http.sourceIp);
     const response = await handler!.handle(request);
