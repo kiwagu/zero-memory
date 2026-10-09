@@ -24,6 +24,11 @@ export interface AppOptions {
    * app is reached through a forwarding app that does the listening.
    */
   requestIp?: McpAuthPluginOptions['requestIp'];
+  /**
+   * The OAuth rate limiter's count when it must be shared by several
+   * instances; without it the count stays in this process.
+   */
+  rateLimiter?: McpAuthPluginOptions['limiter'];
   /** Where MCP sessions live between requests. */
   sessions: IMcpSessionStore;
   /** Answer MCP POSTs with one JSON body instead of an SSE stream. */
@@ -70,6 +75,7 @@ export const createApp = (options: AppOptions) =>
         issuer: options.publicUrl,
         webUrl: options.webUrl,
         requestIp: options.requestIp,
+        limiter: options.rateLimiter,
       })
     )
     .use(

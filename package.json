@@ -19,6 +19,7 @@
     "db:sync": "bun run db:migrate:e2e && bun run db:types",
     "db:types": "bun run --cwd packages/db gen-types",
     "test": "CI=1 turbo run test:vitest",
+    "test:dynamodb": "bun run --cwd apps/server test:dynamodb",
     "test:installers": "bash scripts/installers.test.sh",
     "test:prune-actions": "bash scripts/prune-actions-storage.test.sh",
     "test:integration": "CI=1 turbo run test:integration",

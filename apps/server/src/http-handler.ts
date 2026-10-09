@@ -20,6 +20,8 @@ export interface HttpHandlerOptions {
   jsonResponse?: boolean;
   /** Where the OAuth rate limiter learns the client's address. */
   requestIp?: McpAuthPluginOptions['requestIp'];
+  /** The OAuth rate limiter's count, when instances must share it. */
+  rateLimiter?: McpAuthPluginOptions['limiter'];
 }
 
 export interface HttpHandler {
@@ -70,6 +72,7 @@ export const createHttpHandler = (options: HttpHandlerOptions): HttpHandler => {
     publicUrl,
     webUrl,
     requestIp: options.requestIp,
+    rateLimiter: options.rateLimiter,
     sessions: options.sessions,
     jsonResponse: options.jsonResponse,
   });

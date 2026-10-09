@@ -14,7 +14,8 @@
     "lint:strict": "eslint . --max-warnings 0",
     "format": "bunx prettier --write .",
     "typecheck": "tsc --noEmit",
-    "test:vitest": "vitest run"
+    "test:vitest": "vitest run",
+    "test:dynamodb": "bash scripts/dynamodb-local.test.sh"
   },
   "bin": {
     "zero-memory-mcp": "./src/mcp-stdio.ts"

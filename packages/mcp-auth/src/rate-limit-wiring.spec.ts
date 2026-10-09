@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { IAuthGateway } from './auth-gateway.js';
 import { InMemoryOAuthStore } from './in-memory-oauth-store.js';
 import { mcpAuthPlugin } from './plugin.js';
+import { FixedWindowRateLimiter } from './rate-limit.js';
 
 const auth: IAuthGateway = {
   verifyAccessToken: async () => null,
@@ -45,5 +46,34 @@ describe('the rate-limit key behind a forwarding app', () => {
     // Another caller is another bucket.
     address = '203.0.113.11';
     expect((await register(inner)).status).toBe(201);
+  });
+});
+
+describe('a limiter shared by several instances', () => {
+  it('counts the requests of every instance together', async () => {
+    delete process.env.ZM_TRUST_PROXY;
+    const shared = new FixedWindowRateLimiter({
+      maxRequests: 2,
+      windowSeconds: 60,
+    });
+    const instance = () =>
+      new Elysia().use(
+        mcpAuthPlugin({
+          issuer: 'http://server.test',
+          webUrl: 'http://web.test',
+          store: new InMemoryOAuthStore(),
+          auth,
+          limiter: shared,
+          requestIp: () => ({
+            requestIP: () => ({ address: '203.0.113.20' }),
+          }),
+        })
+      );
+    const [a, b] = [instance(), instance()];
+    expect((await register(a)).status).toBe(201);
+    expect((await register(b)).status).toBe(201);
+    // The third request is over the shared limit whichever instance takes it.
+    expect((await register(a)).status).toBe(429);
+    expect((await register(b)).status).toBe(429);
   });
 });

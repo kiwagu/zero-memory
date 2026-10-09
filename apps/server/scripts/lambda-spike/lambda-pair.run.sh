@@ -31,12 +31,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 docker network create zm-lambda >/dev/null 2>&1 || true
 if ! docker inspect zm-lambda-dynamodb >/dev/null 2>&1; then
   docker run -d --name zm-lambda-dynamodb --network zm-lambda \
-    -p 127.0.0.1:55390:8000 amazon/dynamodb-local:latest \
+    -p 127.0.0.1:55390:8000 amazon/dynamodb-local:3.3.1 \
     -jar DynamoDBLocal.jar -inMemory -sharedDb >/dev/null
   sleep 2
 fi
 AWS_REGION=eu-central-1 AWS_ACCESS_KEY_ID=local AWS_SECRET_ACCESS_KEY=local \
-  bun "$SCRIPT_DIR/session-table.setup.ts" http://127.0.0.1:55390 zm-mcp-sessions
+  bun "$SCRIPT_DIR/dynamodb-tables.setup.ts" http://127.0.0.1:55390 \
+    zm-mcp-sessions zm-rate-limits
 
 for i in 1 2; do
   docker rm -f "zm-lambda-$i" >/dev/null 2>&1 || true
@@ -49,6 +50,7 @@ for i in 1 2; do
     -e AWS_REGION=eu-central-1 -e AWS_ACCESS_KEY_ID=local -e AWS_SECRET_ACCESS_KEY=local \
     -e AWS_ENDPOINT_URL_DYNAMODB=http://zm-lambda-dynamodb:8000 \
     -e ZM_MCP_SESSION_TABLE=zm-mcp-sessions \
+    -e ZM_RATE_LIMIT_TABLE=zm-rate-limits \
     -e ZM_MCP_JSON_RESPONSE="${ZM_MCP_JSON_RESPONSE:-}" \
     -e ZM_ORIGIN_VERIFY="${ZM_ORIGIN_VERIFY:-}" \
     -e ZM_PUBLIC_URL=http://127.0.0.1:55398 -e ZM_WEB_URL=http://localhost:3102 \
