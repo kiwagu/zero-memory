@@ -3,9 +3,15 @@ import { createLogger, drainDetached } from '@workspace/logger';
 
 import { createHttpHandler } from './http-handler.js';
 import {
+  cameThroughEdge,
+  EDGE_HEADER,
+  loadRuntimeConfig,
+} from './lambda.config.js';
+import {
   functionUrlResultFromResponse,
   requestFromFunctionUrlEvent,
   type FunctionUrlEvent,
+  type FunctionUrlResult,
 } from './lambda.function-url.js';
 import { DynamoDbMcpSessionStore } from './mcp-session.dynamodb-store.js';
 
@@ -20,6 +26,11 @@ import { DynamoDbMcpSessionStore } from './mcp-session.dynamodb-store.js';
  * writes started during the request (metering, audit, the session's project)
  * are drained first; an instance that is recycled while frozen would lose
  * them otherwise.
+ *
+ * Configuration that cannot sit on the function itself (secrets, the edge's
+ * own address) is loaded once per instance before the server is composed,
+ * and a request that did not come through the edge is refused before it
+ * reaches the server.
  */
 
 const logger = createLogger('lambda');
@@ -28,7 +39,6 @@ if (!runtimeApi) {
   throw new Error('AWS_LAMBDA_RUNTIME_API is not set: not running in Lambda.');
 }
 const invocationUrl = `http://${runtimeApi}/2018-06-01/runtime/invocation`;
-const tableName = process.env.ZM_MCP_SESSION_TABLE;
 
 /** Keep this much of the invocation's time for posting the response. */
 const POST_RESERVE_MS = 500;
@@ -45,7 +55,9 @@ const reportInitError = async (error: unknown): Promise<never> => {
 
 const sourceIps = new WeakMap<Request, string>();
 
-const start = (): ReturnType<typeof createHttpHandler> => {
+const start = async (): Promise<ReturnType<typeof createHttpHandler>> => {
+  await loadRuntimeConfig();
+  const tableName = process.env.ZM_MCP_SESSION_TABLE;
   if (!tableName) {
     throw new Error('ZM_MCP_SESSION_TABLE must name the session table.');
   }
@@ -67,9 +79,16 @@ const start = (): ReturnType<typeof createHttpHandler> => {
   });
 };
 
+const notFromEdge: FunctionUrlResult = {
+  statusCode: 403,
+  headers: { 'content-type': 'text/plain' },
+  body: 'Forbidden',
+  isBase64Encoded: false,
+};
+
 let handler: ReturnType<typeof createHttpHandler>;
 try {
-  handler = start();
+  handler = await start();
 } catch (error) {
   await reportInitError(error);
 }
@@ -81,6 +100,16 @@ for (;;) {
   const deadline = Number(next.headers.get('lambda-runtime-deadline-ms'));
   const event = (await next.json()) as FunctionUrlEvent;
   try {
+    const presented = event.headers?.[EDGE_HEADER];
+    if (!cameThroughEdge(presented, process.env.ZM_ORIGIN_VERIFY)) {
+      await fetch(`${invocationUrl}/${invocationId}/response`, {
+        method: 'POST',
+        body: JSON.stringify(notFromEdge),
+      });
+      continue;
+    }
+    // The shared value is the edge's business only; the server never sees it.
+    delete event.headers?.[EDGE_HEADER];
     const request = requestFromFunctionUrlEvent(event);
     sourceIps.set(request, event.requestContext.http.sourceIp);
     const response = await handler!.handle(request);

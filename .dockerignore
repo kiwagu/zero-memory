@@ -36,6 +36,8 @@ coverage
 # (`docs/` is NOT here: the documentation image serves that tree, and the
 # other images simply never copy it.)
 infra
+# The lockfile covers this workspace, so its manifest has to be there.
+!infra/aws/package.json
 scripts
 supabase
 Makefile

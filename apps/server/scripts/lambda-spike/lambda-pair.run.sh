@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs two Lambda containers of the server under the AWS Runtime Interface
 # Emulator, the way Lambda runs them (read-only root, writable /tmp, 2 GB),
-# with MCP sessions in a DynamoDB Local container on a shared network.
+# with MCP sessions in a DynamoDB Local container on a shared network. The
+# embedding model comes from the image, as on Lambda.
 #
 #   lambda-pair.run.sh <image> <rie-dir> <stack-env-file> <entry...>
 #
@@ -12,8 +13,9 @@
 #
 # The containers answer on 127.0.0.1:55381 and :55382; put
 # function-url.emulator.ts in front of them on :55398. ZM_MCP_JSON_RESPONSE=on
-# in the calling shell switches POST answers from SSE to JSON. Stop with
-# `lambda-pair.run.sh --down`.
+# in the calling shell switches POST answers from SSE to JSON; ZM_ORIGIN_VERIFY
+# makes the containers refuse requests without that edge header (give the
+# emulator the same value). Stop with `lambda-pair.run.sh --down`.
 set -euo pipefail
 
 if [ "${1:-}" = "--down" ]; then
@@ -41,13 +43,14 @@ for i in 1 2; do
   docker run -d --name "zm-lambda-$i" --network zm-lambda \
     --read-only --tmpfs /tmp:rw,exec --memory 2g \
     --add-host host.docker.internal:host-gateway -p "127.0.0.1:5538$i:8080" \
-    -v "$RIE_DIR:/aws-lambda:ro" -v "$HOME/.cache/zero-memory/models:/models:ro" \
+    -v "$RIE_DIR:/aws-lambda:ro" \
     -e SUPABASE_URL=http://host.docker.internal:55331 \
     -e SUPABASE_ANON_KEY -e SUPABASE_SERVICE_ROLE_KEY \
     -e AWS_REGION=eu-central-1 -e AWS_ACCESS_KEY_ID=local -e AWS_SECRET_ACCESS_KEY=local \
     -e AWS_ENDPOINT_URL_DYNAMODB=http://zm-lambda-dynamodb:8000 \
-    -e ZM_MCP_SESSION_TABLE=zm-mcp-sessions -e ZM_MODEL_CACHE_DIR=/models \
+    -e ZM_MCP_SESSION_TABLE=zm-mcp-sessions \
     -e ZM_MCP_JSON_RESPONSE="${ZM_MCP_JSON_RESPONSE:-}" \
+    -e ZM_ORIGIN_VERIFY="${ZM_ORIGIN_VERIFY:-}" \
     -e ZM_PUBLIC_URL=http://127.0.0.1:55398 -e ZM_WEB_URL=http://localhost:3102 \
     --entrypoint /aws-lambda/aws-lambda-rie "$IMAGE" "$@" >/dev/null
 done

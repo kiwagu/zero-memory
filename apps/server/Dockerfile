@@ -57,6 +57,7 @@ COPY packages/typescript-config/package.json packages/typescript-config/
 COPY packages/ui/package.json packages/ui/
 COPY packages/usage/package.json packages/usage/
 COPY tests/e2e/package.json tests/e2e/
+COPY infra/aws/package.json infra/aws/
 
 # Scoped to the server workspace (and its transitive workspace deps) —
 # keeps web-only dependencies (next, react) out of the image.

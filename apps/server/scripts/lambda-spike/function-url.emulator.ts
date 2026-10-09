@@ -9,6 +9,8 @@
  *   bun scripts/lambda-spike/function-url.emulator.ts <port> <rie-url>...
  *
  * Each <rie-url> is a container's invoke base, e.g. http://127.0.0.1:9101.
+ * With ZM_ORIGIN_VERIFY set, every request carries it in `x-origin-verify`,
+ * as the CloudFront distribution in front of the real function does.
  */
 
 interface InvokeResult {
@@ -52,6 +54,10 @@ Bun.serve({
     request.headers.forEach((value, name) => {
       headers[name] = value;
     });
+    const edgeValue = process.env.ZM_ORIGIN_VERIFY;
+    if (edgeValue) {
+      headers['x-origin-verify'] = edgeValue;
+    }
     const body = await request.arrayBuffer();
     const event = {
       version: '2.0',

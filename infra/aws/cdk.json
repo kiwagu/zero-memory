@@ -1,0 +1,7 @@
+{
+  "app": "bun bin/app.ts",
+  "watch": { "include": ["bin/**", "src/**"] },
+  "context": {
+    "stage": "stand"
+  }
+}
