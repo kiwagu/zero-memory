@@ -20,6 +20,8 @@
     "zero-memory-mcp": "./src/mcp-stdio.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "catalog:",
+    "@aws-sdk/lib-dynamodb": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
     "@workspace/audit": "workspace:*",
     "@workspace/board": "workspace:*",

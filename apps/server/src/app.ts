@@ -5,6 +5,7 @@ import { buildVersion, checkoutRevision } from './build-version.js';
 import { errorResponse, errorResponseFromThrown } from './http-error.js';
 import { renderMetrics } from './metrics.js';
 import { createMcpHttpRoutes } from './mcp-http.js';
+import type { IMcpSessionStore } from './mcp-session.store.js';
 import {
   createDefaultReadinessProbes,
   createReadinessRoutes,
@@ -23,6 +24,10 @@ export interface AppOptions {
    * app is reached through a forwarding app that does the listening.
    */
   requestIp?: McpAuthPluginOptions['requestIp'];
+  /** Where MCP sessions live between requests. */
+  sessions: IMcpSessionStore;
+  /** Answer MCP POSTs with one JSON body instead of an SSE stream. */
+  jsonResponse?: boolean;
 }
 
 export const createApp = (options: AppOptions) =>
@@ -67,6 +72,12 @@ export const createApp = (options: AppOptions) =>
         requestIp: options.requestIp,
       })
     )
-    .use(createMcpHttpRoutes({ issuer: options.publicUrl }));
+    .use(
+      createMcpHttpRoutes({
+        issuer: options.publicUrl,
+        sessions: options.sessions,
+        jsonResponse: options.jsonResponse,
+      })
+    );
 
 export type App = ReturnType<typeof createApp>;

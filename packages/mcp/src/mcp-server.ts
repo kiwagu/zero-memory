@@ -316,7 +316,9 @@ export interface McpServerDeps {
    * The connecting client's self-declared `clientInfo.name` from the
    * initialize request, when the transport can see it before the server
    * object is built (HTTP can: the request body is parsed first). Drives how
-   * much rule text the instructions carry.
+   * much rule text the instructions carry, and names the agent in the
+   * activity feed when this server object did not receive the handshake
+   * itself (HTTP builds one per request and keeps the name with the session).
    */
   clientName?: string | null;
 }
@@ -959,9 +961,11 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
 
   // The agent principal the activity feed attributes: the client's
   // self-declared name from the initialize handshake. Resolved lazily at call
-  // time (initialize has completed by the time any tool runs).
+  // time (initialize has completed by the time any tool runs). A server built
+  // for one request of an existing session never saw that handshake itself,
+  // so the name the session recorded at initialize stands in for it.
   const clientName = (): string | null =>
-    server.server.getClientVersion()?.name ?? null;
+    server.server.getClientVersion()?.name ?? deps.clientName ?? null;
 
   const readLinks = (links: ResourceLink[]): ResourceLink[] =>
     resourceLinksForClient(links, clientName());
