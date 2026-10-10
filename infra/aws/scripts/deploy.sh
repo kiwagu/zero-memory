@@ -13,6 +13,11 @@
 # ZM_BUILD_VERSION and ZM_BUILD_COMMIT, when set, name the build that /healthz
 # and the pages report (the pipeline sets them from the release tag).
 #
+# An instance reads its app's environment secret only when it starts. The
+# current version of each secret is stamped into its function, so a deploy
+# after a secret changed replaces the running instances, and one after no
+# change leaves them alone.
+#
 # After the deploy, one direct invocation makes a server instance load the
 # embedding model, and one request each wakes the dashboard and the docs. The
 # first read of a new image is slow (close to a minute measured for the
@@ -34,6 +39,13 @@ server_id="$(build server | tail -1)"
 web_id="$(build web | tail -1)"
 docs_id="$(build docs | tail -1)"
 
+# Empty until the stack has created the secret.
+env_version() {
+  aws secretsmanager describe-secret --secret-id "zero-memory/${stage}/$1-env" \
+    --query VersionIdsToStages --output json 2>/dev/null |
+    jq -r 'to_entries[] | select(.value | index("AWSCURRENT")) | .key' || true
+}
+
 cd "$repo/infra/aws"
 outputs="cdk.out/outputs-${stage}.json"
 bunx cdk deploy "zero-memory-web-${stage}" "zero-memory-${stage}" \
@@ -43,6 +55,9 @@ bunx cdk deploy "zero-memory-web-${stage}" "zero-memory-${stage}" \
   -c serverImage="zero-memory-server:aws-${stage}" -c serverImageId="$server_id" \
   -c webImage="zero-memory-web:aws-${stage}" -c webImageId="$web_id" \
   -c docsImage="zero-memory-docs:aws-${stage}" -c docsImageId="$docs_id" \
+  -c serverEnvVersion="$(env_version server)" \
+  -c webEnvVersion="$(env_version web)" \
+  -c docsEnvVersion="$(env_version docs)" \
   "$@"
 
 for page in "$(jq -r --arg stack "zero-memory-web-${stage}" '.[$stack].DashboardUrl' "$outputs")/login" \

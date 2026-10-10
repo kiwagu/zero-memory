@@ -75,8 +75,10 @@ AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/server-env 
 AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/web-env web.env
 ```
 
-An instance reads its secret when it starts; the next deploy restarts them
-all.
+An instance reads its secret only when it starts. The deploy script stamps
+each secret's current version into its function, so the next deploy after
+you change a secret replaces that app's running instances; until then they
+keep the old values.
 
 In the Supabase project's Auth settings, set the site URL to the dashboard's
 address (the `DashboardUrl` output) and add `<DashboardUrl>/**` to the

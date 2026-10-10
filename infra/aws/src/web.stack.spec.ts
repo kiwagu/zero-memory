@@ -51,6 +51,20 @@ describe('WebStack', () => {
     });
   });
 
+  it('gives each app the version of its own environment secret', () => {
+    const template = synth({
+      webEnvVersion: 'web-2',
+      docsEnvVersion: 'docs-5',
+    });
+    for (const version of ['web-2', 'docs-5']) {
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        Environment: {
+          Variables: Match.objectLike({ ZM_ENV_VERSION: version }),
+        },
+      });
+    }
+  });
+
   it('caches only the static files at the edge, and forwards cookies for the pages', () => {
     synth().hasResourceProperties('AWS::CloudFront::Distribution', {
       DistributionConfig: Match.objectLike({

@@ -89,6 +89,22 @@ describe('ServerStack', () => {
     );
   });
 
+  it('carries the version of its environment secret, so a changed secret replaces its instances', () => {
+    synth({ envVersion: 'v-2' }).hasResourceProperties(
+      'AWS::Lambda::Function',
+      {
+        Environment: {
+          Variables: Match.objectLike({ ZM_ENV_VERSION: 'v-2' }),
+        },
+      }
+    );
+    synth().hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({ ZM_ENV_VERSION: Match.absent() }),
+      },
+    });
+  });
+
   it('takes the memory size it is given', () => {
     synth({ memorySize: 2048 }).hasResourceProperties('AWS::Lambda::Function', {
       MemorySize: 2048,

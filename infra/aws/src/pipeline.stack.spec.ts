@@ -68,7 +68,7 @@ describe('PipelineStack', () => {
     });
   });
 
-  it('lets the build assume only the CDK bootstrap roles and invoke its own stage', () => {
+  it("lets the build assume only the CDK bootstrap roles, invoke its own stage and see its secrets' versions", () => {
     const statements = Object.values(
       synth().findResources('AWS::IAM::Policy')
     ).flatMap(
@@ -84,6 +84,8 @@ describe('PipelineStack', () => {
       'role/cdk-hnb659fds-*-role-111111111111-eu-north-1'
     );
     expect(rendered).toContain('function:zero-memory-test-*');
+    expect(rendered).toContain('secretsmanager:DescribeSecret');
+    expect(rendered).toContain('secret:zero-memory/test/*-env-??????');
     expect(rendered).not.toMatch(/"Action":"\*"/);
   });
 

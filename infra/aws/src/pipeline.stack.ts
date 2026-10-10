@@ -43,7 +43,8 @@ export interface PipelineStackProps extends StackProps {
  * script an operator runs by hand (`infra/aws/buildspec.yml`).
  *
  * No AWS key leaves AWS: the build's role may only assume the CDK bootstrap
- * roles, invoke the deployed function for its warm-up, and read its secrets.
+ * roles, invoke the deployed function for its warm-up, read its own secrets,
+ * and see which version each app's environment secret is at.
  *
  * Two values are set by hand once: the connection is created pending and
  * becomes usable when it is approved in the console (which installs the AWS
@@ -135,6 +136,21 @@ export class PipelineStack extends Stack {
             service: 'lambda',
             resource: 'function',
             resourceName: `zero-memory-${stage}-*`,
+            arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+          }),
+        ],
+      })
+    );
+    // The deploy script stamps each app's environment secret version into
+    // its function; it reads the version, never the value.
+    project.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['secretsmanager:DescribeSecret'],
+        resources: [
+          this.formatArn({
+            service: 'secretsmanager',
+            resource: 'secret',
+            resourceName: `zero-memory/${stage}/*-env-??????`,
             arnFormat: ArnFormat.COLON_RESOURCE_NAME,
           }),
         ],

@@ -118,8 +118,10 @@ AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/stand/web-env we
 ```
 
 The script keeps the keys it does not overwrite, among them the edge header
-value. An instance reads its secret once, when it starts; instances already
-running keep what they read, and the next deploy restarts them. The server's
+value. An instance reads its secret once, when it starts, and keeps what it
+read. `deploy.sh` stamps each secret's current version into its function
+(`ZM_ENV_VERSION`), so the next deploy after a secret changes replaces that
+app's instances, and a deploy after no change leaves them running. The server's
 `ZM_WEB_URL` and the dashboard's `ZM_SERVER_URL` come from the SSM
 parameters, ahead of the secrets.
 

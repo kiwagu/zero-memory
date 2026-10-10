@@ -37,6 +37,13 @@ export interface ServerStackProps extends StackProps {
    */
   memorySize?: number;
   /**
+   * The current version of the server's environment secret. Instances read
+   * the secret only when they start, so the deploy script stamps its version
+   * into the function: a changed secret changes the function, and the deploy
+   * replaces the running instances.
+   */
+  envVersion?: string;
+  /**
    * The public host name, with `certificateArn` an ACM certificate for it in
    * us-east-1 (CloudFront takes certificates from there only). Without them
    * the server answers on the distribution's own address.
@@ -158,6 +165,7 @@ export class ServerStack extends Stack {
         ZM_ENV_SECRET_ID: serverEnv.secretArn,
         ZM_PUBLIC_URL_PARAMETER: publicUrlParameterName,
         ZM_WEB_URL_PARAMETER: webUrlParameterName,
+        ...(props.envVersion ? { ZM_ENV_VERSION: props.envVersion } : {}),
       },
     });
     sessions.grantReadWriteData(server);

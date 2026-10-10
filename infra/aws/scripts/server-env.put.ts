@@ -7,8 +7,8 @@
  * SUPABASE_SERVICE_ROLE_KEY, ZM_WEB_URL and any model keys the server uses.
  * Keys already in the secret and absent from the file are kept, so the edge
  * header value the stack generated survives. Values are never printed.
- * Running instances keep the environment they started with; new ones read
- * the new value.
+ * Running instances keep the environment they started with; the next
+ * `deploy.sh` sees the secret's new version and replaces them.
  */
 import { readFileSync } from 'node:fs';
 

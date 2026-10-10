@@ -43,6 +43,12 @@ export interface WebAppProps {
   parameters?: Record<string, string>;
   /** Plain settings for the app, set on the function. */
   environment?: Record<string, string>;
+  /**
+   * The current version of the app's environment secret, which instances
+   * read only when they start: stamped into the function, a changed secret
+   * makes the deploy replace them.
+   */
+  envVersion?: string;
   /** The function that names the viewer's address and host at the edge. */
   edgeFunction: cloudfront.IFunction;
   /** A host name of its own, with an ACM certificate for it in us-east-1. */
@@ -106,6 +112,7 @@ export class WebApp extends Construct {
       environment: {
         ...props.environment,
         ZM_ENV_SECRET_ID: this.secret.secretArn,
+        ...(props.envVersion ? { ZM_ENV_VERSION: props.envVersion } : {}),
         ...(parameters.length > 0
           ? {
               ZM_PARAMETERS: parameters
@@ -205,6 +212,9 @@ export interface WebStackProps extends StackProps {
   webCertificateArn?: string;
   docsDomainName?: string;
   docsCertificateArn?: string;
+  /** Current versions of the dashboard's and the docs' environment secrets. */
+  webEnvVersion?: string;
+  docsEnvVersion?: string;
   /**
    * A domain to send authentication mail from through Amazon SES. The stack
    * creates its SES identity with Easy DKIM and prints the DNS records the
@@ -244,6 +254,7 @@ export class WebStack extends Stack {
               props.mailFrom ?? `zero-memory <noreply@${props.mailDomain}>`,
           }
         : undefined,
+      envVersion: props.webEnvVersion,
       edgeFunction,
       domainName: props.webDomainName,
       certificateArn: props.webCertificateArn,
@@ -254,6 +265,7 @@ export class WebStack extends Stack {
       appDir: 'apps/docs',
       appImage: props.docsImage,
       appImageId: props.docsImageId,
+      envVersion: props.docsEnvVersion,
       edgeFunction,
       domainName: props.docsDomainName,
       certificateArn: props.docsCertificateArn,
