@@ -72,7 +72,7 @@ describe('WebStack', () => {
     });
   });
 
-  it('sends mail through SES only for a domain it was given, and prints its DKIM records', () => {
+  it('sends mail through SES only from a domain it was given, and prints its DKIM records', () => {
     const silent = synth();
     silent.resourceCountIs('AWS::SES::EmailIdentity', 0);
 
@@ -91,7 +91,12 @@ describe('WebStack', () => {
     template.hasResourceProperties('AWS::IAM::Policy', {
       PolicyDocument: Match.objectLike({
         Statement: Match.arrayWith([
-          Match.objectLike({ Action: ['ses:SendEmail', 'ses:SendRawEmail'] }),
+          Match.objectLike({
+            Action: ['ses:SendEmail', 'ses:SendRawEmail'],
+            Condition: {
+              StringLike: { 'ses:FromAddress': '*@example.com' },
+            },
+          }),
         ]),
       }),
     });

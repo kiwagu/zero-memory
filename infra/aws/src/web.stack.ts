@@ -263,7 +263,25 @@ export class WebStack extends Stack {
       const identity = new ses.EmailIdentity(this, 'MailIdentity', {
         identity: ses.Identity.domain(props.mailDomain),
       });
-      identity.grantSendEmail(dashboard.fn);
+      // SES checks a send against the sender's own address
+      // (`identity/noreply@example.com`), not only against the domain's
+      // identity, so a grant on the domain's ARN alone is refused. The
+      // dashboard may send as any identity, but only from this domain.
+      dashboard.fn.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+          resources: [
+            this.formatArn({
+              service: 'ses',
+              resource: 'identity',
+              resourceName: '*',
+            }),
+          ],
+          conditions: {
+            StringLike: { 'ses:FromAddress': `*@${props.mailDomain}` },
+          },
+        })
+      );
       identity.dkimRecords.forEach((record, index) => {
         new CfnOutput(this, `MailDkim${index + 1}`, {
           value: `${record.name} CNAME ${record.value}`,
