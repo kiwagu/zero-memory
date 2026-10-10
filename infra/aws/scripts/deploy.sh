@@ -28,6 +28,11 @@ stage="${1:-stand}"
 shift || true
 repo="$(cd "$(dirname "$0")/../../.." && pwd)"
 
+# BuildKit attaches a provenance attestation that records the build's time,
+# which gives every build of an unchanged tree a new image id, and so a new
+# asset that replaces every function. Without it the id follows the content.
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
 build() {
   docker build -f "$repo/apps/$1/Dockerfile" -t "zero-memory-$1:aws-${stage}" \
     --build-arg ZM_BUILD_VERSION="${ZM_BUILD_VERSION:-}" \
