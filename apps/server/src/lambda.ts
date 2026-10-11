@@ -8,6 +8,7 @@ import { createLogger, drainDetached } from '@workspace/logger';
 import { rateLimiterOptionsFromEnv } from '@workspace/mcp-auth';
 
 import { createHttpHandler } from './http-handler.js';
+import { isJobEvent, runJob, type JobEvent } from './lambda.jobs.js';
 import {
   cameThroughEdge,
   EDGE_HEADER,
@@ -39,6 +40,10 @@ import { DynamoDbRateLimiter } from './rate-limit.dynamodb-limiter.js';
  * own address) is loaded once per instance before the server is composed,
  * and a request that did not come through the edge is refused before it
  * reaches the server.
+ *
+ * The same runtime serves two direct invocations besides requests: a
+ * warm-up, and a timed job (usage upkeep, translation, hygiene) that a
+ * scheduler starts on a function of its own with a longer timeout.
  */
 
 const logger = createLogger('lambda');
@@ -145,12 +150,25 @@ for (;;) {
   const next = await fetch(`${invocationUrl}/next`);
   const invocationId = next.headers.get('lambda-runtime-aws-request-id');
   const deadline = Number(next.headers.get('lambda-runtime-deadline-ms'));
-  const event = (await next.json()) as FunctionUrlEvent | WarmUpEvent;
+  const event = (await next.json()) as
+    FunctionUrlEvent | WarmUpEvent | JobEvent;
   try {
     if (isWarmUp(event)) {
       await fetch(`${invocationUrl}/${invocationId}/response`, {
         method: 'POST',
         body: JSON.stringify(await warmUp()),
+      });
+      continue;
+    }
+    if (isJobEvent(event)) {
+      const startedAt = performance.now();
+      await runJob(event.job);
+      await drainDetached(Math.max(0, deadline - Date.now() - POST_RESERVE_MS));
+      const duration_ms = Math.round(performance.now() - startedAt);
+      logger.info('job complete', { job: event.job, duration_ms });
+      await fetch(`${invocationUrl}/${invocationId}/response`, {
+        method: 'POST',
+        body: JSON.stringify({ job: event.job, duration_ms }),
       });
       continue;
     }
