@@ -152,8 +152,19 @@ export class DatabaseBackup extends Construct {
       alarmDescription: 'No database backup has been stored for over a day.',
     }).addAlarmAction(notify);
 
-    new CfnOutput(this, 'BucketName', { value: this.bucket.bucketName });
-    new CfnOutput(this, 'EnvSecret', { value: env.secretName });
-    new CfnOutput(this, 'FunctionName', { value: fn.functionName });
+    // Named outright: inside a construct an output's name would otherwise
+    // carry a hash of its path.
+    new CfnOutput(this, 'BucketName', {
+      key: 'BackupBucket',
+      value: this.bucket.bucketName,
+    });
+    new CfnOutput(this, 'EnvSecret', {
+      key: 'BackupEnvSecret',
+      value: env.secretName,
+    });
+    new CfnOutput(this, 'FunctionName', {
+      key: 'BackupFunctionName',
+      value: fn.functionName,
+    });
   }
 }
