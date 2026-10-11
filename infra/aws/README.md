@@ -170,9 +170,12 @@ Docker Hub's anonymous pull limit stops the build).
 
 Then, once:
 
-1. Approve the connection: CodePipeline console → Settings → Connections →
-   `zero-memory-<stage>` → Update pending connection. This installs the AWS
-   Connector app on the GitHub repository.
+1. Approve the connection: in the Developer Tools console's left menu (not
+   the pipeline's own Settings tab), Settings → Connections →
+   `zero-memory-<stage>` → Update pending connection. Install the AWS
+   Connector app on the GitHub repository (only that repository is enough);
+   the status turns to Available. `aws codeconnections list-connections`
+   shows it too.
 2. Put the database URL the migrations go through. CodeBuild has no IPv6, so
    for a Supabase project use the session pooler's address:
 

@@ -131,9 +131,11 @@ AWS_PROFILE=<profile> bunx cdk deploy zero-memory-pipeline-prod \
   -c stage=prod -c githubRepo=<owner>/<repo>
 ```
 
-Approve the connection in the CodePipeline console (Settings → Connections),
-which installs the AWS Connector app on the repository, and put the database
-URL the migrations use into the `zero-memory/prod/database-url` secret
+Approve the connection: in the Developer Tools console's left menu (not the
+pipeline's own Settings tab), open Settings → Connections →
+`zero-memory-prod` → Update pending connection, and install the AWS
+Connector app on the repository; its status turns to Available. Then put the
+database URL the migrations use into the `zero-memory/prod/database-url` secret
 (`scripts/secret-value.put.ts`). CodeBuild reaches the database over IPv4, so
 for a Supabase project give the session pooler's address. From then on, every
 pushed tag matching `v*` deploys.
