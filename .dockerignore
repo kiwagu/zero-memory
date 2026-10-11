@@ -38,6 +38,9 @@ coverage
 infra
 # The lockfile covers this workspace, so its manifest has to be there.
 !infra/aws/package.json
+# The database backup image on AWS runs the host's own dump script.
+!infra/aws/runtime/backup.entry.ts
+!infra/prod/scripts/db-dump.sh
 scripts
 supabase
 Makefile

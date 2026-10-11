@@ -42,6 +42,12 @@ const optional = (key: string): string | undefined => {
 const stage = stageName;
 const memorySize = optional('memorySize');
 
+const hours = (key: string): number | undefined => {
+  const value = optional(key);
+  return value === undefined ? undefined : Number(value);
+};
+const keepWarmMinutes = optional('keepWarmMinutes');
+
 const env = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
   region: process.env.CDK_DEFAULT_REGION ?? 'eu-central-1',
@@ -75,6 +81,16 @@ const server = new ServerStack(app, `zero-memory-${stage}`, {
   domainName: optional('domainName'),
   certificateArn: optional('certificateArn'),
   alarmEmail: optional('alarmEmail'),
+  // Hours between job runs; translation and hygiene stay off without one.
+  jobIntervals: {
+    'usage-upkeep': hours('usageUpkeepIntervalHours'),
+    translation: hours('translationIntervalHours'),
+    hygiene: hours('hygieneIntervalHours'),
+  },
+  keepWarmMinutes:
+    keepWarmMinutes === undefined ? undefined : Number(keepWarmMinutes),
+  backups: optional('backups') !== 'off',
+  backupEnvVersion: contextValue('backupEnvVersion'),
   env,
 });
 server.addDependency(web);

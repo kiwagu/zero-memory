@@ -19,6 +19,7 @@
     "constructs": "catalog:"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/client-ssm": "catalog:",
     "@types/node": "catalog:",
     "@workspace/eslint-config": "workspace:^",

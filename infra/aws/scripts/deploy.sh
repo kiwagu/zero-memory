@@ -21,7 +21,8 @@
 # After the deploy, one direct invocation makes a server instance load the
 # embedding model, and one request each wakes the dashboard and the docs. The
 # first read of a new image is slow (close to a minute measured for the
-# server's model); this pays it before anyone arrives. Needs the AWS CLI.
+# server's model); this pays it before anyone arrives. It also starts one
+# usage upkeep run. Needs the AWS CLI.
 set -euo pipefail
 
 stage="${1:-stand}"
@@ -63,12 +64,21 @@ bunx cdk deploy "zero-memory-web-${stage}" "zero-memory-${stage}" \
   -c serverEnvVersion="$(env_version server)" \
   -c webEnvVersion="$(env_version web)" \
   -c docsEnvVersion="$(env_version docs)" \
+  -c backupEnvVersion="$(env_version backup)" \
   "$@"
 
 for page in "$(jq -r --arg stack "zero-memory-web-${stage}" '.[$stack].DashboardUrl' "$outputs")/login" \
   "$(jq -r --arg stack "zero-memory-web-${stage}" '.[$stack].DocsUrl' "$outputs")/"; do
   echo "wake: $(curl -s -o /dev/null -w '%{http_code} %{time_total}s' "$page") $page"
 done
+
+# Usage upkeep also runs once at every start on the container host, so a new
+# deployment has its partitions and first rollup at once. Not awaited.
+jobs_function="$(jq -r --arg stack "zero-memory-${stage}" '.[$stack].JobsFunctionName' "$outputs")"
+aws lambda invoke --function-name "$jobs_function" --invocation-type Event \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"zeroMemory":"job","job":"usage-upkeep"}' /dev/null >/dev/null &&
+  echo "usage upkeep: started"
 
 function_name="$(jq -r --arg stack "zero-memory-${stage}" '.[$stack].FunctionName' "$outputs")"
 answer="$(mktemp)"

@@ -74,7 +74,8 @@ describe('ServerStack', () => {
 
   it('alarms into one topic, and mails it only when asked to', () => {
     const silent = synth();
-    silent.resourceCountIs('AWS::CloudWatch::Alarm', 5);
+    // Five on the server, one on the jobs, two on the backups.
+    silent.resourceCountIs('AWS::CloudWatch::Alarm', 8);
     silent.allResourcesProperties('AWS::CloudWatch::Alarm', {
       AlarmActions: [
         Match.objectLike({ Ref: Match.stringLikeRegexp('Alarms') }),
@@ -109,6 +110,102 @@ describe('ServerStack', () => {
     synth({ memorySize: 2048 }).hasResourceProperties('AWS::Lambda::Function', {
       MemorySize: 2048,
     });
+  });
+
+  it('runs the timed jobs on a function of their own, one run at a time, outside the edge', () => {
+    const template = synth();
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Timeout: 900,
+      ReservedConcurrentExecutions: 1,
+      Environment: {
+        Variables: Match.objectLike({ ZM_ENV_SECRET_ID: Match.anyValue() }),
+      },
+    });
+    // Only the server answers HTTP.
+    template.resourceCountIs('AWS::Lambda::Url', 1);
+  });
+
+  it('schedules usage upkeep always, the paid jobs only when given an interval', () => {
+    const jobSchedules = (template: Template): string[] =>
+      Object.values(template.findResources('AWS::Scheduler::Schedule'))
+        .map(
+          (schedule) =>
+            (
+              schedule as {
+                Properties: {
+                  ScheduleExpression: string;
+                  Target: { Input?: string };
+                };
+              }
+            ).Properties
+        )
+        .filter(({ Target }) => Target.Input?.includes('"job"'))
+        .map(
+          ({ ScheduleExpression, Target }) =>
+            `${(JSON.parse(Target.Input ?? '{}') as { job: string }).job} ${ScheduleExpression}`
+        )
+        .sort();
+
+    expect(jobSchedules(synth())).toEqual(['usage-upkeep rate(1 day)']);
+    // An unset interval (a stage without the setting) keeps the default.
+    expect(
+      jobSchedules(synth({ jobIntervals: { 'usage-upkeep': undefined } }))
+    ).toEqual(['usage-upkeep rate(1 day)']);
+    expect(
+      jobSchedules(
+        synth({
+          jobIntervals: { 'usage-upkeep': 12, translation: 24, hygiene: 48 },
+        })
+      )
+    ).toEqual([
+      'hygiene rate(2 days)',
+      'translation rate(1 day)',
+      'usage-upkeep rate(12 hours)',
+    ]);
+  });
+
+  it('keeps one server instance warm unless told not to', () => {
+    synth().hasResourceProperties('AWS::Scheduler::Schedule', {
+      ScheduleExpression: 'rate(5 minutes)',
+      Target: Match.objectLike({ Input: '{"zeroMemory":"warm-up"}' }),
+    });
+    const cold = Object.values(
+      synth({ keepWarmMinutes: 0 }).findResources('AWS::Scheduler::Schedule')
+    ).filter((schedule) => JSON.stringify(schedule).includes('warm-up'));
+    expect(cold).toHaveLength(0);
+  });
+
+  it('backs the database up daily into a bucket that outlives the stack, and alarms when backups stop', () => {
+    const template = synth();
+    template.hasResource('AWS::S3::Bucket', {
+      DeletionPolicy: 'Retain',
+      Properties: Match.objectLike({
+        LifecycleConfiguration: {
+          Rules: Match.arrayWith([
+            Match.objectLike({ Prefix: 'daily/', ExpirationInDays: 30 }),
+            Match.objectLike({ Prefix: 'monthly/', ExpirationInDays: 366 }),
+          ]),
+        },
+      }),
+    });
+    template.hasResourceProperties('AWS::SecretsManager::Secret', {
+      Name: 'zero-memory/test/backup-env',
+    });
+    template.hasResourceProperties('AWS::Scheduler::Schedule', {
+      ScheduleExpression: 'cron(30 3 * * ? *)',
+    });
+    // No backup for longer than a day and a bit: every hourly point empty.
+    template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+      ComparisonOperator: 'LessThanThreshold',
+      Threshold: 1,
+      Period: 3600,
+      EvaluationPeriods: 26,
+      DatapointsToAlarm: 26,
+      TreatMissingData: 'breaching',
+    });
+
+    const without = synth({ backups: false });
+    without.resourceCountIs('AWS::S3::Bucket', 0);
   });
 
   it("overwrites the viewer's address header at the edge, on every request", () => {

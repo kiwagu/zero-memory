@@ -1,5 +1,5 @@
 /**
- * Ambient surface for the Bun APIs web-app.entry.ts uses. Declared locally
+ * Ambient surface for the Bun APIs the runtime entries use. Declared locally
  * rather than pulling in `bun-types`, whose global augmentation collides with
  * `@types/node`; the same approach the repository's packages take. Extend
  * here rather than casting at the call site.
