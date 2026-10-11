@@ -105,7 +105,11 @@ export class DatabaseBackup extends Construct {
       },
     });
     env.grantRead(fn);
-    this.bucket.grantReadWrite(fn);
+    // Read, list and write, never delete: whatever takes over the function
+    // cannot remove the backups it would want gone; only the lifecycle
+    // rules expire them.
+    this.bucket.grantRead(fn);
+    this.bucket.grantPut(fn);
 
     new scheduler.Schedule(this, 'Daily', {
       description: `Backs up the zero-memory ${stage} database`,

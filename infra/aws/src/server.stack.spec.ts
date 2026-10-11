@@ -204,6 +204,17 @@ describe('ServerStack', () => {
       TreatMissingData: 'breaching',
     });
 
+    // The function that writes the backups cannot delete them.
+    const policies = JSON.stringify(
+      template.findResources('AWS::IAM::Policy', {
+        Properties: {
+          Roles: [{ Ref: Match.stringLikeRegexp('BackupFunctionServiceRole') }],
+        },
+      })
+    );
+    expect(policies).toContain('s3:PutObject');
+    expect(policies).not.toContain('s3:DeleteObject');
+
     const without = synth({ backups: false });
     without.resourceCountIs('AWS::S3::Bucket', 0);
   });
