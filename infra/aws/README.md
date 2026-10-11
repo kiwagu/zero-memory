@@ -20,7 +20,10 @@ server), `zero-memory-web-<stage>` (dashboard and docs) and, optionally,
 | DynamoDB table                                  | The OAuth rate limiter's counts, shared by every instance; expire through TTL                                                                                          |
 | Secrets Manager secret                          | The server's environment as JSON (Supabase keys, dashboard URL, model keys), plus the edge header value it generates                                                   |
 | SSM parameter                                   | The public URL (OAuth issuer), read by the function at start                                                                                                           |
-| CloudWatch log group, alarms, dashboard         | Function logs kept one week; five alarms into one SNS topic; one dashboard (see [Alarms](#alarms))                                                                     |
+| CloudWatch log group, alarms, dashboard         | Function logs kept one week; eight alarms into one SNS topic; one dashboard (see [Alarms](#alarms))                                                                    |
+| Lambda function (jobs)                          | The same image without an edge: runs one timed job per invocation (usage upkeep, translation, hygiene), up to 15 minutes, one run at a time                            |
+| EventBridge Scheduler schedules                 | Each job at its interval, and a warm-up of the server every 5 minutes (see [Timed jobs](#timed-jobs))                                                                  |
+| S3 bucket + backup function                     | A daily logical backup of the database, kept 30 days and the first of each month for a year (see [Backups](#backups))                                                  |
 
 The web stack holds the dashboard and the docs, each as a Lambda function
 from `runtime/web-app.Dockerfile` — the app's own image plus the Lambda Web
@@ -88,6 +91,11 @@ Options, passed after the stage as CDK context:
 | `-c memorySize=<MB>`                           | Memory, and with it CPU (default 3008)                                                                                        |
 | `-c domainName=<host> -c certificateArn=<arn>` | Serve a host name of your own; the certificate must be in ACM in `us-east-1`. Point the name at `EdgeDomain` (CNAME or alias) |
 | `-c alarmEmail=<address>`                      | Mail the alarms there (confirm the subscription from the first mail)                                                          |
+| `-c usageUpkeepIntervalHours=<hours>`          | How often usage upkeep runs (default 24)                                                                                      |
+| `-c translationIntervalHours=<hours>`          | Run translation at that interval; without it, never (it calls a model)                                                        |
+| `-c hygieneIntervalHours=<hours>`              | Run the hygiene cycle at that interval; without it, never (it calls a model)                                                  |
+| `-c keepWarmMinutes=<minutes>`                 | Minutes between warm-ups of the server (default 5; `0` turns them off)                                                        |
+| `-c backups=off`                               | No backup bucket, function or schedule                                                                                        |
 
 ```sh
 AWS_PROFILE=<profile> bash scripts/deploy.sh stand -c alarmEmail=ops@example.com
@@ -187,9 +195,59 @@ Then, once:
 A pushed tag that matches starts a deploy; the build names the release by the
 tag, which `/healthz` then reports.
 
+## Timed jobs
+
+On a container host the server runs three jobs on in-process timers. Here a
+second function from the same image runs them, and EventBridge Scheduler
+starts it with the job's name at the job's interval:
+
+| Job            | Runs                                                             |
+| -------------- | ---------------------------------------------------------------- |
+| `usage-upkeep` | daily, always (two SQL calls; also once after every `deploy.sh`) |
+| `translation`  | only with `translationIntervalHours` (it calls a model)          |
+| `hygiene`      | only with `hygieneIntervalHours` (it calls a model)              |
+
+The function has 15 minutes per run and one run at a time; a run that
+arrives while another is going waits. A failed run is not repeated, the next
+interval brings the next one, and the `JobErrors` alarm says it failed. Run a
+job once by hand:
+
+```sh
+AWS_PROFILE=<profile> aws lambda invoke --function-name <JobsFunctionName> \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"zeroMemory":"job","job":"hygiene"}' --cli-read-timeout 900 out.json
+```
+
+The scheduler also invokes the server's warm-up every five minutes, so one
+instance keeps the embedding model loaded and a person's first search after a
+pause does not wait for it.
+
+## Backups
+
+Every day at 03:30 UTC a function runs the container host's own dump script
+(`infra/prod/scripts/db-dump.sh`, unchanged) and stores the artifact and its
+manifest in the backup bucket under `daily/`; the first one of each month is
+also copied under `monthly/`. Lifecycle rules keep 30 days and 12 months. The
+function may read and write the bucket, never delete from it.
+
+It reads the database URL from the secret `zero-memory/<stage>/backup-env`.
+The function reaches the internet over IPv4 only, so for a Supabase project
+give the session pooler's address:
+
+```sh
+echo 'DATABASE_URL=postgresql://postgres.<ref>:<password>@<pooler-host>:5432/postgres' > backup.env
+AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/stand/backup-env backup.env
+rm backup.env
+```
+
+Take one now with `aws lambda invoke --function-name <BackupFunctionName>
+out.json`. To restore, download an artifact and its manifest, check them with
+`infra/prod/scripts/db-dump.sh verify <file>`, and load them with
+`infra/prod/scripts/db-restore.sh` as on a container host.
+
 ## Alarms
 
-Five alarms, all in the function's Region, notify one SNS topic:
+Eight alarms, all in the function's Region, notify one SNS topic:
 
 | Alarm              | Fires when                                                   |
 | ------------------ | ------------------------------------------------------------ |
@@ -198,11 +256,14 @@ Five alarms, all in the function's Region, notify one SNS topic:
 | `NearTimeout`      | an invocation ran past 90% of the 60-second timeout          |
 | `FailedStarts`     | an instance failed to start (`Runtime.InitError` in the log) |
 | `ServerErrors`     | the server answered 5xx three or more times in five minutes  |
+| `JobErrors`        | a timed job failed                                           |
+| backup `Failed`    | a backup run failed                                          |
+| backup `Missing`   | no backup has been stored for 26 hours                       |
 
-The last two count lines of the function's log through metric filters. The
-dashboard `zero-memory-<stage>` shows the same metrics. CloudFront's own
-metrics live in `us-east-1` and are not watched; a broken edge shows as
-silence on the function.
+`FailedStarts`, `ServerErrors` and backup `Missing` count lines of the
+functions' logs through metric filters. The dashboard `zero-memory-<stage>`
+shows the server's metrics. CloudFront's own metrics live in `us-east-1` and
+are not watched; a broken edge shows as silence on the function.
 
 The stack sets no spending limit. Set one for the account (an AWS Budget, or
 the spend limit in AWS Settings where the account has one).
@@ -221,7 +282,9 @@ Point an MCP client at `McpUrl`.
 - CloudFront ends a response that takes longer than 60 seconds, so the
   function's timeout is 60 seconds too.
 - The first request an instance serves pays for loading the server, and its
-  first search for loading the embedding model (seconds).
+  first search for loading the embedding model (seconds). The keep-warm keeps
+  one instance past that; a second instance, started under load, still pays
+  it.
 - Background writes started by a request (usage metering, audit) finish before
   its response is returned, because Lambda freezes the instance afterwards.
 
@@ -234,4 +297,6 @@ AWS_PROFILE=<profile> bunx cdk destroy zero-memory-stand zero-memory-web-stand -
 This deletes the functions, the tables, the secrets, the parameters, the
 alarms and the logs; `bunx cdk destroy zero-memory-pipeline-stand -c stage=stand -c
 githubRepo=<owner>/<repo>` removes the pipeline. The CDK bootstrap stack and
-the images it pushed stay.
+the images it pushed stay, and so does the backup bucket: removing a
+deployment must not take its backups with it. Empty and delete the bucket
+yourself once they are no longer needed.

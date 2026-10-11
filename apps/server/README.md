@@ -34,7 +34,10 @@ CQRS buses. Nothing depends on this app; it depends on almost every package.
   the edge it answers only requests carrying `x-origin-verify`, and takes the
   client's address from the edge's `x-viewer-address`, never from the
   `X-Forwarded-For` a client sent (`src/lambda.config.ts`). A direct
-  invocation with `{"zeroMemory":"warm-up"}` loads the embedding model.
+  invocation with `{"zeroMemory":"warm-up"}` loads the embedding model; one
+  with `{"zeroMemory":"job","job":"usage-upkeep|translation|hygiene"}` runs
+  that timed job once (`src/lambda.jobs.ts`), through the same run function
+  the in-process scheduler (`src/*-scheduler.ts`) calls on a container host.
   Built as a container image by `lambda.Dockerfile` (`runtime-api` target;
   the `web-adapter` target runs `src/index.ts` behind the Lambda Web
   Adapter). `scripts/lambda-spike/` runs it locally under the AWS Runtime

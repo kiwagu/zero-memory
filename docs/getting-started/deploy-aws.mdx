@@ -6,9 +6,10 @@ description: Run the MCP server, the dashboard and this documentation site on AW
 The whole instance except its database can run on AWS Lambda instead of a
 container host. The CDK app in `infra/aws/` deploys the MCP server, the
 dashboard and this documentation site, each behind its own CloudFront
-distribution; keeps MCP sessions and rate-limit counts in DynamoDB; and
-watches the server with CloudWatch alarms. Each app runs from the same image
-the container host runs; only the way requests reach it differs.
+distribution; keeps MCP sessions and rate-limit counts in DynamoDB; runs the
+server's timed jobs on a schedule; backs the database up daily into S3; and
+watches it all with CloudWatch alarms. Each app runs from the same image the
+container host runs; only the way requests reach it differs.
 
 ```
 MCP clients (OAuth)   browsers               AWS (one Region)
@@ -21,6 +22,8 @@ MCP clients (OAuth)   browsers               AWS (one Region)
                                           │   3 GB), dashboard and docs      │
                                           │   (Next.js + Web Adapter)        │
                                           │ DynamoDB: sessions, rate limits  │
+                                          │ EventBridge Scheduler: jobs      │
+                                          │ S3: daily database backups       │
                                           │ Secrets Manager, SSM, CloudWatch │
                                           └────────────────┬─────────────────┘
                                                            ▼
@@ -95,9 +98,55 @@ command line still wins.
 {
   "mailDomain": "example.com",
   "mailFrom": "Example <noreply@example.com>",
-  "githubRepo": "<owner>/<repo>"
+  "githubRepo": "<owner>/<repo>",
+  "translationIntervalHours": "24"
 }
 ```
+
+## Timed jobs
+
+On a container host the server runs three jobs on timers of its own. On AWS
+a second function from the server's image runs them, started by EventBridge
+Scheduler:
+
+- **Usage upkeep** keeps the usage ledger's monthly partitions ahead and
+  refreshes the daily numbers the dashboard shows. It runs daily, and once
+  after every deploy.
+- **Translation** brings memories written in other languages into English.
+- **Hygiene** looks for duplicates, stale memories and conflicts.
+
+Translation and hygiene call a language model, so, as on a container host,
+they run only when you give them an interval: `translationIntervalHours` and
+`hygieneIntervalHours` in the stage's settings. A job runs for up to 15
+minutes, one at a time, and an alarm fires when one fails.
+
+The same scheduler sends the server a warm-up every five minutes, so one
+instance always has the embedding model loaded and the first search after a
+pause answers as fast as any other. Turn it off with `keepWarmMinutes` set to
+`0`.
+
+## Backups
+
+Every day at 03:30 UTC a function runs the same backup script a container
+host runs (`infra/prod/scripts/db-dump.sh`) and stores the result in an S3
+bucket: daily backups for 30 days, and the first of each month for a year.
+An alarm fires when a backup fails, and another when none has been stored
+for over a day.
+
+Give it the database's address once, in the `zero-memory/<stage>/backup-env`
+secret. The function reaches the database over IPv4, so for a Supabase
+project give the session pooler's address:
+
+```sh
+echo 'DATABASE_URL=postgresql://postgres.<ref>:<password>@<pooler-host>:5432/postgres' > backup.env
+AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/backup-env backup.env
+rm backup.env
+```
+
+To restore, download a backup and its manifest from the bucket and load them
+with `infra/prod/scripts/db-restore.sh`, as on a container host. The bucket
+stays when you remove the stacks; delete it yourself when you no longer need
+the backups.
 
 ## Mail through Amazon SES
 
@@ -170,11 +219,12 @@ Then point an MCP client or the watcher at `<PublicUrl>/mcp` and sign in.
 
 ## Operations
 
-- **Alarms.** Five alarms on the server notify one SNS topic: failed or
+- **Alarms.** Eight alarms notify one SNS topic: on the server, failed or
   timed-out invocations, throttling, an invocation near the 60-second
-  timeout, an instance that failed to start, and repeated 5xx answers. With
+  timeout, an instance that failed to start, and repeated 5xx answers; a
+  timed job that failed; a backup that failed, and backups that stopped. With
   `alarmEmail`, confirm the subscription from the first mail. The CloudWatch
-  dashboard `zero-memory-<stage>` shows the same metrics.
+  dashboard `zero-memory-<stage>` shows the server's metrics.
 - **Spending.** The stacks set no spending limit; set one for the account.
 - **Logs.** Each function's log group keeps one week. A failed start writes
   its reason there.
@@ -185,10 +235,9 @@ Then point an MCP client or the watcher at `<PublicUrl>/mcp` and sign in.
 
 - A request that runs longer than 60 seconds is cut by CloudFront, so the
   server's timeout is 60 seconds too.
-- An instance's first search waits for the embedding model to load
-  (seconds).
-- The background jobs the container runs on a timer — hygiene scans, usage
-  roll-ups, translation — do not run on Lambda yet.
+- A new instance's first search waits for the embedding model to load
+  (seconds). The warm-up keeps one instance past that; a second one, started
+  when requests overlap, still pays it.
 - Uploading pages to this site from its `/upload` form is off: the pages are
   compiled into the image.
 
@@ -199,4 +248,5 @@ AWS_PROFILE=<profile> bunx cdk destroy zero-memory-prod zero-memory-web-prod -c 
 ```
 
 This deletes the functions, the tables, the secrets, the parameters, the
-alarms and the logs. The CDK bootstrap stack and the images it pushed stay.
+schedules, the alarms and the logs. The CDK bootstrap stack, the images it
+pushed and the backup bucket stay.
