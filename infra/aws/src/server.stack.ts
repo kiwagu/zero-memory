@@ -225,6 +225,11 @@ export class ServerStack extends Stack {
     });
     serverEnv.grantRead(jobs);
     jobs.addToRolePolicy(readParameters);
+    // Work the server starts after answering (a check of a new memory, a
+    // full hygiene scan, a benchmark) would stall on a frozen instance; the
+    // server hands it to the jobs function instead.
+    server.addEnvironment('ZM_JOBS_FUNCTION', jobs.functionName);
+    jobs.grantInvoke(server);
 
     const functionUrl = server.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,

@@ -67,6 +67,7 @@
       "@ai-sdk/openai-compatible": "^3.0.12",
       "@ai-sdk/xai": "^4.0.16",
       "@aws-sdk/client-dynamodb": "3.1140.0",
+      "@aws-sdk/client-lambda": "3.1140.0",
       "@aws-sdk/client-s3": "3.1140.0",
       "@aws-sdk/client-secrets-manager": "3.1140.0",
       "@aws-sdk/client-sesv2": "3.1140.0",

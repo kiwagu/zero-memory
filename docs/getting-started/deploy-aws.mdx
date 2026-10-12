@@ -120,6 +120,12 @@ they run only when you give them an interval: `translationIntervalHours` and
 `hygieneIntervalHours` in the stage's settings. A job runs for up to 15
 minutes, one at a time, and an alarm fires when one fails.
 
+The same function also finishes what the server starts in the background:
+translating and checking a memory you just saved, a scan you start with
+`scan_hygiene`, and a `benchmark_memory` run. On AWS the server cannot keep
+working after it answers, so it hands that work over and answers at once, as
+it does on a container host.
+
 The same scheduler sends the server a warm-up every five minutes, so one
 instance always has the embedding model loaded and the first search after a
 pause answers as fast as any other. Turn it off with `keepWarmMinutes` set to

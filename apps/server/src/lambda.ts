@@ -1,14 +1,23 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { LambdaClient } from '@aws-sdk/client-lambda';
 import { container } from '@workspace/di';
 import {
   EMBEDDING_SERVICE,
   type IEmbeddingService,
 } from '@workspace/embedding';
-import { createLogger, drainDetached } from '@workspace/logger';
+import {
+  createLogger,
+  dispatchBackgroundTo,
+  drainDetached,
+} from '@workspace/logger';
 import { rateLimiterOptionsFromEnv } from '@workspace/mcp-auth';
 
 import { createHttpHandler } from './http-handler.js';
-import { isJobEvent, runJob, type JobEvent } from './lambda.jobs.js';
+import {
+  jobsFunctionDispatcher,
+  parseJobEvent,
+  runJob,
+} from './lambda.jobs.js';
 import {
   cameThroughEdge,
   EDGE_HEADER,
@@ -117,6 +126,15 @@ let edgeSecret: string | null = null;
 try {
   handler = await start();
   edgeSecret = edgeSecretFrom(process.env);
+  // Behind the edge the instance freezes once it answers, so work started in
+  // the background goes to the jobs function. The jobs function itself has
+  // no ZM_JOBS_FUNCTION: it runs such work in place, and drains it.
+  const jobsFunction = process.env.ZM_JOBS_FUNCTION;
+  if (jobsFunction) {
+    dispatchBackgroundTo(
+      jobsFunctionDispatcher(jobsFunction, new LambdaClient({}))
+    );
+  }
 } catch (error) {
   await reportInitError(error);
 }
@@ -155,8 +173,7 @@ for (;;) {
   const next = await fetch(`${invocationUrl}/next`);
   const invocationId = next.headers.get('lambda-runtime-aws-request-id');
   const deadline = Number(next.headers.get('lambda-runtime-deadline-ms'));
-  const event = (await next.json()) as
-    FunctionUrlEvent | WarmUpEvent | JobEvent;
+  const event = (await next.json()) as FunctionUrlEvent | WarmUpEvent;
   try {
     if (isWarmUp(event)) {
       await fetch(`${invocationUrl}/${invocationId}/response`, {
@@ -165,15 +182,16 @@ for (;;) {
       });
       continue;
     }
-    if (isJobEvent(event)) {
+    const job = parseJobEvent(event);
+    if (job) {
       const startedAt = performance.now();
-      await runJob(event.job);
+      await runJob(job);
       await drainDetached(Math.max(0, deadline - Date.now() - POST_RESERVE_MS));
       const duration_ms = Math.round(performance.now() - startedAt);
-      logger.info('job complete', { job: event.job, duration_ms });
+      logger.info('job complete', { job: job.job, duration_ms });
       await fetch(`${invocationUrl}/${invocationId}/response`, {
         method: 'POST',
-        body: JSON.stringify({ job: event.job, duration_ms }),
+        body: JSON.stringify({ job: job.job, duration_ms }),
       });
       continue;
     }

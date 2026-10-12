@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "catalog:",
+    "@aws-sdk/client-lambda": "catalog:",
     "@aws-sdk/client-secrets-manager": "catalog:",
     "@aws-sdk/client-ssm": "catalog:",
     "@aws-sdk/lib-dynamodb": "catalog:",
@@ -45,6 +46,7 @@
     "@workspace/persistence": "workspace:*",
     "@workspace/policy": "workspace:*",
     "@workspace/query-handlers": "workspace:*",
+    "@workspace/roi": "workspace:*",
     "@workspace/translation": "workspace:*",
     "@workspace/usage": "workspace:*",
     "elysia": "catalog:",

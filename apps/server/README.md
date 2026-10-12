@@ -38,6 +38,12 @@ CQRS buses. Nothing depends on this app; it depends on almost every package.
   with `{"zeroMemory":"job","job":"usage-upkeep|translation|hygiene"}` runs
   that timed job once (`src/lambda.jobs.ts`), through the same run function
   the in-process scheduler (`src/*-scheduler.ts`) calls on a container host.
+  Work a request starts in the background (`runInBackground` from
+  `@workspace/logger`: the check and translation of a new memory, a
+  `scan_hygiene` run, a benchmark) would stall once the instance freezes, so
+  when `ZM_JOBS_FUNCTION` names the jobs function the server hands each one
+  to it as an asynchronous invocation (`hygiene-one`, `translation`,
+  `hygiene-scan`, `benchmark-probes`, `benchmark-run`).
   Built as a container image by `lambda.Dockerfile` (`runtime-api` target;
   the `web-adapter` target runs `src/index.ts` behind the Lambda Web
   Adapter). `scripts/lambda-spike/` runs it locally under the AWS Runtime

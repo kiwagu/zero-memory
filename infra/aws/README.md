@@ -224,6 +224,13 @@ AWS_PROFILE=<profile> aws lambda invoke --function-name <JobsFunctionName> \
   --payload '{"zeroMemory":"job","job":"hygiene"}' --cli-read-timeout 900 out.json
 ```
 
+The same function runs the work the server starts after answering, which it
+cannot finish itself because its instance freezes once a response is out: the
+translation and the duplicate check of a new memory, a `scan_hygiene` run, and
+a `benchmark_memory` run. The server hands each one over as an asynchronous
+invocation (`ZM_JOBS_FUNCTION` names the function) and answers at once, as on
+a container host.
+
 The scheduler also invokes the server's warm-up every five minutes, so one
 instance keeps the embedding model loaded and a person's first search after a
 pause does not wait for it.

@@ -134,6 +134,23 @@ describe('ServerStack', () => {
     template.resourceCountIs('AWS::Lambda::Url', 1);
   });
 
+  it('lets the server hand its background work to the jobs function', () => {
+    const template = synth();
+    // Only the function behind the edge names the jobs function; the jobs
+    // function runs such work in place.
+    const named = Object.values(
+      template.findResources('AWS::Lambda::Function')
+    ).filter((fn) => JSON.stringify(fn).includes('ZM_JOBS_FUNCTION'));
+    expect(named).toHaveLength(1);
+    expect(JSON.stringify(named[0])).not.toContain('"Timeout":900');
+    const invokes = Object.values(
+      template.findResources('AWS::IAM::Policy')
+    ).filter((policy) =>
+      JSON.stringify(policy).includes('lambda:InvokeFunction')
+    );
+    expect(JSON.stringify(invokes)).toMatch(/ServerServiceRole/);
+  });
+
   it('schedules usage upkeep always, the paid jobs only when given an interval', () => {
     const jobSchedules = (template: Template): string[] =>
       Object.values(template.findResources('AWS::Scheduler::Schedule'))
