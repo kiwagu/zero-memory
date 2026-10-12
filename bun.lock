@@ -52,7 +52,7 @@
     },
     "apps/server": {
       "name": "server",
-      "version": "0.43.0",
+      "version": "0.44.0",
       "bin": {
         "zero-memory-mcp": "./src/mcp-stdio.ts",
       },
@@ -122,7 +122,7 @@
     },
     "apps/web": {
       "name": "web",
-      "version": "0.43.0",
+      "version": "0.44.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "catalog:",
         "@supabase/ssr": "catalog:",
@@ -852,6 +852,7 @@
         "@types/node": "catalog:",
         "@workspace/db": "workspace:*",
         "@workspace/eslint-config": "workspace:^",
+        "@workspace/mcp-oauth-client": "workspace:*",
         "@workspace/typescript-config": "workspace:^",
         "dotenv": "^17.2.4",
         "eslint": "catalog:",
