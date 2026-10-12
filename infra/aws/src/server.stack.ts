@@ -217,6 +217,9 @@ export class ServerStack extends Stack {
       timeout: Duration.minutes(15),
       reservedConcurrentExecutions: 1,
       retryAttempts: 0,
+      // A job queued longer than this is dropped undelivered: a claim's record
+      // outlives it, so a late job can always tell whether it may still run.
+      maxEventAge: Duration.hours(1),
       logGroup: new logs.LogGroup(this, 'JobsLogs', {
         retention: logs.RetentionDays.ONE_MONTH,
         removalPolicy: RemovalPolicy.DESTROY,

@@ -76,4 +76,37 @@ describe('DynamoDbWorkClaims against DynamoDB Local', () => {
     expect(await claimsAt(minutes(40)).confirm(key, token!)).toBe(true);
     expect(await claimsAt(minutes(41)).claim(key)).toBeNull();
   });
+
+  it('turns away a late job once a newer claim has run and ended', async () => {
+    const key = `hygiene-scan#usr_${crypto.randomUUID()}`;
+    const late = await claimsAt(minutes(0)).claim(key);
+    // The first job waits in the queue past its hold; a newer request claims,
+    // its job runs and ends before the first job is finally delivered.
+    const newer = await claimsAt(minutes(11)).claim(key);
+    expect(await claimsAt(minutes(12)).confirm(key, newer!)).toBe(true);
+    await claimsAt(minutes(20)).release(key, newer!);
+
+    expect(await claimsAt(minutes(25)).confirm(key, late!)).toBe(false);
+    // The ended claim leaves the key free for the next request.
+    expect(await claimsAt(minutes(25)).claim(key)).not.toBeNull();
+  });
+
+  it('allows one run per claim, so a repeated delivery of its job skips', async () => {
+    const key = `benchmark#usr_${crypto.randomUUID()}`;
+    const token = await claimsAt(minutes(0)).claim(key);
+
+    expect(await claimsAt(minutes(1)).confirm(key, token!)).toBe(true);
+    expect(await claimsAt(minutes(2)).confirm(key, token!)).toBe(false);
+    await claimsAt(minutes(5)).release(key, token!);
+    expect(await claimsAt(minutes(6)).confirm(key, token!)).toBe(false);
+  });
+
+  it('never lets a job run on a claim it cannot find', async () => {
+    const key = `hygiene-scan#usr_${crypto.randomUUID()}`;
+    const token = entityIdSchemas.work_claim.create();
+
+    expect(await claimsAt(minutes(0)).confirm(key, token)).toBe(false);
+    await claimsAt(minutes(0)).release(key, token);
+    expect(await claimsAt(minutes(0)).claim(key)).not.toBeNull();
+  });
 });

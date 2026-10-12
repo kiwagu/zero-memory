@@ -214,7 +214,8 @@ starts it with the job's name at the job's interval:
 | `hygiene`      | only with `hygieneIntervalHours` (it calls a model)              |
 
 The function has 15 minutes per run and one run at a time; a run that
-arrives while another is going waits. A failed run is not repeated, the next
+arrives while another is going waits, for up to an hour, after which Lambda
+drops it undelivered. A failed run is not repeated, the next
 interval brings the next one, and the `JobErrors` alarm says it failed. Run a
 job once by hand:
 
@@ -229,7 +230,11 @@ cannot finish itself because its instance freezes once a response is out: the
 translation and the duplicate check of a new memory, a `scan_hygiene` run, and
 a `benchmark_memory` run. The server hands each one over as an asynchronous
 invocation (`ZM_JOBS_FUNCTION` names the function) and answers at once, as on
-a container host.
+a container host. A scan or benchmark holds the owner's claim in the
+rate-limit table from the request until its job ends, so a second request
+hears `already_running` instead of queueing a paid duplicate; the job runs
+only if that claim is still its own and not yet started, so a job that waited
+past its claim, or arrived twice, skips.
 
 The scheduler also invokes the server's warm-up every five minutes, so one
 instance keeps the embedding model loaded and a person's first search after a

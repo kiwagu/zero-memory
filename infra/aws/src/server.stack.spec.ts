@@ -149,8 +149,8 @@ describe('ServerStack', () => {
       JSON.stringify(policy).includes('lambda:InvokeFunction')
     );
     expect(JSON.stringify(invokes)).toMatch(/ServerServiceRole/);
-    // The jobs function releases the owner's claim on the work it ran; the
-    // claims live in the rate-limit table.
+    // The jobs function confirms and releases the owner's claim on the work
+    // it ran; the claims live in the rate-limit table.
     const jobsPolicy = JSON.stringify(
       template.findResources('AWS::IAM::Policy', {
         Properties: {
@@ -158,8 +158,15 @@ describe('ServerStack', () => {
         },
       })
     );
-    expect(jobsPolicy).toContain('dynamodb:DeleteItem');
+    expect(jobsPolicy).toContain('dynamodb:UpdateItem');
     expect(jobsPolicy).toMatch(/RateLimits/);
+    // A job queued past an hour is dropped undelivered; a claim keeps its
+    // record longer than that, so a late job can still tell whether it may run.
+    template.hasResourceProperties('AWS::Lambda::EventInvokeConfig', {
+      FunctionName: { Ref: Match.stringLikeRegexp('^Jobs') },
+      MaximumEventAgeInSeconds: 3600,
+      MaximumRetryAttempts: 0,
+    });
   });
 
   it('schedules usage upkeep always, the paid jobs only when given an interval', () => {
