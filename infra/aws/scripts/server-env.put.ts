@@ -33,6 +33,14 @@ for (const line of readFileSync(envFile, 'utf8').split('\n')) {
   const [, key, raw] = match as unknown as [string, string, string];
   fromFile[key] = raw.replace(/^(['"])(.*)\1$/, '$2');
 }
+// The edge header value is generated with the stack; an empty one would leave
+// the apps unable to tell the edge from anyone else, and they refuse to start.
+if (fromFile.ZM_ORIGIN_VERIFY === '') {
+  console.error(
+    `${envFile} sets ZM_ORIGIN_VERIFY to nothing; leave the line out to keep the generated value.`
+  );
+  process.exit(2);
+}
 
 const client = new SecretsManagerClient({});
 const { SecretString } = await client.send(

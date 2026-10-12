@@ -53,6 +53,7 @@ for i in 1 2; do
     -e ZM_RATE_LIMIT_TABLE=zm-rate-limits \
     -e ZM_MCP_JSON_RESPONSE="${ZM_MCP_JSON_RESPONSE:-}" \
     -e ZM_ORIGIN_VERIFY="${ZM_ORIGIN_VERIFY:-}" \
+    -e ZM_EDGE_CHECK="$([ -n "${ZM_ORIGIN_VERIFY:-}" ] && echo on || echo off)" \
     -e ZM_PUBLIC_URL=http://127.0.0.1:55398 -e ZM_WEB_URL=http://localhost:3102 \
     --entrypoint /aws-lambda/aws-lambda-rie "$IMAGE" "$@" >/dev/null
 done

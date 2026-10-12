@@ -91,22 +91,42 @@ export const loadRuntimeConfig = async (
  * Whether a request came through the edge: it carries the header the edge
  * adds, with the shared value. The function's own URL stays reachable from
  * the internet, so without this anyone could skip the edge and, among other
- * things, choose the X-Forwarded-For the rate limiter keys on. No configured
- * value means no edge in front, and every request passes.
+ * things, choose the X-Forwarded-For the rate limiter keys on. Without a
+ * shared value nothing passes.
  */
 export const cameThroughEdge = (
   presented: string | undefined,
-  expected: string | undefined
+  expected: string
 ): boolean => {
-  if (!expected) {
-    return true;
-  }
-  if (presented === undefined) {
+  if (!expected || presented === undefined) {
     return false;
   }
   const a = Buffer.from(presented);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
+};
+
+/**
+ * The value the edge must present. A missing or empty one is a broken
+ * configuration, never "no edge": the function URL stays reachable from the
+ * internet, so failing open would let anyone past the edge and pick their own
+ * rate-limit address. The function refuses to start instead. Only a local
+ * emulator, which has no edge, turns the check off, and only by saying so:
+ * `ZM_EDGE_CHECK=off`.
+ */
+export const edgeSecretFrom = (
+  env: Readonly<Record<string, string | undefined>>
+): string | null => {
+  if (env.ZM_EDGE_CHECK === 'off') {
+    return null;
+  }
+  const value = env.ZM_ORIGIN_VERIFY;
+  if (!value) {
+    throw new Error(
+      'ZM_ORIGIN_VERIFY is not set: the function would answer requests that skipped the edge. Set it, or ZM_EDGE_CHECK=off for a local emulator without an edge.'
+    );
+  }
+  return value;
 };
 
 /**

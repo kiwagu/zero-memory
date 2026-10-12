@@ -4,6 +4,7 @@ import { ParameterNotFound } from '@aws-sdk/client-ssm';
 
 import {
   cameThroughEdge,
+  edgeSecretFrom,
   forwardedForFromEdge,
   loadRuntimeConfig,
   VIEWER_HEADER,
@@ -30,8 +31,10 @@ describe('forwardedForFromEdge', () => {
 });
 
 describe('cameThroughEdge', () => {
-  it('passes everything when no edge is configured', () => {
-    expect(cameThroughEdge(undefined, undefined)).toBe(true);
+  it('refuses everything when no shared value is configured', () => {
+    expect(cameThroughEdge(undefined, '')).toBe(false);
+    expect(cameThroughEdge('', '')).toBe(false);
+    expect(cameThroughEdge('anything', '')).toBe(false);
   });
 
   it('needs the exact shared value when one is', () => {
@@ -39,6 +42,23 @@ describe('cameThroughEdge', () => {
     expect(cameThroughEdge('secreT', 'secret')).toBe(false);
     expect(cameThroughEdge('secret-longer', 'secret')).toBe(false);
     expect(cameThroughEdge(undefined, 'secret')).toBe(false);
+  });
+});
+
+describe('edgeSecretFrom', () => {
+  it('returns the shared value the edge must present', () => {
+    expect(edgeSecretFrom({ ZM_ORIGIN_VERIFY: 'secret' })).toBe('secret');
+  });
+
+  it('refuses to start without one, rather than answer anyone', () => {
+    expect(() => edgeSecretFrom({})).toThrow(/ZM_ORIGIN_VERIFY/);
+    expect(() => edgeSecretFrom({ ZM_ORIGIN_VERIFY: '' })).toThrow(
+      /ZM_ORIGIN_VERIFY/
+    );
+  });
+
+  it('turns the check off only when told so explicitly, for a local emulator', () => {
+    expect(edgeSecretFrom({ ZM_EDGE_CHECK: 'off' })).toBeNull();
   });
 });
 

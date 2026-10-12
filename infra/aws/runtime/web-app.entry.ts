@@ -104,9 +104,19 @@ for (let attempt = 0; ; attempt += 1) {
   await Bun.sleep(50);
 }
 
-const expected = env.ZM_ORIGIN_VERIFY;
+// A missing value is a broken configuration, never "no edge": the function
+// URL stays reachable from the internet, so the entry refuses to start rather
+// than answer requests that skipped the edge. Only a local run without an
+// edge turns the check off, and only by saying so: ZM_EDGE_CHECK=off.
+const edgeCheck = env.ZM_EDGE_CHECK !== 'off';
+const expected = env.ZM_ORIGIN_VERIFY ?? '';
+if (edgeCheck && !expected) {
+  throw new Error(
+    'ZM_ORIGIN_VERIFY is not set: the app would answer requests that skipped the edge.'
+  );
+}
 const cameThroughEdge = (presented: string | null): boolean => {
-  if (!expected) {
+  if (!edgeCheck) {
     return true;
   }
   if (presented === null) {
@@ -127,7 +137,7 @@ Bun.serve({
     }
     const headers = new Headers(request.headers);
     headers.delete(EDGE_HEADER);
-    if (expected) {
+    if (edgeCheck) {
       const viewer = headers.get(VIEWER_HEADER);
       headers.delete(VIEWER_HEADER);
       headers.delete('x-forwarded-for');

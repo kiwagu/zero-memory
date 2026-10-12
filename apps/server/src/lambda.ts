@@ -12,6 +12,7 @@ import { isJobEvent, runJob, type JobEvent } from './lambda.jobs.js';
 import {
   cameThroughEdge,
   EDGE_HEADER,
+  edgeSecretFrom,
   forwardedForFromEdge,
   loadRuntimeConfig,
 } from './lambda.config.js';
@@ -110,8 +111,12 @@ const notFromEdge: FunctionUrlResult = {
 };
 
 let handler: ReturnType<typeof createHttpHandler>;
+// The value the edge must present; null only where ZM_EDGE_CHECK=off says
+// there is no edge (a local emulator).
+let edgeSecret: string | null = null;
 try {
   handler = await start();
+  edgeSecret = edgeSecretFrom(process.env);
 } catch (error) {
   await reportInitError(error);
 }
@@ -172,8 +177,10 @@ for (;;) {
       });
       continue;
     }
-    const presented = event.headers?.[EDGE_HEADER];
-    if (!cameThroughEdge(presented, process.env.ZM_ORIGIN_VERIFY)) {
+    if (
+      edgeSecret !== null &&
+      !cameThroughEdge(event.headers?.[EDGE_HEADER], edgeSecret)
+    ) {
       await fetch(`${invocationUrl}/${invocationId}/response`, {
         method: 'POST',
         body: JSON.stringify(notFromEdge),
@@ -182,7 +189,7 @@ for (;;) {
     }
     // The shared value is the edge's business only; the server never sees it.
     delete event.headers?.[EDGE_HEADER];
-    if (process.env.ZM_ORIGIN_VERIFY && event.headers) {
+    if (edgeSecret !== null && event.headers) {
       forwardedForFromEdge(event.headers);
     }
     const request = requestFromFunctionUrlEvent(event);
