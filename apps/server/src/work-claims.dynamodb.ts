@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import {
   ConditionalCheckFailedException,
   DynamoDBClient,
@@ -9,7 +7,11 @@ import {
   DynamoDBDocumentClient,
   PutCommand,
 } from '@aws-sdk/lib-dynamodb';
-import type { IWorkClaims } from '@workspace/mcp';
+import {
+  newWorkClaimToken,
+  type IWorkClaims,
+  type WorkClaimToken,
+} from '@workspace/mcp';
 
 export interface DynamoDbWorkClaimsOptions {
   /** A table keyed on `bucket` with TTL on `expiresAt` (the rate-limit one). */
@@ -54,9 +56,9 @@ export class DynamoDbWorkClaims implements IWorkClaims {
     this.#now = options.now ?? Date.now;
   }
 
-  async claim(key: string): Promise<string | null> {
+  async claim(key: string): Promise<WorkClaimToken | null> {
     const now = this.#seconds();
-    const token = randomUUID();
+    const token = newWorkClaimToken();
     const taken = await this.#conditionalPut(
       key,
       token,
@@ -71,7 +73,7 @@ export class DynamoDbWorkClaims implements IWorkClaims {
    * Whether the worker holding `token` may run the work, and if so the claim
    * now lasts the whole run.
    */
-  async confirm(key: string, token: string): Promise<boolean> {
+  async confirm(key: string, token: WorkClaimToken): Promise<boolean> {
     const now = this.#seconds();
     return this.#conditionalPut(
       key,
@@ -82,7 +84,7 @@ export class DynamoDbWorkClaims implements IWorkClaims {
     );
   }
 
-  async release(key: string, token: string): Promise<void> {
+  async release(key: string, token: WorkClaimToken): Promise<void> {
     try {
       await this.#db.send(
         new DeleteCommand({
@@ -107,7 +109,7 @@ export class DynamoDbWorkClaims implements IWorkClaims {
 
   async #conditionalPut(
     key: string,
-    token: string,
+    token: WorkClaimToken,
     expiresAt: number,
     condition: string,
     values: Record<string, unknown>

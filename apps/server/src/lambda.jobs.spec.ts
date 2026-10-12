@@ -1,3 +1,4 @@
+import { entityIdSchemas } from '@workspace/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -12,6 +13,11 @@ const job = (name: string, args?: unknown) => ({
   ...(args === undefined ? {} : { args }),
 });
 
+const memoryId = entityIdSchemas.memory.create();
+const ownerId = entityIdSchemas.user.create();
+const claimToken = entityIdSchemas.work_claim.create();
+const probeId = entityIdSchemas.roi_probe.create();
+
 describe('parseJobEvent', () => {
   it('accepts the scheduled jobs, which take no arguments', () => {
     for (const name of ['usage-upkeep', 'translation', 'hygiene']) {
@@ -21,15 +27,15 @@ describe('parseJobEvent', () => {
 
   it('accepts the work the server hands off, with its arguments', () => {
     const handedOff = [
-      job('translate-one', { memoryId: 'mem_1' }),
-      job('hygiene-one', { memoryId: 'mem_1' }),
-      job('hygiene-scan', { ownerId: 'usr_1', limit: null, claimToken: 't' }),
-      job('hygiene-scan', { ownerId: 'usr_1', limit: 50, claimToken: 't' }),
-      job('benchmark-probes', { ownerId: 'usr_1', claimToken: 't' }),
+      job('translate-one', { memoryId }),
+      job('hygiene-one', { memoryId }),
+      job('hygiene-scan', { ownerId, limit: null, claimToken }),
+      job('hygiene-scan', { ownerId, limit: 50, claimToken }),
+      job('benchmark-probes', { ownerId, claimToken }),
       job('benchmark-run', {
-        ownerId: 'usr_1',
-        claimToken: 't',
-        recalled: [{ probeId: 'prb_1', surfacedIds: ['mem_a'] }],
+        ownerId,
+        claimToken,
+        recalled: [{ probeId, surfacedIds: [memoryId] }],
       }),
     ];
     for (const event of handedOff) {
@@ -44,11 +50,9 @@ describe('parseJobEvent', () => {
     expect(parseJobEvent(job('hygiene-one'))).toBeNull();
     expect(parseJobEvent(job('translate-one', {}))).toBeNull();
     expect(parseJobEvent(job('hygiene-one', { memoryId: '' }))).toBeNull();
-    expect(parseJobEvent(job('hygiene-scan', { ownerId: 'usr_1' }))).toBeNull();
+    expect(parseJobEvent(job('hygiene-scan', { ownerId }))).toBeNull();
     // A claimed job without its claim's token cannot prove it still holds it.
-    expect(
-      parseJobEvent(job('benchmark-probes', { ownerId: 'usr_1' }))
-    ).toBeNull();
+    expect(parseJobEvent(job('benchmark-probes', { ownerId }))).toBeNull();
     expect(
       parseJobEvent({
         ...job('usage-upkeep'),
@@ -56,6 +60,31 @@ describe('parseJobEvent', () => {
       })
     ).toBeNull();
     expect(parseJobEvent(null)).toBeNull();
+  });
+
+  it('refuses an id of the wrong kind or shape anywhere in the arguments', () => {
+    expect(parseJobEvent(job('hygiene-one', { memoryId: ownerId }))).toBeNull();
+    expect(
+      parseJobEvent(job('benchmark-probes', { ownerId: memoryId, claimToken }))
+    ).toBeNull();
+    expect(
+      parseJobEvent(
+        job('hygiene-scan', {
+          ownerId,
+          limit: null,
+          claimToken: crypto.randomUUID(),
+        })
+      )
+    ).toBeNull();
+    expect(
+      parseJobEvent(
+        job('benchmark-run', {
+          ownerId,
+          claimToken,
+          recalled: [{ probeId, surfacedIds: [probeId] }],
+        })
+      )
+    ).toBeNull();
   });
 });
 
@@ -73,7 +102,7 @@ describe('jobsFunctionDispatcher', () => {
       client as never
     );
 
-    await dispatch({ kind: 'hygiene-one', args: { memoryId: 'mem_1' } });
+    await dispatch({ kind: 'hygiene-one', args: { memoryId } });
 
     expect(sent).toHaveLength(1);
     const { FunctionName, InvocationType, Payload } = sent[0]!.input;
@@ -84,7 +113,7 @@ describe('jobsFunctionDispatcher', () => {
     ) as unknown;
     expect(parseJobEvent(event)).toMatchObject({
       job: 'hygiene-one',
-      args: { memoryId: 'mem_1' },
+      args: { memoryId },
     });
   });
 });

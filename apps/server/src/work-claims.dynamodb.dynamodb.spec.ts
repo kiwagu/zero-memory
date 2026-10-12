@@ -1,3 +1,4 @@
+import { entityIdSchemas } from '@workspace/contracts';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { dynamoDbTestTables } from './dynamodb.test-tables.js';
@@ -30,7 +31,7 @@ describe('DynamoDbWorkClaims against DynamoDB Local', () => {
     const key = `hygiene-scan#usr_${crypto.randomUUID()}`;
 
     const token = await server.claim(key);
-    expect(token).toEqual(expect.any(String));
+    expect(entityIdSchemas.work_claim.is(token)).toBe(true);
     expect(await otherServer.claim(key)).toBeNull();
 
     await worker.release(key, token!);

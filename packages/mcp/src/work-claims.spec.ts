@@ -1,3 +1,4 @@
+import { entityIdSchemas } from '@workspace/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { InProcessWorkClaims, workClaimKey } from './work-claims.js';
@@ -8,7 +9,7 @@ describe('InProcessWorkClaims', () => {
     const key = workClaimKey('hygiene-scan', 'usr_1');
 
     const token = await claims.claim(key);
-    expect(token).toEqual(expect.any(String));
+    expect(entityIdSchemas.work_claim.is(token)).toBe(true);
     expect(await claims.claim(key)).toBeNull();
     expect(
       await claims.claim(workClaimKey('benchmark', 'usr_1'))

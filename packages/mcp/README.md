@@ -33,7 +33,10 @@ app host connects the returned server to a transport.
 - `IWorkClaims` / `InProcessWorkClaims` / `workClaimKey` — one queued or
   running background scan or benchmark per owner. The default holds the
   claims in this process; a deployment whose background work runs on a worker
-  of its own supplies shared claims, and the worker releases them.
+  of its own supplies shared claims, and the worker releases them. Each claim
+  hands out a `WorkClaimToken` (a `wcl_` entity id, `newWorkClaimToken`,
+  checked with `workClaimTokenSchema`) that travels with the work; only its
+  holder may end the claim.
 - `McpSessionScope` — how a session learns where its scope-less writes go:
   `attachProjectScope` / `currentProjectScope`. **First attach wins.** A
   `project_hint` that resolves attaches the session only while it has no

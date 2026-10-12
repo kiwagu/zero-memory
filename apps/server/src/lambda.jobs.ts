@@ -1,7 +1,17 @@
 import { InvokeCommand, type LambdaClient } from '@aws-sdk/client-lambda';
+import {
+  entityIdSchemas,
+  memoryIdSchema,
+  userIdSchema,
+} from '@workspace/contracts';
 import { HygieneScanner, runOwnerScan } from '@workspace/hygiene';
 import { createLogger, type BackgroundDispatcher } from '@workspace/logger';
-import { workClaimKey, type IWorkClaims } from '@workspace/mcp';
+import {
+  workClaimKey,
+  workClaimTokenSchema,
+  type IWorkClaims,
+  type WorkClaimToken,
+} from '@workspace/mcp';
 import { createRoiRunner } from '@workspace/roi';
 import { z } from 'zod';
 
@@ -26,7 +36,9 @@ const job = <Name extends string, Args extends z.ZodTypeAny>(
   args: Args
 ) => z.object({ zeroMemory: z.literal('job'), job: z.literal(name), args });
 
-const id = z.string().min(1);
+// Every id a job carries is checked against its own kind, so a payload with
+// a malformed or misplaced id is refused before any work starts.
+const probeIdSchema = entityIdSchemas.roi_probe.schema;
 
 const jobEventSchema = z.discriminatedUnion('job', [
   // Scheduled.
@@ -34,23 +46,31 @@ const jobEventSchema = z.discriminatedUnion('job', [
   job('translation', z.unknown().optional()),
   job('hygiene', z.unknown().optional()),
   // Handed off by the server.
-  job('translate-one', z.object({ memoryId: id })),
-  job('hygiene-one', z.object({ memoryId: id })),
+  job('translate-one', z.object({ memoryId: memoryIdSchema })),
+  job('hygiene-one', z.object({ memoryId: memoryIdSchema })),
   job(
     'hygiene-scan',
     z.object({
-      ownerId: id,
+      ownerId: userIdSchema,
       limit: z.number().int().positive().nullable(),
-      claimToken: id,
+      claimToken: workClaimTokenSchema,
     })
   ),
-  job('benchmark-probes', z.object({ ownerId: id, claimToken: id })),
+  job(
+    'benchmark-probes',
+    z.object({ ownerId: userIdSchema, claimToken: workClaimTokenSchema })
+  ),
   job(
     'benchmark-run',
     z.object({
-      ownerId: id,
-      claimToken: id,
-      recalled: z.array(z.object({ probeId: id, surfacedIds: z.array(id) })),
+      ownerId: userIdSchema,
+      claimToken: workClaimTokenSchema,
+      recalled: z.array(
+        z.object({
+          probeId: probeIdSchema,
+          surfacedIds: z.array(memoryIdSchema),
+        })
+      ),
     })
   ),
 ]);
@@ -82,7 +102,7 @@ export const parseJobEvent = (event: unknown): JobEvent | null => {
  * a claim before it runs the work (see `DynamoDbWorkClaims.confirm`).
  */
 export interface WorkerClaims extends IWorkClaims {
-  confirm(key: string, token: string): Promise<boolean>;
+  confirm(key: string, token: WorkClaimToken): Promise<boolean>;
 }
 
 /**
@@ -145,7 +165,7 @@ export const runJob = async (
 const underClaim = async (
   claims: WorkerClaims | undefined,
   key: string,
-  token: string,
+  token: WorkClaimToken,
   work: () => Promise<void>
 ): Promise<void> => {
   if (claims && !(await claims.confirm(key, token))) {
