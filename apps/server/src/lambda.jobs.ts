@@ -5,7 +5,10 @@ import { createRoiRunner } from '@workspace/roi';
 import { z } from 'zod';
 
 import { runHygieneScan } from './hygiene-scheduler.js';
-import { runTranslationPass } from './translation-scheduler.js';
+import {
+  runTranslationPass,
+  translationWorkerFromEnv,
+} from './translation-scheduler.js';
 import { runUsageUpkeep } from './usage-scheduler.js';
 
 /**
@@ -23,12 +26,12 @@ const job = <Name extends string, Args extends z.ZodTypeAny>(
 const id = z.string().min(1);
 
 const jobEventSchema = z.discriminatedUnion('job', [
-  // Scheduled. Translation is also what the server hands off after a
-  // non-English write: the pass takes every pending row.
+  // Scheduled.
   job('usage-upkeep', z.unknown().optional()),
   job('translation', z.unknown().optional()),
   job('hygiene', z.unknown().optional()),
   // Handed off by the server.
+  job('translate-one', z.object({ memoryId: id })),
   job('hygiene-one', z.object({ memoryId: id })),
   job(
     'hygiene-scan',
@@ -74,6 +77,9 @@ export const runJob = async (event: JobEvent): Promise<void> => {
       return runTranslationPass();
     case 'hygiene':
       return runHygieneScan();
+    case 'translate-one':
+      await translationWorkerFromEnv().translateOne(event.args.memoryId);
+      return;
     case 'hygiene-one':
       await new HygieneScanner().scanOne(event.args.memoryId);
       return;

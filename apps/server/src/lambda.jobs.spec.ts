@@ -21,7 +21,7 @@ describe('parseJobEvent', () => {
 
   it('accepts the work the server hands off, with its arguments', () => {
     const handedOff = [
-      job('translation', {}),
+      job('translate-one', { memoryId: 'mem_1' }),
       job('hygiene-one', { memoryId: 'mem_1' }),
       job('hygiene-scan', { ownerId: 'usr_1', limit: null }),
       job('hygiene-scan', { ownerId: 'usr_1', limit: 50 }),
@@ -41,6 +41,7 @@ describe('parseJobEvent', () => {
     expect(parseJobEvent({ zeroMemory: 'job' })).toBeNull();
     expect(parseJobEvent({ zeroMemory: 'warm-up' })).toBeNull();
     expect(parseJobEvent(job('hygiene-one'))).toBeNull();
+    expect(parseJobEvent(job('translate-one', {}))).toBeNull();
     expect(parseJobEvent(job('hygiene-one', { memoryId: '' }))).toBeNull();
     expect(parseJobEvent(job('hygiene-scan', { ownerId: 'usr_1' }))).toBeNull();
     expect(

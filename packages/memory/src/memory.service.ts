@@ -628,11 +628,11 @@ export class MemoryService {
     // cron. A failure is logged and the row stays 'pending' for the async
     // worker to retry. In-process it runs inside the request's async context,
     // so the repository update keeps the caller's identity; a runtime that
-    // hands background work to a worker of its own runs the translation pass
-    // there instead, which takes every pending row, this one included.
+    // hands background work to a worker of its own translates this one memory
+    // there instead.
     if (translation.status === 'pending') {
       void runInBackground(
-        { kind: 'translation', args: {} },
+        { kind: 'translate-one', args: { memoryId: fragment.id } },
         () => this.#canonicalize(fragment.id, content),
         this.#logger,
         'write-triggered canonicalization failed',
