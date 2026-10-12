@@ -22,7 +22,7 @@
 # embedding model, and one request each wakes the dashboard and the docs. The
 # first read of a new image is slow (close to a minute measured for the
 # server's model); this pays it before anyone arrives. It also starts one
-# usage upkeep run. Needs the AWS CLI.
+# usage upkeep run and one database backup. Needs the AWS CLI.
 set -euo pipefail
 
 stage="${1:-stand}"
@@ -79,6 +79,16 @@ aws lambda invoke --function-name "$jobs_function" --invocation-type Event \
   --cli-binary-format raw-in-base64-out \
   --payload '{"zeroMemory":"job","job":"usage-upkeep"}' /dev/null >/dev/null &&
   echo "usage upkeep: started"
+
+# One backup now rather than at the next 03:30 UTC: a new deployment would
+# otherwise have none for up to a day, and the missing-backup alarm would say
+# so. Without a database URL in its secret yet, the run fails and the failure
+# alarm names what is missing. Not awaited.
+backup_function="$(jq -r --arg stack "zero-memory-${stage}" '.[$stack].BackupFunctionName // empty' "$outputs")"
+if [ -n "$backup_function" ]; then
+  aws lambda invoke --function-name "$backup_function" --invocation-type Event \
+    /dev/null >/dev/null && echo "backup: started"
+fi
 
 function_name="$(jq -r --arg stack "zero-memory-${stage}" '.[$stack].FunctionName' "$outputs")"
 answer="$(mktemp)"

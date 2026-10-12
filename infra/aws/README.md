@@ -224,11 +224,16 @@ pause does not wait for it.
 
 ## Backups
 
-Every day at 03:30 UTC a function runs the container host's own dump script
-(`infra/prod/scripts/db-dump.sh`, unchanged) and stores the artifact and its
-manifest in the backup bucket under `daily/`; the first one of each month is
-also copied under `monthly/`. Lifecycle rules keep 30 days and 12 months. The
-function may read and write the bucket, never delete from it.
+Every day at 03:30 UTC, and once after every `deploy.sh`, a function runs the
+container host's own dump script (`infra/prod/scripts/db-dump.sh`, unchanged)
+and stores the artifact and its manifest in the backup bucket under `daily/`;
+the first one of each month is also copied under `monthly/`. Lifecycle rules
+keep 30 days and 12 months. The function may read and write the bucket, never
+delete from it.
+
+The `Missing` alarm is evaluated once an hour over the last 26 hours, so it
+clears up to an hour after a backup lands, and fires about a day after the
+last good one.
 
 It reads the database URL from the secret `zero-memory/<stage>/backup-env`.
 The function reaches the internet over IPv4 only, so for a Supabase project

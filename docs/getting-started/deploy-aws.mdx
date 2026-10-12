@@ -127,11 +127,12 @@ pause answers as fast as any other. Turn it off with `keepWarmMinutes` set to
 
 ## Backups
 
-Every day at 03:30 UTC a function runs the same backup script a container
-host runs (`infra/prod/scripts/db-dump.sh`) and stores the result in an S3
-bucket: daily backups for 30 days, and the first of each month for a year.
-An alarm fires when a backup fails, and another when none has been stored
-for over a day.
+Every day at 03:30 UTC, and once after every deploy, a function runs the
+same backup script a container host runs (`infra/prod/scripts/db-dump.sh`)
+and stores the result in an S3 bucket: daily backups for 30 days, and the
+first of each month for a year. An alarm fires when a backup fails, and
+another when none has been stored for over a day; that one is checked once an
+hour, so it can take up to an hour to clear after a backup lands.
 
 Give it the database's address once, in the `zero-memory/<stage>/backup-env`
 secret. The function reaches the database over IPv4, so for a Supabase
