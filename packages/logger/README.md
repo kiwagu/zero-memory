@@ -25,6 +25,14 @@ app for one-line-per-entry JSON logs.
   up to the timeout, and returns how many were still pending. Only a runtime
   that freezes the process once a response is out (a serverless function)
   needs it; it drains before handing the response over.
+- `runInBackground(task, work, logger, message, context?)` — starts work that
+  outlives the request (a model-backed check of a new memory, a full hygiene
+  scan). `work` runs here, detached, unless a runtime installed a dispatcher
+  with `dispatchBackgroundTo(dispatcher)`: then `task`, the same work as data
+  (`{ kind, args }`), is handed to it and `work` never runs here. Either way
+  the drain waits for it; it never rejects, logs a failure at error, and
+  resolves when the work or the hand-off ends. The server's AWS Lambda entry
+  installs a dispatcher that sends the task to a worker function.
 - Types: `Logger`, `LogLevel`, `LogContext`, `LogContextResolver`.
 
 ## Environment variables

@@ -203,3 +203,67 @@ export const drainDetached = async (timeoutMs: number): Promise<number> => {
   }
   return 0;
 };
+
+/** Work that outlives a request, described as data. */
+export interface BackgroundTask {
+  /** Which work, by a name the receiving worker maps to the same code. */
+  kind: string;
+  /** Its arguments, as JSON. */
+  args: Readonly<Record<string, unknown>>;
+}
+
+export type BackgroundDispatcher = (task: BackgroundTask) => Promise<void>;
+
+let backgroundDispatcher: BackgroundDispatcher | undefined;
+
+/**
+ * Hands every later {@link runInBackground} to `dispatcher` instead of running
+ * it in this process — for a runtime that freezes after each response (a
+ * serverless function), whose entry installs one at start. `undefined` goes
+ * back to running the work here.
+ */
+export const dispatchBackgroundTo = (
+  dispatcher: BackgroundDispatcher | undefined
+): void => {
+  backgroundDispatcher = dispatcher;
+};
+
+/**
+ * Starts work that outlives the request that asked for it: a model-backed
+ * check of a new memory, a full hygiene scan. In a long-lived process `work`
+ * runs here, detached. Where a runtime installed a dispatcher, `task` — the
+ * same work as data — is handed to it instead, and `work` never runs here.
+ * Either way it counts as a side write {@link drainDetached} waits for, so a
+ * function that freezes after answering has made the hand-off first, and a
+ * worker running the work itself finishes it.
+ *
+ * Never rejects: a failure of the work or of the hand-off is logged at error
+ * with `context`. Resolves once either has ended, for callers that guard
+ * against starting the same work twice.
+ */
+export const runInBackground = (
+  task: BackgroundTask,
+  work: () => Promise<unknown>,
+  logger: Logger,
+  message: string,
+  context: LogContext = {}
+): Promise<void> => {
+  const dispatcher = backgroundDispatcher;
+  const pending: Promise<void> = Promise.resolve()
+    .then(() => (dispatcher ? dispatcher(task) : work()))
+    .then(
+      () => undefined,
+      (error: unknown) => {
+        logger.error(message, {
+          ...context,
+          task: task.kind,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    )
+    .finally(() => {
+      detached.delete(pending);
+    });
+  detached.add(pending);
+  return pending;
+};
