@@ -132,6 +132,11 @@ import { createRoiRunner, type RoiProbeCase } from '@workspace/roi';
 import { z } from 'zod';
 
 import { toolError, toolErrorFromThrown } from './tool-error.js';
+import {
+  InProcessWorkClaims,
+  workClaimKey,
+  type IWorkClaims,
+} from './work-claims.js';
 
 /**
  * Appended to the WRITE-side tool descriptions only (remember,
@@ -236,6 +241,12 @@ export interface McpSessionScope {
 export interface McpServerDeps {
   commandBus: ICommandBus;
   queryBus: IQueryBus;
+  /**
+   * Claims on per-owner background work (a hygiene scan, a benchmark). The
+   * default holds them in this process; a deployment whose background work
+   * runs on a worker of its own supplies shared ones, released by the worker.
+   */
+  workClaims?: IWorkClaims;
   /** Wraps every tool call in an authenticated execution context. */
   runInToolContext: <T>(fn: () => Promise<T>) => Promise<T>;
   /**
@@ -911,13 +922,12 @@ const sessionStateLine = (state: SessionAttachment): string => {
 const footerOf = (...segments: Array<string | null | undefined>): string =>
   segments.filter(Boolean).join('\n\n');
 
-// Owners with a background hygiene scan currently running (see scan_hygiene):
-// a full scan far outlives a request round-trip, so it is fire-and-forget and
-// must not stack on repeated triggers. Held per PROCESS, not per MCP session:
-// one owner opening several sessions still gets one scan at a time.
-const scansInFlight = new Set<string>();
-// Same guard for the ROI benchmark (see benchmark_memory).
-const benchmarksInFlight = new Set<string>();
+// Owners with a background hygiene scan or benchmark queued or running: such
+// work far outlives a request round-trip and must not stack on repeated
+// triggers. Held per PROCESS unless the deployment supplies shared claims
+// (where the work runs on a worker of its own): one owner opening several
+// sessions still gets one scan at a time.
+const processWorkClaims = new InProcessWorkClaims();
 
 export const buildMcpServer = (deps: McpServerDeps): McpServer => {
   const logger = createLogger('mcp-server');
@@ -1120,21 +1130,25 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('scan_hygiene');
           return Promise.resolve(mustGetCurrentUserEntityId());
         });
-        if (scansInFlight.has(ownerId)) {
+        const claims = deps.workClaims ?? processWorkClaims;
+        const claimKey = workClaimKey('hygiene-scan', ownerId);
+        if (!(await claims.claim(claimKey))) {
           return asToolResult({ started: false, reason: 'already_running' });
         }
         // A full scan makes many judge calls and far outlives the request: it
         // runs in the background (service role, no request context needed),
         // here or on a worker the runtime hands it to, and the tool returns
-        // immediately.
-        scansInFlight.add(ownerId);
+        // immediately. Whoever runs it releases the claim when it ends.
         void runInBackground(
           { kind: 'hygiene-scan', args: { ownerId, limit: limit ?? null } },
-          () => runOwnerScan(ownerId, limit),
+          () =>
+            runOwnerScan(ownerId, limit).finally(() =>
+              claims.release(claimKey)
+            ),
           logger,
           'background hygiene scan failed',
           { ownerId }
-        ).finally(() => scansInFlight.delete(ownerId));
+        );
         return asToolResult({ started: true });
       } catch (error) {
         logger.error('scan_hygiene failed', { error: String(error) });
@@ -1434,82 +1448,99 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('benchmark_memory');
           return Promise.resolve(mustGetCurrentUserEntityId());
         });
-        if (benchmarksInFlight.has(ownerId)) {
+        const claims = deps.workClaims ?? processWorkClaims;
+        const claimKey = workClaimKey('benchmark', ownerId);
+        if (!(await claims.claim(claimKey))) {
           return asToolResult({ started: false, reason: 'already_running' });
         }
-        const runner = createRoiRunner();
-        const probes = await runner.activeProbes(ownerId);
-        if (probes.length === 0) {
-          // Phase 1: no holdout set yet — generate it in the background and
-          // let the caller re-invoke once it exists.
-          benchmarksInFlight.add(ownerId);
-          void runInBackground(
-            { kind: 'benchmark-probes', args: { ownerId } },
-            () => runner.ensureProbes(ownerId),
-            logger,
-            'roi probe generation failed',
-            { ownerId }
-          ).finally(() => benchmarksInFlight.delete(ownerId));
-          return asToolResult({
-            started: true,
-            phase: 'generating_probes',
-            note: 'Holdout questions are being generated — call benchmark_memory again shortly to run the benchmark.',
-          });
-        }
-
-        // Phase 2: recall each question INSIDE the authenticated context —
-        // the benchmark must see exactly what the user's own recall sees
-        // (RLS-honest), never a service-role view.
-        const cases: RoiProbeCase[] = await deps.runInToolContext(async () => {
-          const collected: RoiProbeCase[] = [];
-          for (const probe of probes) {
-            const result = await deps.queryBus.execute<
-              RecallQuery,
-              RecallOutput
-            >(
-              new RecallQuery({
-                query: probe.question,
-                scopes: probeReadScopes(probe.sourceScope),
-              })
+        // Until the work is handed to the background, a failure here is this
+        // request's to clean up; from then on whoever runs it releases.
+        let handedOff = false;
+        try {
+          const runner = createRoiRunner();
+          const probes = await runner.activeProbes(ownerId);
+          if (probes.length === 0) {
+            // Phase 1: no holdout set yet — generate it in the background and
+            // let the caller re-invoke once it exists.
+            void runInBackground(
+              { kind: 'benchmark-probes', args: { ownerId } },
+              () =>
+                runner
+                  .ensureProbes(ownerId)
+                  .finally(() => claims.release(claimKey)),
+              logger,
+              'roi probe generation failed',
+              { ownerId }
             );
-            collected.push({
-              probeId: probe.probeId,
-              question: probe.question,
-              groundTruthId: probe.groundTruthId,
-              groundTruth: probe.groundTruth,
-              surfaced: result.memories.map((memory) => ({
-                id: memory.id,
-                content: memory.content,
-              })),
+            handedOff = true;
+            return asToolResult({
+              started: true,
+              phase: 'generating_probes',
+              note: 'Holdout questions are being generated — call benchmark_memory again shortly to run the benchmark.',
             });
           }
-          return collected;
-        });
 
-        // Phase 3: judging + result rows run in the background (LLM-bound);
-        // a probe top-up rides along so the NEXT run covers fresh memories.
-        // A worker is handed the surfaced ids, not their text, and reloads it.
-        benchmarksInFlight.add(ownerId);
-        void runInBackground(
-          {
-            kind: 'benchmark-run',
-            args: {
-              ownerId,
-              recalled: cases.map((probeCase) => ({
-                probeId: probeCase.probeId,
-                surfacedIds: probeCase.surfaced.map((memory) => memory.id),
-              })),
+          // Phase 2: recall each question INSIDE the authenticated context —
+          // the benchmark must see exactly what the user's own recall sees
+          // (RLS-honest), never a service-role view.
+          const cases: RoiProbeCase[] = await deps.runInToolContext(
+            async () => {
+              const collected: RoiProbeCase[] = [];
+              for (const probe of probes) {
+                const result = await deps.queryBus.execute<
+                  RecallQuery,
+                  RecallOutput
+                >(
+                  new RecallQuery({
+                    query: probe.question,
+                    scopes: probeReadScopes(probe.sourceScope),
+                  })
+                );
+                collected.push({
+                  probeId: probe.probeId,
+                  question: probe.question,
+                  groundTruthId: probe.groundTruthId,
+                  groundTruth: probe.groundTruth,
+                  surfaced: result.memories.map((memory) => ({
+                    id: memory.id,
+                    content: memory.content,
+                  })),
+                });
+              }
+              return collected;
+            }
+          );
+
+          // Phase 3: judging + result rows run in the background (LLM-bound);
+          // a probe top-up rides along so the NEXT run covers fresh memories.
+          // A worker is handed the surfaced ids, not their text, and reloads it.
+          void runInBackground(
+            {
+              kind: 'benchmark-run',
+              args: {
+                ownerId,
+                recalled: cases.map((probeCase) => ({
+                  probeId: probeCase.probeId,
+                  surfacedIds: probeCase.surfaced.map((memory) => memory.id),
+                })),
+              },
             },
-          },
-          () =>
-            runner
-              .judgeAndRecord(ownerId, cases)
-              .then(() => runner.ensureProbes(ownerId)),
-          logger,
-          'roi benchmark run failed',
-          { ownerId }
-        ).finally(() => benchmarksInFlight.delete(ownerId));
-        return asToolResult({ started: true, probes: cases.length });
+            () =>
+              runner
+                .judgeAndRecord(ownerId, cases)
+                .then(() => runner.ensureProbes(ownerId))
+                .finally(() => claims.release(claimKey)),
+            logger,
+            'roi benchmark run failed',
+            { ownerId }
+          );
+          handedOff = true;
+          return asToolResult({ started: true, probes: cases.length });
+        } finally {
+          if (!handedOff) {
+            await claims.release(claimKey);
+          }
+        }
       } catch (error) {
         logger.error('benchmark_memory failed', { error: String(error) });
         return toolErrorFromThrown(error);

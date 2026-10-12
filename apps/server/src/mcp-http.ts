@@ -6,7 +6,7 @@ import { entityIdSchemas } from '@workspace/contracts';
 import { CommandBus, QueryBus } from '@workspace/cqrs';
 import { container } from '@workspace/di';
 import { createLogger, runDetached } from '@workspace/logger';
-import { buildMcpServer } from '@workspace/mcp';
+import { buildMcpServer, type IWorkClaims } from '@workspace/mcp';
 import {
   incompleteSessionResponse,
   unauthorizedResponse,
@@ -74,6 +74,8 @@ export interface McpHttpOptions {
    * Streamable HTTP; JSON suits a runtime that hands back whole responses.
    */
   jsonResponse?: boolean;
+  /** Claims on per-owner background work, when a worker elsewhere runs it. */
+  workClaims?: IWorkClaims;
 }
 
 /**
@@ -132,6 +134,7 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
     buildMcpServer({
       commandBus,
       queryBus,
+      workClaims: options.workClaims,
       // The per-request AsyncLocalStorage context (established below) already
       // wraps tool execution, so the tool-context hook is a pass-through.
       runInToolContext: (fn) => fn(),

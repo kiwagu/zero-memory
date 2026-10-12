@@ -1,3 +1,4 @@
+import type { IWorkClaims } from '@workspace/mcp';
 import { getRequestId } from '@workspace/context';
 import { createLogger, setLogContextResolver } from '@workspace/logger';
 import {
@@ -22,6 +23,8 @@ export interface HttpHandlerOptions {
   requestIp?: McpAuthPluginOptions['requestIp'];
   /** The OAuth rate limiter's count, when instances must share it. */
   rateLimiter?: McpAuthPluginOptions['limiter'];
+  /** Claims on per-owner background work, when a worker elsewhere runs it. */
+  workClaims?: IWorkClaims;
 }
 
 export interface HttpHandler {
@@ -75,6 +78,7 @@ export const createHttpHandler = (options: HttpHandlerOptions): HttpHandler => {
     rateLimiter: options.rateLimiter,
     sessions: options.sessions,
     jsonResponse: options.jsonResponse,
+    workClaims: options.workClaims,
   });
   const handle = withRequestObservability(
     (request) => inner.handle(request),

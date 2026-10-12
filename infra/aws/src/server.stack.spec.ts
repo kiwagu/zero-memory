@@ -149,6 +149,17 @@ describe('ServerStack', () => {
       JSON.stringify(policy).includes('lambda:InvokeFunction')
     );
     expect(JSON.stringify(invokes)).toMatch(/ServerServiceRole/);
+    // The jobs function releases the owner's claim on the work it ran; the
+    // claims live in the rate-limit table.
+    const jobsPolicy = JSON.stringify(
+      template.findResources('AWS::IAM::Policy', {
+        Properties: {
+          Roles: [{ Ref: Match.stringLikeRegexp('^JobsServiceRole') }],
+        },
+      })
+    );
+    expect(jobsPolicy).toContain('dynamodb:DeleteItem');
+    expect(jobsPolicy).toMatch(/RateLimits/);
   });
 
   it('schedules usage upkeep always, the paid jobs only when given an interval', () => {
@@ -219,7 +230,7 @@ describe('ServerStack', () => {
             Match.objectLike({
               Prefix: 'monthly/',
               ExpirationInDays: 366,
-              NoncurrentVersionExpiration: { NoncurrentDays: 366 },
+              NoncurrentVersionExpiration: { NoncurrentDays: 30 },
             }),
           ]),
         },

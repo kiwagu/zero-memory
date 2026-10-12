@@ -1,6 +1,7 @@
 import { InvokeCommand, type LambdaClient } from '@aws-sdk/client-lambda';
 import { HygieneScanner, runOwnerScan } from '@workspace/hygiene';
 import type { BackgroundDispatcher } from '@workspace/logger';
+import { workClaimKey, type IWorkClaims } from '@workspace/mcp';
 import { createRoiRunner } from '@workspace/roi';
 import { z } from 'zod';
 
@@ -69,7 +70,15 @@ export const parseJobEvent = (event: unknown): JobEvent | null => {
   return parsed.success ? parsed.data : null;
 };
 
-export const runJob = async (event: JobEvent): Promise<void> => {
+/**
+ * Runs one job. A scan or benchmark that a request handed over holds the
+ * owner's claim the request took; the job releases it when it ends, success
+ * or not, so the owner can start the next one.
+ */
+export const runJob = async (
+  event: JobEvent,
+  claims?: IWorkClaims
+): Promise<void> => {
   switch (event.job) {
     case 'usage-upkeep':
       return runUsageUpkeep();
@@ -84,20 +93,45 @@ export const runJob = async (event: JobEvent): Promise<void> => {
       await new HygieneScanner().scanOne(event.args.memoryId);
       return;
     case 'hygiene-scan':
-      return runOwnerScan(event.args.ownerId, event.args.limit ?? undefined);
-    case 'benchmark-probes':
-      await createRoiRunner().ensureProbes(event.args.ownerId);
-      return;
-    case 'benchmark-run': {
-      const runner = createRoiRunner();
-      const cases = await runner.casesFromIds(
-        event.args.ownerId,
-        event.args.recalled
+      return releasing(
+        claims,
+        workClaimKey('hygiene-scan', event.args.ownerId),
+        () => runOwnerScan(event.args.ownerId, event.args.limit ?? undefined)
       );
-      await runner.judgeAndRecord(event.args.ownerId, cases);
-      await runner.ensureProbes(event.args.ownerId);
-      return;
-    }
+    case 'benchmark-probes':
+      return releasing(
+        claims,
+        workClaimKey('benchmark', event.args.ownerId),
+        async () => {
+          await createRoiRunner().ensureProbes(event.args.ownerId);
+        }
+      );
+    case 'benchmark-run':
+      return releasing(
+        claims,
+        workClaimKey('benchmark', event.args.ownerId),
+        async () => {
+          const runner = createRoiRunner();
+          const cases = await runner.casesFromIds(
+            event.args.ownerId,
+            event.args.recalled
+          );
+          await runner.judgeAndRecord(event.args.ownerId, cases);
+          await runner.ensureProbes(event.args.ownerId);
+        }
+      );
+  }
+};
+
+const releasing = async (
+  claims: IWorkClaims | undefined,
+  key: string,
+  work: () => Promise<void>
+): Promise<void> => {
+  try {
+    await work();
+  } finally {
+    await claims?.release(key);
   }
 };
 

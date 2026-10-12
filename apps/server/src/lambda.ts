@@ -34,6 +34,7 @@ import {
 } from './lambda.function-url.js';
 import { DynamoDbMcpSessionStore } from './mcp-session.dynamodb-store.js';
 import { DynamoDbRateLimiter } from './rate-limit.dynamodb-limiter.js';
+import { DynamoDbWorkClaims } from './work-claims.dynamodb.js';
 
 /**
  * The server as an AWS Lambda function behind a function URL: a custom
@@ -82,6 +83,10 @@ const reportInitError = async (error: unknown): Promise<never> => {
 
 const sourceIps = new WeakMap<Request, string>();
 
+// Claims on per-owner background work, shared by every instance and by the
+// jobs function that releases them.
+let workClaims: DynamoDbWorkClaims | undefined;
+
 const start = async (): Promise<ReturnType<typeof createHttpHandler>> => {
   await loadRuntimeConfig();
   const tableName = process.env.ZM_MCP_SESSION_TABLE;
@@ -93,7 +98,9 @@ const start = async (): Promise<ReturnType<typeof createHttpHandler>> => {
     throw new Error('ZM_RATE_LIMIT_TABLE must name the rate-limit table.');
   }
   const client = new DynamoDBClient({});
+  workClaims = new DynamoDbWorkClaims({ tableName: rateLimitTable, client });
   return createHttpHandler({
+    workClaims,
     port: Number(process.env.PORT ?? 8787),
     sessions: new DynamoDbMcpSessionStore({ tableName, client }),
     rateLimiter: new DynamoDbRateLimiter({
@@ -186,7 +193,7 @@ for (;;) {
     const job = parseJobEvent(event);
     if (job) {
       const startedAt = performance.now();
-      await runJob(job);
+      await runJob(job, workClaims);
       await drainDetached(Math.max(0, deadline - Date.now() - POST_RESERVE_MS));
       const duration_ms = Math.round(performance.now() - startedAt);
       logger.info('job complete', { job: job.job, duration_ms });

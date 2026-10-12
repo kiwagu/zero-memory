@@ -1,3 +1,4 @@
+import type { IWorkClaims } from '@workspace/mcp';
 import { mcpAuthPlugin, type McpAuthPluginOptions } from '@workspace/mcp-auth';
 import { Elysia } from 'elysia';
 
@@ -33,6 +34,8 @@ export interface AppOptions {
   sessions: IMcpSessionStore;
   /** Answer MCP POSTs with one JSON body instead of an SSE stream. */
   jsonResponse?: boolean;
+  /** Claims on per-owner background work, when a worker elsewhere runs it. */
+  workClaims?: IWorkClaims;
 }
 
 export const createApp = (options: AppOptions) =>
@@ -83,6 +86,7 @@ export const createApp = (options: AppOptions) =>
         issuer: options.publicUrl,
         sessions: options.sessions,
         jsonResponse: options.jsonResponse,
+        workClaims: options.workClaims,
       })
     );
 

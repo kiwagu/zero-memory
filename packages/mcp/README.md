@@ -29,7 +29,11 @@ app host connects the returned server to a transport.
 - `McpServerDeps` — `commandBus`, `queryBus`, `runInToolContext` (wraps every
   tool call in an authenticated execution context), optional `sessionScope`
   and metering hooks (including `onWriteRefused`, fired with the stable reason
-  code when a write named no usable target).
+  code when a write named no usable target), and optional `workClaims`.
+- `IWorkClaims` / `InProcessWorkClaims` / `workClaimKey` — one queued or
+  running background scan or benchmark per owner. The default holds the
+  claims in this process; a deployment whose background work runs on a worker
+  of its own supplies shared claims, and the worker releases them.
 - `McpSessionScope` — how a session learns where its scope-less writes go:
   `attachProjectScope` / `currentProjectScope`. **First attach wins.** A
   `project_hint` that resolves attaches the session only while it has no

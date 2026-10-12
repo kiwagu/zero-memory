@@ -230,6 +230,9 @@ export class ServerStack extends Stack {
     // server hands it to the jobs function instead.
     server.addEnvironment('ZM_JOBS_FUNCTION', jobs.functionName);
     jobs.grantInvoke(server);
+    // A scan or benchmark the server hands over holds the owner's claim,
+    // which the jobs function releases when the work ends.
+    rateLimits.grantReadWriteData(jobs);
 
     const functionUrl = server.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
