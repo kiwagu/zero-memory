@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import {
   createServer,
   type IncomingMessage,
@@ -24,6 +24,8 @@ interface TestServer {
   ended: string[];
   /** DELETE requests that reached the server, answered or not. */
   deletes(): number;
+  /** Settles once the client has dropped every DELETE the server held. */
+  heldDeletesDropped(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -37,6 +39,7 @@ const startServer = async (
 ): Promise<TestServer> => {
   const ended: string[] = [];
   const held: ServerResponse[] = [];
+  const heldDropped: Promise<void>[] = [];
   let deletes = 0;
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
@@ -53,6 +56,11 @@ const startServer = async (
         deletes += 1;
         if (options.holdDelete) {
           held.push(response);
+          // A response that is never ended closes only when the connection
+          // under it does.
+          heldDropped.push(
+            new Promise((resolve) => response.once('close', () => resolve()))
+          );
           return;
         }
       }
@@ -65,6 +73,9 @@ const startServer = async (
     url: `http://127.0.0.1:${port}/mcp`,
     ended,
     deletes: () => deletes,
+    heldDeletesDropped: async () => {
+      await Promise.all(heldDropped);
+    },
     stop: async () => {
       for (const response of held) {
         response.destroy();
@@ -75,11 +86,13 @@ const startServer = async (
   };
 };
 
+const storeDirs: string[] = [];
+
 /** A token store that already holds a login for `serverUrl`. */
 const loggedInStore = (serverUrl: string): OAuthStateStore => {
-  const store = new OAuthStateStore(
-    join(mkdtempSync(join(tmpdir(), 'zm-oauth-')), 'oauth.json')
-  );
+  const dir = mkdtempSync(join(tmpdir(), 'zm-oauth-'));
+  storeDirs.push(dir);
+  const store = new OAuthStateStore(join(dir, 'oauth.json'));
   store.update(serverUrl, {
     tokens: { access_token: 'a-token', token_type: 'Bearer' },
   });
@@ -92,6 +105,9 @@ describe('createAuthedTransport', () => {
   afterEach(async () => {
     await server?.stop();
     server = undefined;
+    for (const dir of storeDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('ends its session on the server when the client closes', async () => {
@@ -124,6 +140,9 @@ describe('createAuthedTransport', () => {
 
     expect(server.deletes()).toBe(1);
     expect(Date.now() - started).toBeLessThan(3_000);
+    // Closing also gave up the DELETE still waiting for its answer, so no
+    // request outlives the client and keeps its process alive.
+    await server.heldDeletesDropped();
     expect(server.ended).toEqual([]);
   });
 });

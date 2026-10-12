@@ -6,7 +6,7 @@
  * "Session not found". The watcher's transport ends its session when it
  * closes, and the server frees that session's place under the cap.
  */
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -59,16 +59,21 @@ test.describe('MCP session cap', () => {
     }
     await expect(evicted.listToolNames()).rejects.toThrow(/Session not found/);
 
-    const store = new OAuthStateStore(
-      join(mkdtempSync(join(tmpdir(), 'zm-e2e-oauth-')), 'oauth.json')
-    );
-    store.update(mcpUrl, {
-      tokens: { access_token: token, token_type: 'Bearer' },
-    });
-    const editor = await McpTestClient.connect(token, 'zm-e2e-editor');
-    for (let run = 0; run < ONE_SHOT_CLIENTS; run += 1) {
-      await runWatcherClient(store);
+    // The watcher's transport reads its token from a store on disk, kept only
+    // for the length of the test.
+    const storeDir = mkdtempSync(join(tmpdir(), 'zm-e2e-oauth-'));
+    try {
+      const store = new OAuthStateStore(join(storeDir, 'oauth.json'));
+      store.update(mcpUrl, {
+        tokens: { access_token: token, token_type: 'Bearer' },
+      });
+      const editor = await McpTestClient.connect(token, 'zm-e2e-editor');
+      for (let run = 0; run < ONE_SHOT_CLIENTS; run += 1) {
+        await runWatcherClient(store);
+      }
+      expect(await editor.listToolNames()).toContain('recall');
+    } finally {
+      rmSync(storeDir, { recursive: true, force: true });
     }
-    expect(await editor.listToolNames()).toContain('recall');
   });
 });
