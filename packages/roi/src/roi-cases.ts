@@ -11,8 +11,9 @@ export interface RoiRecalledIds {
  * The cases a recall phase collected, rebuilt from ids alone: the question and
  * ground truth from the probe, each surfaced memory's content from `contents`.
  * The recall picked the ids under the caller's own access rules, so this
- * shows the judge nothing that recall did not. A probe retired since, or a
- * memory gone since, is left out rather than judged on partial evidence.
+ * shows the judge nothing that recall did not. A probe retired since is left
+ * out, and so is a case one of whose surfaced memories is gone since: judged
+ * on partial evidence it could record a miss recall never made.
  */
 export const rebuildRoiCases = (
   probes: readonly RoiProbeRow[],
@@ -22,7 +23,7 @@ export const rebuildRoiCases = (
   const byId = new Map(probes.map((probe) => [probe.probeId, probe]));
   return recalled.flatMap(({ probeId, surfacedIds }) => {
     const probe = byId.get(probeId);
-    if (!probe) {
+    if (!probe || surfacedIds.some((id) => !contents.has(id))) {
       return [];
     }
     return [
@@ -31,10 +32,10 @@ export const rebuildRoiCases = (
         question: probe.question,
         groundTruthId: probe.groundTruthId,
         groundTruth: probe.groundTruth,
-        surfaced: surfacedIds.flatMap((id) => {
-          const content = contents.get(id);
-          return content === undefined ? [] : [{ id, content }];
-        }),
+        surfaced: surfacedIds.map((id) => ({
+          id,
+          content: contents.get(id) ?? '',
+        })),
       },
     ];
   });

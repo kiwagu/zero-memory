@@ -243,7 +243,7 @@ and stores the artifact and its manifest in the backup bucket under `daily/`;
 the first one of each month is also copied under `monthly/`. Lifecycle rules
 keep 30 days and 12 months. The function may read and write the bucket, never
 delete from it, and the bucket is versioned, so a write over an existing
-backup keeps the old one for as long as it would have lived.
+backup keeps the old bytes for 30 more days (an expired backup's too).
 
 The `Missing` alarm is evaluated once an hour over the last 26 hours, so it
 clears up to an hour after a backup lands, and fires about a day after the

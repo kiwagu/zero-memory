@@ -58,7 +58,8 @@ export class DatabaseBackup extends Construct {
 
     // Versioned: the function may write but never delete, and a write over an
     // existing key would otherwise replace a backup as surely as a delete.
-    // An overwritten version stays as long as the backup itself would have.
+    // An overwritten (or expired) version stays 30 more days: time enough
+    // for the alarms to be seen, without a second year of monthly copies.
     this.bucket = new s3.Bucket(this, 'Bucket', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -75,7 +76,7 @@ export class DatabaseBackup extends Construct {
           id: 'monthly',
           prefix: 'monthly/',
           expiration: Duration.days(366),
-          noncurrentVersionExpiration: Duration.days(366),
+          noncurrentVersionExpiration: Duration.days(30),
         },
         // An expired backup leaves a delete marker over its old versions;
         // once those are gone too, the marker goes.

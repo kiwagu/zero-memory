@@ -45,17 +45,17 @@ describe('rebuildRoiCases', () => {
     ]);
   });
 
-  it('drops a probe retired since the recall, and a memory gone since then', () => {
+  it('drops a probe retired since the recall, and a case whose evidence lost a memory since', () => {
     const cases = rebuildRoiCases(
-      [probe('prb_1', 'q1')],
+      [probe('prb_1', 'q1'), probe('prb_2', 'q2')],
       new Map([['mem_a', 'content a']]),
       [
         { probeId: 'prb_gone', surfacedIds: ['mem_a'] },
         { probeId: 'prb_1', surfacedIds: ['mem_deleted', 'mem_a'] },
+        { probeId: 'prb_2', surfacedIds: ['mem_a'] },
       ]
     );
 
-    expect(cases).toHaveLength(1);
-    expect(cases[0]?.surfaced).toEqual([{ id: 'mem_a', content: 'content a' }]);
+    expect(cases.map((probeCase) => probeCase.probeId)).toEqual(['prb_2']);
   });
 });
