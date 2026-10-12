@@ -14,6 +14,7 @@ import { rateLimiterOptionsFromEnv } from '@workspace/mcp-auth';
 
 import { createHttpHandler } from './http-handler.js';
 import {
+  isDirectInvocation,
   jobsFunctionDispatcher,
   parseJobEvent,
   runJob,
@@ -194,6 +195,15 @@ for (;;) {
         body: JSON.stringify({ job: job.job, duration_ms }),
       });
       continue;
+    }
+    if (isDirectInvocation(event)) {
+      // Not a request, not a warm-up, not a job this function runs: an
+      // invocation error the alarms count, never a quiet answer that would
+      // drop handed-off work.
+      const asked = (event as { job?: unknown }).job;
+      throw new Error(
+        `Not a job this function runs: ${typeof asked === 'string' ? asked : 'no job named'} (or its arguments do not match).`
+      );
     }
     if (
       edgeSecret !== null &&

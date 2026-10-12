@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { jobsFunctionDispatcher, parseJobEvent } from './lambda.jobs.js';
+import {
+  isDirectInvocation,
+  jobsFunctionDispatcher,
+  parseJobEvent,
+} from './lambda.jobs.js';
 
 const job = (name: string, args?: unknown) => ({
   zeroMemory: 'job',
@@ -76,5 +80,16 @@ describe('jobsFunctionDispatcher', () => {
       job: 'hygiene-one',
       args: { memoryId: 'mem_1' },
     });
+  });
+});
+
+describe('isDirectInvocation', () => {
+  it('tells a direct invocation from a request through the function URL', () => {
+    expect(isDirectInvocation({ zeroMemory: 'job', job: 'nope' })).toBe(true);
+    expect(isDirectInvocation({})).toBe(true);
+    expect(
+      isDirectInvocation({ requestContext: { http: { method: 'GET' } } })
+    ).toBe(false);
+    expect(isDirectInvocation(null)).toBe(false);
   });
 });

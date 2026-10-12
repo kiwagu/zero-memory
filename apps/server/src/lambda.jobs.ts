@@ -47,17 +47,19 @@ const jobEventSchema = z.discriminatedUnion('job', [
 export type JobEvent = z.infer<typeof jobEventSchema>;
 
 /**
- * The job a direct invocation asks for, or null. A job invocation comes from
- * a caller with AWS credentials (the scheduler, the server, an operator);
- * anything that arrived through the function URL carries `requestContext`
- * and is never one.
+ * Whether an event was sent by a caller with AWS credentials (a scheduler,
+ * the server, an operator) rather than through the function URL: anything
+ * that came through the URL carries `requestContext`. A direct invocation
+ * that is neither a warm-up nor a job this function runs must fail loudly —
+ * handed-off work is invoked asynchronously, and a quiet answer to it would
+ * drop the work with nothing to show for it.
  */
+export const isDirectInvocation = (event: unknown): boolean =>
+  typeof event === 'object' && event !== null && !('requestContext' in event);
+
+/** The job a direct invocation asks for, or null. */
 export const parseJobEvent = (event: unknown): JobEvent | null => {
-  if (
-    typeof event !== 'object' ||
-    event === null ||
-    'requestContext' in event
-  ) {
+  if (!isDirectInvocation(event)) {
     return null;
   }
   const parsed = jobEventSchema.safeParse(event);
