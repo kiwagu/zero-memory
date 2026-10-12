@@ -233,8 +233,8 @@ invocation (`ZM_JOBS_FUNCTION` names the function) and answers at once, as on
 a container host. A scan or benchmark holds the owner's claim in the
 rate-limit table from the request until its job ends, so a second request
 hears `already_running` instead of queueing a paid duplicate; the job runs
-only if that claim is still its own and not yet started, so a job that waited
-past its claim, or arrived twice, skips.
+only if that claim is still its own and not yet started, so a job whose claim
+a newer request took over, or one that arrives twice, skips.
 
 The scheduler also invokes the server's warm-up every five minutes, so one
 instance keeps the embedding model loaded and a person's first search after a
