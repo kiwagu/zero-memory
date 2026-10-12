@@ -23,11 +23,12 @@ describe('parseJobEvent', () => {
     const handedOff = [
       job('translate-one', { memoryId: 'mem_1' }),
       job('hygiene-one', { memoryId: 'mem_1' }),
-      job('hygiene-scan', { ownerId: 'usr_1', limit: null }),
-      job('hygiene-scan', { ownerId: 'usr_1', limit: 50 }),
-      job('benchmark-probes', { ownerId: 'usr_1' }),
+      job('hygiene-scan', { ownerId: 'usr_1', limit: null, claimToken: 't' }),
+      job('hygiene-scan', { ownerId: 'usr_1', limit: 50, claimToken: 't' }),
+      job('benchmark-probes', { ownerId: 'usr_1', claimToken: 't' }),
       job('benchmark-run', {
         ownerId: 'usr_1',
+        claimToken: 't',
         recalled: [{ probeId: 'prb_1', surfacedIds: ['mem_a'] }],
       }),
     ];
@@ -44,6 +45,10 @@ describe('parseJobEvent', () => {
     expect(parseJobEvent(job('translate-one', {}))).toBeNull();
     expect(parseJobEvent(job('hygiene-one', { memoryId: '' }))).toBeNull();
     expect(parseJobEvent(job('hygiene-scan', { ownerId: 'usr_1' }))).toBeNull();
+    // A claimed job without its claim's token cannot prove it still holds it.
+    expect(
+      parseJobEvent(job('benchmark-probes', { ownerId: 'usr_1' }))
+    ).toBeNull();
     expect(
       parseJobEvent({
         ...job('usage-upkeep'),

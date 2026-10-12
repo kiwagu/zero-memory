@@ -7,14 +7,30 @@ describe('InProcessWorkClaims', () => {
     const claims = new InProcessWorkClaims();
     const key = workClaimKey('hygiene-scan', 'usr_1');
 
-    expect(await claims.claim(key)).toBe(true);
-    expect(await claims.claim(key)).toBe(false);
-    expect(await claims.claim(workClaimKey('benchmark', 'usr_1'))).toBe(true);
-    expect(await claims.claim(workClaimKey('hygiene-scan', 'usr_2'))).toBe(
-      true
-    );
+    const token = await claims.claim(key);
+    expect(token).toEqual(expect.any(String));
+    expect(await claims.claim(key)).toBeNull();
+    expect(
+      await claims.claim(workClaimKey('benchmark', 'usr_1'))
+    ).not.toBeNull();
+    expect(
+      await claims.claim(workClaimKey('hygiene-scan', 'usr_2'))
+    ).not.toBeNull();
 
-    await claims.release(key);
-    expect(await claims.claim(key)).toBe(true);
+    await claims.release(key, token!);
+    expect(await claims.claim(key)).not.toBeNull();
+  });
+
+  it('ignores a release by a holder whose claim is no longer the current one', async () => {
+    const claims = new InProcessWorkClaims();
+    const key = workClaimKey('benchmark', 'usr_1');
+    const first = await claims.claim(key);
+    await claims.release(key, first!);
+    const second = await claims.claim(key);
+
+    await claims.release(key, first!);
+
+    expect(second).not.toBeNull();
+    expect(await claims.claim(key)).toBeNull();
   });
 });

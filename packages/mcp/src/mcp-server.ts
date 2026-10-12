@@ -1132,7 +1132,8 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         });
         const claims = deps.workClaims ?? processWorkClaims;
         const claimKey = workClaimKey('hygiene-scan', ownerId);
-        if (!(await claims.claim(claimKey))) {
+        const claimToken = await claims.claim(claimKey);
+        if (!claimToken) {
           return asToolResult({ started: false, reason: 'already_running' });
         }
         // A full scan makes many judge calls and far outlives the request: it
@@ -1140,10 +1141,13 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         // here or on a worker the runtime hands it to, and the tool returns
         // immediately. Whoever runs it releases the claim when it ends.
         void runInBackground(
-          { kind: 'hygiene-scan', args: { ownerId, limit: limit ?? null } },
+          {
+            kind: 'hygiene-scan',
+            args: { ownerId, limit: limit ?? null, claimToken },
+          },
           () =>
             runOwnerScan(ownerId, limit).finally(() =>
-              claims.release(claimKey)
+              claims.release(claimKey, claimToken)
             ),
           logger,
           'background hygiene scan failed',
@@ -1450,7 +1454,8 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         });
         const claims = deps.workClaims ?? processWorkClaims;
         const claimKey = workClaimKey('benchmark', ownerId);
-        if (!(await claims.claim(claimKey))) {
+        const claimToken = await claims.claim(claimKey);
+        if (!claimToken) {
           return asToolResult({ started: false, reason: 'already_running' });
         }
         // Until the work is handed to the background, a failure here is this
@@ -1463,11 +1468,11 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
             // Phase 1: no holdout set yet — generate it in the background and
             // let the caller re-invoke once it exists.
             void runInBackground(
-              { kind: 'benchmark-probes', args: { ownerId } },
+              { kind: 'benchmark-probes', args: { ownerId, claimToken } },
               () =>
                 runner
                   .ensureProbes(ownerId)
-                  .finally(() => claims.release(claimKey)),
+                  .finally(() => claims.release(claimKey, claimToken)),
               logger,
               'roi probe generation failed',
               { ownerId }
@@ -1519,6 +1524,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
               kind: 'benchmark-run',
               args: {
                 ownerId,
+                claimToken,
                 recalled: cases.map((probeCase) => ({
                   probeId: probeCase.probeId,
                   surfacedIds: probeCase.surfaced.map((memory) => memory.id),
@@ -1529,7 +1535,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
               runner
                 .judgeAndRecord(ownerId, cases)
                 .then(() => runner.ensureProbes(ownerId))
-                .finally(() => claims.release(claimKey)),
+                .finally(() => claims.release(claimKey, claimToken)),
             logger,
             'roi benchmark run failed',
             { ownerId }
@@ -1538,7 +1544,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           return asToolResult({ started: true, probes: cases.length });
         } finally {
           if (!handedOff) {
-            await claims.release(claimKey);
+            await claims.release(claimKey, claimToken);
           }
         }
       } catch (error) {

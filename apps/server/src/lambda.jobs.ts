@@ -1,6 +1,6 @@
 import { InvokeCommand, type LambdaClient } from '@aws-sdk/client-lambda';
 import { HygieneScanner, runOwnerScan } from '@workspace/hygiene';
-import type { BackgroundDispatcher } from '@workspace/logger';
+import { createLogger, type BackgroundDispatcher } from '@workspace/logger';
 import { workClaimKey, type IWorkClaims } from '@workspace/mcp';
 import { createRoiRunner } from '@workspace/roi';
 import { z } from 'zod';
@@ -11,6 +11,8 @@ import {
   translationWorkerFromEnv,
 } from './translation-scheduler.js';
 import { runUsageUpkeep } from './usage-scheduler.js';
+
+const logger = createLogger('lambda-jobs');
 
 /**
  * Work that runs on its own function on AWS Lambda, one invocation per run.
@@ -36,13 +38,18 @@ const jobEventSchema = z.discriminatedUnion('job', [
   job('hygiene-one', z.object({ memoryId: id })),
   job(
     'hygiene-scan',
-    z.object({ ownerId: id, limit: z.number().int().positive().nullable() })
+    z.object({
+      ownerId: id,
+      limit: z.number().int().positive().nullable(),
+      claimToken: id,
+    })
   ),
-  job('benchmark-probes', z.object({ ownerId: id })),
+  job('benchmark-probes', z.object({ ownerId: id, claimToken: id })),
   job(
     'benchmark-run',
     z.object({
       ownerId: id,
+      claimToken: id,
       recalled: z.array(z.object({ probeId: id, surfacedIds: z.array(id) })),
     })
   ),
@@ -71,13 +78,22 @@ export const parseJobEvent = (event: unknown): JobEvent | null => {
 };
 
 /**
- * Runs one job. A scan or benchmark that a request handed over holds the
- * owner's claim the request took; the job releases it when it ends, success
- * or not, so the owner can start the next one.
+ * The claims a worker holds work under: besides releasing them, it confirms
+ * a claim before it runs the work (see `DynamoDbWorkClaims.confirm`).
+ */
+export interface WorkerClaims extends IWorkClaims {
+  confirm(key: string, token: string): Promise<boolean>;
+}
+
+/**
+ * Runs one job. A scan or benchmark that a request handed over comes with the
+ * owner's claim the request took: the job runs only while that claim is still
+ * its own — a newer request may have taken it after it expired in the queue —
+ * and releases it when it ends, success or not.
  */
 export const runJob = async (
   event: JobEvent,
-  claims?: IWorkClaims
+  claims?: WorkerClaims
 ): Promise<void> => {
   switch (event.job) {
     case 'usage-upkeep':
@@ -93,23 +109,26 @@ export const runJob = async (
       await new HygieneScanner().scanOne(event.args.memoryId);
       return;
     case 'hygiene-scan':
-      return releasing(
+      return underClaim(
         claims,
         workClaimKey('hygiene-scan', event.args.ownerId),
+        event.args.claimToken,
         () => runOwnerScan(event.args.ownerId, event.args.limit ?? undefined)
       );
     case 'benchmark-probes':
-      return releasing(
+      return underClaim(
         claims,
         workClaimKey('benchmark', event.args.ownerId),
+        event.args.claimToken,
         async () => {
           await createRoiRunner().ensureProbes(event.args.ownerId);
         }
       );
     case 'benchmark-run':
-      return releasing(
+      return underClaim(
         claims,
         workClaimKey('benchmark', event.args.ownerId),
+        event.args.claimToken,
         async () => {
           const runner = createRoiRunner();
           const cases = await runner.casesFromIds(
@@ -123,15 +142,20 @@ export const runJob = async (
   }
 };
 
-const releasing = async (
-  claims: IWorkClaims | undefined,
+const underClaim = async (
+  claims: WorkerClaims | undefined,
   key: string,
+  token: string,
   work: () => Promise<void>
 ): Promise<void> => {
+  if (claims && !(await claims.confirm(key, token))) {
+    logger.info('claimed work superseded; skipped', { claim: key });
+    return;
+  }
   try {
     await work();
   } finally {
-    await claims?.release(key);
+    await claims?.release(key, token);
   }
 };
 
