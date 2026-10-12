@@ -34,16 +34,22 @@ repo="$(cd "$(dirname "$0")/../../.." && pwd)"
 # asset that replaces every function. Without it the id follows the content.
 export BUILDX_NO_DEFAULT_ATTESTATIONS=1
 
+# Runs inside a command substitution, where `set -e` does not reach: a failed
+# build has to fail the function itself, or the inspection below would hand
+# CDK the id of the image an earlier build left under the same tag.
 build() {
   docker build -f "$repo/apps/$1/Dockerfile" -t "zero-memory-$1:aws-${stage}" \
     --build-arg ZM_BUILD_VERSION="${ZM_BUILD_VERSION:-}" \
     --build-arg ZM_BUILD_COMMIT="${ZM_BUILD_COMMIT:-}" \
-    "$repo"
+    "$repo" || return 1
   docker image inspect --format '{{.Id}}' "zero-memory-$1:aws-${stage}"
 }
 server_id="$(build server | tail -1)"
 web_id="$(build web | tail -1)"
 docs_id="$(build docs | tail -1)"
+for id in "$server_id" "$web_id" "$docs_id"; do
+  [ -n "$id" ] || { echo "an image build produced no image id" >&2; exit 1; }
+done
 
 # Empty until the stack has created the secret.
 env_version() {
@@ -75,10 +81,13 @@ done
 # Usage upkeep also runs once at every start on the container host, so a new
 # deployment has its partitions and first rollup at once. Not awaited.
 jobs_function="$(jq -r --arg stack "zero-memory-${stage}" '.[$stack].JobsFunctionName' "$outputs")"
-aws lambda invoke --function-name "$jobs_function" --invocation-type Event \
+if aws lambda invoke --function-name "$jobs_function" --invocation-type Event \
   --cli-binary-format raw-in-base64-out \
-  --payload '{"zeroMemory":"job","job":"usage-upkeep"}' /dev/null >/dev/null &&
+  --payload '{"zeroMemory":"job","job":"usage-upkeep"}' /dev/null >/dev/null; then
   echo "usage upkeep: started"
+else
+  echo "warning: usage upkeep could not be started; the daily schedule will run it" >&2
+fi
 
 # One backup now rather than at the next 03:30 UTC: a new deployment would
 # otherwise have none for up to a day, and the missing-backup alarm would say
@@ -86,8 +95,12 @@ aws lambda invoke --function-name "$jobs_function" --invocation-type Event \
 # alarm names what is missing. Not awaited.
 backup_function="$(jq -r --arg stack "zero-memory-${stage}" '.[$stack].BackupFunctionName // empty' "$outputs")"
 if [ -n "$backup_function" ]; then
-  aws lambda invoke --function-name "$backup_function" --invocation-type Event \
-    /dev/null >/dev/null && echo "backup: started"
+  if aws lambda invoke --function-name "$backup_function" \
+    --invocation-type Event /dev/null >/dev/null; then
+    echo "backup: started"
+  else
+    echo "warning: a backup could not be started; the daily schedule will take one" >&2
+  fi
 fi
 
 function_name="$(jq -r --arg stack "zero-memory-${stage}" '.[$stack].FunctionName' "$outputs")"
