@@ -63,6 +63,12 @@ describe('WebStack', () => {
         },
       });
     }
+    // Each edge presents the value from the same version its app reads.
+    const distributions = JSON.stringify(
+      template.findResources('AWS::CloudFront::Distribution')
+    );
+    expect(distributions).toContain(':SecretString:ZM_ORIGIN_VERIFY::web-2}}');
+    expect(distributions).toContain(':SecretString:ZM_ORIGIN_VERIFY::docs-5}}');
   });
 
   it('caches only the static files at the edge, and forwards cookies for the pages', () => {

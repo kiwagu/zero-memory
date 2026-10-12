@@ -20,7 +20,7 @@ import {
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 
-import { viewerRequestFunction } from './edge.function.js';
+import { edgeHeaderValue, viewerRequestFunction } from './edge.function.js';
 
 const runtimeDir = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -142,9 +142,7 @@ export class WebApp extends Construct {
       fn.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.NONE }),
       {
         customHeaders: {
-          'x-origin-verify': this.secret
-            .secretValueFromJson('ZM_ORIGIN_VERIFY')
-            .unsafeUnwrap(),
+          'x-origin-verify': edgeHeaderValue(this.secret, props.envVersion),
         },
         readTimeout: RESPONSE_TIMEOUT,
       }

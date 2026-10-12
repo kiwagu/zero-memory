@@ -133,6 +133,12 @@ app's instances, and a deploy after no change leaves them running. The server's
 `ZM_WEB_URL` and the dashboard's `ZM_SERVER_URL` come from the SSM
 parameters, ahead of the secrets.
 
+The edge reads `ZM_ORIGIN_VERIFY` from the same secret version, so a deploy
+after you change it updates the distribution too. CloudFront takes a few
+minutes to apply that, and the apps refuse requests that carry the old value
+meanwhile; change it when a short outage is acceptable. An app whose secret
+has no `ZM_ORIGIN_VERIFY` refuses to start.
+
 In the Supabase project's Auth settings, set the site URL to `DashboardUrl`
 and add `<DashboardUrl>/**` to the redirect URLs.
 

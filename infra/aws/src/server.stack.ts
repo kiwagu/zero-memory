@@ -21,7 +21,7 @@ import {
 import type { Construct } from 'constructs';
 
 import { DatabaseBackup } from './database.backup.js';
-import { viewerRequestFunction } from './edge.function.js';
+import { edgeHeaderValue, viewerRequestFunction } from './edge.function.js';
 import { ServerJobs, type JobName } from './server.jobs.js';
 import { ServerObservability } from './server.observability.js';
 
@@ -238,9 +238,7 @@ export class ServerStack extends Stack {
       defaultBehavior: {
         origin: new origins.FunctionUrlOrigin(functionUrl, {
           customHeaders: {
-            'x-origin-verify': serverEnv
-              .secretValueFromJson('ZM_ORIGIN_VERIFY')
-              .unsafeUnwrap(),
+            'x-origin-verify': edgeHeaderValue(serverEnv, props.envVersion),
           },
           readTimeout: RESPONSE_TIMEOUT,
         }),

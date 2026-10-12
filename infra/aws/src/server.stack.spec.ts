@@ -106,6 +106,15 @@ describe('ServerStack', () => {
     });
   });
 
+  it('gives the edge the same version of the shared value the function reads', () => {
+    const distribution = JSON.stringify(
+      synth({ envVersion: 'v-2' }).findResources(
+        'AWS::CloudFront::Distribution'
+      )
+    );
+    expect(distribution).toContain(':SecretString:ZM_ORIGIN_VERIFY::v-2}}');
+  });
+
   it('takes the memory size it is given', () => {
     synth({ memorySize: 2048 }).hasResourceProperties('AWS::Lambda::Function', {
       MemorySize: 2048,
