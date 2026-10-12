@@ -33,6 +33,7 @@
     "@types/node": "catalog:",
     "@workspace/db": "workspace:*",
     "@workspace/eslint-config": "workspace:^",
+    "@workspace/mcp-oauth-client": "workspace:*",
     "@workspace/typescript-config": "workspace:^",
     "dotenv": "^17.2.4",
     "eslint": "catalog:",

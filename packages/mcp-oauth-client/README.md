@@ -19,7 +19,12 @@ watcher and the hooks on a machine (shared token store, keyed by server URL).
 ## Key exports
 
 - `createAuthedTransport(serverUrl, store?)` — a `StreamableHTTPClientTransport`
-  wired to the file-backed provider; hand it to an SDK `Client`.
+  wired to the file-backed provider; hand it to an SDK `Client`. Closing it
+  ends the session on the server too (the protocol's `DELETE`), waiting at
+  most a second for the answer. The SDK's own `close()` only closes the client
+  side, and the hooks open a session per run: left behind, those sessions
+  count against the server's per-account session cap and push out the
+  editor's long-lived session.
 - `runLogin(serverUrl)` — one-time interactive bootstrap: dynamic client
   registration + PKCE authorization code, capturing the redirect on a loopback
   port, printing (and best-effort opening) the URL. Each login sends a fresh
