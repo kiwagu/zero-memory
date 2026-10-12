@@ -75,8 +75,14 @@ export const loadRuntimeConfig = async (
 
   const secretId = env.ZM_ENV_SECRET_ID;
   if (secretId) {
+    // The version the deploy stamped into the function is the one the edge
+    // presents its header from; the current one may already be newer.
+    const version = env.ZM_ENV_VERSION;
     const { SecretString } = await secrets.send(
-      new GetSecretValueCommand({ SecretId: secretId })
+      new GetSecretValueCommand({
+        SecretId: secretId,
+        ...(version ? { VersionId: version } : {}),
+      })
     );
     const values = JSON.parse(SecretString ?? '{}') as Record<string, unknown>;
     for (const [name, value] of Object.entries(values)) {

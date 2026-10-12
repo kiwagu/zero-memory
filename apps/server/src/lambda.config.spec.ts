@@ -128,4 +128,26 @@ describe('loadRuntimeConfig', () => {
       loadRuntimeConfig({ ...base }, clients({}, {}))
     ).rejects.toBeInstanceOf(ParameterNotFound);
   });
+
+  it('reads the secret version the deploy stamped, the one the edge presents', async () => {
+    const asked: unknown[] = [];
+    const fakes = clients({ '/zm/test/public-url': 'https://api.test' }, {});
+    const recording = {
+      ...fakes,
+      secrets: {
+        send: async (command: { input: unknown }) => {
+          asked.push(command.input);
+          return fakes.secrets.send(command as never);
+        },
+      },
+    } as unknown as RuntimeConfigClients;
+
+    await loadRuntimeConfig({ ...base, ZM_ENV_VERSION: 'v-7' }, recording);
+    await loadRuntimeConfig({ ...base }, recording);
+
+    expect(asked).toEqual([
+      { SecretId: 'zm/test/server-env', VersionId: 'v-7' },
+      { SecretId: 'zm/test/server-env' },
+    ]);
+  });
 });

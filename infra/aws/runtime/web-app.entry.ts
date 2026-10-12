@@ -67,7 +67,12 @@ if (parameterNames.length > 0) {
 
 if (env.ZM_ENV_SECRET_ID) {
   const { SecretString } = await new SecretsManagerClient({}).send(
-    new GetSecretValueCommand({ SecretId: env.ZM_ENV_SECRET_ID })
+    new GetSecretValueCommand({
+      SecretId: env.ZM_ENV_SECRET_ID,
+      // The version the deploy stamped, the one the edge presents its header
+      // from; the current one may already be newer.
+      ...(env.ZM_ENV_VERSION ? { VersionId: env.ZM_ENV_VERSION } : {}),
+    })
   );
   const values = JSON.parse(SecretString ?? '{}') as Record<string, unknown>;
   for (const [name, value] of Object.entries(values)) {

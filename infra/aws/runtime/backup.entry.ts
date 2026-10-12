@@ -75,7 +75,11 @@ const loadDatabaseUrl = async (): Promise<string> => {
     return databaseUrl;
   }
   const { SecretString } = await secrets.send(
-    new GetSecretValueCommand({ SecretId: secretId })
+    new GetSecretValueCommand({
+      SecretId: secretId,
+      // The version the deploy stamped into the function.
+      ...(env.ZM_ENV_VERSION ? { VersionId: env.ZM_ENV_VERSION } : {}),
+    })
   );
   const value = (JSON.parse(SecretString ?? '{}') as Record<string, string>)
     .DATABASE_URL;
