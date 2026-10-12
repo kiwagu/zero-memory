@@ -62,7 +62,7 @@ import {
   passageWindows,
   type IEmbeddingService,
 } from '@workspace/embedding';
-import { createLogger } from '@workspace/logger';
+import { createLogger, runInBackground } from '@workspace/logger';
 import { Err, Ok, type Result } from 'oxide.ts';
 
 import { guardMemoryWrite, guardTextFields } from './content-guard.js';
@@ -623,17 +623,20 @@ export class MemoryService {
       : await this.#applyDeclaredSupersedes(fragment.id, ownerId, input.links);
 
     // Write-triggered canonicalization: a non-English memory is canonicalized
-    // to English right after it is stored, in the background (fire-and-forget) —
-    // the write returns immediately and does not block on the model or wait for
-    // the cron. A failure is logged and the row stays 'pending' for the async
-    // worker to retry. Runs inside the request's async context, so the
-    // repository update keeps the caller's identity.
+    // to English right after it is stored, in the background — the write
+    // returns immediately and does not block on the model or wait for the
+    // cron. A failure is logged and the row stays 'pending' for the async
+    // worker to retry. In-process it runs inside the request's async context,
+    // so the repository update keeps the caller's identity; a runtime that
+    // hands background work to a worker of its own runs the translation pass
+    // there instead, which takes every pending row, this one included.
     if (translation.status === 'pending') {
-      void this.#canonicalize(fragment.id, content).catch((error: unknown) =>
-        this.#logger.warn('write-triggered canonicalization failed', {
-          id: fragment.id,
-          error: error instanceof Error ? error.message : String(error),
-        })
+      void runInBackground(
+        { kind: 'translation', args: {} },
+        () => this.#canonicalize(fragment.id, content),
+        this.#logger,
+        'write-triggered canonicalization failed',
+        { id: fragment.id }
       );
     }
 

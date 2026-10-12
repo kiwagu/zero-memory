@@ -26,3 +26,4 @@ export * from './stale-suspect-detector.js';
 export * from './entity-merge.js';
 export * from './entity-merge-service.js';
 export * from './write-portability-judge.js';
+export * from './owner-scan.js';

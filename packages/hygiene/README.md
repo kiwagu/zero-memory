@@ -213,7 +213,9 @@ is system-wide, not owner-scoped):
 - `apps/server/src/hygiene-scheduler.ts` — periodic in-process tick
   (`ZM_HYGIENE_SCAN_INTERVAL_HOURS`).
 - the `scan_hygiene` MCP tool (owner-scoped, fire-and-forget) — also behind
-  the dashboard scan button.
+  the dashboard scan button. It runs `runOwnerScan` (`src/owner-scan.ts`) in
+  the background of the request, or, on AWS Lambda, on the jobs function the
+  server hands it to.
 - `apps/server/src/hygiene-scan.ts` (`bun run hygiene:scan` in `apps/server`)
   — manual CLI pass. Requires `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
   and `ANTHROPIC_API_KEY`.

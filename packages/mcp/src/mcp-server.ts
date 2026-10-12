@@ -111,19 +111,14 @@ import type { ICommandBus, IQueryBus } from '@workspace/cqrs';
 import {
   HygieneResolver,
   HygieneScanner,
-  JudgeRescanDetector,
-  LoopClosureDetector,
-  PortabilityDetector,
-  ReflectionDetector,
-  ReinforcementRollup,
   RuleCandidateDetector,
-  StaleSuspectDetector,
+  runOwnerScan,
   type BulkPolicy,
   type BulkResolveResult,
   type TriageResult,
   type ConflictDecision,
 } from '@workspace/hygiene';
-import { createLogger } from '@workspace/logger';
+import { createLogger, runInBackground } from '@workspace/logger';
 import {
   BoardQuery,
   BuildContextQuery,
@@ -1062,11 +1057,12 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           !result.deduplicated
         ) {
           const memoryId = result.memory_id;
-          void new HygieneScanner().scanOne(memoryId).catch((error) =>
-            logger.error('write-triggered hygiene scan failed', {
-              memoryId,
-              error: String(error),
-            })
+          void runInBackground(
+            { kind: 'hygiene-one', args: { memoryId } },
+            () => new HygieneScanner().scanOne(memoryId),
+            logger,
+            'write-triggered hygiene scan failed',
+            { memoryId }
           );
         }
         // No personal-fallback note lives here any more: a write the server
@@ -1127,104 +1123,18 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         if (scansInFlight.has(ownerId)) {
           return asToolResult({ started: false, reason: 'already_running' });
         }
-        // Fire-and-forget: a full scan makes many LLM-judge calls and far
-        // outlives the request. Run it in the background (service-role, no
-        // request context needed) and return immediately.
+        // A full scan makes many judge calls and far outlives the request: it
+        // runs in the background (service role, no request context needed),
+        // here or on a worker the runtime hands it to, and the tool returns
+        // immediately.
         scansInFlight.add(ownerId);
-        const scanner = new HygieneScanner();
-        void scanner
-          .scan(ownerId, limit)
-          .then(async (result) => {
-            logger.info('background hygiene scan complete', {
-              ownerId,
-              ...result,
-            });
-            // Kind audit: demote changelog-style change notes stuck in
-            // durable kinds (they outrank real knowledge in recall).
-            const audited = await scanner.auditKinds(ownerId, limit);
-            logger.info('background hygiene kind audit complete', {
-              ownerId,
-              ...audited,
-            });
-            // On-demand full re-judge of this owner's queue: the user asked for
-            // a scan, so pay to re-classify pending conflicts with the current
-            // judge and dismiss (keep_both) the ones it no longer sees.
-            const healed = await scanner.readjudicatePending({
-              ownerId,
-              rejudge: true,
-            });
-            logger.info('background hygiene readjudicate complete', {
-              ownerId,
-              ...healed,
-            });
-            // Rules incubator: detect this owner's memories that earned
-            // always-on promotion and distill drafts for the review queue.
-            const incubated = await new RuleCandidateDetector().detect(
-              ownerId,
-              limit
-            );
-            logger.info('background rule-candidate detection complete', {
-              ownerId,
-              ...incubated,
-            });
-            // Reflection: consolidate this owner's related-episode clusters
-            // into living-fact drafts for the review queue.
-            const reflected = await new ReflectionDetector().detect(
-              ownerId,
-              limit
-            );
-            logger.info('background reflection detection complete', {
-              ownerId,
-              ...reflected,
-            });
-            // Loop closure: auto-close this owner's open loops whose
-            // completion newer memories assert (judge-gated, reversible).
-            const loopsClosed = await new LoopClosureDetector().detect(ownerId);
-            logger.info('background loop-closure detection complete', {
-              ownerId,
-              ...loopsClosed,
-            });
-            // Usage reinforcement: refresh the precomputed ranking
-            // multipliers (system-wide — the rollup is one free query).
-            const reinforced = await new ReinforcementRollup().rollup();
-            logger.info('background reinforcement rollup complete', {
-              ownerId,
-              ...reinforced,
-            });
-            // Portability audit: propose re-scoping this owner's portable
-            // project-scope world facts into core (judge-gated proposals;
-            // the owner approves from the dashboard).
-            const portability = await new PortabilityDetector().detect(
-              ownerId,
-              limit
-            );
-            logger.info('background portability detection complete', {
-              ownerId,
-              ...portability,
-            });
-            // Stale suspects: queue memories with repeated misled signals
-            // for review (free, never auto-invalidates).
-            const staleSuspects = await new StaleSuspectDetector().detect();
-            logger.info('background stale-suspect detection complete', {
-              ownerId,
-              ...staleSuspects,
-            });
-            // Judge re-examination: a second opinion on this owner's
-            // high-traffic memories from the configured judge, at most once
-            // per model (guarded, capped per run).
-            const judgeRescan = await new JudgeRescanDetector().detect(ownerId);
-            logger.info('background judge re-examination complete', {
-              ownerId,
-              ...judgeRescan,
-            });
-          })
-          .catch((error) =>
-            logger.error('background hygiene scan failed', {
-              ownerId,
-              error: String(error),
-            })
-          )
-          .finally(() => scansInFlight.delete(ownerId));
+        void runInBackground(
+          { kind: 'hygiene-scan', args: { ownerId, limit: limit ?? null } },
+          () => runOwnerScan(ownerId, limit),
+          logger,
+          'background hygiene scan failed',
+          { ownerId }
+        ).finally(() => scansInFlight.delete(ownerId));
         return asToolResult({ started: true });
       } catch (error) {
         logger.error('scan_hygiene failed', { error: String(error) });
@@ -1533,15 +1443,13 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           // Phase 1: no holdout set yet — generate it in the background and
           // let the caller re-invoke once it exists.
           benchmarksInFlight.add(ownerId);
-          void runner
-            .ensureProbes(ownerId)
-            .catch((error) =>
-              logger.error('roi probe generation failed', {
-                ownerId,
-                error: String(error),
-              })
-            )
-            .finally(() => benchmarksInFlight.delete(ownerId));
+          void runInBackground(
+            { kind: 'benchmark-probes', args: { ownerId } },
+            () => runner.ensureProbes(ownerId),
+            logger,
+            'roi probe generation failed',
+            { ownerId }
+          ).finally(() => benchmarksInFlight.delete(ownerId));
           return asToolResult({
             started: true,
             phase: 'generating_probes',
@@ -1580,17 +1488,27 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
 
         // Phase 3: judging + result rows run in the background (LLM-bound);
         // a probe top-up rides along so the NEXT run covers fresh memories.
+        // A worker is handed the surfaced ids, not their text, and reloads it.
         benchmarksInFlight.add(ownerId);
-        void runner
-          .judgeAndRecord(ownerId, cases)
-          .then(() => runner.ensureProbes(ownerId))
-          .catch((error) =>
-            logger.error('roi benchmark run failed', {
+        void runInBackground(
+          {
+            kind: 'benchmark-run',
+            args: {
               ownerId,
-              error: String(error),
-            })
-          )
-          .finally(() => benchmarksInFlight.delete(ownerId));
+              recalled: cases.map((probeCase) => ({
+                probeId: probeCase.probeId,
+                surfacedIds: probeCase.surfaced.map((memory) => memory.id),
+              })),
+            },
+          },
+          () =>
+            runner
+              .judgeAndRecord(ownerId, cases)
+              .then(() => runner.ensureProbes(ownerId)),
+          logger,
+          'roi benchmark run failed',
+          { ownerId }
+        ).finally(() => benchmarksInFlight.delete(ownerId));
         return asToolResult({ started: true, probes: cases.length });
       } catch (error) {
         logger.error('benchmark_memory failed', { error: String(error) });
