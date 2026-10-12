@@ -229,7 +229,8 @@ container host's own dump script (`infra/prod/scripts/db-dump.sh`, unchanged)
 and stores the artifact and its manifest in the backup bucket under `daily/`;
 the first one of each month is also copied under `monthly/`. Lifecycle rules
 keep 30 days and 12 months. The function may read and write the bucket, never
-delete from it.
+delete from it, and the bucket is versioned, so a write over an existing
+backup keeps the old one for as long as it would have lived.
 
 The `Missing` alarm is evaluated once an hour over the last 26 hours, so it
 clears up to an hour after a backup lands, and fires about a day after the
@@ -304,4 +305,5 @@ alarms and the logs; `bunx cdk destroy zero-memory-pipeline-stand -c stage=stand
 githubRepo=<owner>/<repo>` removes the pipeline. The CDK bootstrap stack and
 the images it pushed stay, and so does the backup bucket: removing a
 deployment must not take its backups with it. Empty and delete the bucket
-yourself once they are no longer needed.
+yourself once they are no longer needed; it is versioned, so empty it of
+every version (the console's Empty does).

@@ -177,13 +177,24 @@ describe('ServerStack', () => {
 
   it('backs the database up daily into a bucket that outlives the stack, and alarms when backups stop', () => {
     const template = synth();
+    // Versioned, so a write over an existing backup keeps the old bytes for as
+    // long as the backup itself would have lived.
     template.hasResource('AWS::S3::Bucket', {
       DeletionPolicy: 'Retain',
       Properties: Match.objectLike({
+        VersioningConfiguration: { Status: 'Enabled' },
         LifecycleConfiguration: {
           Rules: Match.arrayWith([
-            Match.objectLike({ Prefix: 'daily/', ExpirationInDays: 30 }),
-            Match.objectLike({ Prefix: 'monthly/', ExpirationInDays: 366 }),
+            Match.objectLike({
+              Prefix: 'daily/',
+              ExpirationInDays: 30,
+              NoncurrentVersionExpiration: { NoncurrentDays: 30 },
+            }),
+            Match.objectLike({
+              Prefix: 'monthly/',
+              ExpirationInDays: 366,
+              NoncurrentVersionExpiration: { NoncurrentDays: 366 },
+            }),
           ]),
         },
       }),
@@ -214,6 +225,7 @@ describe('ServerStack', () => {
     );
     expect(policies).toContain('s3:PutObject');
     expect(policies).not.toContain('s3:DeleteObject');
+    expect(policies).not.toMatch(/s3:PutBucket|s3:PutLifecycle|s3:\*/);
 
     const without = synth({ backups: false });
     without.resourceCountIs('AWS::S3::Bucket', 0);

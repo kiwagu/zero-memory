@@ -41,7 +41,9 @@ export interface DatabaseBackupProps {
  *   DATABASE_URL. The function runs outside a VPC with IPv4 only, so for a
  *   Supabase project it must be the session pooler's address.
  * - Artifacts land under `daily/` and the first of each month is also kept
- *   under `monthly/`; lifecycle rules keep 30 days and 12 months of them.
+ *   under `monthly/`; lifecycle rules keep 30 days and 12 months of them. The
+ *   bucket is versioned, so the function, which may write but not delete,
+ *   cannot destroy a backup by writing over it either.
  * - The bucket is retained when the stack is removed: the backups are the one
  *   thing a teardown must not take with it.
  * - One alarm fires on a failed run, another when no backup has landed for
@@ -54,13 +56,30 @@ export class DatabaseBackup extends Construct {
     super(scope, id);
     const { stage } = props;
 
+    // Versioned: the function may write but never delete, and a write over an
+    // existing key would otherwise replace a backup as surely as a delete.
+    // An overwritten version stays as long as the backup itself would have.
     this.bucket = new s3.Bucket(this, 'Bucket', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
+      versioned: true,
       lifecycleRules: [
-        { id: 'daily', prefix: 'daily/', expiration: Duration.days(30) },
-        { id: 'monthly', prefix: 'monthly/', expiration: Duration.days(366) },
+        {
+          id: 'daily',
+          prefix: 'daily/',
+          expiration: Duration.days(30),
+          noncurrentVersionExpiration: Duration.days(30),
+        },
+        {
+          id: 'monthly',
+          prefix: 'monthly/',
+          expiration: Duration.days(366),
+          noncurrentVersionExpiration: Duration.days(366),
+        },
+        // An expired backup leaves a delete marker over its old versions;
+        // once those are gone too, the marker goes.
+        { id: 'markers', expiredObjectDeleteMarker: true },
       ],
       removalPolicy: RemovalPolicy.RETAIN,
     });

@@ -169,8 +169,13 @@ const backUp = async () => {
     await store(`daily/${manifest}`, join(dir, manifest), 'application/json');
 
     // Artifact names start with the date, so the month is their first part.
+    // The month is kept once its manifest is: the artifact is copied first, so
+    // a run cut between the two leaves no manifest and the next run copies a
+    // whole pair again.
     const month = artifact.slice(0, 7);
-    const monthly = (await keysUnder(`monthly/${month}`)).length === 0;
+    const monthly = !(await keysUnder(`monthly/${month}`)).some((key) =>
+      key.endsWith('.manifest.json')
+    );
     if (monthly) {
       for (const name of [artifact, manifest]) {
         await s3.send(
