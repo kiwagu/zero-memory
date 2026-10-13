@@ -191,10 +191,12 @@ Then, once:
    the status turns to Available. `aws codeconnections list-connections`
    shows it too.
 2. Put the database URL the migrations go through. CodeBuild has no IPv6, so
-   for a Supabase project use the session pooler's address:
+   for a Supabase project use the session pooler's address: set `POOLER_URL`
+   to the connection string the Supabase dashboard shows under Connect →
+   Session pooler, with the database password filled in, then:
 
    ```sh
-   echo 'DATABASE_URL=postgresql://postgres.<ref>:<password>@<pooler-host>:5432/postgres' > db.env
+   echo "DATABASE_URL=$POOLER_URL" > db.env
    AWS_PROFILE=<profile> bun scripts/secret-value.put.ts zero-memory/stand/database-url db.env DATABASE_URL
    ```
 
@@ -256,10 +258,10 @@ last good one.
 
 It reads the database URL from the secret `zero-memory/<stage>/backup-env`.
 The function reaches the internet over IPv4 only, so for a Supabase project
-give the session pooler's address:
+give the session pooler's address, with `POOLER_URL` set as above:
 
 ```sh
-echo 'DATABASE_URL=postgresql://postgres.<ref>:<password>@<pooler-host>:5432/postgres' > backup.env
+echo "DATABASE_URL=$POOLER_URL" > backup.env
 AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/stand/backup-env backup.env
 rm backup.env
 ```
