@@ -12,7 +12,9 @@ import {
 } from './auth-mail.hook';
 import type { IMailSender, OutgoingMail } from './mail-sender';
 
-// The example the Standard Webhooks specification publishes.
+// The public example Svix, the reference implementation of Standard Webhooks,
+// publishes for checking a signature by hand. A documented test value, not a
+// credential: secret scanners may still flag its `whsec_` shape.
 const vector = {
   secret: 'whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw',
   id: 'msg_p5jXN8AQM9LWM0D4loKWxJek',
