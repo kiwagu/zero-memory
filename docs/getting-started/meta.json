@@ -4,6 +4,7 @@
     "index",
     "install-client",
     "deployment",
+    "deploy-aws",
     "claude-code",
     "client-adapters"
   ]

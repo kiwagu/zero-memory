@@ -1,3 +1,4 @@
+import type { IWorkClaims } from '@workspace/mcp';
 import { mcpAuthPlugin, type McpAuthPluginOptions } from '@workspace/mcp-auth';
 import { Elysia } from 'elysia';
 
@@ -5,6 +6,7 @@ import { buildVersion, checkoutRevision } from './build-version.js';
 import { errorResponse, errorResponseFromThrown } from './http-error.js';
 import { renderMetrics } from './metrics.js';
 import { createMcpHttpRoutes } from './mcp-http.js';
+import type { IMcpSessionStore } from './mcp-session.store.js';
 import {
   createDefaultReadinessProbes,
   createReadinessRoutes,
@@ -23,6 +25,17 @@ export interface AppOptions {
    * app is reached through a forwarding app that does the listening.
    */
   requestIp?: McpAuthPluginOptions['requestIp'];
+  /**
+   * The OAuth rate limiter's count when it must be shared by several
+   * instances; without it the count stays in this process.
+   */
+  rateLimiter?: McpAuthPluginOptions['limiter'];
+  /** Where MCP sessions live between requests. */
+  sessions: IMcpSessionStore;
+  /** Answer MCP POSTs with one JSON body instead of an SSE stream. */
+  jsonResponse?: boolean;
+  /** Claims on per-owner background work, when a worker elsewhere runs it. */
+  workClaims?: IWorkClaims;
 }
 
 export const createApp = (options: AppOptions) =>
@@ -65,8 +78,16 @@ export const createApp = (options: AppOptions) =>
         issuer: options.publicUrl,
         webUrl: options.webUrl,
         requestIp: options.requestIp,
+        limiter: options.rateLimiter,
       })
     )
-    .use(createMcpHttpRoutes({ issuer: options.publicUrl }));
+    .use(
+      createMcpHttpRoutes({
+        issuer: options.publicUrl,
+        sessions: options.sessions,
+        jsonResponse: options.jsonResponse,
+        workClaims: options.workClaims,
+      })
+    );
 
 export type App = ReturnType<typeof createApp>;

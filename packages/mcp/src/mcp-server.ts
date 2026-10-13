@@ -111,19 +111,14 @@ import type { ICommandBus, IQueryBus } from '@workspace/cqrs';
 import {
   HygieneResolver,
   HygieneScanner,
-  JudgeRescanDetector,
-  LoopClosureDetector,
-  PortabilityDetector,
-  ReflectionDetector,
-  ReinforcementRollup,
   RuleCandidateDetector,
-  StaleSuspectDetector,
+  runOwnerScan,
   type BulkPolicy,
   type BulkResolveResult,
   type TriageResult,
   type ConflictDecision,
 } from '@workspace/hygiene';
-import { createLogger } from '@workspace/logger';
+import { createLogger, runInBackground } from '@workspace/logger';
 import {
   BoardQuery,
   BuildContextQuery,
@@ -137,6 +132,11 @@ import { createRoiRunner, type RoiProbeCase } from '@workspace/roi';
 import { z } from 'zod';
 
 import { toolError, toolErrorFromThrown } from './tool-error.js';
+import {
+  InProcessWorkClaims,
+  workClaimKey,
+  type IWorkClaims,
+} from './work-claims.js';
 
 /**
  * Appended to the WRITE-side tool descriptions only (remember,
@@ -241,6 +241,12 @@ export interface McpSessionScope {
 export interface McpServerDeps {
   commandBus: ICommandBus;
   queryBus: IQueryBus;
+  /**
+   * Claims on per-owner background work (a hygiene scan, a benchmark). The
+   * default holds them in this process; a deployment whose background work
+   * runs on a worker of its own supplies shared ones, released by the worker.
+   */
+  workClaims?: IWorkClaims;
   /** Wraps every tool call in an authenticated execution context. */
   runInToolContext: <T>(fn: () => Promise<T>) => Promise<T>;
   /**
@@ -316,7 +322,9 @@ export interface McpServerDeps {
    * The connecting client's self-declared `clientInfo.name` from the
    * initialize request, when the transport can see it before the server
    * object is built (HTTP can: the request body is parsed first). Drives how
-   * much rule text the instructions carry.
+   * much rule text the instructions carry, and names the agent in the
+   * activity feed when this server object did not receive the handshake
+   * itself (HTTP builds one per request and keeps the name with the session).
    */
   clientName?: string | null;
 }
@@ -914,13 +922,12 @@ const sessionStateLine = (state: SessionAttachment): string => {
 const footerOf = (...segments: Array<string | null | undefined>): string =>
   segments.filter(Boolean).join('\n\n');
 
-// Owners with a background hygiene scan currently running (see scan_hygiene):
-// a full scan far outlives a request round-trip, so it is fire-and-forget and
-// must not stack on repeated triggers. Held per PROCESS, not per MCP session:
-// one owner opening several sessions still gets one scan at a time.
-const scansInFlight = new Set<string>();
-// Same guard for the ROI benchmark (see benchmark_memory).
-const benchmarksInFlight = new Set<string>();
+// Owners with a background hygiene scan or benchmark queued or running: such
+// work far outlives a request round-trip and must not stack on repeated
+// triggers. Held per PROCESS unless the deployment supplies shared claims
+// (where the work runs on a worker of its own): one owner opening several
+// sessions still gets one scan at a time.
+const processWorkClaims = new InProcessWorkClaims();
 
 export const buildMcpServer = (deps: McpServerDeps): McpServer => {
   const logger = createLogger('mcp-server');
@@ -959,9 +966,11 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
 
   // The agent principal the activity feed attributes: the client's
   // self-declared name from the initialize handshake. Resolved lazily at call
-  // time (initialize has completed by the time any tool runs).
+  // time (initialize has completed by the time any tool runs). A server built
+  // for one request of an existing session never saw that handshake itself,
+  // so the name the session recorded at initialize stands in for it.
   const clientName = (): string | null =>
-    server.server.getClientVersion()?.name ?? null;
+    server.server.getClientVersion()?.name ?? deps.clientName ?? null;
 
   const readLinks = (links: ResourceLink[]): ResourceLink[] =>
     resourceLinksForClient(links, clientName());
@@ -1058,11 +1067,12 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           !result.deduplicated
         ) {
           const memoryId = result.memory_id;
-          void new HygieneScanner().scanOne(memoryId).catch((error) =>
-            logger.error('write-triggered hygiene scan failed', {
-              memoryId,
-              error: String(error),
-            })
+          void runInBackground(
+            { kind: 'hygiene-one', args: { memoryId } },
+            () => new HygieneScanner().scanOne(memoryId),
+            logger,
+            'write-triggered hygiene scan failed',
+            { memoryId }
           );
         }
         // No personal-fallback note lives here any more: a write the server
@@ -1120,107 +1130,29 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('scan_hygiene');
           return Promise.resolve(mustGetCurrentUserEntityId());
         });
-        if (scansInFlight.has(ownerId)) {
+        const claims = deps.workClaims ?? processWorkClaims;
+        const claimKey = workClaimKey('hygiene-scan', ownerId);
+        const claimToken = await claims.claim(claimKey);
+        if (!claimToken) {
           return asToolResult({ started: false, reason: 'already_running' });
         }
-        // Fire-and-forget: a full scan makes many LLM-judge calls and far
-        // outlives the request. Run it in the background (service-role, no
-        // request context needed) and return immediately.
-        scansInFlight.add(ownerId);
-        const scanner = new HygieneScanner();
-        void scanner
-          .scan(ownerId, limit)
-          .then(async (result) => {
-            logger.info('background hygiene scan complete', {
-              ownerId,
-              ...result,
-            });
-            // Kind audit: demote changelog-style change notes stuck in
-            // durable kinds (they outrank real knowledge in recall).
-            const audited = await scanner.auditKinds(ownerId, limit);
-            logger.info('background hygiene kind audit complete', {
-              ownerId,
-              ...audited,
-            });
-            // On-demand full re-judge of this owner's queue: the user asked for
-            // a scan, so pay to re-classify pending conflicts with the current
-            // judge and dismiss (keep_both) the ones it no longer sees.
-            const healed = await scanner.readjudicatePending({
-              ownerId,
-              rejudge: true,
-            });
-            logger.info('background hygiene readjudicate complete', {
-              ownerId,
-              ...healed,
-            });
-            // Rules incubator: detect this owner's memories that earned
-            // always-on promotion and distill drafts for the review queue.
-            const incubated = await new RuleCandidateDetector().detect(
-              ownerId,
-              limit
-            );
-            logger.info('background rule-candidate detection complete', {
-              ownerId,
-              ...incubated,
-            });
-            // Reflection: consolidate this owner's related-episode clusters
-            // into living-fact drafts for the review queue.
-            const reflected = await new ReflectionDetector().detect(
-              ownerId,
-              limit
-            );
-            logger.info('background reflection detection complete', {
-              ownerId,
-              ...reflected,
-            });
-            // Loop closure: auto-close this owner's open loops whose
-            // completion newer memories assert (judge-gated, reversible).
-            const loopsClosed = await new LoopClosureDetector().detect(ownerId);
-            logger.info('background loop-closure detection complete', {
-              ownerId,
-              ...loopsClosed,
-            });
-            // Usage reinforcement: refresh the precomputed ranking
-            // multipliers (system-wide — the rollup is one free query).
-            const reinforced = await new ReinforcementRollup().rollup();
-            logger.info('background reinforcement rollup complete', {
-              ownerId,
-              ...reinforced,
-            });
-            // Portability audit: propose re-scoping this owner's portable
-            // project-scope world facts into core (judge-gated proposals;
-            // the owner approves from the dashboard).
-            const portability = await new PortabilityDetector().detect(
-              ownerId,
-              limit
-            );
-            logger.info('background portability detection complete', {
-              ownerId,
-              ...portability,
-            });
-            // Stale suspects: queue memories with repeated misled signals
-            // for review (free, never auto-invalidates).
-            const staleSuspects = await new StaleSuspectDetector().detect();
-            logger.info('background stale-suspect detection complete', {
-              ownerId,
-              ...staleSuspects,
-            });
-            // Judge re-examination: a second opinion on this owner's
-            // high-traffic memories from the configured judge, at most once
-            // per model (guarded, capped per run).
-            const judgeRescan = await new JudgeRescanDetector().detect(ownerId);
-            logger.info('background judge re-examination complete', {
-              ownerId,
-              ...judgeRescan,
-            });
-          })
-          .catch((error) =>
-            logger.error('background hygiene scan failed', {
-              ownerId,
-              error: String(error),
-            })
-          )
-          .finally(() => scansInFlight.delete(ownerId));
+        // A full scan makes many judge calls and far outlives the request: it
+        // runs in the background (service role, no request context needed),
+        // here or on a worker the runtime hands it to, and the tool returns
+        // immediately. Whoever runs it releases the claim when it ends.
+        void runInBackground(
+          {
+            kind: 'hygiene-scan',
+            args: { ownerId, limit: limit ?? null, claimToken },
+          },
+          () =>
+            runOwnerScan(ownerId, limit).finally(() =>
+              claims.release(claimKey, claimToken)
+            ),
+          logger,
+          'background hygiene scan failed',
+          { ownerId }
+        );
         return asToolResult({ started: true });
       } catch (error) {
         logger.error('scan_hygiene failed', { error: String(error) });
@@ -1520,74 +1452,101 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('benchmark_memory');
           return Promise.resolve(mustGetCurrentUserEntityId());
         });
-        if (benchmarksInFlight.has(ownerId)) {
+        const claims = deps.workClaims ?? processWorkClaims;
+        const claimKey = workClaimKey('benchmark', ownerId);
+        const claimToken = await claims.claim(claimKey);
+        if (!claimToken) {
           return asToolResult({ started: false, reason: 'already_running' });
         }
-        const runner = createRoiRunner();
-        const probes = await runner.activeProbes(ownerId);
-        if (probes.length === 0) {
-          // Phase 1: no holdout set yet — generate it in the background and
-          // let the caller re-invoke once it exists.
-          benchmarksInFlight.add(ownerId);
-          void runner
-            .ensureProbes(ownerId)
-            .catch((error) =>
-              logger.error('roi probe generation failed', {
-                ownerId,
-                error: String(error),
-              })
-            )
-            .finally(() => benchmarksInFlight.delete(ownerId));
-          return asToolResult({
-            started: true,
-            phase: 'generating_probes',
-            note: 'Holdout questions are being generated — call benchmark_memory again shortly to run the benchmark.',
-          });
-        }
-
-        // Phase 2: recall each question INSIDE the authenticated context —
-        // the benchmark must see exactly what the user's own recall sees
-        // (RLS-honest), never a service-role view.
-        const cases: RoiProbeCase[] = await deps.runInToolContext(async () => {
-          const collected: RoiProbeCase[] = [];
-          for (const probe of probes) {
-            const result = await deps.queryBus.execute<
-              RecallQuery,
-              RecallOutput
-            >(
-              new RecallQuery({
-                query: probe.question,
-                scopes: probeReadScopes(probe.sourceScope),
-              })
+        // Until the work is handed to the background, a failure here is this
+        // request's to clean up; from then on whoever runs it releases.
+        let handedOff = false;
+        try {
+          const runner = createRoiRunner();
+          const probes = await runner.activeProbes(ownerId);
+          if (probes.length === 0) {
+            // Phase 1: no holdout set yet — generate it in the background and
+            // let the caller re-invoke once it exists.
+            void runInBackground(
+              { kind: 'benchmark-probes', args: { ownerId, claimToken } },
+              () =>
+                runner
+                  .ensureProbes(ownerId)
+                  .finally(() => claims.release(claimKey, claimToken)),
+              logger,
+              'roi probe generation failed',
+              { ownerId }
             );
-            collected.push({
-              probeId: probe.probeId,
-              question: probe.question,
-              groundTruthId: probe.groundTruthId,
-              groundTruth: probe.groundTruth,
-              surfaced: result.memories.map((memory) => ({
-                id: memory.id,
-                content: memory.content,
-              })),
+            handedOff = true;
+            return asToolResult({
+              started: true,
+              phase: 'generating_probes',
+              note: 'Holdout questions are being generated — call benchmark_memory again shortly to run the benchmark.',
             });
           }
-          return collected;
-        });
 
-        // Phase 3: judging + result rows run in the background (LLM-bound);
-        // a probe top-up rides along so the NEXT run covers fresh memories.
-        benchmarksInFlight.add(ownerId);
-        void runner
-          .judgeAndRecord(ownerId, cases)
-          .then(() => runner.ensureProbes(ownerId))
-          .catch((error) =>
-            logger.error('roi benchmark run failed', {
-              ownerId,
-              error: String(error),
-            })
-          )
-          .finally(() => benchmarksInFlight.delete(ownerId));
-        return asToolResult({ started: true, probes: cases.length });
+          // Phase 2: recall each question INSIDE the authenticated context —
+          // the benchmark must see exactly what the user's own recall sees
+          // (RLS-honest), never a service-role view.
+          const cases: RoiProbeCase[] = await deps.runInToolContext(
+            async () => {
+              const collected: RoiProbeCase[] = [];
+              for (const probe of probes) {
+                const result = await deps.queryBus.execute<
+                  RecallQuery,
+                  RecallOutput
+                >(
+                  new RecallQuery({
+                    query: probe.question,
+                    scopes: probeReadScopes(probe.sourceScope),
+                  })
+                );
+                collected.push({
+                  probeId: probe.probeId,
+                  question: probe.question,
+                  groundTruthId: probe.groundTruthId,
+                  groundTruth: probe.groundTruth,
+                  surfaced: result.memories.map((memory) => ({
+                    id: memory.id,
+                    content: memory.content,
+                  })),
+                });
+              }
+              return collected;
+            }
+          );
+
+          // Phase 3: judging + result rows run in the background (LLM-bound);
+          // a probe top-up rides along so the NEXT run covers fresh memories.
+          // A worker is handed the surfaced ids, not their text, and reloads it.
+          void runInBackground(
+            {
+              kind: 'benchmark-run',
+              args: {
+                ownerId,
+                claimToken,
+                recalled: cases.map((probeCase) => ({
+                  probeId: probeCase.probeId,
+                  surfacedIds: probeCase.surfaced.map((memory) => memory.id),
+                })),
+              },
+            },
+            () =>
+              runner
+                .judgeAndRecord(ownerId, cases)
+                .then(() => runner.ensureProbes(ownerId))
+                .finally(() => claims.release(claimKey, claimToken)),
+            logger,
+            'roi benchmark run failed',
+            { ownerId }
+          );
+          handedOff = true;
+          return asToolResult({ started: true, probes: cases.length });
+        } finally {
+          if (!handedOff) {
+            await claims.release(claimKey, claimToken);
+          }
+        }
       } catch (error) {
         logger.error('benchmark_memory failed', { error: String(error) });
         return toolErrorFromThrown(error);

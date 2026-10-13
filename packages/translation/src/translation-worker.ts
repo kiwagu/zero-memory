@@ -192,6 +192,36 @@ export class TranslationWorker {
     return result;
   }
 
+  /**
+   * Paid, for one memory: translates it if it is still pending and under the
+   * attempt cap, and leaves every other pending row to the scheduled pass.
+   * It is what a write hands off where the request cannot translate in its
+   * own background, so a large backlog never stands between a memory and its
+   * translation.
+   */
+  async translateOne(
+    memoryId: string,
+    options: TranslationWorkerOptions = {}
+  ): Promise<'translated' | 'failed' | 'not-pending'> {
+    const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    const { data, error } = await this.client
+      .from('memories')
+      .select('id, content, translation_attempts, owner_id')
+      .eq('id', memoryId)
+      .eq('translation_status', 'pending')
+      .lt('translation_attempts', maxAttempts)
+      .maybeSingle();
+    if (error) {
+      throw new Error(`Failed to load ${memoryId}: ${error.message}`);
+    }
+    if (!data) {
+      return 'not-pending';
+    }
+    const outcome = await this.#translateRow(data as PendingRow);
+    this.#logger.info('translate one complete', { id: memoryId, outcome });
+    return outcome;
+  }
+
   /** classify() then translate() — the full canonicalization pass. */
   async run(
     options: TranslationWorkerOptions = {}

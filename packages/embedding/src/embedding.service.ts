@@ -25,4 +25,11 @@ export interface IEmbeddingService {
    * it.
    */
   embed(texts: string[], kind?: EmbeddingKind): Promise<number[][]>;
+
+  /**
+   * Prepares the model so the first `embed` does not pay for loading it.
+   * Embeds nothing on anyone's behalf, so nothing is metered. Adapters with
+   * nothing to load leave it out.
+   */
+  warmUp?(): Promise<void>;
 }

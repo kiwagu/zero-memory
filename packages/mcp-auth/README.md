@@ -49,7 +49,10 @@ and it does not sign the person out of the dashboard.
   RFC 9728 metadata, `/oauth/register`, `/oauth/authorize`, the two consent
   endpoints above, and `/oauth/token` (`authorization_code` +
   `refresh_token`). Public clients only: PKCE S256 mandatory, no client
-  secrets. Register, authorize and token are rate-limited per client IP.
+  secrets. Register, authorize and token are rate-limited per client IP,
+  through an `IRateLimiter`: the in-process `FixedWindowRateLimiter` by
+  default, or the shared count a server spread over instances passes as
+  `limiter`.
 - `unauthorizedResponse(issuer, description?)` / `buildWwwAuthenticate` —
   401 challenge pointing at the protected-resource metadata.
 - Ports: `IAuthGateway` (verify a bearer token, mint a session for a user,

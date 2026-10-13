@@ -98,6 +98,11 @@ export const ENTITY_PREFIXES = {
   // append-only stream — a move with its reason, an attachment, or a note.
   card: 'crd',
   card_event: 'cev',
+  // work claim: the token of one claim on an owner's background work (a
+  // hygiene scan, a benchmark). It travels with the handed-off job, and only
+  // the holder of the current token may run the work or end the claim. No
+  // table of its own: it lives in the claim it names, like the session id.
+  work_claim: 'wcl',
 } as const;
 
 export type EntityKind = keyof typeof ENTITY_PREFIXES;

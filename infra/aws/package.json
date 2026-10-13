@@ -1,0 +1,32 @@
+{
+  "name": "@workspace/infra-aws",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "license": "Apache-2.0",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
+    "format": "bunx prettier --write .",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p runtime",
+    "synth": "cdk synth --quiet",
+    "deploy": "bash scripts/deploy.sh",
+    "test:vitest": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "catalog:",
+    "aws-cdk-lib": "catalog:",
+    "constructs": "catalog:"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "catalog:",
+    "@aws-sdk/client-ssm": "catalog:",
+    "@types/node": "catalog:",
+    "@workspace/eslint-config": "workspace:^",
+    "@workspace/typescript-config": "workspace:^",
+    "aws-cdk": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

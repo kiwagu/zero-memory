@@ -19,9 +19,18 @@ looking like different products.
   mail renders with GoTrue's placeholders where a product mail renders real
   values; that substitution is the whole trick that lets one component tree
   serve both senders.
-- `IMailSender` + `ResendMailSender` — the product-mail port and its transport.
-  Narrow on purpose: one message, one recipient. No scheduling or recipient
-  selection lives here — that belongs to whatever feature decides to send.
+- `IMailSender` + `ResendMailSender` / `SesMailSender` — the product-mail port
+  and its transports (Resend's API; Amazon SES's API under the runtime's own
+  AWS role). Narrow on purpose: one message, one recipient. No scheduling or
+  recipient selection lives here — that belongs to whatever feature decides
+  to send.
+- `answerAuthMailHook` — Supabase Auth's send-email hook, for a deployment
+  that sends authentication mail through its own transport instead of SMTP:
+  checks the Standard Webhooks signature, works out which template goes to
+  which address with which verification link (an address change can mean two
+  mails, with Auth's token fields crossed), renders the same templates Auth
+  would fill in with the real values, and sends them. Actions the product
+  never triggers (magic links, reauthentication, notifications) are refused.
 
 ## Strings
 

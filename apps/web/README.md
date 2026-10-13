@@ -55,6 +55,11 @@ dependency is `@workspace/db` for the generated database types.
   `aal2`); the dashboard layout, `/accept-terms`, `/oauth/consent` and the
   password reset send such a session here with a `next`. Enforced in the app,
   never in row-level security, because agent sessions stay `aal1` by design.
+- `/auth/hooks/send-email` — Supabase Auth's send-email hook
+  (`lib/auth-mail.hook.ts`, `@workspace/email`): with the hook enabled on the
+  Supabase project, Auth posts each authentication mail here and the
+  dashboard sends it through `ZM_MAIL_TRANSPORT`. Without
+  `ZM_AUTH_HOOK_SECRET` it answers 404.
 - `/oauth/consent` — where an agent's authorization lands: the person signs
   in, gives the code if they have a factor, and allows or denies the client.
 
@@ -96,3 +101,6 @@ See `.env.example`.
 | `NEXT_PUBLIC_SUPABASE_URL`      | Supabase Data API URL                                                                                                                  |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key                                                                                                                      |
 | `SUPABASE_SERVICE_ROLE_KEY`     | Optional, server-only: member email lookup on `/scopes` and the memory shared-with dialog (without it, emails degrade to raw user ids) |
+| `ZM_AUTH_HOOK_SECRET`           | Optional: the send-email hook's secret from Supabase Auth (`v1,whsec_…`); turns `/auth/hooks/send-email` on                            |
+| `ZM_MAIL_TRANSPORT`             | With the hook: `ses` (the runtime's AWS role) or `resend` (`RESEND_API_KEY`)                                                           |
+| `ZM_MAIL_FROM`                  | With the hook: the sender, an address of a domain the transport has verified                                                           |

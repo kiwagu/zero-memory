@@ -1,6 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { runDetached, type Logger } from './index.js';
+import {
+  dispatchBackgroundTo,
+  drainDetached,
+  runDetached,
+  runInBackground,
+  type Logger,
+} from './index.js';
 
 const spyLogger = (): Logger => {
   const logger: Logger = {
@@ -63,5 +69,107 @@ describe('runDetached', () => {
     expect(logger.warn).toHaveBeenCalledWith('failed to record audit event', {
       error: 'boom',
     });
+  });
+});
+
+describe('drainDetached', () => {
+  it('returns only after a write still in flight has finished', async () => {
+    let finished = false;
+    runDetached(
+      () =>
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            finished = true;
+            resolve();
+          }, 20)
+        ),
+      spyLogger(),
+      'failed to record'
+    );
+
+    const left = await drainDetached(1_000);
+
+    expect(finished).toBe(true);
+    expect(left).toBe(0);
+  });
+
+  it('gives up at the deadline and reports how many writes are still pending', async () => {
+    let release: () => void = () => undefined;
+    runDetached(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      spyLogger(),
+      'failed to record'
+    );
+
+    const left = await drainDetached(10);
+    release();
+    await drainDetached(1_000);
+
+    expect(left).toBe(1);
+  });
+});
+
+describe('runInBackground', () => {
+  afterEach(() => dispatchBackgroundTo(undefined));
+
+  const task = { kind: 'hygiene-one', args: { memoryId: 'mem_1' } };
+
+  it('runs the work in this process when no runtime installed a dispatcher', async () => {
+    const work = vi.fn().mockResolvedValue(undefined);
+
+    await runInBackground(task, work, spyLogger(), 'check failed');
+
+    expect(work).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands the task to the installed dispatcher instead, and never runs the work here', async () => {
+    const dispatched: unknown[] = [];
+    dispatchBackgroundTo((handed) => {
+      dispatched.push(handed);
+      return Promise.resolve();
+    });
+    const work = vi.fn().mockResolvedValue(undefined);
+
+    await runInBackground(task, work, spyLogger(), 'check failed');
+
+    expect(work).not.toHaveBeenCalled();
+    expect(dispatched).toEqual([task]);
+  });
+
+  it('never rejects, and logs a failed work or hand-off at error', async () => {
+    const logger = spyLogger();
+    dispatchBackgroundTo(() => Promise.reject(new Error('throttled')));
+
+    await expect(
+      runInBackground(task, vi.fn(), logger, 'check failed', { id: 'mem_1' })
+    ).resolves.toBeUndefined();
+
+    expect(logger.error).toHaveBeenCalledWith('check failed', {
+      id: 'mem_1',
+      task: 'hygiene-one',
+      error: 'throttled',
+    });
+  });
+
+  it('is a side write the drain waits for', async () => {
+    let finished = false;
+    void runInBackground(
+      task,
+      () =>
+        new Promise<void>((resolve) =>
+          setTimeout(() => {
+            finished = true;
+            resolve();
+          }, 20)
+        ),
+      spyLogger(),
+      'check failed'
+    );
+
+    expect(await drainDetached(1000)).toBe(0);
+    expect(finished).toBe(true);
   });
 });

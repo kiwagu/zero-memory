@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
   // Workspace packages ship TypeScript sources.
   transpilePackages: [
     '@workspace/db',
+    '@workspace/email',
     '@workspace/i18n-catalogs',
     '@workspace/ui',
   ],

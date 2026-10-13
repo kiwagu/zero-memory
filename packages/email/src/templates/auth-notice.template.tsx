@@ -1,7 +1,7 @@
 import { Button, Heading, Link, Text } from '@react-email/components';
 
-import { MailLayout } from '../mail.layout.js';
-import { mailTheme } from '../mail.theme.js';
+import { MailLayout } from '../mail.layout';
+import { mailTheme } from '../mail.theme';
 
 export type AuthNoticeProps = {
   lang: string;

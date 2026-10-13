@@ -7,6 +7,16 @@ const logger = createLogger('usage-scheduler');
 const DEFAULT_INTERVAL_HOURS = 24;
 
 /**
+ * One upkeep run: what each tick does, and what a deployment without a
+ * long-running process (AWS Lambda) invokes on its own schedule. Throws when
+ * the run fails; the caller decides whether that is fatal.
+ */
+export async function runUsageUpkeep(): Promise<void> {
+  const result = await new UsageUpkeep().run();
+  logger.info('usage upkeep complete', { ...result });
+}
+
+/**
  * Storage upkeep for the usage ledger: extends the monthly partition horizon
  * and refreshes the daily metric rollup.
  *
@@ -40,8 +50,7 @@ export function startUsageScheduler(): () => void {
     }
     running = true;
     try {
-      const result = await new UsageUpkeep().run();
-      logger.info('usage upkeep complete', { ...result });
+      await runUsageUpkeep();
     } catch (error) {
       logger.error('usage upkeep failed', {
         error: error instanceof Error ? error.message : String(error),

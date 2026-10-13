@@ -19,6 +19,7 @@ import {
   rateLimitedResponse,
   rateLimiterOptionsFromEnv,
   resolveClientIp,
+  type IRateLimiter,
   type RateLimiterOptions,
   type RequestIpSource,
 } from './rate-limit.js';
@@ -42,6 +43,11 @@ export interface McpAuthPluginOptions {
   /** Rate-limiter override (defaults read ZM_RATELIMIT_MAX / _WINDOW_S). */
   rateLimit?: RateLimiterOptions;
   /**
+   * The count shared by every instance of a server that runs as several.
+   * Without it each process keeps its own count, configured by `rateLimit`.
+   */
+  limiter?: IRateLimiter;
+  /**
    * Where the client's socket address comes from. Elysia hands a route the
    * server of its own app, which is null when this plugin's app does not
    * listen itself but is reached through a forwarding app; that app's server
@@ -50,6 +56,18 @@ export interface McpAuthPluginOptions {
    */
   requestIp?: () => RequestIpSource | null | undefined;
 }
+
+/** A count kept in this process, swept as its windows elapse. */
+const inProcessLimiter = (overrides?: RateLimiterOptions): IRateLimiter => {
+  const limiterOptions = { ...rateLimiterOptionsFromEnv(), ...overrides };
+  const limiter = new FixedWindowRateLimiter(limiterOptions);
+  const sweeper = setInterval(
+    () => limiter.sweep(),
+    limiterOptions.windowSeconds * 1000
+  );
+  sweeper.unref?.();
+  return limiter;
+};
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -104,23 +122,14 @@ export const mcpAuthPlugin = (options: McpAuthPluginOptions) => {
   // Guard on the unauthenticated endpoints: token (code / refresh-token
   // guessing), authorize (each request parks a pending row before anyone has
   // signed in), register (DCR spam). Keys are per client IP per route.
-  const limiterOptions = {
-    ...rateLimiterOptionsFromEnv(),
-    ...options.rateLimit,
-  };
-  const limiter = new FixedWindowRateLimiter(limiterOptions);
-  const sweeper = setInterval(
-    () => limiter.sweep(),
-    limiterOptions.windowSeconds * 1000
-  );
-  sweeper.unref?.();
+  const limiter = options.limiter ?? inProcessLimiter(options.rateLimit);
 
-  const overLimit = (
+  const overLimit = async (
     route: 'token' | 'authorize' | 'register',
     request: Request,
     server: RequestIpSource | null
-  ): Response | null => {
-    const decision = limiter.hit(
+  ): Promise<Response | null> => {
+    const decision = await limiter.hit(
       `${resolveClientIp(request, options.requestIp?.() ?? server)}:${route}`
     );
     return decision.allowed
@@ -140,7 +149,7 @@ export const mcpAuthPlugin = (options: McpAuthPluginOptions) => {
         json(protectedResourceMetadata(deps.issuer))
       )
       .post('/oauth/register', async ({ body, request, server }) => {
-        const limited = overLimit('register', request, server);
+        const limited = await overLimit('register', request, server);
         if (limited) {
           return limited;
         }
@@ -148,7 +157,7 @@ export const mcpAuthPlugin = (options: McpAuthPluginOptions) => {
         return json(result.body, result.status);
       })
       .get('/oauth/authorize', async ({ query, request, server }) => {
-        const limited = overLimit('authorize', request, server);
+        const limited = await overLimit('authorize', request, server);
         if (limited) {
           return limited;
         }
@@ -185,7 +194,7 @@ export const mcpAuthPlugin = (options: McpAuthPluginOptions) => {
         }
       )
       .post('/oauth/token', async ({ body, request, server }) => {
-        const limited = overLimit('token', request, server);
+        const limited = await overLimit('token', request, server);
         if (limited) {
           return limited;
         }
