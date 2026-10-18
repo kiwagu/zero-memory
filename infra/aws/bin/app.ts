@@ -6,7 +6,7 @@ import { App } from 'aws-cdk-lib';
 
 import { PipelineStack } from '../src/pipeline.stack.js';
 import { ServerStack } from '../src/server.stack.js';
-import { WebStack } from '../src/web.stack.js';
+import { WebStack, type MailIdentityMode } from '../src/web.stack.js';
 
 const app = new App();
 
@@ -48,6 +48,15 @@ const hours = (key: string): number | undefined => {
 };
 const keepWarmMinutes = optional('keepWarmMinutes');
 
+const mailIdentityMode = (
+  value: string | undefined
+): MailIdentityMode | undefined => {
+  if (value === undefined || value === 'create' || value === 'existing') {
+    return value;
+  }
+  throw new Error(`mailIdentity is create or existing, not "${value}".`);
+};
+
 const env = {
   account: process.env.CDK_DEFAULT_ACCOUNT,
   region: process.env.CDK_DEFAULT_REGION ?? 'eu-central-1',
@@ -69,6 +78,7 @@ const web = new WebStack(app, `zero-memory-web-${stage}`, {
   docsEnvVersion: contextValue('docsEnvVersion'),
   mailDomain: optional('mailDomain'),
   mailFrom: optional('mailFrom'),
+  mailIdentity: mailIdentityMode(optional('mailIdentity')),
   env,
 });
 

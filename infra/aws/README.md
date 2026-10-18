@@ -163,14 +163,24 @@ URL and put the secret Supabase generates into the dashboard's secret as
 of SMTP. The SES sandbox delivers only to verified addresses until production
 access is granted.
 
+An SES identity is unique per account and Region, so when two stages share an
+account and a mail domain, only one of them creates it: give the other
+`mailIdentity=existing`, and it sends through the identity that already
+exists (it creates none and prints no DKIM records). A created identity is
+kept when its stack is removed or its mail is turned off, because another
+stage may still send through it; delete it in the SES console once nothing
+does.
+
 ## Deploy from release tags
 
 A second stack runs the same deploy inside the AWS account, from a release
 tag pushed to GitHub: CodePipeline takes the tagged commit through a
-CodeConnections connection, and CodeBuild applies the database migrations and
-runs `scripts/deploy.sh` (`buildspec.yml`). No AWS key leaves AWS; the build's
-role can only assume the CDK bootstrap roles, invoke the stage's function for
-its warm-up, and read its own secrets.
+CodeConnections connection, and CodeBuild takes a backup
+(`scripts/backup.take.sh`, when the stage has backups), applies the database
+migrations and runs `scripts/deploy.sh` (`buildspec.yml`). No AWS key leaves
+AWS; the build's role can only assume the CDK bootstrap roles, invoke the
+stage's functions (the backup, the warm-up), read the stage stack's outputs,
+and read its own secrets.
 
 ```sh
 AWS_PROFILE=<profile> bunx cdk deploy zero-memory-pipeline-stand \
@@ -266,8 +276,8 @@ AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/stand/backup-env
 rm backup.env
 ```
 
-Take one now with `aws lambda invoke --function-name <BackupFunctionName>
-out.json`. To restore, download an artifact and its manifest, check them with
+Take one now and wait for it with `bash scripts/backup.take.sh <stage>`; it
+prints the key it stored, and waits first when another backup is running. To restore, download an artifact and its manifest, check them with
 `infra/prod/scripts/db-dump.sh verify <file>`, and load them with
 `infra/prod/scripts/db-restore.sh` as on a container host.
 
@@ -297,7 +307,7 @@ the spend limit in AWS Settings where the account has one).
 ## Check it
 
 ```sh
-curl https://<PublicUrl>/healthz      # 200 and the build version
+curl https://<PublicUrl>/healthz      # 200 and the build: <tag or package version>+<commit>
 curl https://<FunctionUrl>/healthz    # 403: the function answers only the edge
 ```
 

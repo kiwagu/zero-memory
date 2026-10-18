@@ -288,6 +288,14 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+      # The build names the commit people can look up: a commit copied from
+      # another repository's commit names that one in a `Source-Commit:`
+      # trailer, and any other commit names itself.
+      - id: source
+        run: |
+          trailer="$(git log -1 --format='%(trailers:key=Source-Commit,valueonly)')"
+          commit="${trailer%%$'\n'*}"
+          echo "commit=${commit:-$GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -303,7 +311,7 @@ jobs:
           # arguments their Dockerfile does not declare.
           build-args: |
             ZM_BUILD_VERSION=${{ github.ref_name }}
-            ZM_BUILD_COMMIT=${{ github.sha }}
+            ZM_BUILD_COMMIT=${{ steps.source.outputs.commit }}
             ZM_CLIENT_BUNDLE_URL=${{ vars.ZM_CLIENT_BUNDLE_URL }}
             ZM_CLIENT_BUNDLE_VERSION=${{ vars.ZM_CLIENT_BUNDLE_VERSION }}
             ZM_HOSTED_MCP_URL=${{ vars.ZM_HOSTED_MCP_URL }}

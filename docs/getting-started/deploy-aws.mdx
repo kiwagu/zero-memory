@@ -63,6 +63,11 @@ with one request each and invokes the server once to load the embedding
 model. The first read of a new image can take close to a minute; paid there,
 it stays off the first visitor.
 
+The build reports itself on `/healthz` and next to the product name in the
+dashboard as `<version>+<commit>`: the release tag the checkout sits on (or
+the package version) and the checkout's commit. A checkout with uncommitted
+changes reports `dev` in place of the commit.
+
 Each stack publishes its address in SSM, and each app reads the others' at
 start: the server sends people to the dashboard to sign in, and the
 dashboard calls the server's MCP endpoint. You configure neither address.
@@ -152,8 +157,9 @@ AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/backup-env 
 rm backup.env
 ```
 
-To restore, download a backup and its manifest from the bucket and load them
-with `infra/prod/scripts/db-restore.sh`, as on a container host. The bucket
+To take one now and wait for it, run `bash scripts/backup.take.sh prod` from
+`infra/aws/`. To restore, download a backup and its manifest from the bucket
+and load them with `infra/prod/scripts/db-restore.sh`, as on a container host. The bucket
 stays when you remove the stacks; delete it yourself when you no longer need
 the backups.
 
@@ -177,12 +183,21 @@ templates and sends it under its function's AWS role.
    sandbox). Request production access in the SES console before real users
    sign up.
 
+An SES identity is unique per account and Region. If two stages share an
+account and a mail domain, only the first creates it; deploy the second with
+`mailIdentity=existing` and it sends through the identity that is already
+there. A created identity stays when its stage is removed, since another
+stage may still use it.
+
 ## Deploy on every release
 
 To deploy from release tags instead of by hand, create the pipeline stack
 once. CodePipeline takes a tagged commit from GitHub through a CodeConnections
-connection, and CodeBuild applies the migrations and runs the same deploy
-script, inside your account, with no AWS key stored anywhere else:
+connection, and CodeBuild takes a backup, applies the migrations and runs the
+same deploy script, inside your account, with no AWS key stored anywhere else.
+The backup comes first so a release that changes the schema always has a dump
+from just before it; a stage deployed without backups skips it. Create the
+stack with:
 
 ```sh
 AWS_PROFILE=<profile> bunx cdk deploy zero-memory-pipeline-prod \

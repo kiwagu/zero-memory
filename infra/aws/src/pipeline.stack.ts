@@ -39,12 +39,14 @@ export interface PipelineStackProps extends StackProps {
 /**
  * Deploys the server from a release tag, inside the AWS account: CodePipeline
  * takes the tagged commit from GitHub through a CodeConnections connection,
- * and CodeBuild applies the database migrations and runs the same deploy
- * script an operator runs by hand (`infra/aws/buildspec.yml`).
+ * and CodeBuild backs the database up, applies the migrations and runs the
+ * same deploy script an operator runs by hand (`infra/aws/buildspec.yml`).
  *
  * No AWS key leaves AWS: the build's role may only assume the CDK bootstrap
- * roles, invoke the deployed function for its warm-up, read its own secrets,
- * and see which version each app's environment secret is at.
+ * roles, invoke its stage's functions (the backup before the migrations, the
+ * warm-up after the deploy), read its stage stack's outputs to find them,
+ * read its own secrets, and see which version each app's environment secret
+ * is at.
  *
  * Two values are set by hand once: the connection is created pending and
  * becomes usable when it is approved in the console (which installs the AWS
@@ -137,6 +139,20 @@ export class PipelineStack extends Stack {
             resource: 'function',
             resourceName: `zero-memory-${stage}-*`,
             arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+          }),
+        ],
+      })
+    );
+    // The backup before the migrations finds its function among the stack's
+    // outputs.
+    project.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudformation:DescribeStacks'],
+        resources: [
+          this.formatArn({
+            service: 'cloudformation',
+            resource: 'stack',
+            resourceName: `zero-memory-${stage}/*`,
           }),
         ],
       })

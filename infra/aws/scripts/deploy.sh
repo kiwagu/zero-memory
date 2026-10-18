@@ -10,8 +10,12 @@
 # CDK asks before widening IAM permissions; a run without a terminal, after
 # `cdk diff` was read, passes CDK_REQUIRE_APPROVAL=never.
 #
-# ZM_BUILD_VERSION and ZM_BUILD_COMMIT, when set, name the build that /healthz
-# and the pages report (the pipeline sets them from the release tag).
+# /healthz and the pages report the build as `<version>+<commit>`: the release
+# tag the checkout sits on (else the package version) and the checkout's
+# commit. A commit copied from another repository's commit names that one in a
+# `Source-Commit:` trailer, and the build reports it instead, since it is the
+# one people can look up. A checkout with uncommitted changes reports `dev`.
+# ZM_BUILD_VERSION and ZM_BUILD_COMMIT, when set, override both.
 #
 # An instance reads its app's environment secret only when it starts. The
 # current version of each secret is stamped into its function, so a deploy
@@ -33,6 +37,15 @@ repo="$(cd "$(dirname "$0")/../../.." && pwd)"
 # which gives every build of an unchanged tree a new image id, and so a new
 # asset that replaces every function. Without it the id follows the content.
 export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
+if [ -z "${ZM_BUILD_COMMIT:-}" ] && git -C "$repo" diff --quiet HEAD 2>/dev/null; then
+  # The first line taken in the shell, not by `head`: under pipefail a reader
+  # that stops early can fail the whole pipeline.
+  trailer="$(git -C "$repo" log -1 --format='%(trailers:key=Source-Commit,valueonly)')"
+  ZM_BUILD_COMMIT="${trailer%%$'\n'*}"
+  ZM_BUILD_COMMIT="${ZM_BUILD_COMMIT:-$(git -C "$repo" rev-parse HEAD)}"
+  ZM_BUILD_VERSION="${ZM_BUILD_VERSION:-$(git -C "$repo" describe --tags --exact-match 2>/dev/null || true)}"
+fi
 
 # Runs inside a command substitution, where `set -e` does not reach: a failed
 # build has to fail the function itself, or the inspection below would hand
