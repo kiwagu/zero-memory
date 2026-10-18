@@ -35,12 +35,25 @@ if [ -z "$function_name" ] || [ "$function_name" = None ]; then
 fi
 
 answer="$(mktemp)"
-trap 'rm -f "$answer"' EXIT
-# The function runs for up to 15 minutes. It answers with what it stored, and
-# an error it throws arrives as FunctionError with the invocation itself
-# reported as a success.
-error="$(aws lambda invoke --function-name "$function_name" \
-  --cli-read-timeout 900 --query FunctionError --output text "$answer")"
+refusal="$(mktemp)"
+trap 'rm -f "$answer" "$refusal"' EXIT
+# The function runs for up to 15 minutes, one backup at a time: while another
+# one runs (the daily one, or the one a deploy starts), Lambda refuses the call
+# as throttled, so the script waits for it, as long as one backup can take.
+# The function answers with what it stored, and an error it throws arrives as
+# FunctionError with the invocation itself reported as a success.
+for attempt in $(seq 1 31); do
+  if error="$(aws lambda invoke --function-name "$function_name" \
+    --cli-read-timeout 900 --query FunctionError --output text "$answer" 2>"$refusal")"; then
+    break
+  fi
+  if ! grep -q TooManyRequestsException "$refusal" || [ "$attempt" = 31 ]; then
+    cat "$refusal" >&2
+    exit 1
+  fi
+  echo "backup: another backup is running; trying again in 30 s"
+  sleep 30
+done
 if [ "$error" != None ]; then
   echo "backup failed (${error}): $(cat "$answer")" >&2
   exit 1

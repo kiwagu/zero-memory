@@ -293,7 +293,8 @@ jobs:
       # trailer, and any other commit names itself.
       - id: source
         run: |
-          commit="$(git log -1 --format='%(trailers:key=Source-Commit,valueonly)' | head -n1)"
+          trailer="$(git log -1 --format='%(trailers:key=Source-Commit,valueonly)')"
+          commit="${trailer%%$'\n'*}"
           echo "commit=${commit:-$GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:

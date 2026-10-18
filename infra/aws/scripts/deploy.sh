@@ -39,7 +39,10 @@ repo="$(cd "$(dirname "$0")/../../.." && pwd)"
 export BUILDX_NO_DEFAULT_ATTESTATIONS=1
 
 if [ -z "${ZM_BUILD_COMMIT:-}" ] && git -C "$repo" diff --quiet HEAD 2>/dev/null; then
-  ZM_BUILD_COMMIT="$(git -C "$repo" log -1 --format='%(trailers:key=Source-Commit,valueonly)' | head -n1)"
+  # The first line taken in the shell, not by `head`: under pipefail a reader
+  # that stops early can fail the whole pipeline.
+  trailer="$(git -C "$repo" log -1 --format='%(trailers:key=Source-Commit,valueonly)')"
+  ZM_BUILD_COMMIT="${trailer%%$'\n'*}"
   ZM_BUILD_COMMIT="${ZM_BUILD_COMMIT:-$(git -C "$repo" rev-parse HEAD)}"
   ZM_BUILD_VERSION="${ZM_BUILD_VERSION:-$(git -C "$repo" describe --tags --exact-match 2>/dev/null || true)}"
 fi

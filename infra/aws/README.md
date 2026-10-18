@@ -277,7 +277,7 @@ rm backup.env
 ```
 
 Take one now and wait for it with `bash scripts/backup.take.sh <stage>`; it
-prints the key it stored. To restore, download an artifact and its manifest, check them with
+prints the key it stored, and waits first when another backup is running. To restore, download an artifact and its manifest, check them with
 `infra/prod/scripts/db-dump.sh verify <file>`, and load them with
 `infra/prod/scripts/db-restore.sh` as on a container host.
 
