@@ -305,7 +305,7 @@ the spend limit in AWS Settings where the account has one).
 ## Check it
 
 ```sh
-curl https://<PublicUrl>/healthz      # 200 and the build version
+curl https://<PublicUrl>/healthz      # 200 and the build: <tag or package version>+<commit>
 curl https://<FunctionUrl>/healthz    # 403: the function answers only the edge
 ```
 

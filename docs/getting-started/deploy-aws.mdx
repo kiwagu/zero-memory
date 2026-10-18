@@ -63,6 +63,11 @@ with one request each and invokes the server once to load the embedding
 model. The first read of a new image can take close to a minute; paid there,
 it stays off the first visitor.
 
+The build reports itself on `/healthz` and next to the product name in the
+dashboard as `<version>+<commit>`: the release tag the checkout sits on (or
+the package version) and the checkout's commit. A checkout with uncommitted
+changes reports `dev` in place of the commit.
+
 Each stack publishes its address in SSM, and each app reads the others' at
 start: the server sends people to the dashboard to sign in, and the
 dashboard calls the server's MCP endpoint. You configure neither address.
