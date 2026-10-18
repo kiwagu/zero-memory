@@ -163,6 +163,14 @@ URL and put the secret Supabase generates into the dashboard's secret as
 of SMTP. The SES sandbox delivers only to verified addresses until production
 access is granted.
 
+An SES identity is unique per account and Region, so when two stages share an
+account and a mail domain, only one of them creates it: give the other
+`mailIdentity=existing`, and it sends through the identity that already
+exists (it creates none and prints no DKIM records). A created identity is
+kept when its stack is removed or its mail is turned off, because another
+stage may still send through it; delete it in the SES console once nothing
+does.
+
 ## Deploy from release tags
 
 A second stack runs the same deploy inside the AWS account, from a release

@@ -125,6 +125,41 @@ describe('WebStack', () => {
         key.startsWith('MailDkim')
       )
     ).toHaveLength(3);
+    // Another stage may send through it, so removing this one keeps it.
+    template.hasResource('AWS::SES::EmailIdentity', {
+      DeletionPolicy: 'Retain',
+      UpdateReplacePolicy: 'Retain',
+    });
+  });
+
+  it('sends through an identity that already exists when told to, and creates none', () => {
+    const template = synth({
+      mailDomain: 'example.com',
+      mailIdentity: 'existing',
+    });
+    template.resourceCountIs('AWS::SES::EmailIdentity', 0);
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({ ZM_MAIL_TRANSPORT: 'ses' }),
+      },
+    });
+    template.hasResourceProperties('AWS::IAM::Policy', {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['ses:SendEmail', 'ses:SendRawEmail'],
+            Condition: {
+              StringLike: { 'ses:FromAddress': '*@example.com' },
+            },
+          }),
+        ]),
+      }),
+    });
+    expect(
+      Object.keys(template.findOutputs('*')).filter((key) =>
+        key.startsWith('MailDkim')
+      )
+    ).toHaveLength(0);
   });
 
   it('refuses a domain without a certificate', () => {

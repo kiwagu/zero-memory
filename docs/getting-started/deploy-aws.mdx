@@ -177,6 +177,12 @@ templates and sends it under its function's AWS role.
    sandbox). Request production access in the SES console before real users
    sign up.
 
+An SES identity is unique per account and Region. If two stages share an
+account and a mail domain, only the first creates it; deploy the second with
+`mailIdentity=existing` and it sends through the identity that is already
+there. A created identity stays when its stage is removed, since another
+stage may still use it.
+
 ## Deploy on every release
 
 To deploy from release tags instead of by hand, create the pipeline stack

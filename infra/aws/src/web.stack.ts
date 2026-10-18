@@ -222,7 +222,16 @@ export interface WebStackProps extends StackProps {
   mailDomain?: string;
   /** The sender, e.g. `zero-memory <noreply@example.com>`; default noreply@<mailDomain>. */
   mailFrom?: string;
+  /**
+   * Whether this stage creates the mail domain's SES identity (`create`, the
+   * default) or sends through one that already exists in the account and
+   * Region (`existing`). An identity is unique per account and Region, so
+   * when two stages share an account and a mail domain, only one creates it.
+   */
+  mailIdentity?: MailIdentityMode;
 }
+
+export type MailIdentityMode = 'create' | 'existing';
 
 /**
  * The dashboard and the documentation site. The dashboard calls the server at
@@ -270,9 +279,15 @@ export class WebStack extends Stack {
     });
 
     if (props.mailDomain) {
-      const identity = new ses.EmailIdentity(this, 'MailIdentity', {
-        identity: ses.Identity.domain(props.mailDomain),
-      });
+      const identity =
+        (props.mailIdentity ?? 'create') === 'create'
+          ? new ses.EmailIdentity(this, 'MailIdentity', {
+              identity: ses.Identity.domain(props.mailDomain),
+            })
+          : undefined;
+      // Another stage may send through this identity: removing this stage,
+      // or turning its mail off, leaves it in place.
+      identity?.applyRemovalPolicy(RemovalPolicy.RETAIN);
       // SES checks a send against the sender's own address
       // (`identity/noreply@example.com`), not only against the domain's
       // identity, so a grant on the domain's ARN alone is refused. The
@@ -292,7 +307,7 @@ export class WebStack extends Stack {
           },
         })
       );
-      identity.dkimRecords.forEach((record, index) => {
+      identity?.dkimRecords.forEach((record, index) => {
         new CfnOutput(this, `MailDkim${index + 1}`, {
           value: `${record.name} CNAME ${record.value}`,
         });
