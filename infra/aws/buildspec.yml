@@ -1,6 +1,7 @@
 # The deploy the stack's CodePipeline runs on CodeBuild (src/pipeline.stack.ts)
-# for a release tag: apply the database migrations, then deploy and warm up the
-# server exactly as scripts/deploy.sh does when an operator runs it by hand.
+# for a release tag: back the database up, apply the migrations, then deploy and
+# warm up the server exactly as scripts/deploy.sh does when an operator runs it
+# by hand.
 version: 0.2
 
 env:
@@ -22,6 +23,8 @@ phases:
           postgres://* | postgresql://*) ;;
           *) echo "zero-memory/$STAGE/database-url holds no Postgres URL yet" >&2; exit 1 ;;
         esac
+      # A dump from just before the schema changes, as a container host takes.
+      - bash infra/aws/scripts/backup.take.sh "$STAGE"
       - bunx supabase db push --db-url "$DATABASE_URL" --yes
   build:
     commands:

@@ -157,8 +157,9 @@ AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/backup-env 
 rm backup.env
 ```
 
-To restore, download a backup and its manifest from the bucket and load them
-with `infra/prod/scripts/db-restore.sh`, as on a container host. The bucket
+To take one now and wait for it, run `bash scripts/backup.take.sh prod` from
+`infra/aws/`. To restore, download a backup and its manifest from the bucket
+and load them with `infra/prod/scripts/db-restore.sh`, as on a container host. The bucket
 stays when you remove the stacks; delete it yourself when you no longer need
 the backups.
 
@@ -192,8 +193,11 @@ stage may still use it.
 
 To deploy from release tags instead of by hand, create the pipeline stack
 once. CodePipeline takes a tagged commit from GitHub through a CodeConnections
-connection, and CodeBuild applies the migrations and runs the same deploy
-script, inside your account, with no AWS key stored anywhere else:
+connection, and CodeBuild takes a backup, applies the migrations and runs the
+same deploy script, inside your account, with no AWS key stored anywhere else.
+The backup comes first so a release that changes the schema always has a dump
+from just before it; a stage deployed without backups skips it. Create the
+stack with:
 
 ```sh
 AWS_PROFILE=<profile> bunx cdk deploy zero-memory-pipeline-prod \

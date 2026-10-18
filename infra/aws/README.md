@@ -175,10 +175,12 @@ does.
 
 A second stack runs the same deploy inside the AWS account, from a release
 tag pushed to GitHub: CodePipeline takes the tagged commit through a
-CodeConnections connection, and CodeBuild applies the database migrations and
-runs `scripts/deploy.sh` (`buildspec.yml`). No AWS key leaves AWS; the build's
-role can only assume the CDK bootstrap roles, invoke the stage's function for
-its warm-up, and read its own secrets.
+CodeConnections connection, and CodeBuild takes a backup
+(`scripts/backup.take.sh`, when the stage has backups), applies the database
+migrations and runs `scripts/deploy.sh` (`buildspec.yml`). No AWS key leaves
+AWS; the build's role can only assume the CDK bootstrap roles, invoke the
+stage's functions (the backup, the warm-up), read the stage stack's outputs,
+and read its own secrets.
 
 ```sh
 AWS_PROFILE=<profile> bunx cdk deploy zero-memory-pipeline-stand \
@@ -274,8 +276,8 @@ AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/stand/backup-env
 rm backup.env
 ```
 
-Take one now with `aws lambda invoke --function-name <BackupFunctionName>
-out.json`. To restore, download an artifact and its manifest, check them with
+Take one now and wait for it with `bash scripts/backup.take.sh <stage>`; it
+prints the key it stored. To restore, download an artifact and its manifest, check them with
 `infra/prod/scripts/db-dump.sh verify <file>`, and load them with
 `infra/prod/scripts/db-restore.sh` as on a container host.
 
