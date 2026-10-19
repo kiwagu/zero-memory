@@ -295,4 +295,46 @@ describe('ServerStack', () => {
       }),
     });
   });
+
+  it("restores the MCP endpoint's challenge at the edge, naming the metadata when it knows its domain", () => {
+    const certificateArn =
+      'arn:aws:acm:us-east-1:111111111111:certificate/test';
+    const template = synth({ domainName: 'api.example.com', certificateArn });
+    template.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
+      ResponseHeadersPolicyConfig: Match.objectLike({
+        CustomHeadersConfig: {
+          Items: [
+            {
+              Header: 'WWW-Authenticate',
+              Value:
+                'Bearer resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp"',
+              Override: false,
+            },
+          ],
+        },
+      }),
+    });
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({
+        CacheBehaviors: [
+          Match.objectLike({
+            PathPattern: '/mcp*',
+            ResponseHeadersPolicyId: Match.anyValue(),
+            OriginRequestPolicyId: Match.anyValue(),
+            FunctionAssociations: [
+              Match.objectLike({ EventType: 'viewer-request' }),
+            ],
+          }),
+        ],
+      }),
+    });
+
+    synth().hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
+      ResponseHeadersPolicyConfig: Match.objectLike({
+        CustomHeadersConfig: {
+          Items: [Match.objectLike({ Value: 'Bearer', Override: false })],
+        },
+      }),
+    });
+  });
 });

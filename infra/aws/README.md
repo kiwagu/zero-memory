@@ -323,6 +323,13 @@ Point an MCP client at `McpUrl`.
   it.
 - Background writes started by a request (usage metering, audit) finish before
   its response is returned, because Lambda freezes the instance afterwards.
+- A function URL refuses a request whose headers pass about 10 KB (a 413 that
+  names a 6 MB limit), and renames a response's `WWW-Authenticate` to
+  `x-amzn-remapped-www-authenticate`. The edge answers both: its
+  viewer-request function clears the Supabase session cookies once a
+  request's cookies pass 8 KB and sends the browser back to the same address,
+  and a response headers policy on `/mcp*` adds the MCP challenge
+  (`src/edge.function.ts`).
 
 ## Remove
 
