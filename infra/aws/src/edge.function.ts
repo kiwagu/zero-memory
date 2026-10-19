@@ -50,9 +50,12 @@ export const COOKIE_BUDGET = 8192;
  * address that expires every one of them, so the browser returns with a
  * request the origin accepts and the person signs in again. Without it the
  * function URL refuses that browser on every request until its cookies are
- * cleared by hand. The query string arrives split into fields whose names
- * and values are still percent-encoded as the browser sent them, so they are
- * joined back as they are.
+ * cleared by hand. The redirect names the scheme and the request's own host,
+ * so no path (`//other.example/…`, `/\other.example`) can turn it into a
+ * redirect elsewhere; CloudFront serves a distribution only under its own
+ * names, so the host is one of them. The query string arrives split into
+ * fields whose names and values are still percent-encoded as the browser sent
+ * them, so they are joined back as they are.
  */
 export const VIEWER_REQUEST_SOURCE = [
   `var COOKIE_BUDGET = ${COOKIE_BUDGET};`,
@@ -92,7 +95,7 @@ export const VIEWER_REQUEST_SOURCE = [
   '    statusCode: 303,',
   "    statusDescription: 'See Other',",
   '    headers: {',
-  "      location: { value: request.uri + (query.length ? '?' + query.join('&') : '') },",
+  "      location: { value: 'https://' + headers.host.value + request.uri + (query.length ? '?' + query.join('&') : '') },",
   "      'cache-control': { value: 'no-store' },",
   '    },',
   '    cookies: expired,',

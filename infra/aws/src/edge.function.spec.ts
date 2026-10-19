@@ -16,12 +16,16 @@ const handler = new Function(`${VIEWER_REQUEST_SOURCE}\nreturn handler;`)() as (
   event: unknown
 ) => Result;
 
-const run = (cookies: Fields, querystring: Fields = {}): Result =>
+const run = (
+  cookies: Fields,
+  querystring: Fields = {},
+  uri = '/oauth/consent'
+): Result =>
   handler({
     viewer: { ip: '203.0.113.7' },
     request: {
       method: 'GET',
-      uri: '/oauth/consent',
+      uri,
       querystring,
       headers: { host: { value: 'app.example.com' } },
       cookies,
@@ -62,7 +66,7 @@ describe('viewer-request function', () => {
     expect(result.statusCode).toBe(303);
     expect(result.headers.location).toEqual({
       value:
-        '/oauth/consent?authorization_id=oaa_test&next=%2Fa%20b%3Fc%3Dd%26e',
+        'https://app.example.com/oauth/consent?authorization_id=oaa_test&next=%2Fa%20b%3Fc%3Dd%26e',
     });
     expect(result.headers['cache-control']).toEqual({ value: 'no-store' });
     expect(Object.keys(result.cookies ?? {}).sort()).toEqual([
@@ -95,7 +99,7 @@ describe('viewer-request function', () => {
     });
     expect(result.statusCode).toBe(303);
     expect(result.headers.location).toEqual({
-      value: '/oauth/consent?tag=one&tag=two',
+      value: 'https://app.example.com/oauth/consent?tag=one&tag=two',
     });
   });
 
@@ -104,11 +108,26 @@ describe('viewer-request function', () => {
     expect(result.statusCode).toBeUndefined();
   });
 
+  it('never redirects off the host, whatever the path looks like', () => {
+    const big = { ...session('old', 6000), ...session('current', 6000) };
+    for (const uri of [
+      '//attacker.example/landing',
+      '/\\attacker.example',
+      '/@attacker.example',
+    ]) {
+      const location = run(big, {}, uri).headers.location?.value ?? '';
+      expect(location).toBe(`https://app.example.com${uri}`);
+      expect(new URL(location).host).toBe('app.example.com');
+    }
+  });
+
   it('keeps the address without a query when there is none', () => {
     const result = run({
       ...session('old', 6000),
       ...session('current', 6000),
     });
-    expect(result.headers.location).toEqual({ value: '/oauth/consent' });
+    expect(result.headers.location).toEqual({
+      value: 'https://app.example.com/oauth/consent',
+    });
   });
 });
