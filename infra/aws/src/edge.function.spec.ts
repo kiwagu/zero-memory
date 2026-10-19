@@ -55,7 +55,8 @@ describe('viewer-request function', () => {
       },
       {
         authorization_id: { value: 'oaa_test' },
-        next: { value: '/a b?c=d&e' },
+        // As CloudFront passes it: split into fields, still percent-encoded.
+        next: { value: '%2Fa%20b%3Fc%3Dd%26e' },
       }
     );
     expect(result.statusCode).toBe(303);

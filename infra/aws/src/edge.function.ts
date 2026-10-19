@@ -50,7 +50,9 @@ export const COOKIE_BUDGET = 8192;
  * address that expires every one of them, so the browser returns with a
  * request the origin accepts and the person signs in again. Without it the
  * function URL refuses that browser on every request until its cookies are
- * cleared by hand. The query string arrives parsed and is encoded again.
+ * cleared by hand. The query string arrives split into fields whose names
+ * and values are still percent-encoded as the browser sent them, so they are
+ * joined back as they are.
  */
 export const VIEWER_REQUEST_SOURCE = [
   `var COOKIE_BUDGET = ${COOKIE_BUDGET};`,
@@ -79,7 +81,7 @@ export const VIEWER_REQUEST_SOURCE = [
   '    var param = request.querystring[key];',
   '    var items = param.multiValue || [param];',
   '    for (var j = 0; j < items.length; j++) {',
-  "      query.push(encodeURIComponent(key) + '=' + encodeURIComponent(items[j].value));",
+  "      query.push(key + '=' + items[j].value);",
   '    }',
   '  }',
   '  var expired = {};',
