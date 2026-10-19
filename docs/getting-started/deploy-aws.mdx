@@ -264,6 +264,16 @@ Then point an MCP client or the watcher at `<PublicUrl>/mcp` and sign in.
   when requests overlap, still pays it.
 - Uploading pages to this site from its `/upload` form is off: the pages are
   compiled into the image.
+- A function URL refuses a request whose headers pass about 10 KB, with a 413
+  that names a 6 MB limit. A browser gets there when it keeps the session
+  cookies of two Supabase projects, after an instance moves to another
+  project. When a request's cookies pass 8 KB, the edge clears the Supabase
+  session cookies and sends the browser back to the same address, and the
+  person signs in again.
+- A function URL renames a response's `WWW-Authenticate` header. The edge
+  adds the MCP endpoint's challenge back, naming the authorization metadata
+  when the server has its own domain; without one, clients find the metadata
+  at its well-known address.
 
 ## Remove
 

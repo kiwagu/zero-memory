@@ -21,7 +21,11 @@ import {
 import type { Construct } from 'constructs';
 
 import { DatabaseBackup } from './database.backup.js';
-import { edgeHeaderValue, viewerRequestFunction } from './edge.function.js';
+import {
+  edgeHeaderValue,
+  mcpChallenge,
+  viewerRequestFunction,
+} from './edge.function.js';
 import { ServerJobs, type JobName } from './server.jobs.js';
 import { ServerObservability } from './server.observability.js';
 
@@ -245,28 +249,53 @@ export class ServerStack extends Stack {
 
     const viewerAddress = viewerRequestFunction(this, 'ViewerAddress');
 
+    const behavior: cloudfront.BehaviorOptions = {
+      origin: new origins.FunctionUrlOrigin(functionUrl, {
+        customHeaders: {
+          'x-origin-verify': edgeHeaderValue(serverEnv, props.envVersion),
+        },
+        readTimeout: RESPONSE_TIMEOUT,
+      }),
+      allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+      viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+      cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+      // Every viewer header (the bearer token included) but Host: a
+      // function URL answers only to its own host name.
+      originRequestPolicy:
+        cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+      functionAssociations: [
+        {
+          function: viewerAddress,
+          eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
+        },
+      ],
+    };
+    // The MCP endpoint's challenge, which the function URL renames on its
+    // way out (see mcpChallenge).
+    const challenge = new cloudfront.ResponseHeadersPolicy(
+      this,
+      'McpChallenge',
+      {
+        comment: `zero-memory ${stage}: the MCP endpoint's WWW-Authenticate`,
+        customHeadersBehavior: {
+          customHeaders: [
+            {
+              header: 'WWW-Authenticate',
+              value: mcpChallenge(
+                props.domainName ? `https://${props.domainName}` : undefined
+              ),
+              override: false,
+            },
+          ],
+        },
+      }
+    );
+
     const edge = new cloudfront.Distribution(this, 'Edge', {
       comment: `zero-memory ${stage}`,
-      defaultBehavior: {
-        origin: new origins.FunctionUrlOrigin(functionUrl, {
-          customHeaders: {
-            'x-origin-verify': edgeHeaderValue(serverEnv, props.envVersion),
-          },
-          readTimeout: RESPONSE_TIMEOUT,
-        }),
-        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
-        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
-        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-        // Every viewer header (the bearer token included) but Host: a
-        // function URL answers only to its own host name.
-        originRequestPolicy:
-          cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
-        functionAssociations: [
-          {
-            function: viewerAddress,
-            eventType: cloudfront.FunctionEventType.VIEWER_REQUEST,
-          },
-        ],
+      defaultBehavior: behavior,
+      additionalBehaviors: {
+        '/mcp*': { ...behavior, responseHeadersPolicy: challenge },
       },
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
