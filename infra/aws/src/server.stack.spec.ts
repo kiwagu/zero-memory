@@ -229,7 +229,9 @@ describe('ServerStack', () => {
       Properties: Match.objectLike({
         VersioningConfiguration: { Status: 'Enabled' },
         LifecycleConfiguration: {
-          Rules: [
+          // Exact: a prefix on the rule would leave whatever lies outside it,
+          // the monthly copies of earlier releases among them, unexpired.
+          Rules: Match.exact([
             {
               Id: 'backups',
               Status: 'Enabled',
@@ -241,7 +243,7 @@ describe('ServerStack', () => {
               Status: 'Enabled',
               ExpiredObjectDeleteMarker: true,
             },
-          ],
+          ]),
         },
       }),
     });

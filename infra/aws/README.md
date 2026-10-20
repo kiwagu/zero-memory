@@ -260,8 +260,9 @@ and stores the artifact and its manifest in the backup bucket under `daily/`.
 A lifecycle rule expires every object in the bucket 30 days after it is
 written. The function may read and write the bucket, never delete from it,
 and the bucket is versioned, so a write over an existing backup keeps the old
-bytes one more day, as it keeps an expired backup's: about 30 days after a
-backup is taken, nothing of it is left. Earlier releases also copied the
+bytes one more day, as it keeps an expired backup's: a backup is deleted for
+good about 31 days after it is taken (S3 runs lifecycle rules in the
+background, so a little later at times). Earlier releases also copied the
 first backup of each month under `monthly/`; the same rule expires those
 copies.
 
