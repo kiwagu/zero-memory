@@ -221,24 +221,28 @@ describe('ServerStack', () => {
 
   it('backs the database up daily into a bucket that outlives the stack, and alarms when backups stop', () => {
     const template = synth();
-    // Versioned, so a write over an existing backup keeps the old bytes for as
-    // long as the backup itself would have lived.
+    // Versioned, so a write over an existing backup keeps the old bytes, and
+    // everything in it, an expired backup's old version included, is gone
+    // within about 30 days.
     template.hasResource('AWS::S3::Bucket', {
       DeletionPolicy: 'Retain',
       Properties: Match.objectLike({
         VersioningConfiguration: { Status: 'Enabled' },
         LifecycleConfiguration: {
-          Rules: Match.arrayWith([
-            Match.objectLike({
-              Prefix: 'daily/',
+          // Exact: a prefix on the rule would leave whatever lies outside it,
+          // the monthly copies of earlier releases among them, unexpired.
+          Rules: Match.exact([
+            {
+              Id: 'backups',
+              Status: 'Enabled',
               ExpirationInDays: 30,
-              NoncurrentVersionExpiration: { NoncurrentDays: 30 },
-            }),
-            Match.objectLike({
-              Prefix: 'monthly/',
-              ExpirationInDays: 366,
-              NoncurrentVersionExpiration: { NoncurrentDays: 30 },
-            }),
+              NoncurrentVersionExpiration: { NoncurrentDays: 1 },
+            },
+            {
+              Id: 'markers',
+              Status: 'Enabled',
+              ExpiredObjectDeleteMarker: true,
+            },
           ]),
         },
       }),

@@ -23,7 +23,7 @@ server), `zero-memory-web-<stage>` (dashboard and docs) and, optionally,
 | CloudWatch log group, alarms, dashboard         | Function logs kept one week; eight alarms into one SNS topic; one dashboard (see [Alarms](#alarms))                                                                    |
 | Lambda function (jobs)                          | The same image without an edge: runs one timed job per invocation (usage upkeep, translation, hygiene), up to 15 minutes, one run at a time                            |
 | EventBridge Scheduler schedules                 | Each job at its interval, and a warm-up of the server every 5 minutes (see [Timed jobs](#timed-jobs))                                                                  |
-| S3 bucket + backup function                     | A daily logical backup of the database, kept 30 days and the first of each month for a year (see [Backups](#backups))                                                  |
+| S3 bucket + backup function                     | A daily logical backup of the database, kept 30 days (see [Backups](#backups))                                                                                         |
 
 The web stack holds the dashboard and the docs, each as a Lambda function
 from `runtime/web-app.Dockerfile` — the app's own image plus the Lambda Web
@@ -256,11 +256,15 @@ pause does not wait for it.
 
 Every day at 03:30 UTC, and once after every `deploy.sh`, a function runs the
 container host's own dump script (`infra/prod/scripts/db-dump.sh`, unchanged)
-and stores the artifact and its manifest in the backup bucket under `daily/`;
-the first one of each month is also copied under `monthly/`. Lifecycle rules
-keep 30 days and 12 months. The function may read and write the bucket, never
-delete from it, and the bucket is versioned, so a write over an existing
-backup keeps the old bytes for 30 more days (an expired backup's too).
+and stores the artifact and its manifest in the backup bucket under `daily/`.
+A lifecycle rule expires every object in the bucket 30 days after it is
+written. The function may read and write the bucket, never delete from it,
+and the bucket is versioned, so a write over an existing backup keeps the old
+bytes one more day, as it keeps an expired backup's: a backup is deleted for
+good about 31 days after it is taken (S3 runs lifecycle rules in the
+background, so a little later at times). Earlier releases also copied the
+first backup of each month under `monthly/`; the same rule expires those
+copies.
 
 The `Missing` alarm is evaluated once an hour over the last 26 hours, so it
 clears up to an hour after a backup lands, and fires about a day after the
