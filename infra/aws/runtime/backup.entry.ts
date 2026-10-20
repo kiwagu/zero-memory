@@ -10,9 +10,8 @@
  *   session pooler's address;
  * - the newest stored manifest is put next to the new dump first, so the
  *   script can warn when the row count fell sharply since the last backup;
- * - the artifact and its manifest go under `daily/`, and the first backup of
- *   each month is also copied under `monthly/`. The bucket's lifecycle rules
- *   expire both;
+ * - the artifact and its manifest go under `daily/`, where the bucket's
+ *   lifecycle rule expires them;
  * - success is logged as `backup stored`, which the stack's dead-man alarm
  *   counts; a failure is the invocation's error, which another alarm counts.
  */
@@ -26,7 +25,6 @@ import {
 import { join } from 'node:path';
 
 import {
-  CopyObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
@@ -172,30 +170,10 @@ const backUp = async () => {
     await store(`daily/${artifact}`, join(dir, artifact), 'application/gzip');
     await store(`daily/${manifest}`, join(dir, manifest), 'application/json');
 
-    // Artifact names start with the date, so the month is their first part.
-    // The month is kept once its manifest is: the artifact is copied first, so
-    // a run cut between the two leaves no manifest and the next run copies a
-    // whole pair again.
-    const month = artifact.slice(0, 7);
-    const monthly = !(await keysUnder(`monthly/${month}`)).some((key) =>
-      key.endsWith('.manifest.json')
-    );
-    if (monthly) {
-      for (const name of [artifact, manifest]) {
-        await s3.send(
-          new CopyObjectCommand({
-            Bucket: bucket,
-            Key: `monthly/${name}`,
-            CopySource: `${bucket}/daily/${encodeURIComponent(name)}`,
-          })
-        );
-      }
-    }
-
     const { bytes, rows_total } = JSON.parse(
       readFileSync(join(dir, manifest), 'utf8')
     ) as { bytes: number; rows_total: number };
-    const result = { key: `daily/${artifact}`, bytes, rows_total, monthly };
+    const result = { key: `daily/${artifact}`, bytes, rows_total };
     log('info', 'backup stored', result);
     return result;
   } finally {

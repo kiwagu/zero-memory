@@ -40,10 +40,10 @@ export interface DatabaseBackupProps {
  * - The database URL lives in the secret `zero-memory/<stage>/backup-env` as
  *   DATABASE_URL. The function runs outside a VPC with IPv4 only, so for a
  *   Supabase project it must be the session pooler's address.
- * - Artifacts land under `daily/` and the first of each month is also kept
- *   under `monthly/`; lifecycle rules keep 30 days and 12 months of them. The
- *   bucket is versioned, so the function, which may write but not delete,
- *   cannot destroy a backup by writing over it either.
+ * - Artifacts land under `daily/`, and every object in the bucket expires 30
+ *   days after it is written. The bucket is versioned, so the function, which
+ *   may write but not delete, cannot destroy a backup by writing over it
+ *   either: the bytes it replaced stay one more day.
  * - The bucket is retained when the stack is removed: the backups are the one
  *   thing a teardown must not take with it.
  * - One alarm fires on a failed run, another when no backup has landed for
@@ -58,8 +58,11 @@ export class DatabaseBackup extends Construct {
 
     // Versioned: the function may write but never delete, and a write over an
     // existing key would otherwise replace a backup as surely as a delete.
-    // An overwritten (or expired) version stays 30 more days: time enough
-    // for the alarms to be seen, without a second year of monthly copies.
+    // Artifact names carry the time they were taken, so no backup writes over
+    // another, and a version turns noncurrent only when it expires. It goes a
+    // day later: a backup, and the data it holds, is gone about 30 days after
+    // it was taken. The rule spans the whole bucket, so it also expires the
+    // monthly copies earlier releases kept under `monthly/`.
     this.bucket = new s3.Bucket(this, 'Bucket', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -67,16 +70,9 @@ export class DatabaseBackup extends Construct {
       versioned: true,
       lifecycleRules: [
         {
-          id: 'daily',
-          prefix: 'daily/',
+          id: 'backups',
           expiration: Duration.days(30),
-          noncurrentVersionExpiration: Duration.days(30),
-        },
-        {
-          id: 'monthly',
-          prefix: 'monthly/',
-          expiration: Duration.days(366),
-          noncurrentVersionExpiration: Duration.days(30),
+          noncurrentVersionExpiration: Duration.days(1),
         },
         // An expired backup leaves a delete marker over its old versions;
         // once those are gone too, the marker goes.
