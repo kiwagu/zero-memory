@@ -7,6 +7,9 @@ workflow; the model supplies one number per question and generates no text.
 - `IJudgment` — the port (`judge(request, { timeoutMs })`).
 - `TypeSafeJudgment` — TypeSafe System One (`POST /v1/systemone`, Noul questions).
 - `SubqJudgment` — SubQ Snap (see "Providers").
+- `IJudgeCredentialResolver` — whose key a call runs on; `EnvJudgeCredentialResolver`
+  serves the platform keys from the env, and a provider without one resolves to null.
+- `defaultJudgmentFactory` — builds the adapter a resolved credential names.
 - `readJudgeConfig(env)` / `readRuleGateConfig(env)` — the server's env knobs.
 - `@workspace/judgment/testing` — `FakeJudgment` for unit and e2e tests.
 
