@@ -69,7 +69,7 @@ describe('clearsDistillGate', () => {
 });
 
 describe('ruleDistillationSchema', () => {
-  it('validates a distillation and rejects out-of-range confidence', () => {
+  it('parses a distillation without applies_when and rejects out-of-range values', () => {
     // A model may omit applies_when; the answer still parses and reads as null.
     const parsed = ruleDistillationSchema.parse({
       rule: true,

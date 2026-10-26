@@ -2338,7 +2338,9 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'already know a decision/preference/convention is a standing rule. ' +
         'The imperative text is distilled from the memory (pass rule_text to ' +
         'override), and so is applies_when: the observable task features ' +
-        'under which the rule binds (pass it to set your own). By default it ' +
+        'under which the rule binds (pass it to set your own). With ' +
+        'rule_text nothing is distilled, so pass applies_when too or the ' +
+        'stored one is kept. By default it ' +
         'becomes a GENERAL (user-layer) rule when the memory sits in a ' +
         'personal scope, delivered to every session via ' +
         'the MCP instructions; pass applies_scope to make it a PROJECT rule ' +
