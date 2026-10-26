@@ -31,12 +31,23 @@ configured" and work as before. There is no fallback to another provider.
 
 ## Providers
 
-Both providers speak the same System One wire shape; they differ in host,
-model ids and the statuses that mean "try later". Each adapter keeps only the
-answers to the questions it asked, maps `noul` (already 0..1) to
-`{ noul }`, and reports `usage` from the response, or zeros when the response
-carries none. A response that does not match the shape (not JSON, a `noul`
-outside 0..1) is a plain error, never `JudgeUnavailableError`.
+Both providers speak the same System One wire shape, so both adapters are thin
+wrappers over one exchange (`system-one.exchange.ts`); they differ only in host
+and model ids. The exchange keeps only the answers to the questions it asked,
+maps `noul` (already 0..1) to `{ noul }`, and reports `model` and `usage` from
+the response, or the configured model and zeros when the response carries
+none.
+
+One status policy for both providers:
+
+- `429` and any `5xx` → `JudgeUnavailableError` (no verdict; try later);
+- no complete answer within the timeout, body read included →
+  `JudgeUnavailableError`;
+- any other non-2xx → a plain `Error`, `<provider>: HTTP <status>: <body>`
+  with the body cut to 200 characters (the request is wrong; a retry won't
+  help);
+- a 2xx body that does not match the shape (not JSON, a `noul` outside 0..1)
+  → a plain `Error`, never `JudgeUnavailableError`.
 
 ### TypeSafe
 
@@ -47,7 +58,8 @@ outside 0..1) is a plain error, never `JudgeUnavailableError`.
 - Request: `{ model, state, questions: { <name>: { type: 'noul', instructions, criteria } } }`,
   where `criteria` is `{ true, false }`.
 - Response: `{ model, answers: { <name>: { type: 'noul', noul } }, usage: { input_tokens, output_tokens } }`.
-- `429` and `529` → `JudgeUnavailableError`; any other non-2xx → `Error` with the status.
+- Statuses: TypeSafe documents `429` and `529` as retryable; both fall under
+  the shared policy above.
 
 ### SubQ Snap
 
@@ -88,7 +100,8 @@ The SubQ Decisions API (public preview), documented at
 
   SubQ bills input tokens only; `output_tokens` is always `0`.
 
-- Errors carry `{ detail: { error_type, message } }`. `429` (rate limit), `503`
-  (temporarily unavailable) and `529` → `JudgeUnavailableError`; `400`, `401`,
-  `402` (no credits), `403` (the key may not use the model), `422` (invalid
-  request) and other statuses → `Error` with the status.
+- Errors carry `{ detail: { error_type, message } }`. Under the shared policy,
+  `429` (rate limit) and `5xx` (`503`: temporarily unavailable) →
+  `JudgeUnavailableError`; `400` (over the token limit), `401`, `402` (no
+  credits), `403` (the key may not use the model) and `422` (invalid request)
+  → `Error` with the status.

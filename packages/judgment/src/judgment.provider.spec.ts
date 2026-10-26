@@ -18,7 +18,7 @@ describe('defaultJudgmentFactory', () => {
       defaultJudgmentFactory({
         provider: 'subq',
         apiKey: 'k',
-        model: 'snap-1.1',
+        model: 'subq-snap-1.1',
         ownedByCaller: true,
       })
     ).toBeInstanceOf(SubqJudgment);

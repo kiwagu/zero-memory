@@ -16,7 +16,7 @@ describe('readJudgeConfig', () => {
       ZM_TYPESAFE_API_KEY: 'ts-key',
       SNAPQ_API_KEY: 'snap-key',
       ZM_JUDGE_PROVIDER: 'subq',
-      ZM_JUDGE_MODEL_SUBQ: 'snap-1.1',
+      ZM_JUDGE_MODEL_SUBQ: 'subq-snap-preview',
       ZM_JUDGE_TIMEOUT_MS: '900',
     });
     expect(config.provider).toBe('subq');
@@ -24,7 +24,7 @@ describe('readJudgeConfig', () => {
       typesafe: 'ts-key',
       subq: 'snap-key',
     });
-    expect(config.models.subq).toBe('snap-1.1');
+    expect(config.models.subq).toBe('subq-snap-preview');
     expect(config.timeoutMs).toBe(900);
   });
 
