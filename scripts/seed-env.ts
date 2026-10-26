@@ -42,6 +42,18 @@ function readExistingKey(
 const ANTHROPIC_API_KEY = readExistingKey('ANTHROPIC_API_KEY');
 // Server runtime posture that must reach apps/server (Bun cwd gotcha, mirrored below).
 const ZM_INGEST_EXTRACT = readExistingKey('ZM_INGEST_EXTRACT');
+// Judge-provider platform keys (rule delivery gate), mirrored into
+// apps/server/.env below for the same cwd reason as ANTHROPIC_API_KEY. A key
+// placed only in apps/server/.env is read back from there, so a --force reseed
+// keeps it.
+function readServerKey(name: string): string {
+  return (
+    readExistingKey(name) ||
+    readExistingKey(name, resolve(root, 'apps/server/.env'))
+  );
+}
+const ZM_TYPESAFE_API_KEY = readServerKey('ZM_TYPESAFE_API_KEY');
+const SNAPQ_API_KEY = readServerKey('SNAPQ_API_KEY');
 const PUBLIC_URL =
   process.env.ZM_PUBLIC_URL ??
   (readExistingKey('ZM_PUBLIC_URL') || `http://localhost:${SERVER_PORT}`);
@@ -135,6 +147,8 @@ const files: Array<{ path: string; content: string }> = [
       `ZM_EMAIL=${ZM_EMAIL}`,
       `ZM_PASSWORD=${ZM_PASSWORD}`,
       `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}`,
+      `ZM_TYPESAFE_API_KEY=${ZM_TYPESAFE_API_KEY}`,
+      `SNAPQ_API_KEY=${SNAPQ_API_KEY}`,
       '',
     ].join('\n'),
   },
@@ -190,6 +204,12 @@ if (ANTHROPIC_API_KEY) {
 // reads it, so it must land there, not just in the root .env.
 if (ZM_INGEST_EXTRACT) {
   syncKey('ZM_INGEST_EXTRACT', ZM_INGEST_EXTRACT, serverEnv);
+}
+if (ZM_TYPESAFE_API_KEY) {
+  syncKey('ZM_TYPESAFE_API_KEY', ZM_TYPESAFE_API_KEY, serverEnv);
+}
+if (SNAPQ_API_KEY) {
+  syncKey('SNAPQ_API_KEY', SNAPQ_API_KEY, serverEnv);
 }
 
 console.log(`→ provisioning dev user ${ZM_EMAIL}…`);
