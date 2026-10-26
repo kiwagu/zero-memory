@@ -76,9 +76,29 @@ export const recordToolResult = (
       ...(truncatedQuery(metering.query) !== undefined && {
         query: truncatedQuery(metering.query),
       }),
+      ...(metering.ruleGate && { rule_gate: metering.ruleGate }),
     },
   });
   recordBriefing(recorder, metering);
+};
+
+/**
+ * A read of one standing rule by id: the agent went for the full text of a
+ * rule that arrived by headline or gate. Recorded as its own mcp_tool_call row
+ * so the retro can join it to the call that headlined the rule.
+ */
+export const recordResourceRead = (
+  recorder: IUsageRecorder,
+  metering: { resource: 'rule'; ruleId: string; found: boolean }
+): void => {
+  recordUsage(recorder, {
+    eventType: 'mcp_tool_call',
+    metadata: {
+      tool: 'resource:rule',
+      rule_id: metering.ruleId,
+      found: metering.found,
+    },
+  });
 };
 
 /**

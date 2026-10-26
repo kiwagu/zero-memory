@@ -17,6 +17,7 @@ import {
   fetchSessionAssurance,
   listPromotedUserRules,
   fetchUserEntityId,
+  readPromotedRuleById,
   type SessionAssurance,
 } from '@workspace/persistence';
 import { USAGE_RECORDER, type IUsageRecorder } from '@workspace/usage';
@@ -28,6 +29,7 @@ import {
   recordChallengeMisled,
   recordInBandRecallUsed,
   recordRememberResult,
+  recordResourceRead,
   recordToolError,
   recordToolInvocation,
   recordToolResult,
@@ -158,6 +160,9 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
       // Live rules read for the zm://rules resource — same credential the
       // request carries, so a mid-session promote is visible on the next read.
       readPromotedRules: () => listPromotedUserRules(accessToken),
+      // One rule in full for zm://rules/{id}, and the read's own usage row.
+      readPromotedRule: (id) => readPromotedRuleById(accessToken, id),
+      onResourceRead: (metering) => recordResourceRead(usageRecorder, metering),
       // How an HTTP session learns its project: a caller passes a
       // `project_hint` (the briefing hook sends the repo root), the read
       // tool resolves it, and the resolved scope attaches to the session so

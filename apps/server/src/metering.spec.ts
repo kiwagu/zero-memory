@@ -1,3 +1,4 @@
+import type { RuleGateBlock } from '@workspace/contracts';
 import type { ToolResultMetering } from '@workspace/mcp';
 import type { IUsageRecorder, UsageEvent } from '@workspace/usage';
 import { describe, expect, it, vi } from 'vitest';
@@ -6,6 +7,7 @@ import {
   recordBriefing,
   recordInBandRecallUsed,
   recordRememberResult,
+  recordResourceRead,
   recordToolError,
   recordToolInvocation,
   recordToolResult,
@@ -195,7 +197,7 @@ describe('recordToolInvocation — pre-execution volume metering', () => {
     });
   });
 
-  it.each(['recall', 'build_context', 'remember'])(
+  it.each(['recall', 'build_context', 'remember', 'resource:rule'])(
     'skips %s (metered post-result instead, no double count)',
     async (tool) => {
       const { recorder, record } = recorderSpy();
@@ -410,6 +412,63 @@ describe('recordToolResult — recall-hit attribution', () => {
     });
   });
 
+  it('carries the rule gate block when the gate ran, omits it otherwise', async () => {
+    const ruleGate: RuleGateBlock = {
+      mode: 'live',
+      provider: 'typesafe',
+      model: 'jev',
+      latency_ms: 140,
+      judge_unavailable: false,
+      bands: { hi: 0.7, lo: 0.3 },
+      chars_baseline: 900,
+      chars_delivered: 420,
+      levels: { full: 1, gate: 1, headline: 1 },
+      rules: [
+        {
+          id: 'rlc_0000000000000000.0000000000',
+          p: null,
+          level: 'full',
+          chars: 300,
+          pinned: true,
+        },
+        {
+          id: 'rlc_1111111111111111.1111111111',
+          p: 0.5,
+          level: 'gate',
+          chars: 80,
+          pinned: false,
+        },
+        {
+          id: 'rlc_2222222222222222.2222222222',
+          p: 0.1,
+          level: 'headline',
+          chars: 40,
+          pinned: false,
+        },
+      ],
+    };
+    const gated = recorderSpy();
+    recordToolResult(
+      gated.recorder,
+      briefingMetering({ briefing: null, ruleGate })
+    );
+    await flush();
+    expect(firstEvent(gated.record)?.metadata).toMatchObject({
+      tool: 'build_context',
+      rule_gate: ruleGate,
+    });
+
+    const ungated = recorderSpy();
+    recordToolResult(
+      ungated.recorder,
+      briefingMetering({ briefing: null, ruleGate: null })
+    );
+    await flush();
+    expect(firstEvent(ungated.record)?.metadata).not.toHaveProperty(
+      'rule_gate'
+    );
+  });
+
   it('also emits session_briefing when the call was a session-start briefing', async () => {
     const { recorder, record } = recorderSpy();
 
@@ -450,6 +509,29 @@ describe('recordInBandRecallUsed — in-band recall usefulness', () => {
     await flush();
 
     expect(record).not.toHaveBeenCalled();
+  });
+});
+
+describe('recordResourceRead — one-rule resource reads', () => {
+  it('emits one mcp_tool_call naming the rule read and whether it was found', async () => {
+    const { recorder, record } = recorderSpy();
+
+    recordResourceRead(recorder, {
+      resource: 'rule',
+      ruleId: 'rlc_1111111111111111.1111111111',
+      found: false,
+    });
+    await flush();
+
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(firstEvent(record)).toEqual({
+      eventType: 'mcp_tool_call',
+      metadata: {
+        tool: 'resource:rule',
+        rule_id: 'rlc_1111111111111111.1111111111',
+        found: false,
+      },
+    });
   });
 });
 

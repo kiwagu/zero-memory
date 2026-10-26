@@ -3,6 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { ResourceLink } from '@modelcontextprotocol/sdk/types.js';
 import {
   ZM_MEMORY_URI_TEMPLATE,
+  ZM_RULE_URI_TEMPLATE,
   ZM_RULES_URI,
   zmMemoryUri,
   type ContextRule,
@@ -12,7 +13,11 @@ import type { ICommandBus, IQueryBus } from '@workspace/cqrs';
 import { BuildContextQuery, GetMemoryQuery } from '@workspace/queries';
 import { describe, expect, it } from 'vitest';
 
-import { buildMcpServer, resourceLinksForClient } from './mcp-server.js';
+import {
+  buildMcpServer,
+  resourceLinksForClient,
+  type McpServerDeps,
+} from './mcp-server.js';
 
 /**
  * The resources/prompts plane is asserted through a real client over a linked
@@ -42,6 +47,19 @@ const FIXTURE_RULES: ContextRule[] = [
   { text: 'Always the pinned rule first.', pinned: true },
   { text: 'Then the rest.', pinned: false },
 ];
+
+const RULE_ID = 'rlc_0123456789abcdef.0123456789';
+
+const FIXTURE_RULE: ContextRule = {
+  id: RULE_ID,
+  text: 'The whole text of one standing rule.',
+  pinned: false,
+  level: 'full',
+};
+
+type ResourceReadMetering = Parameters<
+  NonNullable<McpServerDeps['onResourceRead']>
+>[0];
 
 const RECALL_FIXTURE = {
   memories: [
@@ -76,7 +94,9 @@ const BUILD_CONTEXT_FIXTURE = {
 const connect = async (options: {
   withRules: boolean;
   clientName?: string;
+  resourceReads?: Array<ResourceReadMetering & { inToolContext: boolean }>;
 }) => {
+  let inToolContext = false;
   const noop = { execute: () => Promise.resolve(undefined) };
   const queryBus = {
     execute: (query: unknown) =>
@@ -93,10 +113,23 @@ const connect = async (options: {
   const server = buildMcpServer({
     commandBus: noop as unknown as ICommandBus,
     queryBus: queryBus as unknown as IQueryBus,
-    runInToolContext: (fn) => fn(),
+    runInToolContext: async (fn) => {
+      inToolContext = true;
+      try {
+        return await fn();
+      } finally {
+        inToolContext = false;
+      }
+    },
     ...(options.withRules
-      ? { readPromotedRules: () => Promise.resolve(FIXTURE_RULES) }
+      ? {
+          readPromotedRules: () => Promise.resolve(FIXTURE_RULES),
+          readPromotedRule: (id: string) =>
+            Promise.resolve(id === RULE_ID ? FIXTURE_RULE : null),
+        }
       : {}),
+    onResourceRead: (metering) =>
+      options.resourceReads?.push({ ...metering, inToolContext }),
   });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -124,7 +157,9 @@ describe('resources', () => {
       const templates = await withRules.client.listResourceTemplates();
       expect(
         templates.resourceTemplates.map((template) => template.uriTemplate)
-      ).toContain(ZM_MEMORY_URI_TEMPLATE);
+      ).toEqual(
+        expect.arrayContaining([ZM_MEMORY_URI_TEMPLATE, ZM_RULE_URI_TEMPLATE])
+      );
 
       const resources = await withRules.client.listResources();
       const rules = resources.resources.find(
@@ -145,6 +180,10 @@ describe('resources', () => {
       expect(resources.resources.map((resource) => resource.uri)).not.toContain(
         ZM_RULES_URI
       );
+      const templates = await withoutRules.client.listResourceTemplates();
+      expect(
+        templates.resourceTemplates.map((template) => template.uriTemplate)
+      ).not.toContain(ZM_RULE_URI_TEMPLATE);
     } finally {
       await withoutRules.close();
     }
@@ -182,6 +221,54 @@ describe('resources', () => {
       expect(JSON.parse(String(text))).toEqual({
         rules: FIXTURE_RULES,
       });
+    } finally {
+      await close();
+    }
+  });
+
+  it('serves one promoted rule in full at zm://rules/{id} and meters the read', async () => {
+    const resourceReads: Array<
+      ResourceReadMetering & { inToolContext: boolean }
+    > = [];
+    const { client, close } = await connect({
+      withRules: true,
+      resourceReads,
+    });
+    try {
+      const read = await client.readResource({ uri: `zm://rules/${RULE_ID}` });
+      const first = read.contents[0];
+      expect(first?.mimeType).toBe('application/json');
+      const text = first && 'text' in first ? first.text : '';
+      expect(JSON.parse(String(text))).toEqual({
+        rule: {
+          id: RULE_ID,
+          text: FIXTURE_RULE.text,
+          pinned: false,
+          level: 'full',
+        },
+      });
+
+      const missing = 'rlc_ffffffffffffffff.0123456789';
+      await expect(
+        client.readResource({ uri: `zm://rules/${missing}` })
+      ).rejects.toThrow(/not found/i);
+
+      await expect(
+        client.readResource({ uri: 'zm://rules/not-an-id' })
+      ).rejects.toThrow(/Not a rule id/);
+
+      // The fetch-after-headline signal: one entry per read of a real id,
+      // found or not, inside the caller's context so the row attributes
+      // them; a malformed id never reaches the store.
+      expect(resourceReads).toEqual([
+        { resource: 'rule', ruleId: RULE_ID, found: true, inToolContext: true },
+        {
+          resource: 'rule',
+          ruleId: missing,
+          found: false,
+          inToolContext: true,
+        },
+      ]);
     } finally {
       await close();
     }

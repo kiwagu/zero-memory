@@ -1,6 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import type { BuildContextOutput, RecallOutput } from '@workspace/contracts';
+import type {
+  BuildContextOutput,
+  ContextRule,
+  RecallOutput,
+  RuleGateBlock,
+} from '@workspace/contracts';
 import type { ICommandBus, IQueryBus } from '@workspace/cqrs';
 import { buildMcpServer } from '@workspace/mcp';
 import type { IUsageRecorder, UsageEvent } from '@workspace/usage';
@@ -8,6 +13,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   recordRememberResult,
+  recordResourceRead,
   recordToolInvocation,
   recordToolResult,
 } from './metering.js';
@@ -72,6 +78,15 @@ const commandBus = {
   execute: vi.fn(),
 } as unknown as ICommandBus;
 
+const RULE_ID = 'rlc_0123456789abcdef.0123456789';
+
+const promotedRule: ContextRule = {
+  id: RULE_ID,
+  text: 'The whole text of one standing rule.',
+  pinned: false,
+  level: 'full',
+};
+
 const connectClient = (
   recorder: IUsageRecorder
 ): Promise<{ client: Client; close: () => Promise<void> }> => {
@@ -82,6 +97,9 @@ const connectClient = (
     onToolInvocation: (tool) => recordToolInvocation(recorder, tool),
     onToolResult: (metering) => recordToolResult(recorder, metering),
     onRememberResult: (metering) => recordRememberResult(recorder, metering),
+    readPromotedRule: (id) =>
+      Promise.resolve(id === RULE_ID ? promotedRule : null),
+    onResourceRead: (metering) => recordResourceRead(recorder, metering),
   });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -162,6 +180,73 @@ describe('metering seam — MCP client → usage events', () => {
     const kinds = events().map((e) => e.eventType);
     expect(kinds).toContain('mcp_tool_call');
     expect(kinds).not.toContain('session_briefing');
+  });
+
+  it('a gated build_context carries the rule gate block on its mcp_tool_call', async () => {
+    const ruleGate: RuleGateBlock = {
+      mode: 'live',
+      provider: 'typesafe',
+      model: 'jev',
+      latency_ms: 90,
+      judge_unavailable: false,
+      bands: { hi: 0.7, lo: 0.3 },
+      chars_baseline: 120,
+      chars_delivered: 40,
+      levels: { full: 0, gate: 0, headline: 1 },
+      rules: [
+        { id: RULE_ID, p: 0.1, level: 'headline', chars: 40, pinned: false },
+      ],
+    };
+    vi.mocked(queryBus.execute).mockResolvedValueOnce({
+      ...buildContextOutput,
+      rules: [
+        {
+          id: RULE_ID,
+          text: 'The whole text',
+          headline: 'The whole text',
+          pinned: false,
+          level: 'headline',
+        },
+      ],
+      rule_gate: ruleGate,
+    });
+    const { recorder, events } = recorderSpy();
+    const { client, close } = await connectClient(recorder);
+
+    await client.callTool({
+      name: 'build_context',
+      arguments: { topic: 'deploy' },
+    });
+    await flush();
+    await close();
+
+    const toolCalls = events().filter((e) => e.eventType === 'mcp_tool_call');
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0]?.metadata).toMatchObject({
+      tool: 'build_context',
+      rule_gate: ruleGate,
+    });
+  });
+
+  it('a one-rule resource read yields one mcp_tool_call with the rule id, no double count', async () => {
+    const { recorder, events } = recorderSpy();
+    const { client, close } = await connectClient(recorder);
+    const missing = 'rlc_ffffffffffffffff.0123456789';
+
+    await client.readResource({ uri: `zm://rules/${RULE_ID}` });
+    await expect(
+      client.readResource({ uri: `zm://rules/${missing}` })
+    ).rejects.toThrow(/not found/i);
+    await flush();
+    await close();
+
+    // One row per read: the pre-execution emit is suppressed for the
+    // result-attributed resource:rule, so the daily fetch count is honest.
+    const toolCalls = events().filter((e) => e.eventType === 'mcp_tool_call');
+    expect(toolCalls.map((e) => e.metadata)).toEqual([
+      { tool: 'resource:rule', rule_id: RULE_ID, found: true },
+      { tool: 'resource:rule', rule_id: missing, found: false },
+    ]);
   });
 
   it('recall attributes the surfaced mem ids on a single mcp_tool_call', async () => {
