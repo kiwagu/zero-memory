@@ -178,52 +178,66 @@ describe('parseTranscript', () => {
     ]);
   });
 
-  it('collects guard refusals from the [guard:<name>] tag wherever it appears', () => {
-    const lines = [
-      JSON.stringify({
-        type: 'assistant',
-        timestamp: '2026-10-24T10:00:00Z',
-        message: {
-          role: 'assistant',
-          content: [
-            {
-              type: 'tool_use',
-              id: 'toolu_1',
-              name: 'Bash',
-              input: { command: 'git commit -m a -m b' },
-            },
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: 'user',
-        timestamp: '2026-10-24T10:00:01Z',
-        message: {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'toolu_1',
-              is_error: true,
-              content:
-                'PreToolUse hook denied: [guard:commit_message_guard] a commit message is one line',
-            },
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: 'user',
-        timestamp: '2026-10-24T10:00:02Z',
-        message: {
-          role: 'user',
-          content: 'plain text mentioning [guard:dev_docs_guard] in prose',
-        },
-      }),
-    ].join('\n');
-    const parsed = parseTranscript(lines);
-    expect(parsed.guardRefusals).toEqual([
-      { guard: 'commit_message_guard', at: '2026-10-24T10:00:01Z' },
-      { guard: 'dev_docs_guard', at: '2026-10-24T10:00:02Z' },
-    ]);
+  // A PreToolUse denial lands in the tool_result that answers the refused
+  // call, so that is the only place a tag counts. The same tag in the call's
+  // own input, in prose, or in a compaction recap is talk about a guard, not
+  // a refusal.
+  it('counts a guard refusal only from the [guard:<name>] tag in a tool result', () => {
+    const toolUse = JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-10-24T10:00:00Z',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Testing [guard:dev_docs_guard] next.' },
+          {
+            type: 'tool_use',
+            id: 'toolu_1',
+            name: 'Bash',
+            input: { command: 'echo "[guard:commit_message_guard] refused"' },
+          },
+        ],
+      },
+    });
+    const refusal = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-10-24T10:00:01Z',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_1',
+            is_error: true,
+            content:
+              'PreToolUse hook denied: [guard:commit_message_guard] a commit message is one line',
+          },
+        ],
+      },
+    });
+    const prose = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-10-24T10:00:02Z',
+      message: {
+        role: 'user',
+        content: 'plain text mentioning [guard:dev_docs_guard] in prose',
+      },
+    });
+    const recap = JSON.stringify({
+      type: 'user',
+      isCompactSummary: true,
+      timestamp: '2026-10-24T10:00:03Z',
+      message: {
+        role: 'user',
+        content: 'Earlier, [guard:commit_message_guard] refused a commit.',
+      },
+    });
+
+    expect(
+      parseTranscript([toolUse, refusal, prose, recap].join('\n')).guardRefusals
+    ).toEqual([{ guard: 'commit_message_guard', at: '2026-10-24T10:00:01Z' }]);
+    expect(
+      parseTranscript([toolUse, prose, recap].join('\n')).guardRefusals
+    ).toEqual([]);
   });
 });

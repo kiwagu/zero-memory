@@ -49,8 +49,8 @@ const transcriptLineSchema = z.looseObject({
  * tool results surfaced. A recalled id is only taken from a tool_result whose
  * tool_use_id belongs to a recall / build_context call — so a `remember` result
  * (which returns a freshly-created id) is never mistaken for a recall hit.
- * Guard refusals are read off EVERY line, tool results included, by the
- * `[guard:<name>]` tag alone: only the name and the line's timestamp are kept.
+ * Guard refusals are read off tool_result items only, by the `[guard:<name>]`
+ * tag: only the name and the line's timestamp are kept.
  */
 export const parseTranscript = (jsonl: string): ParsedTranscript => {
   const entries: TranscriptEntry[] = [];
@@ -64,12 +64,6 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
   for (const line of parseJsonLines(jsonl, transcriptLineSchema)) {
     const { type, isMeta, isCompactSummary, message } = line;
     cwd ??= line.cwd;
-
-    // Before the role and meta filters: a refusal reaches the transcript as a
-    // tool_result, which the text pass below drops.
-    for (const guard of collectGuardTags(JSON.stringify(line.message ?? ''))) {
-      guardRefusals.push({ guard, at: line.timestamp ?? null });
-    }
 
     // A context compaction appends its summary as a record that looks exactly
     // like something the human typed: `type: "user"`, `message.role: "user"`,
@@ -85,6 +79,11 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
     if (isCompactSummary === true) {
       continue;
     }
+
+    // Before the role and meta filters, which do not concern it: a refusal
+    // arrives as the tool_result answering the denied call.
+    collectGuardRefusals(message?.content, line.timestamp, guardRefusals);
+
     if (isMeta === true || (type !== 'user' && type !== 'assistant')) {
       continue;
     }
@@ -115,6 +114,8 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
   return { entries, cwd, recalledIds: [...recalledIds], guardRefusals };
 };
 
+type ContentItem = z.infer<typeof contentItemSchema>;
+
 /**
  * The tag a refusing guard hook opens its reason with, e.g.
  * `[guard:commit_message_guard] …`. The name pattern is the contract's guard
@@ -124,7 +125,29 @@ const GUARD_TAG = /\[guard:([a-z][a-z0-9_-]{1,63})\]/gu;
 const collectGuardTags = (text: string): string[] =>
   [...text.matchAll(GUARD_TAG)].map((match) => match[1]!);
 
-type ContentItem = z.infer<typeof contentItemSchema>;
+/**
+ * Appends the guard refusals one line records, oldest first. A PreToolUse
+ * denial lands in the tool_result that answers the refused call, so only those
+ * items are read: the same tag in prose, in the call's own input or in a
+ * compaction recap is talk about a guard, not a refusal by one.
+ */
+const collectGuardRefusals = (
+  content: string | ContentItem[] | undefined,
+  timestamp: string | undefined,
+  guardRefusals: ParsedTranscript['guardRefusals']
+): void => {
+  if (!Array.isArray(content)) {
+    return;
+  }
+  for (const item of content) {
+    if (item.type !== 'tool_result') {
+      continue;
+    }
+    for (const guard of collectGuardTags(JSON.stringify(item))) {
+      guardRefusals.push({ guard, at: timestamp ?? null });
+    }
+  }
+};
 
 /**
  * Registers recall / build_context tool_use ids and, for a tool_result that
