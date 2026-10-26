@@ -13,11 +13,15 @@
 --     rule_gate_calls         read calls whose rules went through the gate
 --     rules_chars_baseline    characters the rules would have taken whole
 --     rules_chars_delivered   characters actually delivered
---     rules_full              rules delivered whole
---     rules_judged            rules the gate named (summed over calls)
+--     rules_judged            unpinned rules the gate judged (summed over
+--                             calls)
+--     rules_full              of those, delivered whole
 --     rule_fetches            reads of one rule's full text that found it
 --     guard_refusals          guard-hook refusals reported by ingest
---     judge_latency_ms_sum    the judge's latency, summed over gated calls
+--     judge_latency_ms_sum    the judge's latency, summed over gated calls.
+--                             A call whose judge did not answer records 0, so
+--                             the mean is
+--                             sum / (rule_gate_calls - judge_unavailable)
 --     judge_unavailable       gated calls whose judge did not answer
 --     judge_input_tokens      input tokens the judge consumed
 --
@@ -46,6 +50,12 @@
 --     from the raw events.
 --   - A read of a rule id that does not exist is noise, not a fetch: only
 --     reads that found the rule count.
+--   - rules_judged and rules_full both count the unpinned entries of the
+--     gate's rules list, so "share delivered whole" is a ratio of one set and
+--     never exceeds 1. A pinned rule always goes out whole without being
+--     judged, and a rule without an id is not listed; the gate's own level
+--     totals include both, so they are not used here. The per-rule breakdown
+--     counts the same unpinned entries.
 --   - public.rule_gate_stats is the caller's own data only (keyed on the
 --     signed-in user inside the function), so it is open to authenticated
 --     and closed to anon.
@@ -148,11 +158,20 @@ as $$
       count(*)::int as calls,
       coalesce(sum((e.metadata -> 'rule_gate' ->> 'chars_baseline')::int), 0)::int as chars_baseline,
       coalesce(sum((e.metadata -> 'rule_gate' ->> 'chars_delivered')::int), 0)::int as chars_delivered,
-      coalesce(sum((e.metadata -> 'rule_gate' -> 'levels' ->> 'full')::int), 0)::int as rules_full,
-      coalesce(sum(jsonb_array_length(e.metadata -> 'rule_gate' -> 'rules')), 0)::int as rules_judged,
+      coalesce(sum(j.full_n), 0)::int as rules_full,
+      coalesce(sum(j.judged_n), 0)::int as rules_judged,
       coalesce(sum((e.metadata -> 'rule_gate' ->> 'latency_ms')::int), 0)::int as latency_sum,
       count(*) filter (where (e.metadata -> 'rule_gate' ->> 'judge_unavailable')::boolean)::int as unavailable
     from public.usage_events e
+      -- The rules this call judged: the unpinned entries of its rules list,
+      -- and of those the ones delivered whole. One row per event.
+      cross join lateral (
+        select
+          count(*) as judged_n,
+          count(*) filter (where r.value ->> 'level' = 'full') as full_n
+        from jsonb_array_elements(e.metadata -> 'rule_gate' -> 'rules') r
+        where (r.value ->> 'pinned')::boolean is false
+      ) j
     where e.user_id = p_usr
       and e.event_type = 'mcp_tool_call'
       and e.metadata ? 'rule_gate'
@@ -584,7 +603,7 @@ $$;
 -- 6. the per-rule breakdown ----------------------------------------------------
 
 -- How each standing rule fared at the gate over the window, for the calling
--- user: how often it was judged, at which level it went out, the mean
+-- user (unpinned entries only, as in the series): how often it was judged, at which level it went out, the mean
 -- probability the judge gave it, and how often its full text was read back
 -- (found reads only). Plus the guard refusals by guard. Content-free: rule
 -- ids, counts and a probability; never a rule's text.
@@ -600,6 +619,7 @@ as $$
     select e.occurred_at, r.value as rule
     from public.usage_events e, me, jsonb_array_elements(e.metadata -> 'rule_gate' -> 'rules') r
     where e.user_id = me.usr and e.event_type = 'mcp_tool_call' and e.metadata ? 'rule_gate'
+      and (r.value ->> 'pinned')::boolean is false
       and e.occurred_at >= now() - make_interval(days => greatest(coalesce(p_days, 30), 1))
   ),
   per_rule as (
@@ -629,9 +649,9 @@ as $$
   select jsonb_build_object(
     'rules', coalesce((select jsonb_agg(jsonb_build_object(
                'rule_id', p.rule_id, 'calls', p.calls, 'full', p.full, 'gate', p.gate, 'headline', p.headline,
-               'mean_p', round(p.mean_p, 3), 'fetches', coalesce(f.n, 0)) order by p.calls desc)
+               'mean_p', round(p.mean_p, 3), 'fetches', coalesce(f.n, 0)) order by p.calls desc, p.rule_id)
              from per_rule p left join fetches f on f.rule_id = p.rule_id), '[]'::jsonb),
-    'refusals', coalesce((select jsonb_agg(jsonb_build_object('guard', guard, 'count', n) order by n desc) from refusals), '[]'::jsonb)
+    'refusals', coalesce((select jsonb_agg(jsonb_build_object('guard', guard, 'count', n) order by n desc, guard) from refusals), '[]'::jsonb)
   );
 $$;
 
