@@ -2337,8 +2337,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'waiting for it to earn candidacy across sessions. Use when you ' +
         'already know a decision/preference/convention is a standing rule. ' +
         'The imperative text is distilled from the memory (pass rule_text to ' +
-        'override). By default it becomes a GENERAL (user-layer) rule when ' +
-        'the memory sits in a personal scope, delivered to every session via ' +
+        'override), and so is applies_when: the observable task features ' +
+        'under which the rule binds (pass it to set your own). By default it ' +
+        'becomes a GENERAL (user-layer) rule when the memory sits in a ' +
+        'personal scope, delivered to every session via ' +
         'the MCP instructions; pass applies_scope to make it a PROJECT rule ' +
         "delivered only in that project's briefings. Owner-only (your " +
         'memory). Reversible via the /rules revoke.',

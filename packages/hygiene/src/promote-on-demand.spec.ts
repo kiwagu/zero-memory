@@ -228,6 +228,49 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect(upserts[0]!.row).toMatchObject({ applies_when: null });
   });
 
+  it('keeps a stored applies_when on a text-only re-promote; a fresh distillation replaces it', async () => {
+    const stored = {
+      status: 'promoted',
+      target_layer: 'user',
+      applies_scope: null,
+      applies_when: 'tasks that touch supabase/migrations',
+    };
+
+    const textOnly = make(personalMemory, 'unused', stored);
+    await textOnly.detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'never edit an applied migration, write a new one',
+    });
+    expect(textOnly.upserts[0]!.row.applies_when).toBe(
+      'tasks that touch supabase/migrations'
+    );
+
+    const redistilled = make(personalMemory, 'distilled', stored, 'git tasks');
+    await redistilled.detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+    });
+    expect(redistilled.upserts[0]!.row.applies_when).toBe('git tasks');
+  });
+
+  it('trims applies_when and stores a blank one as null', async () => {
+    const explicit = make(personalMemory);
+    await explicit.detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'always squash',
+      appliesWhen: '  tasks that land a branch  ',
+    });
+    const blank = make(personalMemory, 'distilled rule', null, '   ');
+    await blank.detector.promoteOnDemand({ memoryId: MEMORY, ownerId: OWNER });
+
+    expect([
+      explicit.upserts[0]!.row.applies_when,
+      blank.upserts[0]!.row.applies_when,
+    ]).toEqual(['tasks that land a branch', null]);
+  });
+
   it('refuses an applies_when that carries a secret', async () => {
     const { detector, upserts } = make(personalMemory);
 

@@ -14,6 +14,7 @@ import {
 import {
   DEFAULT_INCUBATOR_CONFIG,
   mergeScopeSuggestions,
+  readAppliesWhen,
   targetLayerForScope,
   type IncubatorConfig,
   type RuleDistillation,
@@ -245,7 +246,7 @@ export class RuleCandidateDetector {
 
     const { data: existing } = await this.client
       .from('rule_candidates')
-      .select('status, target_layer, applies_scope')
+      .select('status, target_layer, applies_scope, applies_when')
       .eq('memory_id', memoryId)
       .maybeSingle();
     // Guard the upsert: reviving a DELIBERATELY dismissed candidacy needs an
@@ -274,7 +275,13 @@ export class RuleCandidateDetector {
     // Distill for clean imperative text + scope suggestions unless the caller
     // supplied the text. The verdict never gates the promotion here.
     let text = ruleText?.trim() ?? '';
-    let distilledAppliesWhen: string | null = null;
+    // When the rule binds a task: the caller's condition wins, a fresh
+    // distillation replaces the stored one, and a text-only re-promote keeps
+    // the condition the row already has.
+    let condition =
+      appliesWhen === undefined
+        ? (existing?.applies_when ?? null)
+        : readAppliesWhen(appliesWhen);
     let suggestions: RuleDistillation['scope_suggestions'] = [];
     let confidence: number | null = null;
     let rationale: string | null = null;
@@ -295,7 +302,9 @@ export class RuleCandidateDetector {
       // spends tokens on the owner's behalf, so it must land on their ledger.
       await this.#meterDistill(judgement, ownerId);
       text = judgement.verdict.rule_text.trim();
-      distilledAppliesWhen = judgement.verdict.applies_when ?? null;
+      if (appliesWhen === undefined) {
+        condition = readAppliesWhen(judgement.verdict.applies_when);
+      }
       suggestions = judgement.verdict.scope_suggestions ?? [];
       confidence = judgement.verdict.confidence;
       rationale = judgement.verdict.rationale;
@@ -321,8 +330,7 @@ export class RuleCandidateDetector {
         useful_sessions: 0,
         window_days: 0,
         rule_text: text,
-        // The caller's condition wins over the distiller's.
-        applies_when: appliesWhen ?? distilledAppliesWhen ?? null,
+        applies_when: condition,
         target_layer: targetLayer,
         applies_scope: address,
         suggested_scopes: suggestedScopes,
@@ -527,7 +535,7 @@ export class RuleCandidateDetector {
       .from('rule_candidates')
       .update({
         rule_text: judgement.verdict.rule_text,
-        applies_when: judgement.verdict.applies_when ?? null,
+        applies_when: readAppliesWhen(judgement.verdict.applies_when),
         target_layer: targetLayerForScope(row.scope),
         judge_confidence: judgement.verdict.confidence,
         judge_rationale: judgement.verdict.rationale,
