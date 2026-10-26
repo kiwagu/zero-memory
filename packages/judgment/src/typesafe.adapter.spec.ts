@@ -40,6 +40,21 @@ const fetchReturning =
     });
   };
 
+const judgeAnswering = (answers: unknown) =>
+  new TypeSafeJudgment({
+    apiKey: 'k',
+    model: 'jev-1.14.0',
+    fetch: fetchReturning(
+      200,
+      {
+        model: 'jev-1.14.0',
+        answers,
+        usage: { input_tokens: 10, output_tokens: 1 },
+      },
+      {}
+    ),
+  });
+
 describe('TypeSafeJudgment', () => {
   it('posts state and questions to /v1/systemone and maps the noul answers', async () => {
     const seen: { body?: unknown; headers?: Headers } = {};
@@ -114,5 +129,73 @@ describe('TypeSafeJudgment', () => {
     await expect(judge.judge(request)).rejects.not.toBeInstanceOf(
       JudgeUnavailableError
     );
+  });
+
+  it('bounds the body read too: a body that stalls past the timeout is unavailability', async () => {
+    const judge = new TypeSafeJudgment({
+      apiKey: 'k',
+      model: 'jev-1.14.0',
+      fetch: async (_url, init) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              init?.signal?.addEventListener('abort', () =>
+                controller.error(new DOMException('aborted', 'AbortError'))
+              );
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        ),
+    });
+    await expect(
+      judge.judge(request, { timeoutMs: 20 })
+    ).rejects.toBeInstanceOf(JudgeUnavailableError);
+  });
+
+  it('rejects a noul outside 0..1 as a malformed response (a bug, not unavailability)', async () => {
+    const judge = judgeAnswering({ r1: { type: 'noul', noul: 1.7 } });
+    await expect(judge.judge(request)).rejects.toThrow(
+      /typesafe: malformed response/
+    );
+    await expect(judge.judge(request)).rejects.not.toBeInstanceOf(
+      JudgeUnavailableError
+    );
+  });
+
+  it('rejects a 200 whose body is not JSON as a malformed response', async () => {
+    const judge = new TypeSafeJudgment({
+      apiKey: 'k',
+      model: 'jev-1.14.0',
+      fetch: async () => new Response('<html>busy</html>', { status: 200 }),
+    });
+    await expect(judge.judge(request)).rejects.toThrow(
+      /typesafe: malformed response/
+    );
+  });
+
+  it('drops answers to questions that were never asked', async () => {
+    const result = await judgeAnswering({
+      r1: { type: 'noul', noul: 0.7 },
+      r9: { type: 'noul', noul: 0.4 },
+    }).judge(request);
+    expect(result.answers).toEqual({ r1: { noul: 0.7 } });
+  });
+
+  it('leaves a question the judge did not answer absent from the answers', async () => {
+    const result = await judgeAnswering({
+      r1: { type: 'noul', noul: 0.7 },
+    }).judge({
+      ...request,
+      questions: {
+        ...request.questions,
+        r2: {
+          kind: 'noul',
+          instructions: 'Is `task` about databases?',
+          criteria: { true: 'it is', false: 'it is not' },
+        },
+      },
+    });
+    expect(result.answers).toEqual({ r1: { noul: 0.7 } });
+    expect(result.answers).not.toHaveProperty('r2');
   });
 });

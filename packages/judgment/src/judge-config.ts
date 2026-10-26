@@ -70,7 +70,7 @@ const readTimeoutMs = (env: NodeJS.ProcessEnv) =>
   );
 
 export const readJudgeConfig = (env: NodeJS.ProcessEnv): JudgeConfig => {
-  const rawProvider = env.ZM_JUDGE_PROVIDER ?? 'typesafe';
+  const rawProvider = env.ZM_JUDGE_PROVIDER || 'typesafe';
   if (!isProvider(rawProvider)) {
     throw new Error(
       `ZM_JUDGE_PROVIDER must be one of ${JUDGE_PROVIDER_NAMES.join(', ')}, got "${rawProvider}"`
@@ -92,7 +92,7 @@ export const readJudgeConfig = (env: NodeJS.ProcessEnv): JudgeConfig => {
 };
 
 export const readRuleGateConfig = (env: NodeJS.ProcessEnv): RuleGateConfig => {
-  const rawMode = env.ZM_RULE_GATE_MODE ?? 'off';
+  const rawMode = env.ZM_RULE_GATE_MODE || 'off';
   if (rawMode !== 'off' && rawMode !== 'shadow' && rawMode !== 'live') {
     throw new Error(
       `ZM_RULE_GATE_MODE must be off, shadow or live, got "${rawMode}"`

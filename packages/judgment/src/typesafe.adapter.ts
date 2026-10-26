@@ -1,8 +1,11 @@
+import { z } from 'zod';
+
 import {
   JudgeUnavailableError,
   type IJudgment,
   type JudgmentRequest,
   type JudgmentResult,
+  type NoulAnswer,
 } from './judgment.port.js';
 
 /**
@@ -12,11 +15,39 @@ import {
  * criteria }` — a question is discriminated by its `type` — and the answer
  * carries `{ type: 'noul', noul }` with `noul` in 0..1.
  */
-interface TypeSafeResponse {
-  model?: string;
-  answers?: Record<string, { type?: string; noul?: number }>;
-  usage?: { input_tokens?: number; output_tokens?: number };
-}
+const tokenCount = z.number().int().nonnegative();
+
+const typeSafeResponseSchema = z.object({
+  model: z.string().optional(),
+  answers: z.record(
+    z.string(),
+    z.looseObject({ noul: z.number().min(0).max(1) })
+  ),
+  usage: z
+    .object({ input_tokens: tokenCount, output_tokens: tokenCount })
+    .optional(),
+});
+
+type TypeSafeResponse = z.infer<typeof typeSafeResponseSchema>;
+
+/** A body that does not match the wire shape is a bug, not unavailability. */
+const parseResponse = (text: string): TypeSafeResponse => {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (error) {
+    throw new Error('typesafe: malformed response: not JSON', {
+      cause: error,
+    });
+  }
+  const parsed = typeSafeResponseSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new Error(
+      `typesafe: malformed response: ${z.prettifyError(parsed.error)}`
+    );
+  }
+  return parsed.data;
+};
 
 export class TypeSafeJudgment implements IJudgment {
   readonly #apiKey: string;
@@ -48,6 +79,9 @@ export class TypeSafeJudgment implements IJudgment {
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     const started = performance.now();
     let response: Response;
+    let text: string;
+    // The timer bounds the whole exchange, body included: a provider that
+    // sends headers and then stalls the body must still fail in time.
     try {
       response = await this.#fetch(`${this.#baseUrl}/v1/systemone`, {
         method: 'POST',
@@ -71,6 +105,7 @@ export class TypeSafeJudgment implements IJudgment {
         }),
         signal: controller.signal,
       });
+      text = await response.text();
     } catch (error) {
       throw new JudgeUnavailableError(
         `typesafe: no answer within ${timeoutMs} ms`,
@@ -83,17 +118,16 @@ export class TypeSafeJudgment implements IJudgment {
       throw new JudgeUnavailableError(`typesafe: ${response.status}`);
     }
     if (!response.ok) {
-      throw new Error(
-        `typesafe: HTTP ${response.status}: ${await response.text()}`
-      );
+      throw new Error(`typesafe: HTTP ${response.status}: ${text}`);
     }
-    const body = (await response.json()) as TypeSafeResponse;
-    const answers: Record<string, { noul: number }> = {};
-    for (const [name, answer] of Object.entries(body.answers ?? {})) {
-      if (typeof answer?.noul === 'number') {
-        answers[name] = { noul: answer.noul };
-      }
-    }
+    const body = parseResponse(text);
+    // Only the questions asked get answers; one the judge left unanswered
+    // stays absent.
+    const answers: Record<string, NoulAnswer> = Object.fromEntries(
+      Object.entries(body.answers)
+        .filter(([name]) => Object.hasOwn(request.questions, name))
+        .map(([name, answer]) => [name, { noul: answer.noul }])
+    );
     return {
       answers,
       model: body.model ?? this.#model,

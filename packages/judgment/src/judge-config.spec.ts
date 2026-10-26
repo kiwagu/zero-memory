@@ -28,6 +28,19 @@ describe('readJudgeConfig', () => {
     expect(config.timeoutMs).toBe(900);
   });
 
+  it('treats empty knobs as unset, as compose passes `${VAR:-}`', () => {
+    expect(
+      readJudgeConfig({
+        ZM_JUDGE_PROVIDER: '',
+        ZM_TYPESAFE_API_KEY: '',
+        SNAPQ_API_KEY: '',
+        ZM_JUDGE_MODEL_TYPESAFE: '',
+        ZM_JUDGE_MODEL_SUBQ: '',
+        ZM_JUDGE_TIMEOUT_MS: '',
+      })
+    ).toEqual(readJudgeConfig({}));
+  });
+
   it('refuses an unknown provider name', () => {
     expect(() => readJudgeConfig({ ZM_JUDGE_PROVIDER: 'gpt' })).toThrow(
       /ZM_JUDGE_PROVIDER/
@@ -43,6 +56,17 @@ describe('readRuleGateConfig', () => {
       lo: 0.35,
       timeoutMs: 1500,
     });
+  });
+
+  it('treats empty knobs as unset, as compose passes `${VAR:-}`', () => {
+    expect(
+      readRuleGateConfig({
+        ZM_RULE_GATE_MODE: '',
+        ZM_RULE_GATE_HI: '',
+        ZM_RULE_GATE_LO: '',
+        ZM_JUDGE_TIMEOUT_MS: '',
+      })
+    ).toEqual(readRuleGateConfig({}));
   });
 
   it('refuses bands that are not ordered inside (0, 1)', () => {

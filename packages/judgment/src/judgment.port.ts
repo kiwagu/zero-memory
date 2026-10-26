@@ -34,6 +34,10 @@ export interface NoulAnswer {
 }
 
 export interface JudgmentResult {
+  /**
+   * Keyed by question name. A missing key means the judge gave no answer to
+   * that question; answers to questions that were not asked never appear.
+   */
   readonly answers: Record<string, NoulAnswer>;
   readonly model: string;
   readonly provider: JudgeProviderName;

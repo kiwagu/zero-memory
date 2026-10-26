@@ -578,6 +578,7 @@
       "dependencies": {
         "@workspace/di": "workspace:*",
         "@workspace/logger": "workspace:*",
+        "zod": "catalog:",
       },
       "devDependencies": {
         "@types/node": "catalog:",
