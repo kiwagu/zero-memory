@@ -1786,9 +1786,11 @@ export type Database = {
       rule_candidates: {
         Row: {
           applies_scope: unknown;
+          applies_when: string | null;
           carried_at: string | null;
           carried_from: string | null;
           created_at: string;
+          enforced_by: string | null;
           first_used_at: string | null;
           id: string;
           judge_confidence: number | null;
@@ -1815,9 +1817,11 @@ export type Database = {
         };
         Insert: {
           applies_scope?: unknown;
+          applies_when?: string | null;
           carried_at?: string | null;
           carried_from?: string | null;
           created_at?: string;
+          enforced_by?: string | null;
           first_used_at?: string | null;
           id?: string;
           judge_confidence?: number | null;
@@ -1844,9 +1848,11 @@ export type Database = {
         };
         Update: {
           applies_scope?: unknown;
+          applies_when?: string | null;
           carried_at?: string | null;
           carried_from?: string | null;
           created_at?: string;
+          enforced_by?: string | null;
           first_used_at?: string | null;
           id?: string;
           judge_confidence?: number | null;

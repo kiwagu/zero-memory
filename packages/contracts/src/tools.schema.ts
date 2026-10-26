@@ -733,6 +733,8 @@ export const promoteRuleInputSchema = z.object({
   applies_scope: z.string().min(1).optional(),
   /** Override the distilled imperative text (else distilled from the memory). */
   rule_text: z.string().min(1).max(2000).optional(),
+  /** When the rule binds a task: one to three lines of observable task features. */
+  applies_when: z.string().min(1).max(400).optional(),
   /** Re-promote a memory you earlier DISMISSED as a rule (overrides the guard). */
   force: z.boolean().optional(),
 });

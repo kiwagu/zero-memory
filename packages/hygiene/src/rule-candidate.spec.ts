@@ -30,7 +30,13 @@ describe('clearsDistillGate', () => {
   it('queues a confident rule verdict', () => {
     expect(
       clearsDistillGate(
-        { rule: true, rule_text: 'Always X.', confidence: 0.9, rationale: '' },
+        {
+          rule: true,
+          rule_text: 'Always X.',
+          applies_when: null,
+          confidence: 0.9,
+          rationale: '',
+        },
         gate
       )
     ).toBe(true);
@@ -39,7 +45,13 @@ describe('clearsDistillGate', () => {
   it('dismisses a not-a-rule verdict regardless of confidence', () => {
     expect(
       clearsDistillGate(
-        { rule: false, rule_text: '', confidence: 0.99, rationale: '' },
+        {
+          rule: false,
+          rule_text: '',
+          applies_when: null,
+          confidence: 0.99,
+          rationale: '',
+        },
         gate
       )
     ).toBe(false);
@@ -51,6 +63,7 @@ describe('clearsDistillGate', () => {
         {
           rule: true,
           rule_text: 'Maybe X.',
+          applies_when: null,
           confidence: gate - 0.01,
           rationale: '',
         },
@@ -60,7 +73,13 @@ describe('clearsDistillGate', () => {
     // The gate itself is inclusive: "at or above" queues.
     expect(
       clearsDistillGate(
-        { rule: true, rule_text: 'X.', confidence: gate, rationale: '' },
+        {
+          rule: true,
+          rule_text: 'X.',
+          applies_when: null,
+          confidence: gate,
+          rationale: '',
+        },
         gate
       )
     ).toBe(true);
@@ -74,6 +93,7 @@ describe('ruleDistillationSchema', () => {
         rule: true,
         rule_text:
           'Always pin `set search_path` in security definer functions.',
+        applies_when: 'tasks that write SQL functions',
         confidence: 0.8,
         rationale: 'standing convention',
       }).rule
@@ -82,6 +102,7 @@ describe('ruleDistillationSchema', () => {
       ruleDistillationSchema.parse({
         rule: true,
         rule_text: 'x',
+        applies_when: null,
         confidence: 1.3,
         rationale: 'x',
       })

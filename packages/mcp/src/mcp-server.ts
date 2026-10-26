@@ -2356,6 +2356,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           ownerId,
           appliesScope: input.applies_scope,
           ruleText: input.rule_text,
+          appliesWhen: input.applies_when,
           force: input.force,
         });
         // Instructions are frozen at connect, so a freshly promoted rule does

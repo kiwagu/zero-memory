@@ -36,6 +36,17 @@ export const ruleDistillationSchema = z.object({
   rule: z.boolean(),
   /** Imperative, self-contained rule text (markdown), empty when rule=false. */
   rule_text: z.string(),
+  /**
+   * When the rule binds a task: one to three lines of observable task
+   * features. Null when the rule binds every task of this owner.
+   */
+  applies_when: z
+    .string()
+    .max(400)
+    .nullable()
+    .describe(
+      'Observable task features for which the rule binds; null when it binds every task'
+    ),
   confidence: z.number().min(0).max(1),
   rationale: z.string(),
   /**

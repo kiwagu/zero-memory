@@ -56,12 +56,16 @@ function fakeClient(
   return { client, upserts, inserts };
 }
 
-const distillerReturning = (ruleText: string): RuleDistiller =>
+const distillerReturning = (
+  ruleText: string,
+  appliesWhen: string | null = null
+): RuleDistiller =>
   ({
     distill: vi.fn().mockResolvedValue({
       verdict: {
         rule: true,
         rule_text: ruleText,
+        applies_when: appliesWhen,
         confidence: 0.9,
         rationale: 'because',
         scope_suggestions: [],
@@ -76,10 +80,11 @@ const distillerReturning = (ruleText: string): RuleDistiller =>
 const make = (
   memory: Record<string, unknown> | null,
   distillText = 'distilled rule',
-  existing: Record<string, unknown> | null = null
+  existing: Record<string, unknown> | null = null,
+  distillAppliesWhen: string | null = null
 ) => {
   const { client, upserts, inserts } = fakeClient(memory, existing);
-  const distiller = distillerReturning(distillText);
+  const distiller = distillerReturning(distillText, distillAppliesWhen);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const detector = new RuleCandidateDetector(client as any, distiller);
   return { detector, upserts, inserts, distiller };
@@ -175,6 +180,66 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect(upserts[0]!.row.rule_text).toBe(
       'always run the e2e suite before review'
     );
+  });
+
+  it('stores the applies_when the caller gives', async () => {
+    const { detector, upserts } = make(personalMemory);
+
+    await detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'never edit an applied migration',
+      appliesWhen: 'tasks that touch supabase/migrations',
+    });
+
+    expect(upserts[0]!.row.applies_when).toBe(
+      'tasks that touch supabase/migrations'
+    );
+  });
+
+  it("stores the distiller's applies_when unless the caller gives one", async () => {
+    const distilled = make(personalMemory, 'distilled rule', null, 'git tasks');
+    await distilled.detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+    });
+    expect(distilled.upserts[0]!.row.applies_when).toBe('git tasks');
+
+    const named = make(personalMemory, 'distilled rule', null, 'git tasks');
+    await named.detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      appliesWhen: 'tasks that touch supabase/migrations',
+    });
+    expect(named.upserts[0]!.row.applies_when).toBe(
+      'tasks that touch supabase/migrations'
+    );
+  });
+
+  it('stores a null applies_when when neither the caller nor the distiller gives one', async () => {
+    const { detector, upserts } = make(personalMemory);
+
+    await detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'always squash',
+    });
+
+    expect(upserts[0]!.row).toMatchObject({ applies_when: null });
+  });
+
+  it('refuses an applies_when that carries a secret', async () => {
+    const { detector, upserts } = make(personalMemory);
+
+    await expect(
+      detector.promoteOnDemand({
+        memoryId: MEMORY,
+        ownerId: OWNER,
+        ruleText: 'always squash',
+        appliesWhen: 'tasks on postgres://admin:hunter2@db.internal:5432/app',
+      })
+    ).rejects.toThrow(/applies_when/);
+    expect(upserts).toEqual([]);
   });
 
   it('refuses a memory the caller does not own', async () => {
