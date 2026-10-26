@@ -1931,8 +1931,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         // of the remember-reminder footer, so they read as rules, not data.
         // This is the channel that carries their TEXT — the MCP instructions
         // only announce that they exist — so an agent calling build_context
-        // directly (no hook) still receives them in full. Pinned rules lead
-        // and are marked: the owner guaranteed those reach the session.
+        // directly (no hook) still receives each rule at the level the gate
+        // chose: in full, by headline with its condition, or by headline.
+        // Pinned rules lead and are marked: the owner guaranteed those reach
+        // the session.
         const briefedRules = result.rules ?? [];
         const rulesFooter =
           briefedRules.length > 0

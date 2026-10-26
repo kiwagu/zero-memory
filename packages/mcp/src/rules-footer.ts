@@ -3,17 +3,23 @@ import type { ContextRule } from '@workspace/contracts';
 /**
  * The STANDING RULES block of a build_context tool result — the channel that
  * carries rule text for clients with no hook. A rule arrives at the level the
- * gate chose: whole, headline plus applicability gate, or headline. Rules
- * not delivered whole are named and point at the resource that has them.
+ * gate chose: whole, headline plus its applicability condition (when it has
+ * one), or headline. A rule not delivered whole carries its id on its line,
+ * so the resource that has the full text is reachable from this text alone.
  */
 export const renderRulesFooter = (rules: readonly ContextRule[]): string => {
   const lines = rules.map((rule, index) => {
     const pin = rule.pinned ? ' [pinned]' : '';
+    const id = rule.id ? ` ${rule.id}` : '';
     switch (rule.level) {
-      case 'gate':
-        return `${index + 1}.${pin} ${rule.text} — applies when: ${rule.applies_when ?? ''} [gate]`;
+      case 'gate': {
+        const condition = rule.applies_when
+          ? ` — applies when: ${rule.applies_when}`
+          : '';
+        return `${index + 1}.${pin} ${rule.text}${condition} [gate]${id}`;
+      }
       case 'headline':
-        return `${index + 1}.${pin} ${rule.text} [headline]`;
+        return `${index + 1}.${pin} ${rule.text} [headline]${id}`;
       default:
         return `${index + 1}.${pin} ${rule.text}`;
     }
@@ -23,8 +29,8 @@ export const renderRulesFooter = (rules: readonly ContextRule[]): string => {
   ).length;
   const note =
     partial > 0
-      ? `\n(${partial} rule(s) above are delivered by headline or gate because they do not bind this task; ` +
-        "read `zm://rules/<id>` with the entry's id for the full text before acting on one.)"
+      ? `\n(${partial} rule(s) above are delivered by headline or gate because they may not bind this task; ` +
+        'read `zm://rules/<id>` with the id shown on the line for the full text before acting on one.)'
       : '';
   return (
     'STANDING RULES — instructions the owner PROMOTED out of memory for sessions like this one. ' +
