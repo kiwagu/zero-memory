@@ -52,7 +52,7 @@
     },
     "apps/server": {
       "name": "server",
-      "version": "0.45.0",
+      "version": "0.48.0",
       "bin": {
         "zero-memory-mcp": "./src/mcp-stdio.ts",
       },
@@ -100,7 +100,7 @@
     },
     "apps/watcher": {
       "name": "watcher",
-      "version": "0.34.13",
+      "version": "0.34.14",
       "bin": {
         "zero-memory-watcher": "./src/index.ts",
       },
@@ -128,7 +128,7 @@
     },
     "apps/web": {
       "name": "web",
-      "version": "0.45.0",
+      "version": "0.48.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "catalog:",
         "@supabase/ssr": "catalog:",
@@ -570,6 +570,22 @@
         "@workspace/typescript-config": "workspace:^",
         "eslint": "catalog:",
         "typescript": "catalog:",
+      },
+    },
+    "packages/judgment": {
+      "name": "@workspace/judgment",
+      "version": "0.1.0",
+      "dependencies": {
+        "@workspace/di": "workspace:*",
+        "@workspace/logger": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "catalog:",
+        "@workspace/eslint-config": "workspace:^",
+        "@workspace/typescript-config": "workspace:^",
+        "eslint": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
       },
     },
     "packages/llm": {
@@ -1725,6 +1741,8 @@
     "@workspace/i18n-catalogs": ["@workspace/i18n-catalogs@workspace:packages/i18n-catalogs"],
 
     "@workspace/infra-aws": ["@workspace/infra-aws@workspace:infra/aws"],
+
+    "@workspace/judgment": ["@workspace/judgment@workspace:packages/judgment"],
 
     "@workspace/llm": ["@workspace/llm@workspace:packages/llm"],
 
