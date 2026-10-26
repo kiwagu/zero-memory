@@ -129,7 +129,8 @@ rule — does it bind this task? — and maps the answer to `full`, `gate`
 rules are never judged and every rule keeps its name. An agent call is judged
 against its `topic`; a budgeted hook briefing only against the statement
 `hookTaskStatement` builds from the conversation's bound or continuation card,
-and not at all without one. The gate runs only for an account that turned it
+and not at all without one, nor when the call passes `judge_rules: false` (the
+hook's secondary briefing, so one session start judges once). The gate runs only for an account that turned it
 on and has a judge credential; `shadow` records the levels in `rule_gate`
 without changing what is delivered. A judge failure delivers the rules as
 before, flagged `judge_unavailable`, and never falls back to another provider;

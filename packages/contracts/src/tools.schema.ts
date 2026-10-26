@@ -524,6 +524,12 @@ export const buildContextInputSchema = z.object({
    */
   briefing_kind: z.enum(['session', 'task']).optional(),
   /**
+   * False: deliver the standing rules whole, skipping the rule gate. The
+   * session-start hook sets it on its secondary (branch) briefing so one
+   * session start judges once. Default true.
+   */
+  judge_rules: z.boolean().optional(),
+  /**
    * The client's conversation/session id (e.g. Claude Code's `session_id`),
    * passed by the briefing hook. Only meaningful with `briefing: true`: it
    * lands in the `session_briefing` event's metadata as `conversation_id`, so
@@ -608,8 +614,11 @@ export const buildContextOutputSchema = z.object({
    * characters the rules would have cost whole versus what was delivered,
    * and one probability + level per judged rule (ids and numbers only). In
    * `shadow` mode the levels are what WOULD have been delivered; delivery
-   * itself was unchanged. Absent when the gate is off, not enabled for this
-   * account, or the call was a budgeted hook briefing.
+   * itself was unchanged. A budgeted hook briefing is judged, and carries
+   * this block, only when the conversation has a bound or continuation card
+   * to judge against. Absent when the gate is off or not enabled for this
+   * account, when a hook briefing has no such card, or when the call asked
+   * for `judge_rules: false`.
    */
   rule_gate: ruleGateBlockSchema.optional(),
   /**

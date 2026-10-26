@@ -1519,10 +1519,14 @@ export class MemoryService {
         gated = await this.ruleGate.apply({
           rules,
           subjectId: this.context.mustGetCurrentUserEntityId(),
+          // `judge_rules: false` — the hook's secondary briefing — leaves the
+          // judging to the primary one, so one session start judges once.
           task:
-            budgets.maxMemories !== undefined
-              ? hookTaskStatement(work?.work)
-              : topicText,
+            input.judge_rules === false
+              ? null
+              : budgets.maxMemories !== undefined
+                ? hookTaskStatement(work?.work)
+                : topicText,
         });
       } catch (error) {
         this.#logger.warn('rule gate failed; rules delivered whole', {

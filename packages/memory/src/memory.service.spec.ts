@@ -2632,16 +2632,17 @@ describe('MemoryService.buildContext — the rule gate', () => {
   const HINT = '/home/someone/repos/quokka-tool';
   const rule: ContextRule = {
     id: 'rlc_0000000000000001.0000000000',
-    text: 'ONE LINE COMMITS. Every commit has a single subject line and no body.',
-    headline: 'ONE LINE COMMITS',
-    applies_when: 'tasks that create a commit',
+    text: 'IMPORTER FIRST. Run the importer before touching the parser.',
+    headline: 'IMPORTER FIRST',
+    applies_when: 'tasks that touch the importer',
     pinned: false,
   };
   const levelledRule: ContextRule = {
-    ...rule,
-    text: 'ONE LINE COMMITS',
+    id: rule.id,
+    text: 'IMPORTER FIRST',
+    headline: 'IMPORTER FIRST',
     level: 'headline',
-    applies_when: undefined,
+    pinned: false,
   };
   const block: RuleGateBlock = {
     mode: 'live',
@@ -2650,7 +2651,7 @@ describe('MemoryService.buildContext — the rule gate', () => {
     latency_ms: 120,
     judge_unavailable: false,
     bands: { hi: 0.6, lo: 0.35 },
-    chars_baseline: rule.text.length,
+    chars_baseline: rule.text.length + rule.applies_when!.length,
     chars_delivered: levelledRule.text.length,
     levels: { full: 0, gate: 0, headline: 1 },
     rules: [
@@ -2667,7 +2668,7 @@ describe('MemoryService.buildContext — the rule gate', () => {
     bound_card: {
       id: 'crd_0000000000000001.0000000000',
       number: 3,
-      title: 'Wire the importer',
+      title: 'Teach the importer to read CSV',
       state: 'active',
       type: 'story',
       state_reason: 'the importer blocks the release',
@@ -2735,7 +2736,7 @@ describe('MemoryService.buildContext — the rule gate', () => {
 
     const [input] = vi.mocked(ruleGate.apply).mock.calls[0]!;
     expect(input.task).toBe(hookTaskStatement(work));
-    expect(input.task).toContain('Wire the importer');
+    expect(input.task).toContain('Teach the importer to read CSV');
     expect(out).not.toHaveProperty('rule_gate');
   });
 
@@ -2752,6 +2753,31 @@ describe('MemoryService.buildContext — the rule gate', () => {
 
     const [input] = vi.mocked(ruleGate.apply).mock.calls[0]!;
     expect(input.task).toBeNull();
+  });
+
+  it('gives a briefing that asks for judge_rules: false nothing to judge against', async () => {
+    const ruleGate = gateReturning([rule], null);
+    const { service } = ruled(ruleGate, { work, attachedLoopIds: [] });
+
+    // The hook's secondary briefing: same project, same card, judged once
+    // by the primary briefing instead.
+    await service.buildContext({
+      topic: 'quokka-tool',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+      judge_rules: false,
+    });
+    await service.buildContext({
+      topic: 'release the importer',
+      briefing: true,
+      judge_rules: false,
+    });
+
+    const tasks = vi
+      .mocked(ruleGate.apply)
+      .mock.calls.map(([input]) => input.task);
+    expect(tasks).toEqual([null, null]);
   });
 
   it('delivers the rules whole when the gate itself throws', async () => {

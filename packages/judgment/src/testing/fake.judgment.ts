@@ -16,6 +16,8 @@ const MARKER = /\[p=(0(?:\.\d+)?|1(?:\.0+)?)\]/u;
  */
 export class FakeJudgment implements IJudgment {
   readonly calls: JudgmentRequest[] = [];
+  /** The options of each call, index for index with `calls`. */
+  readonly callOptions: { readonly timeoutMs?: number }[] = [];
 
   constructor(
     private readonly options: {
@@ -29,6 +31,7 @@ export class FakeJudgment implements IJudgment {
     options: { readonly timeoutMs?: number } = {}
   ): Promise<JudgmentResult> {
     this.calls.push(request);
+    this.callOptions.push(options);
     if (this.options.mode === 'unavailable') {
       throw new JudgeUnavailableError('fake: unavailable');
     }

@@ -124,6 +124,19 @@ describe('tool contracts', () => {
     ).toThrow();
   });
 
+  it('parses judge_rules: optional, and only a boolean', () => {
+    expect(
+      buildContextInputSchema.parse({ topic: 't' }).judge_rules
+    ).toBeUndefined();
+    expect(
+      buildContextInputSchema.parse({ topic: 't', judge_rules: false })
+        .judge_rules
+    ).toBe(false);
+    expect(() =>
+      buildContextInputSchema.parse({ topic: 't', judge_rules: 'no' })
+    ).toThrow();
+  });
+
   it('parses recall output hits', () => {
     const hit = {
       id: 'mem_0000000000000001.0000000000',

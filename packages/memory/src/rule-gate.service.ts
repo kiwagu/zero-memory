@@ -14,6 +14,7 @@ import {
   type IJudgeCredentialResolver,
   type IJudgeSettingsReader,
   type JudgmentFactory,
+  type JudgmentResult,
   type NoulQuestion,
   type RuleGateConfig,
 } from '@workspace/judgment';
@@ -50,7 +51,7 @@ export const hookTaskStatement = (
   const card = work?.bound_card ?? work?.continuation?.card ?? null;
   if (!card) return null;
   const branch = work?.open_branches?.find(
-    (entry) => entry.number === card.number
+    (entry) => entry.card_id === card.id
   )?.branch;
   return [
     `Continue card #${card.number} (${card.type ?? 'work'}, ${card.state}): ${card.title}.`,
@@ -84,18 +85,13 @@ export const deliverAtLevel = (
   const headline = rule.headline ?? ruleHeadline(rule.text);
   if (level === 'full') return { ...rule, headline, level };
   if (level === 'gate') return { ...rule, headline, text: headline, level };
-  return {
-    ...rule,
-    headline,
-    text: headline,
-    level,
-    applies_when: undefined,
-  };
+  const { applies_when: _dropped, ...named } = rule;
+  return { ...named, headline, text: headline, level };
 };
 
-const deliveredChars = (rule: ContextRule): number =>
-  rule.text.length +
-  (rule.level === 'gate' && rule.applies_when ? rule.applies_when.length : 0);
+/** What a rule costs the session as delivered: its text and its condition. */
+const ruleChars = (rule: ContextRule): number =>
+  rule.text.length + (rule.applies_when?.length ?? 0);
 
 /** One rule's yes/no question. Exported so an evaluation can ask the same. */
 export const questionFor = (key: string): NoulQuestion => ({
@@ -171,18 +167,23 @@ export class RuleGateService implements IRuleGate {
       unpinned.map((rule) => [`rule_${rule.id!}`, questionFor(rule.id!)])
     );
 
-    let answers: Record<string, { noul: number }> = {};
-    let model = credential.model;
-    let latencyMs = 0;
-    let judgeUnavailable = false;
+    let result: JudgmentResult | null = null;
     try {
-      const result = await this.judgmentFor(credential).judge(
+      result = await this.judgmentFor(credential).judge(
         { state, questions, purpose: 'rule_gate', subjectId: input.subjectId },
         { timeoutMs: this.config.timeoutMs }
       );
-      answers = result.answers;
-      model = result.model;
-      latencyMs = result.latencyMs;
+    } catch (error) {
+      logger.warn(
+        error instanceof JudgeUnavailableError
+          ? 'judge unavailable; rules delivered whole'
+          : 'judge failed; rules delivered whole',
+        { error: error instanceof Error ? error.message : String(error) }
+      );
+    }
+    // Metered only once a judgment came back: a failed call spent nothing
+    // the provider reported.
+    if (result) {
       recordUsage(this.usage, {
         eventType: 'llm_extraction',
         quantity: result.usage.inputTokens,
@@ -196,15 +197,9 @@ export class RuleGateService implements IRuleGate {
           output_tokens: result.usage.outputTokens,
         },
       });
-    } catch (error) {
-      judgeUnavailable = true;
-      logger.warn(
-        error instanceof JudgeUnavailableError
-          ? 'judge unavailable; rules delivered whole'
-          : 'judge failed; rules delivered whole',
-        { error: error instanceof Error ? error.message : String(error) }
-      );
     }
+    const judgeUnavailable = result === null;
+    const answers = result?.answers ?? {};
 
     const levelled = input.rules.map((rule) => {
       if (rule.pinned || !rule.id) {
@@ -230,11 +225,11 @@ export class RuleGateService implements IRuleGate {
     // as they arrived; the block still says what happened.
     const asBefore = mode === 'shadow' || judgeUnavailable;
     const baseline = input.rules.reduce(
-      (sum, rule) => sum + rule.text.length,
+      (sum, rule) => sum + ruleChars(rule),
       0
     );
     const delivered = ordered.reduce(
-      (sum, entry) => sum + deliveredChars(entry.rule),
+      (sum, entry) => sum + ruleChars(entry.rule),
       0
     );
     const counts = { full: 0, gate: 0, headline: 0 };
@@ -243,8 +238,8 @@ export class RuleGateService implements IRuleGate {
     const block: RuleGateBlock = {
       mode,
       provider: credential.provider,
-      model,
-      latency_ms: latencyMs,
+      model: result?.model ?? credential.model,
+      latency_ms: result?.latencyMs ?? 0,
       judge_unavailable: judgeUnavailable,
       bands: { hi: this.config.hi, lo: this.config.lo },
       chars_baseline: baseline,
@@ -259,7 +254,7 @@ export class RuleGateService implements IRuleGate {
                 id: entry.rule.id,
                 p: entry.p,
                 level: entry.rule.level ?? 'full',
-                chars: deliveredChars(entry.rule),
+                chars: ruleChars(entry.rule),
                 pinned: entry.rule.pinned,
               },
             ]

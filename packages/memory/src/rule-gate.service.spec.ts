@@ -10,8 +10,6 @@ import {
 } from './rule-gate.service.js';
 
 const id = (n: string) => `rlc_${n.padEnd(16, '0')}.0123456789`;
-// Bodies long enough that a headline plus its condition is shorter than the
-// whole rule, as with every real rule.
 const rules: ContextRule[] = [
   {
     id: id('pin'),
@@ -21,28 +19,28 @@ const rules: ContextRule[] = [
   },
   {
     id: id('commit'),
-    text: 'ONE LINE COMMITS. Every commit has a single subject line and no body at all.',
+    text: 'ONE LINE COMMITS. Body text.',
     headline: 'ONE LINE COMMITS',
     pinned: false,
     applies_when: 'tasks that commit [p=0.9]',
   },
   {
     id: id('stand'),
-    text: 'STAND ROLES. Review feature branches on the preview stand, never on the retired review contour.',
+    text: 'STAND ROLES. Body.',
     headline: 'STAND ROLES',
     pinned: false,
     applies_when: 'tasks that touch a stack [p=0.5]',
   },
   {
     id: id('north'),
-    text: 'NORTH STAR. Rank every epic by its distance to the infinite session.',
+    text: 'NORTH STAR. Body.',
     headline: 'NORTH STAR',
     pinned: false,
     applies_when: 'planning [p=0.1]',
   },
   {
     id: id('bare'),
-    text: 'NO APPLIES WHEN. A rule promoted before conditions existed is judged from its text.',
+    text: 'NO APPLIES WHEN. Body.',
     headline: 'NO APPLIES WHEN',
     pinned: false,
   },
@@ -119,6 +117,8 @@ describe('RuleGateService.apply', () => {
       subjectId: 'usr_a',
     });
     expect(judge.calls).toHaveLength(1);
+    // The judge is held to the configured timeout.
+    expect(judge.callOptions[0]).toEqual({ timeoutMs: 1500 });
     expect(Object.keys(judge.calls[0]!.questions)).toEqual([
       `rule_${id('commit')}`,
       `rule_${id('stand')}`,
@@ -147,6 +147,24 @@ describe('RuleGateService.apply', () => {
     expect(out.block!.rules.find((r) => r.id === id('pin'))!.p).toBeNull();
   });
 
+  it("counts a rule's condition on both sides, so a headline is credited for dropping it", async () => {
+    const { svc } = service();
+    // stand → gate: 11 + 32 of 18 + 32; north → headline: 10 of 17 + 16.
+    const out = await svc.apply({
+      rules: [rules[2]!, rules[3]!],
+      task: 't',
+      subjectId: 'usr_a',
+    });
+    expect(out.block).toMatchObject({
+      chars_baseline: 83,
+      chars_delivered: 53,
+    });
+    expect(out.block!.rules.map((r) => [r.level, r.chars])).toEqual([
+      ['gate', 43],
+      ['headline', 10],
+    ]);
+  });
+
   it('shadow: delivery unchanged, levels recorded in the block only', async () => {
     const { svc } = service({ mode: 'shadow' });
     const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
@@ -170,8 +188,8 @@ describe('RuleGateService.apply', () => {
     const task = hookTaskStatement({
       bound_card: {
         id: 'crd_0000000000000000.0000000000',
-        number: 83,
-        title: 'Judge-gated delivery of standing rules',
+        number: 7,
+        title: 'Teach the importer to read CSV',
         state: 'active',
         type: 'story',
         state_reason: 'implementing',
@@ -182,17 +200,25 @@ describe('RuleGateService.apply', () => {
       waiting: 0,
       lead: [],
       open_branches: [
+        // The same number on another board: a branch belongs to its card id.
+        {
+          card_id: 'crd_2222222222222222.2222222222',
+          number: 7,
+          state: 'active',
+          repo: 'other-tool',
+          branch: 'feature/other-work',
+        },
         {
           card_id: 'crd_0000000000000000.0000000000',
-          number: 83,
+          number: 7,
           state: 'active',
-          repo: 'zero-memory',
-          branch: 'feature/rule-delivery-judge',
+          repo: 'quokka-tool',
+          branch: 'feature/csv-import',
         },
       ],
     } as never);
     expect(task).toBe(
-      'Continue card #83 (story, active): Judge-gated delivery of standing rules. Status: implementing Branch: feature/rule-delivery-judge.'
+      'Continue card #7 (story, active): Teach the importer to read CSV. Status: implementing Branch: feature/csv-import.'
     );
     await svc.apply({ rules, task, subjectId: 'usr_a' });
     expect(judge.calls[0]!.state.task).toBe(task);
@@ -208,17 +234,17 @@ describe('RuleGateService.apply', () => {
         continuation: {
           card: {
             id: 'crd_1111111111111111.1111111111',
-            number: 82,
-            title: 'AWS flavor S4',
+            number: 6,
+            title: 'Retire the old parser',
             state: 'waiting',
             type: 'task',
-            state_reason: 'released v0.48.0',
+            state_reason: 'released v1.2.0',
           },
           last: [],
         },
       } as never)
     ).toBe(
-      'Continue card #82 (task, waiting): AWS flavor S4. Status: released v0.48.0'
+      'Continue card #6 (task, waiting): Retire the old parser. Status: released v1.2.0'
     );
     expect(
       hookTaskStatement({
@@ -247,11 +273,12 @@ describe('RuleGateService.apply', () => {
     }
   });
 
-  it('judge unavailable → unchanged delivery, flagged', async () => {
-    const { svc } = service({
+  it('judge unavailable → unchanged delivery, flagged, nothing metered', async () => {
+    const { svc, recorder } = service({
       judge: new FakeJudgment({ mode: 'unavailable' }),
     });
     const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+    expect(recorder.record).not.toHaveBeenCalled();
     expect(out.rules).toEqual(rules);
     expect(out.block).toMatchObject({
       judge_unavailable: true,
