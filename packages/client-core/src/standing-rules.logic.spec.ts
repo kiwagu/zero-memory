@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   mergeStandingRules,
   renderStandingRulesSection,
-  ruleHeadline,
   splitStandingRules,
 } from './standing-rules.logic.js';
 
@@ -177,33 +176,5 @@ describe('renderStandingRulesSection', () => {
     expect(section).toContain('2. short rule two');
     expect(section).not.toContain('[headline]');
     expect(section).not.toContain('headline only');
-  });
-});
-
-describe('ruleHeadline', () => {
-  it('ends at the first sentence break after the opening', () => {
-    expect(
-      ruleHeadline(
-        'NO PRIVATE REFERENCES IN COMMITTED ARTIFACTS (every project) — the ' +
-          'rest explains why.'
-      )
-    ).toBe('NO PRIVATE REFERENCES IN COMMITTED ARTIFACTS (every project)');
-    expect(ruleHeadline('Production systems are READ-ONLY. Always.')).toBe(
-      'Production systems are READ-ONLY'
-    );
-  });
-
-  it('does not break inside an open parenthesis', () => {
-    expect(
-      ruleHeadline(
-        'NORTH STAR (keep it in view — not only when asked): the rest follows.'
-      )
-    ).toBe('NORTH STAR (keep it in view — not only when asked)');
-  });
-
-  it('caps an opening that never breaks', () => {
-    const headline = ruleHeadline('word '.repeat(100));
-    expect(headline.length).toBeLessThanOrEqual(161);
-    expect(headline.endsWith('…')).toBe(true);
   });
 });

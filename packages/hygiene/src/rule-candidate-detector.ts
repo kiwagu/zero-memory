@@ -200,6 +200,7 @@ export class RuleCandidateDetector {
     rule_text: string;
     target_layer: RuleTargetLayer;
     applies_scope: string | null;
+    applies_when: string | null;
     status: 'promoted';
   }> {
     const { memoryId, ownerId, appliesScope, ruleText, appliesWhen, force } =
@@ -370,6 +371,7 @@ export class RuleCandidateDetector {
       rule_text: text,
       target_layer: targetLayer,
       applies_scope: address,
+      applies_when: condition,
       status: 'promoted',
     };
   }

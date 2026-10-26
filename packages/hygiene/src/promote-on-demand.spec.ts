@@ -237,7 +237,7 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     };
 
     const textOnly = make(personalMemory, 'unused', stored);
-    await textOnly.detector.promoteOnDemand({
+    const kept = await textOnly.detector.promoteOnDemand({
       memoryId: MEMORY,
       ownerId: OWNER,
       ruleText: 'never edit an applied migration, write a new one',
@@ -245,6 +245,8 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect(textOnly.upserts[0]!.row.applies_when).toBe(
       'tasks that touch supabase/migrations'
     );
+    // The reply reports the condition the rule now carries, not the input.
+    expect(kept.applies_when).toBe('tasks that touch supabase/migrations');
 
     const redistilled = make(personalMemory, 'distilled', stored, 'git tasks');
     await redistilled.detector.promoteOnDemand({

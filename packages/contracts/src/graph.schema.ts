@@ -1,6 +1,10 @@
+import { CROCKFORD_CLASS, RAND_LENGTH, TS_LENGTH } from 'entity-id';
 import { z } from 'zod';
 
-import { entityIdSchemas } from './entity-prefixes.js';
+import {
+  entityIdSchemas,
+  RULE_CANDIDATE_ID_PREFIX,
+} from './entity-prefixes.js';
 import {
   memoryIdSchema,
   memoryKindSchema,
@@ -122,6 +126,24 @@ export const relatedMemorySchema = z.object({
 });
 export type RelatedMemory = z.infer<typeof relatedMemorySchema>;
 
+/** `rule_candidates.id`: `rlc_` + 16 + `.` + 10 Crockford characters. */
+export const ruleCandidateIdSchema = z
+  .string()
+  .regex(
+    new RegExp(
+      `^${RULE_CANDIDATE_ID_PREFIX}_${CROCKFORD_CLASS}{${RAND_LENGTH}}\\.${CROCKFORD_CLASS}{${TS_LENGTH}}$`,
+      'u'
+    )
+  );
+
+/**
+ * How much of a standing rule a delivery carries: the whole text, the
+ * headline plus the applicability gate, or the headline alone. Absent on
+ * packs from servers that deliver every rule whole.
+ */
+export const ruleDeliveryLevelSchema = z.enum(['full', 'gate', 'headline']);
+export type RuleDeliveryLevel = z.infer<typeof ruleDeliveryLevelSchema>;
+
 /**
  * Standing rule as it appears inside a context briefing: the promoted rule's
  * imperative text plus whether the owner PINNED it. A pinned rule leads the
@@ -130,7 +152,18 @@ export type RelatedMemory = z.infer<typeof relatedMemorySchema>;
  * from one that merely fit.
  */
 export const contextRuleSchema = z.object({
+  /**
+   * The delivered text: the whole rule at level `full` (and whenever `level`
+   * is absent), otherwise the headline. Always present, so a client that
+   * knows nothing of levels still reads a true statement of the rule's name.
+   */
   text: z.string(),
   pinned: z.boolean(),
+  id: ruleCandidateIdSchema.optional(),
+  /** The rule's opening clause, the same cut every client renders. */
+  headline: z.string().optional(),
+  /** When the rule binds a task; carried at levels `gate` and `full`. */
+  applies_when: z.string().optional(),
+  level: ruleDeliveryLevelSchema.optional(),
 });
 export type ContextRule = z.infer<typeof contextRuleSchema>;

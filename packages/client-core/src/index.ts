@@ -41,10 +41,10 @@ export {
 export {
   mergeStandingRules,
   renderStandingRulesSection,
-  ruleHeadline,
   splitStandingRules,
   type StandingRulesSplit,
 } from './standing-rules.logic.js';
+export { ruleHeadline } from '@workspace/contracts';
 export {
   filterBriefingPack,
   isEmptyPack,

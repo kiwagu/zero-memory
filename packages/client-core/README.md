@@ -38,7 +38,8 @@ consume the same core (see the R3 client-adapters direction).
   is what the owner promoted them for — and pinned rules lead the list,
   marked, because the pin guarantees they reach the delivered set. Given a
   ceiling, the block keeps pinned rules whole even past it, carries the others
-  whole while they fit and by headline (`ruleHeadline`) after, and says so.
+  whole while they fit and by headline (`ruleHeadline`, which lives in
+  `@workspace/contracts` and is re-exported here) after, and says so.
   This is the full-text channel for every client; MCP `instructions` also
   inline rules for uncapped clients, while known capped clients only receive
   the router and inventory.

@@ -11,6 +11,8 @@ import {
   entityHitSchema,
   relatedMemorySchema,
   entityMentionSchema,
+  ruleCandidateIdSchema,
+  ruleDeliveryLevelSchema,
 } from './graph.schema.js';
 import {
   instanceMetricsSchema,
@@ -534,6 +536,38 @@ export const buildContextInputSchema = z.object({
 });
 export type BuildContextInput = z.infer<typeof buildContextInputSchema>;
 
+const nonNegativeInt = z.number().int().nonnegative();
+
+export const ruleGateBlockSchema = z.object({
+  mode: z.enum(['shadow', 'live']),
+  provider: z.enum(['typesafe', 'subq']),
+  model: z.string(),
+  latency_ms: nonNegativeInt,
+  judge_unavailable: z.boolean(),
+  bands: z.object({
+    hi: z.number().min(0).max(1),
+    lo: z.number().min(0).max(1),
+  }),
+  chars_baseline: nonNegativeInt,
+  chars_delivered: nonNegativeInt,
+  levels: z.object({
+    full: nonNegativeInt,
+    gate: nonNegativeInt,
+    headline: nonNegativeInt,
+  }),
+  rules: z.array(
+    z.object({
+      id: ruleCandidateIdSchema,
+      /** Null for a rule the judge did not answer (pinned, or missing answer). */
+      p: z.number().min(0).max(1).nullable(),
+      level: ruleDeliveryLevelSchema,
+      chars: nonNegativeInt,
+      pinned: z.boolean(),
+    })
+  ),
+});
+export type RuleGateBlock = z.infer<typeof ruleGateBlockSchema>;
+
 export const buildContextOutputSchema = z.object({
   memories: z.array(contextMemorySchema),
   entities: z.array(contextEntitySchema),
@@ -568,6 +602,16 @@ export const buildContextOutputSchema = z.object({
    * never drop it. Defaulted so packs from older servers still parse.
    */
   rules: z.array(contextRuleSchema).default([]),
+  /**
+   * How this call's standing rules were delivered when the rule gate judged
+   * them: the judge's provider and model, its latency, the bands, how many
+   * characters the rules would have cost whole versus what was delivered,
+   * and one probability + level per judged rule (ids and numbers only). In
+   * `shadow` mode the levels are what WOULD have been delivered; delivery
+   * itself was unchanged. Absent when the gate is off, not enabled for this
+   * account, or the call was a budgeted hook briefing.
+   */
+  rule_gate: ruleGateBlockSchema.optional(),
   /**
    * Active open loops (kind task/open-question) of the briefed scopes,
    * oldest first, capped — surfaced on every briefing regardless of topic
@@ -746,6 +790,8 @@ export const promoteRuleOutputSchema = z.object({
   target_layer: z.enum(['user', 'project']),
   applies_scope: z.string().nullable(),
   status: z.literal('promoted'),
+  /** When the rule binds a task, as stored after this promotion; null when unset. */
+  applies_when: z.string().nullable(),
   /**
    * Human-readable note on WHEN the rule actually reaches sessions: MCP
    * instructions are captured at connect and frozen, so a rule promoted
