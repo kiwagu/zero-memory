@@ -27,7 +27,11 @@ does not expose the required lifecycle/transcript hooks.
   parses Claude Code's JSONL transcript (`parseTranscript`) into user/assistant
   text plus the `mem_` ids that recall / build_context calls surfaced (the
   usefulness-judge input), and `formatEntries` renders them in the `role: text`
-  form the extractor consumes. The record a context compaction writes back is
+  form the extractor consumes. It also collects guard-hook refusals from every
+  line, tool results included: a refusing PreToolUse guard opens its reason
+  with a `[guard:<name>]` tag, and only that name and the line's timestamp are
+  kept, never the refused command or the reason text. The record a context
+  compaction writes back is
   skipped: it is stored looking exactly like a human turn (`type: "user"`, a
   plain multi-kilobyte string) and only a flag distinguishes it, so ingesting it
   would re-state an already-captured session AND attribute an assistant-written

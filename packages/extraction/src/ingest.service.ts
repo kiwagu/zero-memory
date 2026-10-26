@@ -212,6 +212,10 @@ export class IngestService {
         extract: extractionEnabled ? 'on' : 'off',
         gate_mode: gateMode,
         gate: chunkVerdicts.map((verdict) => verdict.reason).join(','),
+        // The guards that refused an action in this chunk, by name only.
+        ...(input.guard_refusals?.length && {
+          guard_refusals: input.guard_refusals.map((r) => r.guard),
+        }),
       },
     });
 

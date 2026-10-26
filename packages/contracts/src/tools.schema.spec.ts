@@ -5,6 +5,7 @@ import {
   buildContextOutputSchema,
   entitiesOutputSchema,
   extractableMemoryKindSchema,
+  ingestConversationInputSchema,
   linkInputSchema,
   memorySearchHitSchema,
   recallInputSchema,
@@ -255,5 +256,42 @@ describe('tool contracts', () => {
     expect(extractableMemoryKindSchema.options).not.toContain('task');
     expect(extractableMemoryKindSchema.options).not.toContain('open-question');
     expect(extractableMemoryKindSchema.options).toContain('fact');
+  });
+
+  // The field is content-free by shape: a guard is named by a slug, so a
+  // refused command or the reason text cannot ride along as a "name".
+  it('accepts guard refusals as slug names with an optional timestamp, nothing more', () => {
+    const chunk = {
+      transcript_chunk: 'user: hi',
+      chunk_hash: 'h',
+      client: 'test',
+      conversation_id: 'c',
+    };
+    const parsed = ingestConversationInputSchema.parse({
+      ...chunk,
+      guard_refusals: [
+        { guard: 'commit_message_guard', at: '2026-10-24T10:00:01Z' },
+        { guard: 'dev-docs-guard', at: null },
+      ],
+    });
+    expect(parsed.guard_refusals).toHaveLength(2);
+    expect(ingestConversationInputSchema.parse(chunk).guard_refusals).toBe(
+      undefined
+    );
+    expect(() =>
+      ingestConversationInputSchema.parse({
+        ...chunk,
+        guard_refusals: [{ guard: 'git commit -m a -m b', at: null }],
+      })
+    ).toThrow();
+    expect(() =>
+      ingestConversationInputSchema.parse({
+        ...chunk,
+        guard_refusals: Array.from({ length: 51 }, () => ({
+          guard: 'commit_message_guard',
+          at: null,
+        })),
+      })
+    ).toThrow();
   });
 });

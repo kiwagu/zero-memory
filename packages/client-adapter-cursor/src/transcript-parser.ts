@@ -112,5 +112,5 @@ export const parseCursorTranscript = (jsonl: string): ParsedTranscript => {
     entries.push({ role, text: normalized });
   }
 
-  return { entries, recalledIds: [] };
+  return { entries, recalledIds: [], guardRefusals: [] };
 };

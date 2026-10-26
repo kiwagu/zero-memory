@@ -177,4 +177,53 @@ describe('parseTranscript', () => {
       { role: 'assistant', text: 'Picking up where we left off.' },
     ]);
   });
+
+  it('collects guard refusals from the [guard:<name>] tag wherever it appears', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'assistant',
+        timestamp: '2026-10-24T10:00:00Z',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'toolu_1',
+              name: 'Bash',
+              input: { command: 'git commit -m a -m b' },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        timestamp: '2026-10-24T10:00:01Z',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'toolu_1',
+              is_error: true,
+              content:
+                'PreToolUse hook denied: [guard:commit_message_guard] a commit message is one line',
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'user',
+        timestamp: '2026-10-24T10:00:02Z',
+        message: {
+          role: 'user',
+          content: 'plain text mentioning [guard:dev_docs_guard] in prose',
+        },
+      }),
+    ].join('\n');
+    const parsed = parseTranscript(lines);
+    expect(parsed.guardRefusals).toEqual([
+      { guard: 'commit_message_guard', at: '2026-10-24T10:00:01Z' },
+      { guard: 'dev_docs_guard', at: '2026-10-24T10:00:02Z' },
+    ]);
+  });
 });

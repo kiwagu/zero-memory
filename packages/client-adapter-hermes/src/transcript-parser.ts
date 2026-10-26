@@ -102,5 +102,5 @@ export const parseHermesTranscript = (jsonl: string): ParsedTranscript => {
     entries.push({ role: role as TranscriptEntry['role'], text: body });
   }
 
-  return { entries, cwd, recalledIds: [...recalledIds] };
+  return { entries, cwd, recalledIds: [...recalledIds], guardRefusals: [] };
 };

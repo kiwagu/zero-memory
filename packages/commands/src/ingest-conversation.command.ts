@@ -18,6 +18,7 @@ export class IngestConversationCommand
   public readonly conversation_id: string;
   public readonly project_hint?: string;
   public readonly recalled_ids?: string[];
+  public readonly guard_refusals?: IngestConversationInput['guard_refusals'];
   public readonly source_kind?: IngestSourceKind;
   public readonly source_path?: string;
   public readonly probe?: boolean;
@@ -30,6 +31,7 @@ export class IngestConversationCommand
     this.conversation_id = props.conversation_id;
     this.project_hint = props.project_hint;
     this.recalled_ids = props.recalled_ids;
+    this.guard_refusals = props.guard_refusals;
     this.source_kind = props.source_kind;
     this.source_path = props.source_path;
     this.probe = props.probe;

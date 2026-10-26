@@ -159,6 +159,10 @@ export const flushTranscriptDelta = async (
       // Without this the judge stays dark for every hook-driven client — only
       // the file-tailing daemon (Claude) used to pass it on.
       ...recalledIdsField(parsed.recalledIds),
+      // Names and timestamps only, oldest first, within the contract's cap.
+      ...(parsed.guardRefusals.length > 0 && {
+        guard_refusals: parsed.guardRefusals.slice(0, 50),
+      }),
     });
 
     offsets[transcriptPath] = raw.length;

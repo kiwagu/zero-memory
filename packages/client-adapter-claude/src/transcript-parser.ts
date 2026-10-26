@@ -26,6 +26,8 @@ const contentItemSchema = z.looseObject({
 const transcriptLineSchema = z.looseObject({
   type: z.string().optional(),
   cwd: z.string().optional(),
+  /** When the line was written (ISO 8601); dates a guard refusal. */
+  timestamp: z.string().optional(),
   isMeta: z.boolean().optional(),
   /**
    * Marks the record a context compaction writes back into the transcript.
@@ -47,10 +49,13 @@ const transcriptLineSchema = z.looseObject({
  * tool results surfaced. A recalled id is only taken from a tool_result whose
  * tool_use_id belongs to a recall / build_context call — so a `remember` result
  * (which returns a freshly-created id) is never mistaken for a recall hit.
+ * Guard refusals are read off EVERY line, tool results included, by the
+ * `[guard:<name>]` tag alone: only the name and the line's timestamp are kept.
  */
 export const parseTranscript = (jsonl: string): ParsedTranscript => {
   const entries: TranscriptEntry[] = [];
   let cwd: string | undefined;
+  const guardRefusals: ParsedTranscript['guardRefusals'] = [];
   // tool_use ids of recall / build_context calls, so their results (which
   // arrive on a later line) can be matched precisely.
   const recallCallIds = new Set<string>();
@@ -59,6 +64,12 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
   for (const line of parseJsonLines(jsonl, transcriptLineSchema)) {
     const { type, isMeta, isCompactSummary, message } = line;
     cwd ??= line.cwd;
+
+    // Before the role and meta filters: a refusal reaches the transcript as a
+    // tool_result, which the text pass below drops.
+    for (const guard of collectGuardTags(JSON.stringify(line.message ?? ''))) {
+      guardRefusals.push({ guard, at: line.timestamp ?? null });
+    }
 
     // A context compaction appends its summary as a record that looks exactly
     // like something the human typed: `type: "user"`, `message.role: "user"`,
@@ -101,8 +112,17 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
     entries.push({ role, text: normalized });
   }
 
-  return { entries, cwd, recalledIds: [...recalledIds] };
+  return { entries, cwd, recalledIds: [...recalledIds], guardRefusals };
 };
+
+/**
+ * The tag a refusing guard hook opens its reason with, e.g.
+ * `[guard:commit_message_guard] …`. The name pattern is the contract's guard
+ * name, so whatever this matches the server accepts.
+ */
+const GUARD_TAG = /\[guard:([a-z][a-z0-9_-]{1,63})\]/gu;
+const collectGuardTags = (text: string): string[] =>
+  [...text.matchAll(GUARD_TAG)].map((match) => match[1]!);
 
 type ContentItem = z.infer<typeof contentItemSchema>;
 

@@ -22,6 +22,12 @@ export interface ParsedTranscript {
    * slice — the "shown" set the usefulness judge scores against the text. Empty
    * when the client's transcript does not inline tool results (e.g. Cursor). */
   recalledIds: string[];
+  /** Client-side guard hooks that refused an action in this slice, oldest
+   * first: the guard's name (from the `[guard:<name>]` tag a guard opens its
+   * refusal reason with) and the line's timestamp when the format records one.
+   * Names and times only — never the refused command or the reason text.
+   * Empty where the client's parser does not detect them. */
+  guardRefusals: Array<{ guard: string; at: string | null }>;
 }
 
 /**

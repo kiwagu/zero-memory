@@ -883,6 +883,21 @@ export const ingestConversationInputSchema = z.object({
    * judge validates each id individually. */
   recalled_ids: z.array(z.string().min(1)).max(200).optional(),
   /**
+   * Guard-hook refusals seen in this chunk (names and timestamps only): a
+   * client-side PreToolUse guard that refused an action, recognised by the
+   * `[guard:<name>]` tag it prints in its reason. The delivery-quality retro
+   * joins them to the rule each guard enforces.
+   */
+  guard_refusals: z
+    .array(
+      z.object({
+        guard: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/u),
+        at: z.string().nullable(),
+      })
+    )
+    .max(50)
+    .optional(),
+  /**
    * Ledger LOOKUP only: answers whether this chunk_hash was already ingested
    * and returns immediately — no claim, no extraction, no tokens, no writes.
    * Lets a client (e.g. `bootstrap --dry-run`) preview how much of a run is

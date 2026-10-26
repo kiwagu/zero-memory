@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { IngestConversationInput } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { hookClient } from '../hook-client.js';
+import { hookClient, type ClientKind } from '../hook-client.js';
 import { hookInput } from '../testing/hook-client.fake.js';
 import { restoreEnv, useStateDirs } from '../testing/state-dir.fixture.js';
 import { flushTranscriptDelta } from './ingest-hook-runner.js';
@@ -67,21 +67,47 @@ const recallLines = [
   }),
 ];
 
+/** A Claude Code turn: the human's words, then `count` guard-refused calls. */
+const claudeRefusalLines = (count: number): string[] => [
+  JSON.stringify({
+    type: 'user',
+    message: { role: 'user', content: 'commit it' },
+  }),
+  ...Array.from({ length: count }, (_, index) =>
+    JSON.stringify({
+      type: 'user',
+      timestamp: `2026-10-24T10:00:${String(index).padStart(2, '0')}Z`,
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: `toolu_${index}`,
+            is_error: true,
+            content: `[guard:guard_${index}] the refused command stays here`,
+          },
+        ],
+      },
+    })
+  ),
+];
+
 /**
- * The flush end to end for a Codex session: the real client parser reads the
- * rollout, and the payload the server receives is the assertion. The judge
- * channel is the join under test — the runner used to read only `.entries`
- * off the parse result, so even a correct parser measured nothing.
+ * The flush end to end: the real client parser reads the transcript (a Codex
+ * rollout, or a Claude turn for the guard refusals), and the payload the
+ * server receives is the assertion. The judge channel is the join under test —
+ * the runner used to read only `.entries` off the parse result, so even a
+ * correct parser measured nothing.
  */
 describe('flushTranscriptDelta', () => {
   const dirs = useStateDirs('zm-ingest-hook');
   let previousConsent: string | undefined;
 
-  const flush = (lines: string[]) => {
+  const flush = (lines: string[], client: ClientKind = 'codex') => {
     const transcriptPath = join(dirs.work, 'rollout.jsonl');
     writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
     return flushTranscriptDelta(
-      hookClient('codex'),
+      hookClient(client),
       'stop',
       hookInput({
         sessionId: 'codex-session',
@@ -116,5 +142,30 @@ describe('flushTranscriptDelta', () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0]).not.toHaveProperty('recalled_ids');
+  });
+
+  it('sends the guard refusals a Claude turn recorded, names and times only', async () => {
+    expect(await flush(claudeRefusalLines(1), 'claude')).toMatch(/^sent:/);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.guard_refusals).toEqual([
+      { guard: 'guard_0', at: '2026-10-24T10:00:00Z' },
+    ]);
+  });
+
+  it('caps the guard refusals at the contract limit, oldest first', async () => {
+    expect(await flush(claudeRefusalLines(60), 'claude')).toMatch(/^sent:/);
+
+    const refusals = sent[0]?.guard_refusals ?? [];
+    expect(refusals).toHaveLength(50);
+    expect(refusals[0]?.guard).toBe('guard_0');
+    expect(refusals.at(-1)?.guard).toBe('guard_49');
+  });
+
+  it('omits guard_refusals entirely when no guard refused anything', async () => {
+    expect(await flush(claudeRefusalLines(0), 'claude')).toMatch(/^sent:/);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).not.toHaveProperty('guard_refusals');
   });
 });
