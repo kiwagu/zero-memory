@@ -307,18 +307,24 @@ describe('IngestService — usage metering', () => {
     expect(event?.metadata?.guard_refusals).toEqual(['commit_message_guard']);
   });
 
-  it('adds no guard_refusals key when the chunk reports none', async () => {
-    const { service, usage } = makeService();
+  it.each([
+    ['omits the field', {}],
+    ['sends it empty', { guard_refusals: [] }],
+  ])(
+    'adds no guard_refusals key when the chunk %s',
+    async (_label, overrides) => {
+      const { service, usage } = makeService();
 
-    await service.ingest(baseInput());
+      await service.ingest(baseInput(overrides));
 
-    const [event] = vi
-      .mocked(usage.record)
-      .mock.calls.map(([recorded]) => recorded)
-      .filter((recorded) => recorded.eventType === 'ingest_chunk');
-    expect(event?.metadata).toBeDefined();
-    expect(event?.metadata).not.toHaveProperty('guard_refusals');
-  });
+      const [event] = vi
+        .mocked(usage.record)
+        .mock.calls.map(([recorded]) => recorded)
+        .filter((recorded) => recorded.eventType === 'ingest_chunk');
+      expect(event?.metadata).toBeDefined();
+      expect(event?.metadata).not.toHaveProperty('guard_refusals');
+    }
+  );
 });
 
 describe('IngestService — confidence gate and quota', () => {

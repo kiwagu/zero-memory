@@ -4,6 +4,14 @@ import { parseTranscript } from './transcript-parser.js';
 
 const line = (value: unknown): string => JSON.stringify(value);
 
+/** A tool_result content item; `isError` marks a call that did not run. */
+const toolResult = (toolUseId: string, content: string, isError?: boolean) => ({
+  type: 'tool_result',
+  tool_use_id: toolUseId,
+  content,
+  ...(isError !== undefined && { is_error: isError }),
+});
+
 describe('parseTranscript', () => {
   it('keeps user and assistant text and skips tool traffic', () => {
     const jsonl = [
@@ -178,11 +186,11 @@ describe('parseTranscript', () => {
     ]);
   });
 
-  // A PreToolUse denial lands in the tool_result that answers the refused
-  // call, so that is the only place a tag counts. The same tag in the call's
-  // own input, in prose, or in a compaction recap is talk about a guard, not
-  // a refusal.
-  it('counts a guard refusal only from the [guard:<name>] tag in a tool result', () => {
+  // A PreToolUse denial lands as an error tool_result whose text opens with
+  // the hook's reason, so that is the only place a tag counts. The same tag in
+  // the call's own input, in prose, or in a compaction recap is talk about a
+  // guard, not a refusal.
+  it('counts a guard refusal only from a denied tool call', () => {
     const toolUse = JSON.stringify({
       type: 'assistant',
       timestamp: '2026-10-24T10:00:00Z',
@@ -205,13 +213,11 @@ describe('parseTranscript', () => {
       message: {
         role: 'user',
         content: [
-          {
-            type: 'tool_result',
-            tool_use_id: 'toolu_1',
-            is_error: true,
-            content:
-              'PreToolUse hook denied: [guard:commit_message_guard] a commit message is one line',
-          },
+          toolResult(
+            'toolu_1',
+            'PreToolUse:Bash hook error: [guard:commit_message_guard] a commit message is one line',
+            true
+          ),
         ],
       },
     });
@@ -239,5 +245,38 @@ describe('parseTranscript', () => {
     expect(
       parseTranscript([toolUse, prose, recap].join('\n')).guardRefusals
     ).toEqual([]);
+  });
+
+  // A call that SUCCEEDED can still print the tag: reading a guard script,
+  // grep or test output over this repository, a recall quoting a stored
+  // refusal. And a reason that merely mentions a guard after the hook error
+  // is not that guard refusing.
+  it('ignores the tag in a successful result or later in the reason', () => {
+    const denial =
+      'PreToolUse:Bash hook error: [guard:commit_message_guard] a commit message is one line';
+    const jsonl = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-10-24T10:00:04Z',
+      message: {
+        role: 'user',
+        content: [
+          toolResult('toolu_2', denial),
+          toolResult(
+            'toolu_3',
+            'PreToolUse:Bash hook error: see [guard:dev_docs_guard]',
+            true
+          ),
+          toolResult(
+            'toolu_4',
+            'PreToolUse:Bash hook error: [guard:dev_docs_guard] and [guard:commit_message_guard] too',
+            true
+          ),
+        ],
+      },
+    });
+
+    expect(parseTranscript(jsonl).guardRefusals).toEqual([
+      { guard: 'dev_docs_guard', at: '2026-10-24T10:00:04Z' },
+    ]);
   });
 });

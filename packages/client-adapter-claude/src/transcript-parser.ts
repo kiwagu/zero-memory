@@ -21,6 +21,8 @@ const contentItemSchema = z.looseObject({
   id: z.string().optional(),
   /** tool_result: the id of the tool_use it answers. */
   tool_use_id: z.string().optional(),
+  /** tool_result: set when the call did not run, e.g. a hook denied it. */
+  is_error: z.boolean().optional(),
 });
 
 const transcriptLineSchema = z.looseObject({
@@ -49,8 +51,9 @@ const transcriptLineSchema = z.looseObject({
  * tool results surfaced. A recalled id is only taken from a tool_result whose
  * tool_use_id belongs to a recall / build_context call — so a `remember` result
  * (which returns a freshly-created id) is never mistaken for a recall hit.
- * Guard refusals are read off tool_result items only, by the `[guard:<name>]`
- * tag: only the name and the line's timestamp are kept.
+ * Guard refusals are read off denied calls only (an error tool_result whose
+ * hook reason opens with the `[guard:<name>]` tag): only the name and the
+ * line's timestamp are kept.
  */
 export const parseTranscript = (jsonl: string): ParsedTranscript => {
   const entries: TranscriptEntry[] = [];
@@ -117,19 +120,21 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
 type ContentItem = z.infer<typeof contentItemSchema>;
 
 /**
- * The tag a refusing guard hook opens its reason with, e.g.
- * `[guard:commit_message_guard] …`. The name pattern is the contract's guard
- * name, so whatever this matches the server accepts.
+ * A denied call as Claude Code records it: an error tool_result reading
+ * `PreToolUse:<Tool> hook error: <reason>`, where a guard opens its reason with
+ * its tag, e.g. `[guard:commit_message_guard] …`. Anchored to the start of the
+ * reason, so a guard named later in it is not the one refusing. The name
+ * pattern is the contract's guard name, so whatever this matches the server
+ * accepts.
  */
-const GUARD_TAG = /\[guard:([a-z][a-z0-9_-]{1,63})\]/gu;
-const collectGuardTags = (text: string): string[] =>
-  [...text.matchAll(GUARD_TAG)].map((match) => match[1]!);
+const GUARD_REFUSAL = /hook error:\s*\[guard:([a-z][a-z0-9_-]{1,63})\]/u;
 
 /**
- * Appends the guard refusals one line records, oldest first. A PreToolUse
- * denial lands in the tool_result that answers the refused call, so only those
- * items are read: the same tag in prose, in the call's own input or in a
- * compaction recap is talk about a guard, not a refusal by one.
+ * Appends the guard refusals one line records, oldest first: at most one per
+ * denied call. Only an error tool_result counts. A call that succeeded can
+ * still print the tag (a read of a guard script, grep or test output, a recall
+ * quoting a stored refusal), and the tag in prose, in the call's own input or
+ * in a compaction recap is talk about a guard, not a refusal by one.
  */
 const collectGuardRefusals = (
   content: string | ContentItem[] | undefined,
@@ -140,10 +145,12 @@ const collectGuardRefusals = (
     return;
   }
   for (const item of content) {
-    if (item.type !== 'tool_result') {
+    if (item.type !== 'tool_result' || item.is_error !== true) {
       continue;
     }
-    for (const guard of collectGuardTags(JSON.stringify(item))) {
+    const reason = typeof item.content === 'string' ? item.content : '';
+    const guard = GUARD_REFUSAL.exec(reason)?.[1];
+    if (guard) {
       guardRefusals.push({ guard, at: timestamp ?? null });
     }
   }

@@ -84,7 +84,7 @@ const claudeRefusalLines = (count: number): string[] => [
             type: 'tool_result',
             tool_use_id: `toolu_${index}`,
             is_error: true,
-            content: `[guard:guard_${index}] the refused command stays here`,
+            content: `PreToolUse:Bash hook error: [guard:guard_${index}] the refused command stays here`,
           },
         ],
       },
