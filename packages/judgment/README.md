@@ -9,7 +9,10 @@ workflow; the model supplies one number per question and generates no text.
 - `SubqJudgment` — SubQ Snap (see "Providers").
 - `IJudgeCredentialResolver` — whose key a call runs on; `EnvJudgeCredentialResolver`
   serves the platform keys from the env, and a provider without one resolves to null.
-- `defaultJudgmentFactory` — builds the adapter a resolved credential names.
+- `IJudgeSettingsReader` — an account's rule-gate choice (`enabled`, `provider`, null = the
+  platform default); `JUDGE_SETTINGS_OFF` when the account has made none.
+- `defaultJudgmentFactory` — builds the adapter a resolved credential names; the server binds
+  it (or the fake) to `JUDGMENT_FACTORY`.
 - `readJudgeConfig(env)` / `readRuleGateConfig(env)` — the server's env knobs.
 - `@workspace/judgment/testing` — `FakeJudgment` for unit and e2e tests.
 - `@workspace/judgment/availability` — `SUBQ_ADAPTER_AVAILABLE`, importable without

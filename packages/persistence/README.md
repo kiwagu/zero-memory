@@ -8,9 +8,10 @@ Supabase client/session helpers.
 Infrastructure adapter layer. Nothing here defines behaviour: every class
 implements an interface owned by a domain package (`@workspace/memory`,
 `@workspace/usage`, `@workspace/policy`, `@workspace/audit`,
-`@workspace/extraction`) and translates it into Postgres calls. The dependency
-arrow points inward only — the domain never imports this package, which is what
-lets a handler be unit-tested against an in-memory double.
+`@workspace/extraction`, `@workspace/judgment`) and translates it into Postgres
+calls. The dependency arrow points inward only — the domain never imports this
+package, which is what lets a handler be unit-tested against an in-memory
+double.
 
 Adapters build a per-request client with the caller's JWT from the execution
 context, so every query runs under that user's RLS — the database, not the
@@ -45,6 +46,7 @@ One directory per aggregate, mirroring the port it implements:
 | `usage/`      | the append-only metering ledger and its storage upkeep                                                       |
 | `policy/`     | stored allowances and spend summed from the ledger                                                           |
 | `credential/` | resolution of a user's own provider key                                                                      |
+| `judgment/`   | the account's rule-gate choice, and resolution of its own decision-model key                                 |
 | `audit/`      | the command-bus audit trail                                                                                  |
 | `rules/`      | promoted standing rules: the General and project delivery readers, the one-rule read by id, rule fates       |
 | `ingest/`     | the ingest ledger behind idempotent transcript capture                                                       |

@@ -74,6 +74,10 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   scopes: { kind: 'owned', ownerColumn: 'created_by' },
   policy_allowances: { kind: 'owned', ownerColumn: 'subject_id' },
   provider_credentials: { kind: 'owned', ownerColumn: 'subject_id' },
+  // The account's rule-gate choice and its own decision-model key. Erasure
+  // revokes the key through its function, so the Vault secret leaves too.
+  judge_settings: { kind: 'owned', ownerColumn: 'subject_id' },
+  judge_credentials: { kind: 'owned', ownerColumn: 'subject_id' },
 
   // Directly owned — the engine's per-user derived queues and probes.
   reflection_candidates: { kind: 'owned', ownerColumn: 'owner_id' },

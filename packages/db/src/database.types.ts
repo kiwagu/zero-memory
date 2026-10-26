@@ -780,6 +780,57 @@ export type Database = {
           },
         ];
       };
+      judge_credentials: {
+        Row: {
+          created_at: string;
+          hint: string;
+          model: string | null;
+          provider: string;
+          secret_id: string;
+          subject_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          hint: string;
+          model?: string | null;
+          provider: string;
+          secret_id: string;
+          subject_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          hint?: string;
+          model?: string | null;
+          provider?: string;
+          secret_id?: string;
+          subject_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      judge_settings: {
+        Row: {
+          enabled: boolean;
+          provider: string | null;
+          subject_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          enabled?: boolean;
+          provider?: string | null;
+          subject_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          enabled?: boolean;
+          provider?: string | null;
+          subject_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       loop_closure_checks: {
         Row: {
           checked_at: string;
@@ -2667,6 +2718,14 @@ export type Database = {
         Args: { prefix: string; value: string };
         Returns: boolean;
       };
+      judge_credential_for: {
+        Args: { p_subject_id: string };
+        Returns: {
+          api_key: string;
+          model: string;
+          provider: string;
+        }[];
+      };
       list_memory_scopes: {
         Args: never;
         Returns: {
@@ -2792,6 +2851,10 @@ export type Database = {
         Args: { p_client_id: string; p_user_id: string };
         Returns: Json;
       };
+      revoke_judge_credential: {
+        Args: { p_subject_id: string };
+        Returns: undefined;
+      };
       revoke_provider_credential: {
         Args: { p_subject_id: string };
         Returns: undefined;
@@ -2836,6 +2899,15 @@ export type Database = {
       };
       session_assurance: { Args: never; Returns: Json };
       session_receipt: { Args: { p_since: string }; Returns: Json };
+      set_judge_credential: {
+        Args: {
+          p_api_key: string;
+          p_model?: string;
+          p_provider: string;
+          p_subject_id: string;
+        };
+        Returns: undefined;
+      };
       set_provider_credential: {
         Args: {
           p_api_key: string;

@@ -38,6 +38,7 @@
     "@workspace/embedding": "workspace:*",
     "@workspace/extraction": "workspace:*",
     "@workspace/hygiene": "workspace:*",
+    "@workspace/judgment": "workspace:*",
     "@workspace/llm": "workspace:*",
     "@workspace/logger": "workspace:*",
     "@workspace/mcp": "workspace:*",

@@ -21,6 +21,16 @@ import {
   setLlmGateway,
 } from '@workspace/llm';
 import {
+  EnvJudgeCredentialResolver,
+  JUDGE_CREDENTIAL_RESOLVER,
+  JUDGE_SETTINGS_READER,
+  JUDGMENT_FACTORY,
+  defaultJudgmentFactory,
+  readJudgeConfig,
+  type JudgmentFactory,
+} from '@workspace/judgment';
+import { FakeJudgment } from '@workspace/judgment/testing';
+import {
   LlmExtractor,
   LlmUsefulnessJudge,
   EXTRACTOR,
@@ -64,6 +74,8 @@ import {
   SupabaseEntityRepository,
   SupabaseGraphService,
   SupabaseIngestLogRepository,
+  SupabaseJudgeCredentialResolver,
+  SupabaseJudgeSettingsReader,
   SupabaseBriefingWorkReader,
   SupabaseCardRepository,
   SupabaseReleaseRepository,
@@ -184,6 +196,36 @@ export const register = (c = container): void => {
   c.register(BUDGET_GUARD, { useValue: guard });
   c.register(LLM_GATEWAY, { useValue: gateway });
   setLlmGateway(gateway);
+
+  // The rule gate's judge. ZM_JUDGE_FAKE=1 is the e2e/smoke override: a
+  // deterministic judge and a dummy platform key, so the gate's own code
+  // runs without any provider account. Never set it on a serving stack.
+  const judgeConfig = readJudgeConfig(process.env);
+  if (process.env.ZM_JUDGE_FAKE === '1') {
+    const fake = new FakeJudgment();
+    const fakeFactory: JudgmentFactory = () => fake;
+    c.register(JUDGMENT_FACTORY, { useValue: fakeFactory });
+    c.register(JUDGE_CREDENTIAL_RESOLVER, {
+      useValue: {
+        resolve: async () => ({
+          provider: 'typesafe' as const,
+          apiKey: 'fake',
+          model: 'fake',
+          ownedByCaller: false,
+        }),
+      },
+    });
+  } else {
+    c.register(JUDGMENT_FACTORY, { useValue: defaultJudgmentFactory });
+    c.register(JUDGE_CREDENTIAL_RESOLVER, {
+      useValue: new SupabaseJudgeCredentialResolver(
+        new EnvJudgeCredentialResolver(judgeConfig),
+        undefined,
+        judgeConfig.models
+      ),
+    });
+  }
+  c.registerSingleton(JUDGE_SETTINGS_READER, SupabaseJudgeSettingsReader);
 
   // ZM_EXTRACTOR=deterministic is a smoke/test override (no API key needed);
   // production always runs the model-backed extractor. The usefulness judge and

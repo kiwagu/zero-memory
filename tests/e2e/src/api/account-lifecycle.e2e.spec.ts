@@ -411,6 +411,21 @@ test.describe('account lifecycle: erasure', () => {
         subject_id: userId,
         budget_id: 'e2e-erase',
       });
+      await insertOrThrow(db, 'judge_settings', {
+        subject_id: userId,
+        enabled: true,
+        provider: 'subq',
+      });
+      // Stored the way the server stores one, so a Vault secret stands behind
+      // the row and erasure has to revoke it rather than drop a bare row.
+      const { error: judgeKeyError } = await db.rpc('set_judge_credential', {
+        p_subject_id: userId,
+        p_provider: 'typesafe',
+        p_api_key: 'e2e-erase-judge-key',
+      });
+      if (judgeKeyError) {
+        throw new Error(`seed judge_credentials: ${judgeKeyError.message}`);
+      }
       await insertOrThrow(db, 'ingest_log', {
         chunk_hash: 'e2e-erase-hash',
         client: 'e2e',

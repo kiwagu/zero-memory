@@ -23,4 +23,15 @@ describe('defaultJudgmentFactory', () => {
       })
     ).toBeInstanceOf(SubqJudgment);
   });
+
+  it('refuses a provider it has no adapter for', () => {
+    expect(() =>
+      defaultJudgmentFactory({
+        provider: 'gpt' as never,
+        apiKey: 'k',
+        model: 'm',
+        ownedByCaller: false,
+      })
+    ).toThrow('judgment: unknown provider gpt');
+  });
 });
