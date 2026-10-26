@@ -23,7 +23,7 @@ describe('EnvJudgeCredentialResolver', () => {
     await expect(resolver.resolve('usr_a', 'subq')).resolves.toMatchObject({
       provider: 'subq',
       apiKey: 'sq',
-      model: 'snap-1.1',
+      model: 'subq-snap-1.1',
     });
   });
 

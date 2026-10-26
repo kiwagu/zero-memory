@@ -26,7 +26,7 @@ export interface RuleGateConfig {
 
 const DEFAULT_MODELS: Record<JudgeProviderName, string> = {
   typesafe: 'jev-1.14.0',
-  subq: 'snap-1.1',
+  subq: 'subq-snap-1.1',
 };
 
 const DEFAULT_TIMEOUT_MS = 1500;

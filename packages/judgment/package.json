@@ -34,6 +34,11 @@
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
+    },
+    "./availability": {
+      "types": "./src/subq.availability.ts",
+      "import": "./src/subq.availability.ts",
+      "default": "./src/subq.availability.ts"
     }
   }
 }
