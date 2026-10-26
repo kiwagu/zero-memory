@@ -48,6 +48,8 @@ export * from './briefing-work.reader.js';
 export * from './briefing-work.reader.provider.js';
 export * from './rule-fate.reader.js';
 export * from './rule-fate.reader.provider.js';
+export * from './rule-gate.provider.js';
+export * from './rule-gate.service.js';
 export * from './user-rules.reader.js';
 export * from './user-rules.reader.provider.js';
 export * from './verification.js';

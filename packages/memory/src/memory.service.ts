@@ -111,6 +111,12 @@ import type { IProjectRulesReader } from './project-rules.reader.js';
 import { keptLiveRule, ruleFateReport } from './rule-fate.js';
 import { injectRuleFateReader } from './rule-fate.reader.provider.js';
 import type { IRuleFateReader } from './rule-fate.reader.js';
+import { injectRuleGate } from './rule-gate.provider.js';
+import {
+  hookTaskStatement,
+  type IRuleGate,
+  type RuleGateOutcome,
+} from './rule-gate.service.js';
 import { injectUserRulesReader } from './user-rules.reader.provider.js';
 import type { IUserRulesReader } from './user-rules.reader.js';
 import { injectScopeAccessService } from './scope-access.provider.js';
@@ -246,7 +252,9 @@ export class MemoryService {
     @injectBriefingWorkReader()
     private readonly briefingWork: IBriefingWorkReader,
     @injectRuleFateReader()
-    private readonly ruleFates: IRuleFateReader
+    private readonly ruleFates: IRuleFateReader,
+    @injectRuleGate()
+    private readonly ruleGate: IRuleGate
   ) {}
 
   async remember(
@@ -1498,13 +1506,39 @@ export class MemoryService {
       (a, b) => Number(b.pinned) - Number(a.pinned)
     );
 
+    // THE RULE GATE: an agent call (no budget) states its task in `topic`, so
+    // a decision model can say which unpinned rules bind it and the rest can
+    // arrive by headline. A hook briefing carries a project name, not a task,
+    // so it is judged only against what the server knows of the conversation
+    // — its bound or continuation card — and not at all without one. The
+    // prompt never reaches the server, so it is never part of this.
+    // Fail-open like the lookups above.
+    let gated: RuleGateOutcome = { rules, block: null };
+    if (input.briefing === true && rules.length > 0) {
+      try {
+        gated = await this.ruleGate.apply({
+          rules,
+          subjectId: this.context.mustGetCurrentUserEntityId(),
+          task:
+            budgets.maxMemories !== undefined
+              ? hookTaskStatement(work?.work)
+              : topicText,
+        });
+      } catch (error) {
+        this.#logger.warn('rule gate failed; rules delivered whole', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     // Translation transparency: when the topic was rewritten, tell the caller
     // what was actually briefed on. project_scope reports the pin so clients
     // can persist the resolved project identity (and adapters stash it as the
     // session default for later scope-less writes).
     return Ok({
       ...briefing,
-      rules,
+      rules: gated.rules,
+      ...(gated.block ? { rule_gate: gated.block } : {}),
       ...(pinnedScope ? { project_scope: pinnedScope } : {}),
       ...(work ? { work: work.work } : {}),
       ...(threadToken

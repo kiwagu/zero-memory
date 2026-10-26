@@ -8,9 +8,11 @@ that operate on them.
 
 Domain + application layer. Depends on the shared kernel
 (`@workspace/domain`, `@workspace/contracts`, `@workspace/context`,
-`@workspace/di`, `@workspace/logger`) and the embedding port
-(`@workspace/embedding`). It defines the persistence ports; the Supabase
-adapters live in `@workspace/persistence` and are bound in the app host.
+`@workspace/di`, `@workspace/logger`), the embedding port
+(`@workspace/embedding`), the typed-judgment port (`@workspace/judgment`) and
+the usage meter (`@workspace/usage`). It defines the persistence ports; the
+Supabase adapters live in `@workspace/persistence` and are bound in the app
+host.
 
 ## Model
 
@@ -117,6 +119,21 @@ one; the service only reads the result back, so `remember` can list it under
 `rules` (carried, carried with a curated text kept for review, or not carried)
 and `forget` can say the rule stays live. A read failure costs the report,
 never the write.
+
+`IRuleGate` / `RULE_GATE` (`RuleGateService`, configured through
+`RULE_GATE_CONFIG`, which the host reads from `ZM_RULE_GATE_*` and
+`ZM_JUDGE_TIMEOUT_MS` once at startup) decides how much of each standing rule
+a briefing delivers. It asks a decision model one yes/no question per unpinned
+rule — does it bind this task? — and maps the answer to `full`, `gate`
+(headline plus `applies_when`) or `headline` by two probability bands. Pinned
+rules are never judged and every rule keeps its name. An agent call is judged
+against its `topic`; a budgeted hook briefing only against the statement
+`hookTaskStatement` builds from the conversation's bound or continuation card,
+and not at all without one. The gate runs only for an account that turned it
+on and has a judge credential; `shadow` records the levels in `rule_gate`
+without changing what is delivered. A judge failure delivers the rules as
+before, flagged `judge_unavailable`, and never falls back to another provider;
+a gate failure costs the levelling, never the briefing.
 
 A write carries `PassageVectors` — a named `{ primary, overflow }` shape
 rather than a bare array, because the embedding model truncates its input to a

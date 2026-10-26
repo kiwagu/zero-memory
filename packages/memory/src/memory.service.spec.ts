@@ -5,8 +5,10 @@ import {
   CORE_SCOPE,
   PERSONAL_SCOPE,
   THREAD_SOURCE_KEY,
+  type ContextRule,
   type EntityId,
   type MemoryId,
+  type RuleGateBlock,
   type UserId,
 } from '@workspace/contracts';
 import { Err, None, Some } from 'oxide.ts';
@@ -21,6 +23,7 @@ import type { SupersedeCandidateHit } from './memory-search.service.js';
 import type { IProjectRulesReader } from './project-rules.reader.js';
 import { Provenance } from './provenance.vo.js';
 import type { IRuleFateReader } from './rule-fate.reader.js';
+import { hookTaskStatement, type IRuleGate } from './rule-gate.service.js';
 import { Scope } from './scope.vo.js';
 import type { ISessionThreadRepository } from './session-thread.repository.js';
 import {
@@ -2622,6 +2625,147 @@ describe('MemoryService.buildContext — the work summary', () => {
     });
 
     expect(briefingWork.forBriefing).not.toHaveBeenCalled();
+  });
+});
+
+describe('MemoryService.buildContext — the rule gate', () => {
+  const HINT = '/home/someone/repos/quokka-tool';
+  const rule: ContextRule = {
+    id: 'rlc_0000000000000001.0000000000',
+    text: 'ONE LINE COMMITS. Every commit has a single subject line and no body.',
+    headline: 'ONE LINE COMMITS',
+    applies_when: 'tasks that create a commit',
+    pinned: false,
+  };
+  const levelledRule: ContextRule = {
+    ...rule,
+    text: 'ONE LINE COMMITS',
+    level: 'headline',
+    applies_when: undefined,
+  };
+  const block: RuleGateBlock = {
+    mode: 'live',
+    provider: 'typesafe',
+    model: 'jev-1.14.0',
+    latency_ms: 120,
+    judge_unavailable: false,
+    bands: { hi: 0.6, lo: 0.35 },
+    chars_baseline: rule.text.length,
+    chars_delivered: levelledRule.text.length,
+    levels: { full: 0, gate: 0, headline: 1 },
+    rules: [
+      {
+        id: rule.id!,
+        p: 0.1,
+        level: 'headline',
+        chars: levelledRule.text.length,
+        pinned: false,
+      },
+    ],
+  };
+  const work = briefingWorkSchema.parse({
+    bound_card: {
+      id: 'crd_0000000000000001.0000000000',
+      number: 3,
+      title: 'Wire the importer',
+      state: 'active',
+      type: 'story',
+      state_reason: 'the importer blocks the release',
+      refs: 0,
+      updated_at: '2026-09-21T10:00:00Z',
+    },
+    active: 1,
+    waiting: 0,
+    lead: [],
+    open_branches: [
+      {
+        card_id: 'crd_0000000000000001.0000000000',
+        number: 3,
+        state: 'active',
+        repo: 'quokka-tool',
+        branch: 'feature/importer',
+      },
+    ],
+  });
+  const ruled = (
+    gate: IRuleGate,
+    read: Awaited<ReturnType<IBriefingWorkReader['forBriefing']>> = null
+  ) =>
+    makeService({
+      userRules: { listPromoted: vi.fn().mockResolvedValue([rule]) },
+      briefingWork: { forBriefing: vi.fn().mockResolvedValue(read) },
+      ruleGate: gate,
+    });
+  const gateReturning = (rules: ContextRule[], out: RuleGateBlock | null) => ({
+    apply: vi.fn().mockResolvedValue({ rules, block: out }),
+  });
+
+  it('delivers the rules the gate levelled and reports the gate', async () => {
+    const ruleGate = gateReturning([levelledRule], block);
+    const { service } = ruled(ruleGate);
+
+    const out = (
+      await service.buildContext({
+        topic: 'release the importer',
+        briefing: true,
+      })
+    ).unwrap();
+
+    expect(out.rules).toEqual([levelledRule]);
+    expect(out.rule_gate).toEqual(block);
+    expect(ruleGate.apply).toHaveBeenCalledWith({
+      rules: [rule],
+      subjectId: USER_ENTITY_ID,
+      task: 'release the importer',
+    });
+  });
+
+  it('judges a hook briefing against its card, never against the topic', async () => {
+    const ruleGate = gateReturning([rule], null);
+    const { service } = ruled(ruleGate, { work, attachedLoopIds: [] });
+
+    const out = (
+      await service.buildContext({
+        topic: 'quokka-tool',
+        project_hint: HINT,
+        briefing: true,
+        max_tokens: 1200,
+      })
+    ).unwrap();
+
+    const [input] = vi.mocked(ruleGate.apply).mock.calls[0]!;
+    expect(input.task).toBe(hookTaskStatement(work));
+    expect(input.task).toContain('Wire the importer');
+    expect(out).not.toHaveProperty('rule_gate');
+  });
+
+  it('hands a hook briefing without a card no task, so it is not judged', async () => {
+    const ruleGate = gateReturning([rule], null);
+    const { service } = ruled(ruleGate, null);
+
+    await service.buildContext({
+      topic: 'quokka-tool',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    const [input] = vi.mocked(ruleGate.apply).mock.calls[0]!;
+    expect(input.task).toBeNull();
+  });
+
+  it('delivers the rules whole when the gate itself throws', async () => {
+    const ruleGate: IRuleGate = {
+      apply: vi.fn().mockRejectedValue(new Error('gate down')),
+    };
+    const { service } = ruled(ruleGate);
+
+    const out = (
+      await service.buildContext({ topic: 'anything', briefing: true })
+    ).unwrap();
+
+    expect(out.rules).toEqual([rule]);
+    expect(out).not.toHaveProperty('rule_gate');
   });
 });
 

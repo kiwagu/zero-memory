@@ -27,6 +27,7 @@ import {
   JUDGMENT_FACTORY,
   defaultJudgmentFactory,
   readJudgeConfig,
+  readRuleGateConfig,
   type JudgmentFactory,
 } from '@workspace/judgment';
 import { FakeJudgment } from '@workspace/judgment/testing';
@@ -52,6 +53,9 @@ import {
   SCOPE_META_REPOSITORY,
   PROJECT_RULES_READER,
   RULE_FATE_READER,
+  RULE_GATE,
+  RULE_GATE_CONFIG,
+  RuleGateService,
   USER_RULES_READER,
   PORTABILITY_JUDGE,
   PROJECT_BINDING_REPOSITORY,
@@ -226,6 +230,12 @@ export const register = (c = container): void => {
     });
   }
   c.registerSingleton(JUDGE_SETTINGS_READER, SupabaseJudgeSettingsReader);
+  // Read once, here, so a malformed ZM_RULE_GATE_* value stops the server at
+  // startup instead of failing every briefing.
+  c.register(RULE_GATE_CONFIG, {
+    useValue: readRuleGateConfig(process.env),
+  });
+  c.registerSingleton(RULE_GATE, RuleGateService);
 
   // ZM_EXTRACTOR=deterministic is a smoke/test override (no API key needed);
   // production always runs the model-backed extractor. The usefulness judge and

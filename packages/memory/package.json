@@ -18,7 +18,9 @@
     "@workspace/di": "workspace:*",
     "@workspace/domain": "workspace:*",
     "@workspace/embedding": "workspace:*",
+    "@workspace/judgment": "workspace:*",
     "@workspace/logger": "workspace:*",
+    "@workspace/usage": "workspace:*",
     "oxide.ts": "catalog:",
     "zod": "catalog:"
   },
