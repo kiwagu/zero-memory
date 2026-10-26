@@ -10,7 +10,10 @@
  */
 import { expect, test } from '@playwright/test';
 
-import { seedInsightsUsage } from '../helpers/insights.js';
+import {
+  RULE_GATE_SERIES_KEYS,
+  seedInsightsUsage,
+} from '../helpers/insights.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import {
   passwordGrantToken,
@@ -26,20 +29,6 @@ interface ExportMetrics {
   };
   series: Array<Record<string, number | string> & { recall_calls: number }>;
 }
-
-/** The rule gate's per-day measures, in the order the series emits them. */
-const RULE_GATE_SERIES_KEYS = [
-  'rule_gate_calls',
-  'rules_chars_baseline',
-  'rules_chars_delivered',
-  'rules_full',
-  'rules_judged',
-  'rule_fetches',
-  'guard_refusals',
-  'judge_latency_ms_sum',
-  'judge_unavailable',
-  'judge_input_tokens',
-] as const;
 
 test.describe('export_metrics over MCP @smoke', () => {
   test('wraps the vitrine, agrees rollup-vs-raw, and stays personal', async () => {

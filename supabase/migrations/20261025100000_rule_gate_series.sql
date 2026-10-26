@@ -26,15 +26,18 @@
 --   - table public.usage_daily (+10 columns)
 --   - function public.usage_daily_rollup (replaced)
 --   - function public.dashboard_metrics_series (replaced, ten more keys)
+--   - function public.instance_metrics_series (replaced, ten more keys)
 --   - function public.rule_gate_stats (new)
 --
 -- Special considerations:
 --   - The new columns default to 0, so every stored day stays valid and reads
 --     as "nothing measured"; the trailing recompute fills recent days on its
 --     next run.
---   - The three bodies are copied verbatim from
---     20260719191500_usage_daily_rollup.sql; every addition is marked
---     `-- rule gate`. Existing columns and keys are unchanged.
+--   - The three per-user bodies are copied verbatim from
+--     20260719191500_usage_daily_rollup.sql and the operator series from
+--     20260719202121_instance_metrics_operator_surface.sql; every addition is
+--     marked `-- rule gate`. Existing columns and keys are unchanged, and so
+--     is the operator series' notion of an active user.
 --   - private.usage_daily_rows is dropped and re-created because its return
 --     table changes. A re-created function gets PUBLIC execute back, so the
 --     revoke from PUBLIC is restated; it stays callable by its owner only.
@@ -490,7 +493,95 @@ begin
 end;
 $$;
 
--- 5. the per-rule breakdown ----------------------------------------------------
+-- 5. the operator series --------------------------------------------------------
+
+-- The same ten measures summed across every user, read from the rollup like
+-- the rest of the operator series. Grants and comment are kept by the replace.
+create or replace function public.instance_metrics_series(p_days integer default 30)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_days integer := greatest(coalesce(p_days, 30), 1);
+  v_from date := (date_trunc('day', now()) - make_interval(days => v_days - 1))::date;
+  v_result jsonb;
+begin
+  with days as (
+    select generate_series(v_from, date_trunc('day', now())::date, interval '1 day')::date as day
+  ),
+  rolled as (
+    select
+      u.day,
+      sum(u.recall_calls)::int as recall_calls,
+      sum(u.captured)::int as captured,
+      sum(u.saved_tokens) as saved_tokens,
+      sum(u.write_tokens) as write_tokens,
+      sum(u.briefing_hits)::int as briefing_hits,
+      sum(u.briefing_total)::int as briefing_total,
+      sum(u.judged)::int as judged,
+      sum(u.relevant)::int as relevant,
+      sum(u.used)::int as used,
+      -- rule gate
+      sum(u.rule_gate_calls)::int as rule_gate_calls,
+      sum(u.rules_chars_baseline)::int as rules_chars_baseline,
+      sum(u.rules_chars_delivered)::int as rules_chars_delivered,
+      sum(u.rules_full)::int as rules_full,
+      sum(u.rules_judged)::int as rules_judged,
+      sum(u.rule_fetches)::int as rule_fetches,
+      sum(u.guard_refusals)::int as guard_refusals,
+      sum(u.judge_latency_ms_sum)::int as judge_latency_ms_sum,
+      sum(u.judge_unavailable)::int as judge_unavailable,
+      sum(u.judge_input_tokens)::int as judge_input_tokens,
+      count(*) filter (
+        where u.recall_calls > 0 or u.captured > 0 or u.briefing_total > 0
+          or u.judged > 0
+      )::int as users_active
+    from public.usage_daily u
+    where u.day >= v_from
+    group by u.day
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'date', to_char(d.day, 'YYYY-MM-DD'),
+        'recall_calls', coalesce(r.recall_calls, 0),
+        'captured', coalesce(r.captured, 0),
+        'saved_tokens', coalesce(r.saved_tokens, 0),
+        'write_tokens', coalesce(r.write_tokens, 0),
+        'briefing_hits', coalesce(r.briefing_hits, 0),
+        'briefing_total', coalesce(r.briefing_total, 0),
+        'judged', coalesce(r.judged, 0),
+        'relevant', coalesce(r.relevant, 0),
+        'used', coalesce(r.used, 0),
+        -- rule gate
+        'rule_gate_calls', coalesce(r.rule_gate_calls, 0),
+        'rules_chars_baseline', coalesce(r.rules_chars_baseline, 0),
+        'rules_chars_delivered', coalesce(r.rules_chars_delivered, 0),
+        'rules_full', coalesce(r.rules_full, 0),
+        'rules_judged', coalesce(r.rules_judged, 0),
+        'rule_fetches', coalesce(r.rule_fetches, 0),
+        'guard_refusals', coalesce(r.guard_refusals, 0),
+        'judge_latency_ms_sum', coalesce(r.judge_latency_ms_sum, 0),
+        'judge_unavailable', coalesce(r.judge_unavailable, 0),
+        'judge_input_tokens', coalesce(r.judge_input_tokens, 0),
+        'users_active', coalesce(r.users_active, 0)
+      )
+      order by d.day
+    ),
+    '[]'::jsonb
+  )
+  into v_result
+  from days d
+    left join rolled r on r.day = d.day;
+
+  return v_result;
+end;
+$$;
+
+-- 6. the per-rule breakdown ----------------------------------------------------
 
 -- How each standing rule fared at the gate over the window, for the calling
 -- user: how often it was judged, at which level it went out, the mean

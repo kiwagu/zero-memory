@@ -13,7 +13,10 @@
 import { expect, test } from '@playwright/test';
 
 import { admin, psql } from '../helpers/board-store.js';
-import { seedInsightsUsage } from '../helpers/insights.js';
+import {
+  RULE_GATE_SERIES_KEYS,
+  seedInsightsUsage,
+} from '../helpers/insights.js';
 import {
   passwordGrantToken,
   provisionE2EUser,
@@ -103,5 +106,12 @@ test.describe('operator surface: instance_metrics', () => {
     expect(seriesError).toBeNull();
     expect(Array.isArray(series)).toBe(true);
     expect((series as unknown[]).length).toBe(7);
+    // The rule gate's measures come from the SQL on every day, summed over
+    // users — not from the contract's defaults.
+    for (const point of series as Array<Record<string, unknown>>) {
+      for (const key of RULE_GATE_SERIES_KEYS) {
+        expect(point).toHaveProperty(key);
+      }
+    }
   });
 });

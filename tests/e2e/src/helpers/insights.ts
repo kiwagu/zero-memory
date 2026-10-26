@@ -24,6 +24,20 @@ const adminClient = (): SupabaseClient =>
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+/** The rule gate's per-day measures every series point carries, zero or not. */
+export const RULE_GATE_SERIES_KEYS = [
+  'rule_gate_calls',
+  'rules_chars_baseline',
+  'rules_chars_delivered',
+  'rules_full',
+  'rules_judged',
+  'rule_fetches',
+  'guard_refusals',
+  'judge_latency_ms_sum',
+  'judge_unavailable',
+  'judge_input_tokens',
+] as const;
+
 /** Overridable visible strings so the demo seed can present real-looking
  * data in published screenshots; specs assert on the defaults. */
 export interface InsightsFixture {
