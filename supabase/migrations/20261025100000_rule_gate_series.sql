@@ -512,7 +512,7 @@ begin
 end;
 $$;
 
--- 5. the operator series --------------------------------------------------------
+-- 5. the operator series -------------------------------------------------------
 
 -- The same ten measures summed across every user, read from the rollup like
 -- the rest of the operator series. Grants and comment are kept by the replace.
@@ -603,10 +603,11 @@ $$;
 -- 6. the per-rule breakdown ----------------------------------------------------
 
 -- How each standing rule fared at the gate over the window, for the calling
--- user (unpinned entries only, as in the series): how often it was judged, at which level it went out, the mean
--- probability the judge gave it, and how often its full text was read back
--- (found reads only). Plus the guard refusals by guard. Content-free: rule
--- ids, counts and a probability; never a rule's text.
+-- user, over unpinned entries only, as in the series: how often it was
+-- judged, at which level it went out, the mean probability the judge gave
+-- it, and how often its full text was read back (found reads only). Plus the
+-- guard refusals by guard. Content-free: rule ids, counts and a probability;
+-- never a rule's text.
 create or replace function public.rule_gate_stats(p_days integer default 30)
 returns jsonb
 language sql
@@ -656,9 +657,10 @@ as $$
 $$;
 
 comment on function public.rule_gate_stats(integer) is
-  'Per-rule rule-gate breakdown for the calling user over the last p_days: '
-  'calls, level counts, mean judge probability and found full-text reads per '
-  'rule, plus guard refusals per guard. Content-free.';
+  'Per-rule rule-gate breakdown for the calling user over the last p_days, '
+  'counting only unpinned entries of the gate''s rules list: calls, level '
+  'counts, mean judge probability and found full-text reads per rule, plus '
+  'guard refusals per guard. Content-free.';
 
 revoke all on function public.rule_gate_stats(integer) from anon, public;
 grant execute on function public.rule_gate_stats(integer) to authenticated, service_role;

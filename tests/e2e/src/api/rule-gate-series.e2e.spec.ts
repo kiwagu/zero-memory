@@ -7,7 +7,10 @@
  * spec seeds the event shapes the server writes for one throwaway user and
  * pins the exact numbers on every reader — the per-user series computed live
  * and served from the rollup, the operator series, and the per-rule breakdown.
+ * Nothing it rolls up outlives it: see {@link rolledInRollback}.
  */
+import { randomUUID } from 'node:crypto';
+
 import { expect, test } from '@playwright/test';
 
 import { admin, psql } from '../helpers/board-store.js';
@@ -67,12 +70,12 @@ const pick = (point: Record<string, unknown>): RuleGateDay =>
 const PRIOR_DAY = day({ rule_fetches: 1, guard_refusals: 1 });
 // Today: two gated calls. Unpinned entries judged: A, B, C on the first and
 // A, B on the second (5); of those whole: A on the first, A and B on the
-// second (3). The pinned entry and the id-less rule counted in the first
-// call's level totals are in neither. The second call's judge did not answer.
+// second (3). The pinned entry, which the first call's level totals count as
+// whole, is in neither. The second call's judge did not answer.
 const TODAY = day({
   rule_gate_calls: 2,
   rules_chars_baseline: 1800,
-  rules_chars_delivered: 1200,
+  rules_chars_delivered: 1400,
   rules_full: 3,
   rules_judged: 5,
   rule_fetches: 1,
@@ -103,9 +106,10 @@ const seedRuleGateUsage = async (ownerId: string): Promise<void> => {
               latency: 120,
               unavailable: false,
               baseline: 1300,
-              delivered: 700,
-              // Whole: the pinned rule, A and one rule without an id.
-              levels: { full: 3, gate: 1, headline: 1 },
+              // The entries' characters as delivered: 300 + 400 + 150 + 50.
+              delivered: 900,
+              // Whole: the pinned rule and A.
+              levels: { full: 2, gate: 1, headline: 1 },
               rules: [
                 {
                   id: RULE_PINNED,
@@ -144,7 +148,7 @@ const seedRuleGateUsage = async (ownerId: string): Promise<void> => {
           event_type: 'mcp_tool_call',
           agent_name: 'e2e-agent',
           metadata: {
-            tool: 'recall',
+            tool: 'build_context',
             returned: 0,
             returned_ids: [],
             rule_gate: gateBlock({
@@ -228,41 +232,78 @@ const seedRuleGateUsage = async (ownerId: string): Promise<void> => {
 };
 
 /**
- * The operator series next to every OTHER user's stored days, read in one
- * repeatable-read snapshot, so the difference is exactly this user's share
- * however busy the sibling specs are.
+ * The rolled path, measured without leaving anything rolled. The rollup takes
+ * no user: it stores the window for EVERY active user, and a stored day
+ * freezes that user's series, because the reader serves days up to the newest
+ * stored one from the table. A sibling spec that adds events today and
+ * compares its series with the raw ledger would then disagree with itself on
+ * every later run. So the rollup and every read that depends on it run in one
+ * transaction that is rolled back, and no other user's stored days move.
+ * Inside it the user's series is read as the user, under a session opened for
+ * it (a real token names one), and the operator series is read next to every
+ * OTHER user's stored days in the same statement, so the difference is
+ * exactly this user's share however busy the sibling specs are. psql prints
+ * every statement's result; the rollup's count and the two reads carry a
+ * tag to be found by.
  */
-const operatorShare = (ownerId: string): RuleGateDay[] => {
+const rolledInRollback = (
+  authUserId: string,
+  ownerId: string
+): {
+  written: number;
+  series: Array<Record<string, unknown>>;
+  operatorShare: RuleGateDay[];
+} => {
+  const sessionId = randomUUID();
+  const claims = JSON.stringify({
+    sub: authUserId,
+    role: 'authenticated',
+    session_id: sessionId,
+  });
   const sums = RULE_GATE_SERIES_KEYS.map(
     (key) => `sum(u.${key})::int as ${key}`
   ).join(', ');
-  const row = psql(
-    'begin transaction isolation level repeatable read read only; ' +
-      "select json_build_object('instance', public.instance_metrics_series(2), " +
+  const lines = psql(
+    "begin; select 'written ' || public.usage_daily_rollup(2); " +
+      'insert into auth.sessions (id, user_id, created_at, updated_at) ' +
+      `values ('${sessionId}', '${authUserId}', now(), now()); ` +
+      `select set_config('request.jwt.claims', '${claims}', true); ` +
+      'set local role authenticated; ' +
+      "select 'series ' || public.dashboard_metrics_series(2)::text; " +
+      'reset role; ' +
+      "select 'operator ' || json_build_object(" +
+      "'instance', public.instance_metrics_series(2), " +
       "'others', (select coalesce(json_object_agg(to_char(o.day, 'YYYY-MM-DD'), " +
       `row_to_json(o)), '{}'::json) from (select u.day, ${sums} ` +
       `from public.usage_daily u where u.user_id <> '${ownerId}' ` +
       "and u.day >= (date_trunc('day', now()) - interval '1 day')::date " +
-      'group by u.day) o)); commit;'
-  )
-    .split('\n')
-    .find((line) => line.startsWith('{'));
-  if (!row) {
-    throw new Error('operator series snapshot returned no row');
-  }
-  const { instance, others } = JSON.parse(row) as {
+      'group by u.day) o))::text; ' +
+      'rollback;'
+  ).split('\n');
+  const tagged = <T>(tag: string): T => {
+    const line = lines.find((entry) => entry.startsWith(`${tag} `));
+    if (!line) {
+      throw new Error(`rolled-path read returned no ${tag} row`);
+    }
+    return JSON.parse(line.slice(tag.length + 1)) as T;
+  };
+  const { instance, others } = tagged<{
     instance: Array<Record<string, unknown>>;
     others: Record<string, Record<string, number>>;
+  }>('operator');
+  return {
+    written: tagged<number>('written'),
+    series: tagged<Array<Record<string, unknown>>>('series'),
+    operatorShare: instance.map((point) => {
+      const other = others[point.date as string] ?? {};
+      return Object.fromEntries(
+        RULE_GATE_SERIES_KEYS.map((key) => [
+          key,
+          (point[key] as number) - (other[key] ?? 0),
+        ])
+      ) as RuleGateDay;
+    }),
   };
-  return instance.map((point) => {
-    const other = others[point.date as string] ?? {};
-    return Object.fromEntries(
-      RULE_GATE_SERIES_KEYS.map((key) => [
-        key,
-        (point[key] as number) - (other[key] ?? 0),
-      ])
-    ) as RuleGateDay;
-  });
 };
 
 test.describe('rule gate series', () => {
@@ -293,21 +334,14 @@ test.describe('rule gate series', () => {
       expect(pick(livePoints[1]!)).toEqual(TODAY);
       expect(livePoints[1]!.recall_calls).toBe(2);
 
-      // Rolled: the same numbers once the rollup has stored both days.
-      const { error: rollupError } = await client.rpc('usage_daily_rollup', {
-        p_days: 2,
-      });
-      expect(rollupError).toBeNull();
-      const { data: rolled, error: rolledError } = await rest.rpc(
-        'dashboard_metrics_series',
-        { p_days: 2 }
-      );
-      expect(rolledError).toBeNull();
-      const rolledPoints = rolled as Array<Record<string, unknown>>;
-      expect(rolledPoints.map(pick)).toEqual([PRIOR_DAY, TODAY]);
-
-      // Operator: this user's share of the instance-wide sums.
-      expect(operatorShare(ownerId)).toEqual([PRIOR_DAY, TODAY]);
+      // Rolled: the same numbers once the rollup has stored both days, and
+      // this user's share of the operator's instance-wide sums.
+      const rolled = rolledInRollback(user.id, ownerId);
+      // Both of this user's days were stored, so both reads below come from
+      // the table, not from the live tail.
+      expect(rolled.written).toBeGreaterThanOrEqual(2);
+      expect(rolled.series.map(pick)).toEqual([PRIOR_DAY, TODAY]);
+      expect(rolled.operatorShare).toEqual([PRIOR_DAY, TODAY]);
 
       // Per rule: unpinned entries only, found reads only, stable order.
       const { data: stats, error: statsError } = await rest.rpc(
