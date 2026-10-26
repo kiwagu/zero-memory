@@ -46,6 +46,7 @@ One directory per aggregate, mirroring the port it implements:
 | `policy/`     | stored allowances and spend summed from the ledger                                                           |
 | `credential/` | resolution of a user's own provider key                                                                      |
 | `audit/`      | the command-bus audit trail                                                                                  |
+| `rules/`      | promoted standing rules: the General and project delivery readers, the one-rule read by id, rule fates       |
 | `ingest/`     | the ingest ledger behind idempotent transcript capture                                                       |
 | `user/`       | the `auth.users` → `usr_` profile seam                                                                       |
 

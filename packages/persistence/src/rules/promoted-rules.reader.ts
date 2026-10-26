@@ -1,8 +1,9 @@
-import type { ContextRule } from '@workspace/contracts';
+import { type ContextRule, ruleCandidateIdSchema } from '@workspace/contracts';
 import { deliverableRules } from '@workspace/db';
 
 import { readAllPages } from '../paged-read.js';
 import { createUserClient } from '../supabase.client.js';
+import { toContextRule } from './promoted-rule.utils.js';
 
 /**
  * The caller's PROMOTED user-layer (General) rules (rules-incubator output):
@@ -26,6 +27,9 @@ import { createUserClient } from '../supabase.client.js';
  * rows arrive too and accumulate over time. A single response would hit
  * PostgREST's max-rows cap and silently drop an arbitrary subset — pinned
  * rules included.
+ *
+ * Each rule carries its id (the handle a client reads it back by), its
+ * headline and, when stored, its condition of application.
  */
 export async function listPromotedUserRules(
   accessToken: string
@@ -35,7 +39,7 @@ export async function listPromotedUserRules(
     (from, to) =>
       client
         .from('rule_candidates')
-        .select('rule_text, pinned, promoted_at')
+        .select('id, rule_text, pinned, promoted_at, applies_when')
         .eq('status', 'promoted')
         .eq('target_layer', 'user')
         .is('revoked_at', null)
@@ -47,11 +51,54 @@ export async function listPromotedUserRules(
     { label: 'promoted rules lookup' }
   );
   const rules = data.map((row) => ({
+    id: row.id,
     text: row.rule_text?.trim() ?? '',
     pinned: row.pinned === true,
     promotedAt: row.promoted_at,
+    appliesWhen: row.applies_when,
   }));
-  return deliverableRules(rules, Date.now()).flatMap(({ text, pinned }) =>
-    text ? [{ text, pinned }] : []
+  return deliverableRules(rules, Date.now()).flatMap((rule): ContextRule[] =>
+    rule.text ? [toContextRule(rule)] : []
   );
+}
+
+/**
+ * One live promoted rule in full, either layer, read with the caller's JWT —
+ * RLS admits only the owner's rows. Null when the id names no live rule of
+ * theirs (absent, revoked, not promoted, or someone else's), and without a
+ * query when it is not a rule id at all. No age rule and no cap: a rule the
+ * session was told about stays readable by its id.
+ */
+export async function readPromotedRuleById(
+  accessToken: string,
+  id: string
+): Promise<ContextRule | null> {
+  if (!ruleCandidateIdSchema.safeParse(id).success) {
+    return null;
+  }
+  const client = createUserClient(accessToken);
+  const { data, error } = await client
+    .from('rule_candidates')
+    .select('id, rule_text, pinned, applies_when')
+    .eq('id', id)
+    .eq('status', 'promoted')
+    .is('revoked_at', null)
+    .not('rule_text', 'is', null)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`promoted rule lookup failed: ${error.message}`);
+  }
+  const text = data?.rule_text?.trim();
+  if (!data || !text) {
+    return null;
+  }
+  return {
+    ...toContextRule({
+      id: data.id,
+      text,
+      pinned: data.pinned === true,
+      appliesWhen: data.applies_when,
+    }),
+    level: 'full',
+  };
 }

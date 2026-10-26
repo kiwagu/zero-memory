@@ -11,6 +11,7 @@ import type { IProjectRulesReader, Scope } from '@workspace/memory';
 
 import { readAllPages } from '../paged-read.js';
 import { createUserClient, type Client } from '../supabase.client.js';
+import { toContextRule } from './promoted-rule.utils.js';
 
 /** A briefing carries a handful of rules, not a rulebook. */
 const PROJECT_RULES_CAP = RULE_DELIVERY.projectRulesCap;
@@ -48,7 +49,7 @@ export class SupabaseProjectRulesReader implements IProjectRulesReader {
         client
           .from('rule_candidates')
           .select(
-            'rule_text, pinned, promoted_at, applies_scope, memories!inner(scope)'
+            'id, rule_text, pinned, promoted_at, applies_when, applies_scope, memories!inner(scope)'
           )
           .eq('status', 'promoted')
           .eq('target_layer', 'project')
@@ -76,16 +77,18 @@ export class SupabaseProjectRulesReader implements IProjectRulesReader {
         return briefed.has(effective);
       })
       .map((row) => ({
+        id: row.id,
         text: row.rule_text?.trim() ?? '',
         pinned: row.pinned === true,
         promotedAt: row.promoted_at,
+        appliesWhen: row.applies_when,
       }));
     // Soft-TTL and delivery order: a rule older than the delivery TTL drops
     // out of the briefing unless it is PINNED (the pin is a standing
     // decision, not something that expires by age); pinned first, then
     // newest first, so at the cap freshly promoted rules win.
     const eligible = deliverableRules(inScope, Date.now()).flatMap(
-      ({ text, pinned }): ContextRule[] => (text ? [{ text, pinned }] : [])
+      (rule): ContextRule[] => (rule.text ? [toContextRule(rule)] : [])
     );
     // Delivery is capped and the excess is dropped SILENTLY from the
     // briefing, so log it — "promoted but never delivered" has to be
