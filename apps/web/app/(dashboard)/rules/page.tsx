@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { z } from 'zod';
 
 import {
   type DeliveryCandidate,
@@ -28,7 +29,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 const GENERAL_FILTER = '__general__';
 
 const CANDIDATE_COLUMNS =
-  'id, memory_id, useful_sessions, first_used_at, last_used_at, rule_text, target_layer, judge_confidence, judge_rationale, status, suggested_scopes, applies_scope, pinned, carried_from, text_review_since' as const;
+  'id, memory_id, useful_sessions, first_used_at, last_used_at, rule_text, target_layer, judge_confidence, judge_rationale, status, suggested_scopes, applies_scope, pinned, carried_from, text_review_since, applies_when, enforced_by' as const;
 
 /** The pinned facet: pinned only, or unpinned only. */
 const PINNED_VALUES = ['pinned', 'unpinned'] as const;
@@ -58,7 +59,28 @@ type CandidateRow = {
   pinned: boolean;
   carried_from: string | null;
   text_review_since: string | null;
+  applies_when: string | null;
+  enforced_by: string | null;
 };
+
+/** The window the per-rule delivery stats cover, in days. */
+const STATS_DAYS = 30;
+
+/** What rule_gate_stats returns: per-rule delivery counts and guard refusals. */
+const ruleGateStatsSchema = z.object({
+  rules: z.array(
+    z.object({
+      rule_id: z.string(),
+      calls: z.number(),
+      full: z.number(),
+      gate: z.number(),
+      headline: z.number(),
+      mean_p: z.number().nullable(),
+      fetches: z.number(),
+    })
+  ),
+  refusals: z.array(z.object({ guard: z.string(), count: z.number() })),
+});
 
 /**
  * Parse the stored ranked recommendation, tolerating rows written before the
@@ -177,20 +199,39 @@ export default async function RulesPage({
   // delivery facet and what a session actually receives cannot disagree.
   // The same set drives the facet below.
   const deliveryCutoff = ruleDeliveryCutoffNow();
-  const [{ count: pendingCount }, { data: liveRows }] = await Promise.all([
-    supabase
-      .from('rule_candidates')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending')
-      .not('rule_text', 'is', null),
-    supabase
-      .from('rule_candidates')
-      .select(
-        'id, target_layer, applies_scope, pinned, promoted_at, memories!inner(scope)'
-      )
-      .eq('status', 'promoted')
-      .not('rule_text', 'is', null),
-  ]);
+  const [{ count: pendingCount }, { data: liveRows }, { data: statsPayload }] =
+    await Promise.all([
+      supabase
+        .from('rule_candidates')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .not('rule_text', 'is', null),
+      supabase
+        .from('rule_candidates')
+        .select(
+          'id, target_layer, applies_scope, pinned, promoted_at, memories!inner(scope)'
+        )
+        .eq('status', 'promoted')
+        .not('rule_text', 'is', null),
+      // How the delivery judge delivered each rule lately: one read for the
+      // whole page, the caller's own data only.
+      supabase.rpc('rule_gate_stats', { p_days: STATS_DAYS }),
+    ]);
+  const gateStats = ruleGateStatsSchema.safeParse(statsPayload);
+  const statsByRule = new Map(
+    (gateStats.success ? gateStats.data.rules : []).map((rule) => [
+      rule.rule_id,
+      {
+        calls: rule.calls,
+        full: rule.full,
+        gate: rule.gate,
+        headline: rule.headline,
+        meanP: rule.mean_p,
+        fetches: rule.fetches,
+      },
+    ])
+  );
+  const guardRefusals = gateStats.success ? gateStats.data.refusals : [];
   const live: DeliveryCandidate[] = (liveRows ?? []).map((row) => ({
     id: row.id,
     targetLayer: row.target_layer === 'user' ? 'user' : 'project',
@@ -328,6 +369,10 @@ export default async function RulesPage({
       carriedFrom: row.carried_from
         ? { id: row.carried_from, href: `/memory/${row.carried_from}` }
         : null,
+      appliesWhen: row.applies_when,
+      enforcedBy: row.enforced_by,
+      stats:
+        row.status === 'promoted' ? (statsByRule.get(row.id) ?? null) : null,
     };
     return [
       { groupScope: isPersonalScope(effective) ? null : effective, item },
@@ -407,6 +452,19 @@ export default async function RulesPage({
     pinHint: t('rules.pinHint'),
     pinnedBadge: t('rules.pinnedBadge'),
     carriedFrom: t('rules.carriedFrom'),
+    appliesWhen: {
+      label: t('rules.appliesWhen.label'),
+      placeholder: t('rules.appliesWhen.placeholder'),
+      missing: t('rules.appliesWhen.missing'),
+    },
+    enforcedBy: {
+      label: t('rules.enforcedBy.label'),
+      placeholder: t('rules.enforcedBy.placeholder'),
+    },
+    stats: {
+      title: t('rules.stats.title'),
+      line: t('rules.stats.line'),
+    },
   };
 
   const revokeLabels = {
@@ -565,6 +623,21 @@ export default async function RulesPage({
           </section>
         ))
       )}
+
+      {/* Guard refusals over the same window, per guard: how often a
+          client-side guard stopped a tool call. One line for the page. */}
+      {guardRefusals.length > 0 ? (
+        <p
+          className="text-muted-foreground text-xs"
+          data-testid="rules-guard-refusals"
+        >
+          {t('rules.stats.refusals', {
+            list: guardRefusals
+              .map((refusal) => `${refusal.guard} ×${refusal.count}`)
+              .join(', '),
+          })}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -6,6 +6,7 @@
  */
 import { expect, test } from '@playwright/test';
 
+import { admin } from '../helpers/board-store.js';
 import {
   SUGGESTED_SIBLING_SCOPE,
   seedPromotedRuleCandidate,
@@ -105,6 +106,72 @@ test.describe('rules incubator surface', () => {
     await toggle.click();
     await expect(toggle).not.toBeChecked();
     await expect(page.getByTestId('rules-pinned-count')).toHaveCount(0);
+  });
+
+  test('a promoted rule is told when it applies and which guard enforces it', async ({
+    page,
+  }) => {
+    const seed = await readSeedState();
+    const seeded = await seedPromotedRuleCandidate(seed.userA);
+    const clearFields = () =>
+      admin()
+        .from('rule_candidates')
+        .update({ applies_when: null, enforced_by: null })
+        .eq('id', seeded.candidateId);
+    const stored = async () => {
+      const { data } = await admin()
+        .from('rule_candidates')
+        .select('applies_when, enforced_by')
+        .eq('id', seeded.candidateId)
+        .single();
+      return data as {
+        applies_when: string | null;
+        enforced_by: string | null;
+      };
+    };
+
+    try {
+      await clearFields();
+      await signInThroughForm(page, seed.userA);
+      await page.goto('/rules?status=promoted');
+
+      const item = page
+        .getByTestId('rule-item')
+        .filter({ hasText: seeded.candidateId });
+      const appliesWhen = item.getByTestId('rule-applies-when');
+      const missing = item.getByTestId('rule-applies-when-missing');
+      const enforcedBy = item.getByTestId('rule-enforced-by');
+      // Nothing said yet: the judge would read the whole text.
+      await expect(missing).toBeVisible();
+
+      // Enter saves the field; the stored value comes back on the next render.
+      await appliesWhen.fill('  any task that writes a git commit  ');
+      await appliesWhen.press('Enter');
+      await expect(missing).toHaveCount(0);
+      await enforcedBy.fill('commit_message_guard');
+      await enforcedBy.press('Enter');
+      await expect.poll(stored).toEqual({
+        applies_when: 'any task that writes a git commit',
+        enforced_by: 'commit_message_guard',
+      });
+
+      await page.reload();
+      await expect(appliesWhen).toHaveValue(
+        'any task that writes a git commit'
+      );
+      await expect(enforcedBy).toHaveValue('commit_message_guard');
+
+      // Emptying a field clears it.
+      await appliesWhen.fill('');
+      await appliesWhen.press('Enter');
+      await expect(missing).toBeVisible();
+      await expect.poll(stored).toEqual({
+        applies_when: null,
+        enforced_by: 'commit_message_guard',
+      });
+    } finally {
+      await clearFields();
+    }
   });
 
   test('revoking a promoted rule needs a reason and clears it from active', async ({

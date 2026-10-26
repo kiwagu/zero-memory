@@ -32,12 +32,16 @@ dependency is `@workspace/db` for the generated database types.
   as a chain of panels to its right.
 - `/reflections` — reflection candidates and review actions.
 - `/review` — duplicate/supersede/contradiction hygiene queue.
-- `/rules` — standing-rule candidates, delivery budget, and pins.
+- `/rules` — standing-rule candidates, delivery budget and pins; on a
+  promoted rule, when it applies and which guard enforces it, edited in
+  place, and how the delivery judge delivered it over the last 30 days.
 - `/scopes` — scope creation and membership management.
 - `/settings` — profile, two-factor authentication, memory transfer, provider
-  credentials, and account deletion. Deletion runs here and nowhere else
-  (`settings/delete-account/route.ts`, service role, for the signed-in caller)
-  and needs a verified authenticator app and a session that gave its code.
+  credentials, the rule-delivery judge (on or off, provider, an optional own
+  key; `settings/judge-provider/route.ts`), and account deletion. Deletion
+  runs here and nowhere else (`settings/delete-account/route.ts`, service
+  role, for the signed-in caller) and needs a verified authenticator app and
+  a session that gave its code.
 - `/api/panels/[kind]/[id]` — the data behind one panel of the chain (`memory`,
   `card` or `entity`): exactly what that resource's page shows, read under the
   viewer's session; anything the viewer may not read is a 404.

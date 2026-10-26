@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
     '@workspace/db',
     '@workspace/email',
     '@workspace/i18n-catalogs',
+    '@workspace/judgment',
     '@workspace/ui',
   ],
   // Reaching a dev server from another machine goes through a LAN alias, and
