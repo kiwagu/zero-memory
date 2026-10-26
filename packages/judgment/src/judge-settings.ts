@@ -9,6 +9,11 @@ export interface JudgeSettings {
 }
 
 export interface IJudgeSettingsReader {
+  /**
+   * The settings of `subjectId`. The Supabase reader reads under the caller's
+   * access token, so it returns the row of that token's owner whatever is
+   * passed: the caller must pass the same account as `subjectId`.
+   */
   read(subjectId: string): Promise<JudgeSettings>;
 }
 

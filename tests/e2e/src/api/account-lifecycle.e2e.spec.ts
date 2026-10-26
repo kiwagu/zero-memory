@@ -32,6 +32,7 @@ import {
   type UserDataDisposition,
 } from '@workspace/db';
 
+import { psql } from '../helpers/board-store.js';
 import { e2eEnv } from '../helpers/env.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
@@ -869,6 +870,16 @@ test.describe('account lifecycle: erasure', () => {
         ).toBeGreaterThan(0);
       }
 
+      // The judge key is a Vault secret behind its row. The table sweep below
+      // cannot see the vault, so the secret is counted by hand on both sides:
+      // dropping only the row would orphan the key and still pass the sweep.
+      const judgeSecrets = (): string =>
+        psql(
+          `select count(*) from vault.secrets ` +
+            `where name = 'judge_credential:${userId}'`
+        );
+      expect(judgeSecrets()).toBe('1');
+
       // Erase.
       await way.erase(db, { userId, authId: departing.user.id });
 
@@ -884,6 +895,10 @@ test.describe('account lifecycle: erasure', () => {
         );
         expect(remaining, `expected zero user rows left in ${table}`).toBe(0);
       }
+      expect(
+        judgeSecrets(),
+        "the erased account's judge key remains in the vault"
+      ).toBe('0');
       // The agent sessions went with the Auth user (foreign-key cascade): the
       // map excludes the table, so this is asserted here by hand.
       const { count: agentRows, error: agentError } = await db

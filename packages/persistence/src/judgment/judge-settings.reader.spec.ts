@@ -18,6 +18,7 @@ const signedIn = { getAccessToken: () => 'access-token' } as IContext;
 
 beforeEach(() => {
   vi.mocked(createUserClient).mockReset();
+  vi.restoreAllMocks();
 });
 
 describe('SupabaseJudgeSettingsReader', () => {
@@ -42,14 +43,36 @@ describe('SupabaseJudgeSettingsReader', () => {
     ).resolves.toEqual({ enabled: true, provider: null });
   });
 
-  it.each([
-    ['no stored row', { data: null, error: null }],
-    ['a failed read', { data: null, error: { message: 'boom' } }],
-  ])('is off on %s', async (_case, result) => {
-    vi.mocked(createUserClient).mockReturnValue(clientAnswering(result));
+  it('is off when the account has stored no choice', async () => {
+    vi.mocked(createUserClient).mockReturnValue(
+      clientAnswering({ data: null, error: null })
+    );
+    const warned = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     await expect(
       new SupabaseJudgeSettingsReader(signedIn).read('usr_a')
     ).resolves.toEqual(JUDGE_SETTINGS_OFF);
+    expect(warned).not.toHaveBeenCalled();
+  });
+
+  it('is off when the read fails, and logs the message without the row', async () => {
+    vi.mocked(createUserClient).mockReturnValue(
+      clientAnswering({
+        data: { enabled: true, provider: 'subq' },
+        error: { message: 'boom' },
+      })
+    );
+    const warned = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    await expect(
+      new SupabaseJudgeSettingsReader(signedIn).read('usr_a')
+    ).resolves.toEqual(JUDGE_SETTINGS_OFF);
+    expect(warned).toHaveBeenCalledTimes(1);
+    const line = String(warned.mock.calls[0]?.[0]);
+    expect(line).toContain('boom');
+    expect(line).not.toContain('subq');
   });
 
   it('is off without an access token, and reads nothing', async () => {

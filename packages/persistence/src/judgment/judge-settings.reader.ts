@@ -7,8 +7,11 @@ import {
   type JudgeProviderName,
   type JudgeSettings,
 } from '@workspace/judgment';
+import { createLogger } from '@workspace/logger';
 
 import { createUserClient } from '../supabase.client.js';
+
+const logger = createLogger('judge-settings-reader');
 
 /** The caller's own rule-gate choice, read under their RLS; off when no row. */
 @singleton()
@@ -25,7 +28,15 @@ export class SupabaseJudgeSettingsReader implements IJudgeSettingsReader {
       .from('judge_settings')
       .select('enabled, provider')
       .maybeSingle();
-    if (error || !data) return JUDGE_SETTINGS_OFF;
+    if (error) {
+      // The message only: the gate stays off for this call, and nothing about
+      // the account's settings reaches the log.
+      logger.warn('could not read judge settings; the gate stays off', {
+        error: error.message,
+      });
+      return JUDGE_SETTINGS_OFF;
+    }
+    if (!data) return JUDGE_SETTINGS_OFF;
     const provider = (JUDGE_PROVIDER_NAMES as readonly string[]).includes(
       String(data.provider)
     )

@@ -20,14 +20,15 @@ workflow; the model supplies one number per question and generates no text.
 
 ## Env
 
-| Variable                  | Default         | Meaning                                          |
-| ------------------------- | --------------- | ------------------------------------------------ |
-| `ZM_JUDGE_PROVIDER`       | `typesafe`      | platform default provider (`typesafe` or `subq`) |
-| `ZM_TYPESAFE_API_KEY`     | —               | platform TypeSafe key                            |
-| `SNAPQ_API_KEY`           | —               | platform SubQ key                                |
-| `ZM_JUDGE_MODEL_TYPESAFE` | `jev-1.14.0`    | pinned TypeSafe model                            |
-| `ZM_JUDGE_MODEL_SUBQ`     | `subq-snap-1.1` | SubQ model id                                    |
-| `ZM_JUDGE_TIMEOUT_MS`     | `1500`          | per-request timeout                              |
+| Variable                  | Default         | Meaning                                                                                               |
+| ------------------------- | --------------- | ----------------------------------------------------------------------------------------------------- |
+| `ZM_JUDGE_PROVIDER`       | `typesafe`      | platform default provider (`typesafe` or `subq`)                                                      |
+| `ZM_TYPESAFE_API_KEY`     | —               | platform TypeSafe key                                                                                 |
+| `SNAPQ_API_KEY`           | —               | platform SubQ key                                                                                     |
+| `ZM_JUDGE_MODEL_TYPESAFE` | `jev-1.14.0`    | pinned TypeSafe model                                                                                 |
+| `ZM_JUDGE_MODEL_SUBQ`     | `subq-snap-1.1` | SubQ model id                                                                                         |
+| `ZM_JUDGE_TIMEOUT_MS`     | `1500`          | per-request timeout                                                                                   |
+| `ZM_JUDGE_FAKE`           | —               | tests only: `1` binds a deterministic judge and a dummy platform credential; never on a serving stack |
 
 A provider with no key is simply not configured: callers see "judge not
 configured" and work as before. There is no fallback to another provider.

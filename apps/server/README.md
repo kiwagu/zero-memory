@@ -71,14 +71,15 @@ bun run mcp:stdio  # stdio MCP server
 
 Read directly by this app:
 
-| Variable               | Purpose                                                            |
-| ---------------------- | ------------------------------------------------------------------ |
-| `PORT`                 | HTTP port (default `8787`)                                         |
-| `ZM_PUBLIC_URL`        | Public base URL / OAuth issuer (default `http://localhost:<port>`) |
-| `ZM_EXTRACTOR`         | `deterministic` swaps in the test extractor (no API key needed)    |
-| `ZM_MCP_SESSION_TABLE` | DynamoDB table for MCP sessions; unset keeps them in memory        |
-| `ZM_RATE_LIMIT_TABLE`  | DynamoDB table for rate-limit counts (Lambda only, required there) |
-| `ZM_MCP_JSON_RESPONSE` | `on` answers MCP POSTs with one JSON body instead of SSE           |
+| Variable               | Purpose                                                                                               |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| `PORT`                 | HTTP port (default `8787`)                                                                            |
+| `ZM_PUBLIC_URL`        | Public base URL / OAuth issuer (default `http://localhost:<port>`)                                    |
+| `ZM_EXTRACTOR`         | `deterministic` swaps in the test extractor (no API key needed)                                       |
+| `ZM_JUDGE_FAKE`        | tests only: `1` binds a deterministic judge and a dummy platform credential; never on a serving stack |
+| `ZM_MCP_SESSION_TABLE` | DynamoDB table for MCP sessions; unset keeps them in memory                                           |
+| `ZM_RATE_LIMIT_TABLE`  | DynamoDB table for rate-limit counts (Lambda only, required there)                                    |
+| `ZM_MCP_JSON_RESPONSE` | `on` answers MCP POSTs with one JSON body instead of SSE                                              |
 
 The wired adapters read their own variables — `SUPABASE_URL`,
 `SUPABASE_ANON_KEY`, `ZM_EMAIL`, `ZM_PASSWORD`, `ANTHROPIC_API_KEY`, … — see
