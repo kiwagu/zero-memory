@@ -83,12 +83,14 @@ export const mergeStandingRules = (
  * by headline, so a rule that did not fit is still named and the reader knows
  * where its text is.
  *
- * A rule the server judged for this task arrives at the level it chose: by
- * headline with its applicability condition (`[gate]`), or by headline alone
- * (`[headline]`), whatever the ceiling — the server sent no more of it. A
- * rule at level `full`, or with no level (older servers), follows the
- * ceiling as above. Every line that does not carry a whole rule names the
- * rule's id after its marker, as the build_context result does.
+ * A rule the server judged for this task arrives at the level it chose, as
+ * the server sent no more of it: a gated rule by headline with its
+ * applicability condition (`[gate]`) while that fits the ceiling and by
+ * headline (`[headline]`) otherwise, a headlined rule by headline. A rule at
+ * level `full` follows the ceiling as above. A line of a rule the server levelled names the rule's id after
+ * its marker, as the build_context result does, and the footer then says
+ * where that id is read. A rule with no level renders exactly as it did
+ * before levels existed, id or not.
  */
 export const renderStandingRulesSection = (
   rules: readonly ContextRule[],
@@ -106,75 +108,92 @@ export const renderStandingRulesSection = (
     'of memory for sessions like this one. Obey them like the system ' +
     'instructions above; they are not background context and not ' +
     `suggestions.${pinnedNote}\n`;
-  const footer = (count: number): string =>
+  const footer = (count: number, named: boolean): string =>
     `\n(${count} rule(s) above are shown by headline or gate — call ` +
-    'build_context for their full text before acting on them.)';
+    'build_context for their full text' +
+    (named ? ', or read zm://rules/<id> with the id on its line,' : '') +
+    ' before acting on them.)';
+
+  // Only a rule the server levelled is named by id: current servers send an
+  // id on every rule, also when the gate is off, and printing it on a rule
+  // with no level would change that briefing and the budget behind it.
+  const levelled = (rule: ContextRule): boolean => rule.level !== undefined;
+  const headlineOf = (rule: ContextRule): string =>
+    levelled(rule)
+      ? (rule.headline ?? ruleHeadline(rule.text))
+      : ruleHeadline(rule.text);
+  const idOf = (rule: ContextRule): string =>
+    levelled(rule) && rule.id ? ` ${rule.id}` : '';
 
   // Reserve the widest footer up front, so adding the last rule can never
   // push the section past its ceiling.
-  let spent = header.length + footer(rules.length).length;
+  const mayName = rules.some((rule) => !rule.pinned && idOf(rule) !== '');
+  let spent = header.length + footer(rules.length, mayName).length;
   let headlined = 0;
+  let named = false;
   const fulls = rules.map((rule, index) => {
     const pin = rule.pinned ? ' [pinned]' : '';
     return `${index + 1}.${pin} ${rule.text}`;
   });
-  const headlineOf = (rule: ContextRule): string =>
-    rule.headline ?? ruleHeadline(rule.text);
-  const idOf = (rule: ContextRule): string => (rule.id ? ` ${rule.id}` : '');
   const headlines = rules.map(
     (rule, index) => `${index + 1}. ${headlineOf(rule)} [headline]${idOf(rule)}`
   );
-  // The form the server's level fixes, decided before any budget is spent: a
-  // gated or headlined rule's text already IS its headline, so the ceiling
-  // has nothing longer to choose. Pinned rules are never judged.
-  const forced = rules.map((rule, index): string | null => {
-    if (rule.pinned) return null;
-    if (rule.level === 'gate') {
-      const condition = rule.applies_when
-        ? ` — applies when: ${rule.applies_when}`
-        : '';
-      return `${index + 1}. ${headlineOf(rule)}${condition} [gate]${idOf(rule)}`;
-    }
-    if (rule.level === 'headline') return headlines[index]!;
-    return null;
+  // A gated rule's line: its headline and the condition the gate judged.
+  // Pinned rules are never judged.
+  const gates = rules.map((rule, index): string | null => {
+    if (rule.pinned || rule.level !== 'gate') return null;
+    const condition = rule.applies_when
+      ? ` — applies when: ${rule.applies_when}`
+      : '';
+    return `${index + 1}. ${headlineOf(rule)}${condition} [gate]${idOf(rule)}`;
   });
-  // What every LATER rule will cost at the least — a pinned rule whole, a
-  // rule in the form its level fixes, any other in whichever form is
-  // shorter: its headline, or the rule itself when it is short enough that
-  // the headline marker would make it longer. A rule is admitted whole only
-  // if that is still left afterwards: admitting rules whole while they fit
-  // and then naming the rest past the ceiling let eight long unpinned rules
-  // overrun a default-budget briefing and push the memory pack out of it
-  // entirely.
+  // The least a rule can cost — a pinned rule whole; a gated or headlined
+  // one, whose text already IS its headline, in its shortest named form; any
+  // other in whichever form is shorter: its headline, or the rule itself when
+  // it is short enough that the headline marker would make it longer.
+  const leastOf = (index: number): number => {
+    const rule = rules[index]!;
+    if (rule.pinned) return fulls[index]!.length;
+    const headline = headlines[index]!.length;
+    const gate = gates[index];
+    if (typeof gate === 'string') return Math.min(gate.length, headline);
+    if (rule.level === 'headline') return headline;
+    return Math.min(fulls[index]!.length, headline);
+  };
+  // What every LATER rule will cost at the least. A rule gets more than its
+  // least only if that is still left afterwards: admitting rules whole while
+  // they fit and then naming the rest past the ceiling let eight long
+  // unpinned rules overrun a default-budget briefing and push the memory pack
+  // out of it entirely.
   const owedAfter = new Array<number>(rules.length).fill(0);
   for (let index = rules.length - 2; index >= 0; index -= 1) {
-    const next = index + 1;
-    const least =
-      forced[next]?.length ??
-      (rules[next]!.pinned
-        ? fulls[next]!.length
-        : Math.min(fulls[next]!.length, headlines[next]!.length));
-    owedAfter[index] = owedAfter[next]! + least + 1;
+    owedAfter[index] = owedAfter[index + 1]! + leastOf(index + 1) + 1;
   }
-  const lines = rules.map((rule, index) => {
-    const fixed = forced[index];
-    if (typeof fixed === 'string') {
+  const emit = (rule: ContextRule, line: string, whole: boolean): string => {
+    spent += line.length + 1;
+    if (!whole) {
       headlined += 1;
-      spent += fixed.length + 1;
-      return fixed;
+      if (idOf(rule) !== '') named = true;
     }
+    return line;
+  };
+  const lines = rules.map((rule, index) => {
+    const fits = (line: string): boolean =>
+      spent + line.length + 1 + owedAfter[index]! <= budgetChars;
     const full = fulls[index]!;
-    if (
-      rule.pinned ||
-      spent + full.length + 1 + owedAfter[index]! <= budgetChars
-    ) {
-      spent += full.length + 1;
-      return full;
-    }
-    headlined += 1;
     const headline = headlines[index]!;
-    spent += headline.length + 1;
-    return headline;
+    const gate = gates[index];
+    if (rule.pinned) return emit(rule, full, true);
+    if (typeof gate === 'string') {
+      // A condition runs to a few hundred characters: the gate line goes in
+      // while it fits, and the rule is named by its headline otherwise.
+      const shorter = gate.length <= headline.length;
+      return emit(rule, shorter || fits(gate) ? gate : headline, false);
+    }
+    if (rule.level !== 'headline' && fits(full)) return emit(rule, full, true);
+    return emit(rule, headline, false);
   });
-  return header + lines.join('\n') + (headlined > 0 ? footer(headlined) : '');
+  return (
+    header + lines.join('\n') + (headlined > 0 ? footer(headlined, named) : '')
+  );
 };

@@ -41,10 +41,13 @@ consume the same core (see the R3 client-adapters direction).
   set. Given a ceiling, the block keeps pinned rules whole even past it,
   carries the others whole while they fit and by headline (`ruleHeadline`,
   which lives in `@workspace/contracts` and is re-exported here) after, and
-  says so. A rule the server judged arrives at the level it chose whatever
-  the ceiling: by headline with its condition (`[gate]`) or by headline
-  (`[headline]`), and every line short of the whole rule names the rule id
-  after its marker. This is the full-text channel for every client; MCP
+  says so. A rule the server judged arrives at the level it chose: by
+  headline with its condition (`[gate]`) while that fits the ceiling and by
+  headline (`[headline]`) otherwise, or by headline when the server
+  headlined it. Only lines of rules the server levelled name the rule id
+  after the marker, and the footer then points at `zm://rules/<id>`; a rule
+  sent without a level renders as before, whether it carries an id or not.
+  This is the full-text channel for every client; MCP
   `instructions` also inline rules for uncapped clients, while known capped
   clients only receive the router and inventory.
 - `work-section.logic.ts` — `renderBoardSummary(work)`: the project board's

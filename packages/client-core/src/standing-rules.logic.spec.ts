@@ -165,10 +165,36 @@ describe('renderStandingRulesSection', () => {
     // The guarantee the owner pinned it for outranks the ceiling.
     expect(section).toContain(pinned);
     expect(section).not.toContain(ordinary);
-    expect(section).toContain('2. ORDINARY RULE ABOUT BRANCHES [headline]');
+    expect(section).toContain('2. ORDINARY RULE ABOUT BRANCHES [headline]\n');
     expect(section).toContain(
       '(1 rule(s) above are shown by headline or gate — call build_context'
     );
+  });
+
+  it('renders rules with no level the same with or without an id', () => {
+    // Servers send an id on every rule, also with the gate off; a rule the
+    // server did not level is named and budgeted exactly as before.
+    const plain = [
+      { text: body('FIRST RULE ABOUT COMMITS'), pinned: false },
+      { text: 'Use Bun', pinned: false },
+      { text: body('THIRD RULE ABOUT BRANCHES'), pinned: false },
+    ];
+    const withIds = plain.map((rule, index) => ({
+      ...rule,
+      id: `rlc_${String(index).repeat(16)}.${String(index).repeat(10)}`,
+    }));
+    const least = renderStandingRulesSection(plain, 0)!.length;
+    const most = renderStandingRulesSection(plain)!.length + 200;
+    for (let ceiling = least; ceiling <= most; ceiling += 7) {
+      expect(
+        renderStandingRulesSection(withIds, ceiling),
+        `ceiling ${ceiling}`
+      ).toBe(renderStandingRulesSection(plain, ceiling));
+    }
+    const tight = renderStandingRulesSection(withIds, least)!;
+    expect(tight).toContain('3. THIRD RULE ABOUT BRANCHES [headline]\n');
+    expect(tight).not.toContain('rlc_');
+    expect(tight).not.toContain('zm://rules/');
   });
 
   it('keeps non-pinned rules inside the ceiling whenever their headlines fit', () => {
@@ -270,7 +296,11 @@ describe('renderStandingRulesSection with server levels', () => {
     expect(section).toContain(
       '4. NAMED [headline] rlc_2222222222222222.2222222222\n'
     );
-    expect(section).toContain('2 rule(s) above are shown by headline or gate');
+    expect(section).toContain(
+      '\n(2 rule(s) above are shown by headline or gate — call build_context ' +
+        'for their full text, or read zm://rules/<id> with the id on its ' +
+        'line, before acting on them.)'
+    );
   });
 
   it('marks a gate rule without a condition as gated, naming it by headline', () => {
@@ -293,7 +323,41 @@ describe('renderStandingRulesSection with server levels', () => {
     expect(section).not.toContain('With its body');
   });
 
-  it('reserves the gate form of a later rule, so an earlier one cannot overrun the ceiling', () => {
+  it('names a levelled rule without a headline field by the headline cut', () => {
+    const { headline: _none, ...bare } = {
+      ...whole,
+      text: 'DEPLOY FROM THE STAND ONLY. Never from a laptop, whatever the hurry.',
+    };
+    const section = renderStandingRulesSection(
+      [pinned, bare],
+      pinned.text.length + 80
+    )!;
+    expect(section).toContain(
+      '2. DEPLOY FROM THE STAND ONLY [headline] rlc_3333333333333333.3333333333\n'
+    );
+  });
+
+  it('names a gated rule by headline when its condition does not fit the ceiling', () => {
+    const wide = { ...gate, applies_when: 'tasks that deploy '.repeat(22) };
+    const named = renderStandingRulesSection([wide], 0)!;
+    expect(named).toContain(
+      '1. GATED [headline] rlc_1111111111111111.1111111111\n'
+    );
+    // Room for the headline and then some, but not for the condition.
+    const ceiling = named.length + 100;
+    const section = renderStandingRulesSection([wide], ceiling)!;
+    expect(section.length).toBeLessThanOrEqual(ceiling);
+    expect(section).toContain(
+      '1. GATED [headline] rlc_1111111111111111.1111111111\n'
+    );
+    expect(section).toContain('(1 rule(s) above are shown by headline or gate');
+    // Given the room, the same rule carries its condition.
+    expect(renderStandingRulesSection([wide], named.length + 1_000)).toContain(
+      `1. GATED — applies when: ${wide.applies_when} [gate] rlc_1111111111111111.1111111111\n`
+    );
+  });
+
+  it('reserves the named form of a later gated rule, so an earlier one cannot overrun the ceiling', () => {
     // The server sends a gated rule's headline as its text, so the rule
     // "whole" is far shorter than the line it is rendered as.
     const long = {
