@@ -134,7 +134,11 @@ hook's secondary briefing, so one session start judges once). The gate runs only
 on and has a judge credential; `shadow` records the levels in `rule_gate`
 without changing what is delivered. A judge failure delivers the rules as
 before, flagged `judge_unavailable`, and never falls back to another provider;
-a gate failure costs the levelling, never the briefing. Every way out of the
+a gate failure costs the levelling, never the briefing. On the instance's key
+the gate first asks the budget guard (`@workspace/policy`) whether the
+account's `extraction` allowance has room, and delivers the rules whole with
+`unavailable_reason: 'budget_exhausted'` when it has none; an account's own
+key is never held back. Every way out of the
 briefing sends a rule as the agent reads it: its text, pin, id and level, and
 its `applies_when` only at `gate` (`deliverAtLevel`; `deliverUnjudged` when
 nothing judged it). `chars_baseline` sums the rules' whole texts and

@@ -268,7 +268,12 @@ delivers by level. `ZM_RULE_GATE_HI` and `ZM_RULE_GATE_LO` move the two
 bands. When the judge fails or does not answer in time
 (`ZM_JUDGE_TIMEOUT_MS`, 1.5 seconds by default), the rules arrive exactly as
 they would without it and the call says so: `rule_gate.judge_unavailable` is
-`true`. There is no second provider to fall back to.
+`true`. There is no second provider to fall back to. On the instance's key the
+judge runs only while the account's extraction allowance has room; once it is
+used up the rules arrive whole and `rule_gate.unavailable_reason` is
+`budget_exhausted`. The judge's own tokens do not count against that
+allowance, so turning it on never pauses extraction. A key the account
+installed is never held back.
 
 A judged call carries `rule_gate` in its result: the mode, provider and
 model, the judge's latency, the bands, how many characters the rules would

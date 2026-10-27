@@ -200,7 +200,13 @@ const seedRuleGateUsage = async (ownerId: string): Promise<void> => {
           event_type: 'llm_extraction',
           quantity: 750,
           unit: 'tokens',
-          metadata: { purpose: 'rule_gate', provider: 'typesafe' },
+          metadata: {
+            purpose: 'rule_gate',
+            provider: 'typesafe',
+            model: 'e2e-judge',
+            input_tokens: 750,
+            output_tokens: 0,
+          },
         },
         {
           user_id: ownerId,
@@ -321,6 +327,15 @@ test.describe('rule gate series', () => {
     try {
       await seedRuleGateUsage(ownerId);
       const rest = userRestClient(await passwordGrantToken(user));
+
+      // The judge's tokens are no extraction spend: only the other purpose's
+      // 999 count against the extraction allowance.
+      const { data: spent, error: spendError } = await client.rpc(
+        'policy_spend',
+        { p_budget_id: 'extraction', p_window_days: 30, p_subject_id: ownerId }
+      );
+      expect(spendError).toBeNull();
+      expect(spent).toBe(999);
 
       // Live: nothing rolled for this user yet, so both days are computed.
       const { data: live, error: liveError } = await rest.rpc(

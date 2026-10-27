@@ -20,6 +20,7 @@ import {
   type RuleGateConfig,
 } from '@workspace/judgment';
 import { createLogger } from '@workspace/logger';
+import { injectBudgetGuard, type BudgetGuard } from '@workspace/policy';
 import {
   injectUsageRecorder,
   recordUsage,
@@ -168,7 +169,8 @@ const logger = createLogger('rule-gate');
  * mapped to full / gate / headline by two bands. Pinned rules are never judged.
  * `shadow` records what it would have done and delivers everything whole;
  * `live` delivers by level. Any judge failure delivers exactly as before and
- * says so — there is no second provider to fall back to.
+ * says so — there is no second provider to fall back to — and so does an
+ * account whose extraction allowance on the instance's key is used up.
  */
 @singleton()
 export class RuleGateService implements IRuleGate {
@@ -181,6 +183,8 @@ export class RuleGateService implements IRuleGate {
     private readonly judgmentFor: JudgmentFactory,
     @injectUsageRecorder()
     private readonly usage: IUsageRecorder,
+    @injectBudgetGuard()
+    private readonly budget: Pick<BudgetGuard, 'check'>,
     @injectRuleGateConfig()
     private readonly config: RuleGateConfig
   ) {}
@@ -204,34 +208,55 @@ export class RuleGateService implements IRuleGate {
 
     const { state, questions } = ruleGateRequest(input.task, unpinned);
 
+    // On the instance's key the judge runs only while the account's
+    // extraction allowance has room: an account that may not spend the
+    // instance's money on extraction gets none spent on judging either. Its
+    // tokens are not counted against that allowance (a decision-model token
+    // is not a generation token), so judging can never pause extraction. An
+    // account's own key is its own spend and is never held back.
+    const budgetLeft =
+      credential.ownedByCaller ||
+      (await this.budget.check('extraction', { subjectId: input.subjectId }))
+        .allowed;
+
     let result: JudgmentResult | null = null;
-    try {
-      result = await this.judgmentFor(credential).judge(
-        { state, questions, purpose: 'rule_gate', subjectId: input.subjectId },
-        { timeoutMs: this.config.timeoutMs }
-      );
-    } catch (error) {
-      logger.warn(
-        error instanceof JudgeUnavailableError
-          ? 'judge unavailable; rules delivered whole'
-          : 'judge failed; rules delivered whole',
-        { error: error instanceof Error ? error.message : String(error) }
-      );
+    if (budgetLeft) {
+      try {
+        result = await this.judgmentFor(credential).judge(
+          {
+            state,
+            questions,
+            purpose: 'rule_gate',
+            subjectId: input.subjectId,
+          },
+          { timeoutMs: this.config.timeoutMs }
+        );
+      } catch (error) {
+        logger.warn(
+          error instanceof JudgeUnavailableError
+            ? 'judge unavailable; rules delivered whole'
+            : 'judge failed; rules delivered whole',
+          { error: error instanceof Error ? error.message : String(error) }
+        );
+      }
     }
     // Metered only once a judgment came back: a failed call spent nothing
-    // the provider reported.
+    // the provider reported. The row has the shape of every other model
+    // call's, so the rollups read it the same way.
     if (result) {
       recordUsage(this.usage, {
         eventType: 'llm_extraction',
-        quantity: result.usage.inputTokens,
+        quantity: result.usage.inputTokens + result.usage.outputTokens,
         unit: 'tokens',
         subjectId: input.subjectId,
         metadata: {
-          purpose: 'rule_gate',
-          provider: result.provider,
-          model: result.model,
-          owned_by_caller: credential.ownedByCaller,
+          input_tokens: result.usage.inputTokens,
           output_tokens: result.usage.outputTokens,
+          // Spend the instance never paid for: the rollups leave it out.
+          ...(credential.ownedByCaller ? { own_key: true } : {}),
+          model: result.model,
+          provider: result.provider,
+          purpose: 'rule_gate',
         },
       });
     }
@@ -283,6 +308,9 @@ export class RuleGateService implements IRuleGate {
       model: result?.model ?? credential.model,
       latency_ms: result?.latencyMs ?? 0,
       judge_unavailable: judgeUnavailable,
+      ...(budgetLeft
+        ? {}
+        : { unavailable_reason: 'budget_exhausted' as const }),
       bands: { hi: this.config.hi, lo: this.config.lo },
       chars_baseline: baseline,
       chars_delivered: delivered,

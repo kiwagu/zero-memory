@@ -51,10 +51,15 @@ const service = (
     enabled?: boolean;
     judge?: FakeJudgment;
     credential?: unknown;
+    /** Whether the account's extraction allowance has room. */
+    budgetLeft?: boolean;
   } = {}
 ) => {
   const judge = overrides.judge ?? new FakeJudgment({ defaultP: 0.5 });
   const recorder = { record: vi.fn() };
+  const guard = {
+    check: vi.fn().mockResolvedValue({ allowed: overrides.budgetLeft ?? true }),
+  };
   const svc = new RuleGateService(
     {
       read: vi.fn().mockResolvedValue({
@@ -76,9 +81,10 @@ const service = (
     },
     () => judge,
     recorder,
+    guard,
     { mode: overrides.mode ?? 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
   );
-  return { svc, judge, recorder };
+  return { svc, judge, recorder, guard };
 };
 
 describe('levelFor / deliverAtLevel', () => {
@@ -380,20 +386,74 @@ describe('RuleGateService.apply', () => {
     ).toBe(true);
   });
 
-  it('meters the judge tokens under purpose rule_gate', async () => {
-    const { svc, recorder } = service();
+  it('meters the judge tokens under purpose rule_gate, as every model call is metered', async () => {
+    const { svc, recorder, judge } = service();
     await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+    const inputTokens = Math.ceil(
+      JSON.stringify(judge.calls[0]!.state).length / 4
+    );
+    expect(recorder.record).toHaveBeenCalledTimes(1);
     expect(recorder.record).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'llm_extraction',
+        quantity: inputTokens,
         unit: 'tokens',
-        metadata: expect.objectContaining({
-          purpose: 'rule_gate',
-          provider: 'typesafe',
+        subjectId: 'usr_a',
+        metadata: {
+          input_tokens: inputTokens,
+          output_tokens: 0,
           model: 'fake',
-          owned_by_caller: false,
-        }),
+          provider: 'typesafe',
+          purpose: 'rule_gate',
+        },
       })
     );
+  });
+
+  it("marks a judgment on the account's own key, and never holds it back for the allowance", async () => {
+    const { svc, recorder, guard, judge } = service({
+      budgetLeft: false,
+      credential: {
+        provider: 'typesafe',
+        apiKey: 'own',
+        model: 'jev-1.14.0',
+        ownedByCaller: true,
+      },
+    });
+    const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+    expect(guard.check).not.toHaveBeenCalled();
+    expect(judge.calls).toHaveLength(1);
+    expect(out.block).toMatchObject({ judge_unavailable: false });
+    expect(out.block).not.toHaveProperty('unavailable_reason');
+    expect(recorder.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ own_key: true }),
+      })
+    );
+  });
+
+  it("asks nothing on the instance's key once the extraction allowance is used up", async () => {
+    const { svc, recorder, guard, judge } = service({ budgetLeft: false });
+    const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+    expect(guard.check).toHaveBeenCalledWith('extraction', {
+      subjectId: 'usr_a',
+    });
+    expect(judge.calls).toHaveLength(0);
+    expect(recorder.record).not.toHaveBeenCalled();
+    expect(out.rules).toStrictEqual(unjudged);
+    expect(out.block).toMatchObject({
+      judge_unavailable: true,
+      unavailable_reason: 'budget_exhausted',
+      latency_ms: 0,
+      levels: { full: 5, gate: 0, headline: 0 },
+    });
+  });
+
+  it("judges on the instance's key while the allowance has room", async () => {
+    const { svc, guard, judge } = service();
+    const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+    expect(guard.check).toHaveBeenCalledTimes(1);
+    expect(judge.calls).toHaveLength(1);
+    expect(out.block).not.toHaveProperty('unavailable_reason');
   });
 });

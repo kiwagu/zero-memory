@@ -20,6 +20,7 @@
     "@workspace/embedding": "workspace:*",
     "@workspace/judgment": "workspace:*",
     "@workspace/logger": "workspace:*",
+    "@workspace/policy": "workspace:*",
     "@workspace/usage": "workspace:*",
     "oxide.ts": "catalog:",
     "zod": "catalog:"

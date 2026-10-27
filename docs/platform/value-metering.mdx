@@ -137,7 +137,9 @@ When the
 [rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance)
 judges a call's standing rules, that call's `build_context` row carries the
 judgment as `rule_gate`: the mode, the provider and model, the judge's
-latency, whether it was unavailable, the bands, `chars_baseline` (the sum
+latency, whether it was unavailable (and `unavailable_reason:
+budget_exhausted` when it was not asked because the account's extraction
+allowance was used up), the bands, `chars_baseline` (the sum
 of the rules' whole texts, what an unjudged call sends) against
 `chars_delivered` (the characters the session receives: each delivered text,
 plus the **applies when** line of a rule delivered by gate), the count per level,
@@ -147,8 +149,11 @@ never a rule's text. Three more rows complete the picture:
 - a read of one rule at `zm://rules/{id}` is its own `mcp_tool_call` row,
   tool `resource:rule`, with the `rule_id` and whether it was `found`: the
   fetch after a headline;
-- the judge's spend is an `llm_extraction` row with `purpose: rule_gate`, its
-  input tokens as the quantity, written only when the judge answered;
+- the judge's spend is an `llm_extraction` row with `purpose: rule_gate`,
+  shaped like every other model call's: input plus output tokens as the
+  quantity, `input_tokens` and `output_tokens` beside it, and `own_key` when
+  it ran on the account's own key. It is written only when the judge
+  answered, and it is not counted against the extraction allowance;
 - an `ingest_chunk` row carries `guard_refusals`, the names of the guard hooks
   that refused an action in that chunk.
 

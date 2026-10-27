@@ -550,6 +550,12 @@ export const ruleGateBlockSchema = z.object({
   model: z.string(),
   latency_ms: nonNegativeInt,
   judge_unavailable: z.boolean(),
+  /**
+   * Why the judge gave no answer when the gate did not ask it:
+   * `budget_exhausted` — the account's extraction allowance on the
+   * instance's key is used up. Absent when the judge was asked.
+   */
+  unavailable_reason: z.enum(['budget_exhausted']).optional(),
   bands: z.object({
     hi: z.number().min(0).max(1),
     lo: z.number().min(0).max(1),
