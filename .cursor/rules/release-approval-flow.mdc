@@ -25,22 +25,24 @@ promoting stage, restarting services, or touching the live database.
 2. **Validate on the isolated test stack** (units + integration + e2e).
    Real data only via a live clone restored into a non-live stack — never
    by touching live.
-3. **Stand up the review stand — unprompted.** Before asking for
-   approval, from the epic branch: `bun --cwd tests/e2e run
-   test:e2e:stands`. One command stands up BOTH contours from the same
-   commit — the test stack runs the suite off a `db reset`, and the review
-   stack (`zero-memory-review`, server `:8789` / web `:3103`) comes up on a
-   fresh clone of live with the branch's pending migrations applied, and
-   stays up. Hand the reviewer the web URL; the owner signs in with LIVE
-   credentials, since a physical clone carries the real accounts. Do not
-   make them ask for this stand each time. `bun --cwd tests/e2e run
-   stands:down` when it is no longer needed.
+3. **The review stand — only on the owner's request.** The active testing
+   phase is behind the project and the stack is stable, so the review
+   stand is no longer raised by default before asking for approval: the
+   gates of (2) and (5b) on the isolated test stack are the evidence. Raise
+   it only when the owner asks for it, from the branch: `bun --cwd
+   tests/e2e run test:e2e:stands`. One command stands up BOTH contours from
+   the same commit — the test stack runs the suite off a `db reset`, and
+   the review stack (`zero-memory-review`, server `:8789` / web `:3103`)
+   comes up on a clone of live with the branch's pending migrations
+   applied, and stays up. Hand the owner the web URL; they sign in with
+   LIVE credentials, since a physical clone carries the real accounts.
+   `bun --cwd tests/e2e run stands:down` when it is no longer needed.
 
    **Which stand answers which question — the division is by what the data
-   is, not by what is convenient.** The review stand carries a STABLE CLONE
-   of production and is therefore the one to review on, to audit against,
-   and to point a client at: it is the only contour where behaviour can be
-   judged on real volume and real shapes. The dev and test stands are
+   is, not by what is convenient.** The review stand, when it is raised,
+   carries a STABLE CLONE of production and is therefore the one to review
+   on, to audit against, and to point a client at: it is the only contour
+   where behaviour can be judged on real volume and real shapes. The dev and test stands are
    DEVELOPMENT contours whose databases get reformatted — `db reset` is
    routine there and destroys nothing anyone needs — so they answer "does
    the code run" and never "is the result any good".
