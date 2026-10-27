@@ -24,7 +24,7 @@ workflow; the model supplies one number per question and generates no text.
 | ------------------------- | --------------- | ----------------------------------------------------------------------------------------------------- |
 | `ZM_JUDGE_PROVIDER`       | `typesafe`      | platform default provider (`typesafe` or `subq`)                                                      |
 | `ZM_TYPESAFE_API_KEY`     | —               | platform TypeSafe key                                                                                 |
-| `SNAPQ_API_KEY`           | —               | platform SubQ key                                                                                     |
+| `ZM_SNAPQ_API_KEY`        | —               | platform SubQ key                                                                                     |
 | `ZM_JUDGE_MODEL_TYPESAFE` | `jev-1.14.0`    | pinned TypeSafe model                                                                                 |
 | `ZM_JUDGE_MODEL_SUBQ`     | `subq-snap-1.1` | SubQ model id                                                                                         |
 | `ZM_JUDGE_TIMEOUT_MS`     | `1500`          | per-request timeout                                                                                   |

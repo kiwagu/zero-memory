@@ -68,7 +68,7 @@ services:
       ZM_JUDGE_MODEL_SUBQ: ${ZM_JUDGE_MODEL_SUBQ:-}
       ZM_JUDGE_TIMEOUT_MS: ${ZM_JUDGE_TIMEOUT_MS:-}
       ZM_TYPESAFE_API_KEY: ${ZM_TYPESAFE_API_KEY:-}
-      SNAPQ_API_KEY: ${SNAPQ_API_KEY:-}
+      ZM_SNAPQ_API_KEY: ${ZM_SNAPQ_API_KEY:-}
     volumes:
       # Embedding model cache (ZM_MODEL_CACHE_DIR=/models is baked into the
       # image); survives container recreation, downloaded once.

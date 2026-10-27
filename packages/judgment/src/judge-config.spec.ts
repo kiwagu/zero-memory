@@ -14,7 +14,7 @@ describe('readJudgeConfig', () => {
   it('reads the platform keys under their fixed names', () => {
     const config = readJudgeConfig({
       ZM_TYPESAFE_API_KEY: 'ts-key',
-      SNAPQ_API_KEY: 'snap-key',
+      ZM_SNAPQ_API_KEY: 'snap-key',
       ZM_JUDGE_PROVIDER: 'subq',
       ZM_JUDGE_MODEL_SUBQ: 'subq-snap-preview',
       ZM_JUDGE_TIMEOUT_MS: '900',
@@ -33,7 +33,7 @@ describe('readJudgeConfig', () => {
       readJudgeConfig({
         ZM_JUDGE_PROVIDER: '',
         ZM_TYPESAFE_API_KEY: '',
-        SNAPQ_API_KEY: '',
+        ZM_SNAPQ_API_KEY: '',
         ZM_JUDGE_MODEL_TYPESAFE: '',
         ZM_JUDGE_MODEL_SUBQ: '',
         ZM_JUDGE_TIMEOUT_MS: '',

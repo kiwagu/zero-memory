@@ -84,8 +84,8 @@ export const readJudgeConfig = (env: NodeJS.ProcessEnv): JudgeConfig => {
   }
   const platformKeys: Partial<Record<JudgeProviderName, string>> = {};
   if (env.ZM_TYPESAFE_API_KEY) platformKeys.typesafe = env.ZM_TYPESAFE_API_KEY;
-  // SNAPQ_API_KEY is the owner's name for the SubQ Snap key; keep it.
-  if (env.SNAPQ_API_KEY) platformKeys.subq = env.SNAPQ_API_KEY;
+  // The SubQ Snap platform key, named like the TypeSafe one.
+  if (env.ZM_SNAPQ_API_KEY) platformKeys.subq = env.ZM_SNAPQ_API_KEY;
   return {
     provider: rawProvider,
     timeoutMs: readTimeoutMs(env),

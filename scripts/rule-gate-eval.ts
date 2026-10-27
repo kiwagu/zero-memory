@@ -7,7 +7,7 @@
  *   what delivery did before the gate.
  * - `cosine` — the same budget, ranked by E5 similarity between the topic and
  *   the rule's condition (its text when it has none).
- * - the judge — TypeSafe (and SubQ Snap when `SNAPQ_API_KEY` is set), one
+ * - the judge — TypeSafe (and SubQ Snap when `ZM_SNAPQ_API_KEY` is set), one
  *   request per topic asked exactly as the gate asks it, levelled by the
  *   gate's bands (`ZM_RULE_GATE_HI` / `ZM_RULE_GATE_LO`). A rule the judge
  *   leaves unanswered, and every rule of a topic the judge could not answer

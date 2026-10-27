@@ -129,7 +129,7 @@ The rule delivery judge is off unless the server's secret turns it on:
 `ZM_RULE_GATE_MODE` (`shadow` or `live`), optionally `ZM_RULE_GATE_HI`,
 `ZM_RULE_GATE_LO`, `ZM_JUDGE_PROVIDER`, `ZM_JUDGE_MODEL_TYPESAFE`,
 `ZM_JUDGE_MODEL_SUBQ` and `ZM_JUDGE_TIMEOUT_MS`, and the instance's provider
-keys `ZM_TYPESAFE_API_KEY` and `SNAPQ_API_KEY`. Put `ZM_JUDGE_PROVIDER` in
+keys `ZM_TYPESAFE_API_KEY` and `ZM_SNAPQ_API_KEY`. Put `ZM_JUDGE_PROVIDER` in
 the dashboard's secret too, so its settings page names the same default.
 `infra/prod/.env.example` says what each one does.
 

@@ -6,7 +6,7 @@ import { readJudgeConfig } from './judge-config.js';
 describe('EnvJudgeCredentialResolver', () => {
   it('returns the platform key of the default provider, not owned by the caller', async () => {
     const resolver = new EnvJudgeCredentialResolver(
-      readJudgeConfig({ ZM_TYPESAFE_API_KEY: 'ts', SNAPQ_API_KEY: 'sq' })
+      readJudgeConfig({ ZM_TYPESAFE_API_KEY: 'ts', ZM_SNAPQ_API_KEY: 'sq' })
     );
     await expect(resolver.resolve('usr_a')).resolves.toEqual({
       provider: 'typesafe',
@@ -18,7 +18,7 @@ describe('EnvJudgeCredentialResolver', () => {
 
   it('honours a preferred provider when it has a platform key', async () => {
     const resolver = new EnvJudgeCredentialResolver(
-      readJudgeConfig({ ZM_TYPESAFE_API_KEY: 'ts', SNAPQ_API_KEY: 'sq' })
+      readJudgeConfig({ ZM_TYPESAFE_API_KEY: 'ts', ZM_SNAPQ_API_KEY: 'sq' })
     );
     await expect(resolver.resolve('usr_a', 'subq')).resolves.toMatchObject({
       provider: 'subq',

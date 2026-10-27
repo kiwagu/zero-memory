@@ -53,7 +53,7 @@ function readServerKey(name: string): string {
   );
 }
 const ZM_TYPESAFE_API_KEY = readServerKey('ZM_TYPESAFE_API_KEY');
-const SNAPQ_API_KEY = readServerKey('SNAPQ_API_KEY');
+const ZM_SNAPQ_API_KEY = readServerKey('ZM_SNAPQ_API_KEY');
 const PUBLIC_URL =
   process.env.ZM_PUBLIC_URL ??
   (readExistingKey('ZM_PUBLIC_URL') || `http://localhost:${SERVER_PORT}`);
@@ -148,7 +148,7 @@ const files: Array<{ path: string; content: string }> = [
       `ZM_PASSWORD=${ZM_PASSWORD}`,
       `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}`,
       `ZM_TYPESAFE_API_KEY=${ZM_TYPESAFE_API_KEY}`,
-      `SNAPQ_API_KEY=${SNAPQ_API_KEY}`,
+      `ZM_SNAPQ_API_KEY=${ZM_SNAPQ_API_KEY}`,
       '',
     ].join('\n'),
   },
@@ -208,8 +208,8 @@ if (ZM_INGEST_EXTRACT) {
 if (ZM_TYPESAFE_API_KEY) {
   syncKey('ZM_TYPESAFE_API_KEY', ZM_TYPESAFE_API_KEY, serverEnv);
 }
-if (SNAPQ_API_KEY) {
-  syncKey('SNAPQ_API_KEY', SNAPQ_API_KEY, serverEnv);
+if (ZM_SNAPQ_API_KEY) {
+  syncKey('ZM_SNAPQ_API_KEY', ZM_SNAPQ_API_KEY, serverEnv);
 }
 
 console.log(`→ provisioning dev user ${ZM_EMAIL}…`);
