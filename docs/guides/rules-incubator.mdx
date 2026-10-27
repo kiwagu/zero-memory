@@ -242,10 +242,10 @@ first prompt — carries the project, not a task, so it is judged only against
 what the server knows of the conversation: the card it is bound to, or the
 card a new session is offered to continue (its title, state, status reason
 and open branch). Without such a card it is not judged at all. The text you
-type never leaves your machine for this. The session-start hook asks for two
-briefings, the project's and the branch's, and passes `judge_rules: false` on
-the second, so one session start costs one judgment; any caller can pass it
-to have the rules delivered whole.
+type never leaves your machine for this. On a feature branch the
+session-start hook asks for two briefings, the project's and the branch's,
+and passes `judge_rules: false` on the second, so one session start costs one
+judgment; any caller can pass it to have the rules delivered whole.
 
 Each rule carries an **applies when** line — one to three lines of observable
 task features — which is what the judge tests against the task. The distiller
