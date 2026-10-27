@@ -14,6 +14,11 @@ export const CARD_FAILURES = [
   'not_attached',
   'already_promoted',
   'invalid',
+  'branch_required',
+  'branch_open',
+  'links_required',
+  'type_required',
+  'not_linked',
 ] as const;
 export type CardFailureCode = (typeof CARD_FAILURES)[number];
 
@@ -31,6 +36,19 @@ const DEFAULT_MESSAGE: Record<CardFailureCode, string> = {
   not_attached: 'Nothing is attached under that reference.',
   already_promoted: 'That loop already has a card.',
   invalid: 'The call is not a valid card command.',
+  branch_required:
+    'Work entering active needs its branch, or no_branch saying why it has ' +
+    'no code.',
+  branch_open:
+    'A branch is still open on this card: land it, or pass not_landed ' +
+    'saying why it has not landed.',
+  links_required:
+    'Say how this card relates to the board: pass links ' +
+    '[{card, relation, reason}] or no_links saying why it relates to no ' +
+    'other card.',
+  type_required:
+    'Say why the work exists: pass type — story, bug, task or spike.',
+  not_linked: 'These two cards have no such live relation.',
 };
 
 /** True when the string is one of the store's failure codes. */
@@ -62,13 +80,18 @@ export const toCardFailure = (
  * `archived`, `same_state`, `not_attached` and `already_promoted` all become
  * `conflict`: each one means the card exists and the caller may touch it, but
  * its current state refuses this particular call — which is exactly what
- * `conflict` says. The message keeps the specific reason.
+ * `conflict` says, and `branch_open` joins them for the same reason. The
+ * message keeps the specific reason. `branch_required` is a missing input,
+ * so it is `validation_failed` like any other.
  */
 export const cardFailureToErrorCode = (
   failure: CardFailure
 ): 'validation_failed' | 'not_found' | 'forbidden' | 'conflict' => {
   switch (failure.code) {
     case 'invalid':
+    case 'branch_required':
+    case 'links_required':
+    case 'type_required':
       return 'validation_failed';
     case 'not_found':
       return 'not_found';
@@ -78,3 +101,30 @@ export const cardFailureToErrorCode = (
       return 'conflict';
   }
 };
+
+/** A card the store offered as possibly related to one being assessed. */
+export interface LinkCandidate {
+  id: string;
+  number: number;
+  title: string;
+  state: string;
+  why: 'mentioned' | 'similar';
+}
+
+/**
+ * The refusal's sentence with the board's candidates named in it, so an
+ * agent that only reads the error text still sees what to link.
+ */
+export const withLinkCandidates = (
+  message: string,
+  candidates: readonly LinkCandidate[]
+): string =>
+  candidates.length === 0
+    ? `${message} No card on this board looks related.`
+    : `${message} Candidates: ${candidates
+        .map(
+          (candidate) =>
+            `ZM-${candidate.number} "${candidate.title}" [${candidate.state}] ` +
+            `(${candidate.why})`
+        )
+        .join('; ')}.`;

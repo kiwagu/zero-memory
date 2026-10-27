@@ -1,8 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   LoginForm,
@@ -14,11 +13,29 @@ import {
   type MailSentNoticeLabels,
 } from '@workspace/ui/components/auth/mail-sent-notice';
 
+import { authFailureOf, type AuthFailure } from '@/lib/auth-failure';
+import type { SocialProvider } from '@/lib/auth-providers';
 import { createClient } from '@/lib/supabase/client';
 import type { LegalLinks } from '@/lib/legal';
 
+/**
+ * Leaves the sign-in page for `next` with a full page load. A sign-in changes
+ * who the browser is, and on an account with a second factor the dashboard
+ * answers a new session with a redirect to the code step. A page load is a
+ * navigation, which gets that redirect; a router move is a fetch the
+ * dashboard cannot tell from code asking for data, so it would be refused and
+ * the router would reload anyway, with an error on the console on the way.
+ */
+function enterDashboard(next: string): void {
+  window.location.replace(next);
+}
+
 export function LoginView({
   initialError,
+  failureLabels,
+  next,
+  providers,
+  providerLabels,
   labels,
   confirmationLabels,
   legal,
@@ -26,6 +43,18 @@ export function LoginView({
 }: {
   /** Reason a redirect landed here, e.g. a callback that could not complete. */
   initialError?: string;
+  /** The reasons a sign-in may not complete, translated, by code. */
+  failureLabels: Record<AuthFailure, string>;
+  /** Where to go after sign-in; already cleaned by the page. */
+  next: string;
+  /** The social providers this instance enables, in display order. */
+  providers: SocialProvider[];
+  providerLabels: {
+    github: string;
+    google: string;
+    or: string;
+    linkedHint: string;
+  };
   labels: LoginFormLabels;
   /** Resolved from this deployment's configuration; absent documents = no gate. */
   legal: LegalLinks;
@@ -40,7 +69,6 @@ export function LoginView({
     descriptionTemplate: string;
   };
 }) {
-  const router = useRouter();
   const [mode, setMode] = useState<LoginMode>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -54,6 +82,36 @@ export function LoginView({
     string | null
   >(null);
   const [resent, setResent] = useState(false);
+
+  // Auth puts a refusal in the URL FRAGMENT when there is no code to exchange
+  // — a spent or expired link, an implicit-flow error. The server never sees
+  // a fragment, so only the browser can turn it into a message: the one for
+  // its code, never the description, which anyone can write into a link.
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (!hash) {
+      return;
+    }
+    const params = new URLSearchParams(hash);
+    if (!params.has('error') && !params.has('error_code')) {
+      return;
+    }
+    const reason =
+      failureLabels[
+        authFailureOf({
+          error: params.get('error'),
+          errorCode: params.get('error_code'),
+        })
+      ];
+    // Deferred, as the reset view does: a state write that is part of the
+    // effect's own tick would re-render in the same pass it synchronises.
+    const timer = setTimeout(() => {
+      setError(reason);
+      window.history.replaceState(null, '', window.location.pathname);
+    }, 0);
+    return () => clearTimeout(timer);
+    // The hash is gone after the first run, so a later run finds nothing.
+  }, [failureLabels]);
 
   function switchMode(next: LoginMode) {
     setMode(next);
@@ -113,8 +171,7 @@ export function LoginView({
         setPending(false);
         return;
       }
-      router.replace('/');
-      router.refresh();
+      enterDashboard(next);
       return;
     }
 
@@ -127,8 +184,28 @@ export function LoginView({
       setPending(false);
       return;
     }
-    router.replace('/');
-    router.refresh();
+    enterDashboard(next);
+  }
+
+  async function handleProvider(provider: SocialProvider) {
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    const supabase = createClient();
+    // The provider sends the browser to Auth, Auth to /auth/callback with a
+    // code, and the callback — after exchanging it — to `next`. The callback
+    // cleans `next` again: it travels through two other sites on the way.
+    const { error: providerError } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
+    });
+    if (providerError) {
+      setError(providerError.message);
+      setPending(false);
+    }
+    // On success the browser is already navigating away; nothing to reset.
   }
 
   async function handleResend() {
@@ -188,6 +265,19 @@ export function LoginView({
       onModeChange={switchMode}
       onSubmit={() => void handleSubmit()}
       forgotPasswordHref="/forgot-password"
+      providers={
+        providers.length > 0
+          ? {
+              items: providers.map((id) => ({
+                id,
+                label: providerLabels[id],
+              })),
+              dividerLabel: providerLabels.or,
+              linkedHint: providerLabels.linkedHint,
+              onSelect: (id) => void handleProvider(id),
+            }
+          : undefined
+      }
       consent={
         legal.required
           ? {

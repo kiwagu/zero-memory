@@ -22,6 +22,7 @@
     "@workspace/di": "workspace:*",
     "@workspace/domain": "workspace:*",
     "@workspace/extraction": "workspace:*",
+    "@workspace/judgment": "workspace:*",
     "@workspace/llm": "workspace:*",
     "@workspace/logger": "workspace:*",
     "@workspace/memory": "workspace:*",

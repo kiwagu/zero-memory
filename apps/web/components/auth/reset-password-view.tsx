@@ -8,6 +8,7 @@ import {
   type ResetPasswordFormLabels,
 } from '@workspace/ui/components/auth/reset-password-form';
 
+import { verifyPathFor } from '@/lib/mfa';
 import { createClient } from '@/lib/supabase/client';
 
 /**
@@ -16,6 +17,12 @@ import { createClient } from '@/lib/supabase/client';
  * settles both on load, so the form waits for a session instead of assuming
  * one. Without that wait, `updateUser` fires against no session and the reset
  * fails with an error nobody can act on.
+ *
+ * An account with a second factor gives the code before choosing a password:
+ * Auth refuses a password change to a session that has not, and a recovery
+ * link opens exactly such a session. So once the link has settled into a
+ * session that still owes the code, the page sends the person to the code
+ * step, which brings them back here able to save.
  */
 export function ResetPasswordView({
   labels,
@@ -41,8 +48,19 @@ export function ResetPasswordView({
     const supabase = createClient();
     let settled = false;
     const settle = () => {
+      if (settled) {
+        return;
+      }
       settled = true;
-      setReady(true);
+      void supabase.auth.mfa
+        .getAuthenticatorAssuranceLevel()
+        .then(({ data: level }) => {
+          if (level?.currentLevel === 'aal1' && level.nextLevel === 'aal2') {
+            router.replace(verifyPathFor('/reset-password'));
+            return;
+          }
+          setReady(true);
+        });
     };
 
     const { data: subscription } = supabase.auth.onAuthStateChange(
@@ -81,7 +99,7 @@ export function ResetPasswordView({
       clearTimeout(timer);
       subscription.subscription.unsubscribe();
     };
-  }, []);
+  }, [router]);
 
   async function handleSubmit() {
     // Unreachable from the UI: the button stays disabled until the exchange
@@ -99,6 +117,10 @@ export function ResetPasswordView({
     setError(null);
     const supabase = createClient();
     const { error: updateError } = await supabase.auth.updateUser({ password });
+    if (updateError?.code === 'insufficient_aal') {
+      router.replace(verifyPathFor('/reset-password'));
+      return;
+    }
     if (updateError) {
       setError(updateError.message);
       setPending(false);

@@ -1,14 +1,14 @@
-import { confirmationTemplate } from './templates/confirmation.template.js';
-import { emailChangeTemplate } from './templates/email-change.template.js';
-import { inviteTemplate } from './templates/invite.template.js';
-import { recoveryTemplate } from './templates/recovery.template.js';
+import { confirmationTemplate } from './templates/confirmation.template';
+import { emailChangeTemplate } from './templates/email-change.template';
+import { inviteTemplate } from './templates/invite.template';
+import { recoveryTemplate } from './templates/recovery.template';
 
 export {
   AUTH_TEMPLATE_NAMES,
   layoutStrings,
   type AuthTemplateName,
   type AuthTemplateSpec,
-} from './templates/auth-template.type.js';
+} from './templates/auth-template.type';
 
 /**
  * Every authentication template Auth sends, in export order. Adding one means

@@ -2,6 +2,7 @@ import { entityIdSchemas } from '@workspace/contracts';
 import { createLogger } from '@workspace/logger';
 import { createServiceRoleClient, type Client } from '@workspace/persistence';
 
+import { rebuildRoiCases, type RoiRecalledIds } from './roi-cases.js';
 import type { IRoiJudge } from './roi-judge.js';
 import type { IRoiProber, ProbeSourceMemory } from './roi-prober.js';
 import type { RoiProbeCase } from './roi.schema.js';
@@ -165,6 +166,35 @@ export class RoiRunner {
         sourceScope: memory.scope,
       };
     });
+  }
+
+  /**
+   * The cases a recall phase collected, rebuilt from ids: for a worker that
+   * judges them later and elsewhere, which is handed the ids rather than every
+   * surfaced memory's text (see {@link rebuildRoiCases}).
+   */
+  async casesFromIds(
+    ownerId: string,
+    recalled: readonly RoiRecalledIds[]
+  ): Promise<RoiProbeCase[]> {
+    const probes = await this.activeProbes(ownerId);
+    const ids = [...new Set(recalled.flatMap((entry) => entry.surfacedIds))];
+    const contents = new Map<string, string>();
+    if (ids.length > 0) {
+      const { data, error } = await this.client
+        .from('memories')
+        .select('id, content')
+        .in('id', ids);
+      if (error) {
+        throw new Error(
+          `roi: loading surfaced memories failed: ${error.message}`
+        );
+      }
+      for (const row of data ?? []) {
+        contents.set(row.id, row.content);
+      }
+    }
+    return rebuildRoiCases(probes, contents, recalled);
   }
 
   /**

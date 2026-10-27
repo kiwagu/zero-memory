@@ -34,26 +34,86 @@ Two invariants shape everything else:
   blocks editing, attaching or noting. The board reports work; it never
   schedules it, claims it or hands it out.
 
+The same holds for a card's **severity**, a level from 1 (minimal) to 5
+(urgent), 3 unless said: a marker for readers that is set on create and
+changed through `editCard`, recorded in the history with the level it
+replaced, and never sorted, gated or dispatched by. The service refuses a
+level outside the scale before it travels.
+
+A card's **type** (`story`, `bug`, `task` or `spike`) says why its work
+exists and is required: `createCard` and `promoteLoop` refuse a card without
+one (`type_required`) before it travels, and the store refuses a card from
+before types on its way into `active` until a move declares one. `editCard`
+changes a type; a move only declares a missing one. `landCard` answers a
+landed bug with a `hint` to remember what the fix taught; a suggestion, never
+a condition.
+
+One more thing a move accounts for: **the branch**. Work entering `active`
+names the git branch it runs on, or says why it has none (`no_branch`), unless
+the card already holds an open branch; work leaving `active` with a branch
+still open either records the landing (`landCard`: the squash commit and the
+branch it landed on) or says why it has not landed (`not_landed`). The service
+refuses what it can see without the card — both at once, a blank declaration,
+a branch on a move that is not into `active` — and the store decides the rest
+under the card's lock, answering `branch_required` or `branch_open`.
+
+A card also accounts for **its relations** to other cards. A new card
+(`createCard`, `promoteLoop`) passes `links` — `{card, relation, reason}`, by
+id or `ZM-N` label — or says why it relates to nothing (`noLinks`), and a card
+that never did either is asked again when it enters `active`. The service
+refuses both at once, a blank statement and either one on a move that is not
+into `active`; a missing statement is the store's call, because only the store
+knows whether the card was ever assessed and can offer candidates, which the
+refusal carries (`links_required`, with `withLinkCandidates` putting them in
+its sentence). `linkCard` and `unlinkCard` relate cards after the fact, each
+with a reason; a relation that would put a card above itself, or give it a
+second parent, is refused.
+
 Archiving is the single terminal act: it takes a card off the board and
 freezes it. Reversible shelving is the `parked` state, which stays on the
 board and moves back like any other.
 
+A card's **feed** is derived, never stored. Attaching a conversation (a
+`thread` reference) binds it, and `readCard` then returns, beside the history,
+the live memories that conversation wrote in the card's scope — computed at
+read time from each memory's own provenance, under the reader's rights, and
+without recording a recall. Detaching the conversation is the whole undo.
+
 ## Key exports
 
 - `CardService` — the application service: `createCard`, `promoteLoop`,
-  `editCard`, `moveCard`, `archiveCard`, `attachRef`, `detachRef`,
-  `noteCard`, `readCard`, `listBoard`, `resolveCard`. Every call returns a
+  `editCard`, `moveCard`, `archiveCard`, `landCard`, `linkCard`,
+  `unlinkCard`, `attachRef`, `detachRef`, `noteCard`, `readCard` (branches,
+  relations, history and feed, the last two each on its own cursor),
+  `listBoard`, `resolveCard`. Every call returns a
   `Result`; a no-op (re-attaching the same target, an edit that changes
   nothing) is a success that reports `changed: false`.
 - `ICardRepository`, `CARD_REPOSITORY`, `injectCardRepository` — the port and
   its DI token. One method per atomic store command.
 - `CardFailure`, `toCardFailure`, `cardFailureToErrorCode` — why a call did
   not happen, and how that maps onto the transport's error vocabulary. Every
-  state refusal is a `conflict`; the message keeps the specific reason.
+  state refusal is a `conflict` (`branch_open` and `not_linked` included);
+  `branch_required` and `links_required` are missing inputs, so they are
+  `validation_failed`. The message keeps the specific reason.
+- `LinkCardParams`, `withLinkCandidates` — a relation as the service takes
+  it, and the refusal sentence that lists the board's candidates. A relation
+  as a card reads it back, named from the card's side, is `CardLinkView` in
+  `@workspace/contracts`.
+- `LandCardParams`, `CardBranchView`, `CardBranchLanding` — a landing as the
+  service takes it, and a branch as a card reads it back: its latest squash
+  commit, and every landing it had (a branch lands again when a fix is made in
+  the branch that brought the bug).
 - `parseCardRef`, `cardRefKey`, `sameCardRef`, `flattenCardRef` — the closed
-  reference vocabulary (memory, entity, thread, card, url), the identity that
-  makes attaching idempotent, and the flat pair the store keeps.
+  reference vocabulary (memory, entity, thread, card, url, branch — written
+  `<repo>:<branch>`), the identity that makes attaching idempotent, and the
+  flat pair the store keeps.
+- `ReleaseService` (`release.service.ts`) — `settings`, `configure`,
+  `candidates`, `record`: where a project's production state lives, and
+  what it carries.
+- `IReleaseRepository`, `RELEASE_REPOSITORY`, `injectReleaseRepository`
+  (`release.repository.ts`, `release.repository.provider.ts`) — the release
+  port and its DI token, one method per release command.
 
 Schemas, limits and the state vocabulary itself live in
-`@workspace/contracts` (`card.schema.ts`), so storage checks and the tool
-surface mirror one source.
+`@workspace/contracts` (`card.schema.ts`, `release.schema.ts`), so storage
+checks and the tool surface mirror one source.

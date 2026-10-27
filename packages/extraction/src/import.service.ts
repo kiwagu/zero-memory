@@ -11,6 +11,7 @@ import { inject, singleton } from '@workspace/di';
 import { createLogger } from '@workspace/logger';
 import {
   MemoryService,
+  projectHintMissMessage,
   ScopeRoutingService,
   type Scope,
 } from '@workspace/memory';
@@ -141,7 +142,21 @@ export class ImportService {
         validationFailed('project_hint is required when target is "project".')
       );
     }
-    return Ok(await this.scopeRouting.resolveProjectScope(input.project_hint));
+    // A project import that names no project is refused rather than landing
+    // in the personal scope: the caller asked for a project.
+    const target = await this.scopeRouting.resolveProjectTarget(
+      input.project_hint
+    );
+    if (target.isErr()) {
+      return Err(
+        validationFailed(
+          projectHintMissMessage(input.project_hint, target.unwrapErr(), {
+            portableLayers: false,
+          })
+        )
+      );
+    }
+    return Ok(target.unwrap());
   }
 
   async #release(sourceHash: string): Promise<void> {

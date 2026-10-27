@@ -4,13 +4,16 @@
  * and flips to "shared" once someone else joins the scope. The dedicated
  * share-glyph button on the detail page opens a dialog listing who can see it.
  */
-import { createClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
+import { admin } from '../helpers/board-store.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
-import { passwordGrantToken, userRestClient } from '../helpers/users.js';
+import {
+  entityIdOf,
+  passwordGrantToken,
+  userRestClient,
+} from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
 
 test.describe('Memory sharing badge', () => {
@@ -45,6 +48,17 @@ test.describe('Memory sharing badge', () => {
       await mcp.close();
     }
 
+    // scope_members.user_id is the usr_ entity id, not the auth uuid.
+    const userBEntityId = await entityIdOf(seed.userB.id);
+    // A run leaves userB in the probe scope, so a retry on the persisted stack
+    // would open on an already-shared memory: start from owner-only.
+    const reset = await admin()
+      .from('scope_members')
+      .delete()
+      .eq('scope', scope)
+      .eq('user_id', userBEntityId);
+    expect(reset.error).toBeNull();
+
     await signInThroughForm(page, seed.userA);
 
     // Owner is the scope's only member: a capability to share, not the fact.
@@ -53,21 +67,6 @@ test.describe('Memory sharing badge', () => {
     await expect(badge).toHaveText('sharable');
 
     // Deliberately add userB to the scope -> the memory is now truly shared.
-    // scope_members.user_id is the usr_ entity id, not the auth uuid — resolve
-    // it from profiles (service role, keyed by the auth uuid).
-    const admin = createClient(
-      e2eEnv.supabaseUrl,
-      e2eEnv.supabaseServiceRoleKey,
-      { auth: { persistSession: false, autoRefreshToken: false } }
-    );
-    const profile = await admin
-      .from('profiles')
-      .select('id')
-      .eq('user_id', seed.userB.id)
-      .single();
-    expect(profile.error).toBeNull();
-    const userBEntityId = (profile.data as { id: string }).id;
-
     const grant = await userRestClient(tokenA).rpc('add_scope_member', {
       p_scope: scope,
       p_user: userBEntityId,

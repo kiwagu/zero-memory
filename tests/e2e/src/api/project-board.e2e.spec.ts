@@ -4,12 +4,14 @@
  * move, and what another agent left on it is readable without being binding.
  *
  * The invariants proven here are the ones the board would be worthless
- * without: a move cannot happen without a stated reason, a retry after a
- * timeout lands once, a note never moves the card, promoting a loop does not
- * close it, and a stranger sees nothing at all.
+ * without: a retry after a timeout lands once, a note never moves the card,
+ * promoting a loop does not close it, and a stranger sees nothing at all.
+ * What the card service refuses before any round trip — a move or an archive
+ * with no reason, a reply with nothing to answer — is its unit tests' to pin.
  */
 import { expect, test } from '@playwright/test';
 
+import { admin, asUser } from '../helpers/board-store.js';
 import { contentText, firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
@@ -51,6 +53,14 @@ interface BoardResult {
   }>;
   has_more: boolean;
   next_after_seq: number;
+  feed: Array<{
+    memory_id: string;
+    kind: string;
+    preview: string;
+    thread: string;
+  }>;
+  feed_has_more: boolean;
+  feed_next_before: string | null;
 }
 
 const PROJECT_HINT = '/tmp/zm-e2e-board-project';
@@ -75,8 +85,11 @@ test.describe('Project board over MCP', () => {
       // 1. Promoting the loop opens a card and records where it came from.
       const promoted = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Migrate the ingest worker off the legacy queue',
+        type: 'task',
+        no_branch: 'an e2e fixture card with no code',
         body: 'Goal: no traffic on the legacy queue.\nBoundaries: no schema change.',
       });
       expect(promoted.isError ?? false).toBe(false);
@@ -88,22 +101,15 @@ test.describe('Project board over MCP', () => {
       // A loop promotes into exactly one card, however often it is asked.
       const twice = await agent.callTool('card', {
         action: 'promote_loop',
+        no_links: 'e2e fixture',
         loop_id: loop.memory_id,
         title: 'Second attempt at the same work',
+        type: 'task',
+        no_branch: 'an e2e fixture card with no code',
       });
       expect(twice.isError ?? false).toBe(true);
 
-      // 2. A move without a reason is refused — there is no way around it.
-      const reasonless = await agent.callTool('card', {
-        action: 'move',
-        card_id: card.id,
-        to: 'waiting',
-        reason: '   ',
-      });
-      expect(reasonless.isError ?? false).toBe(true);
-      expect(contentText(reasonless)).toMatch(/reason/i);
-
-      // ...and a move to the state it is already in says so rather than
+      // 2. A move to the state the card is already in says so rather than
       // writing a second identical row.
       const standstill = await agent.callTool('card', {
         action: 'move',
@@ -141,15 +147,6 @@ test.describe('Project board over MCP', () => {
       });
       expect(replay.isError ?? false).toBe(false);
       expect(firstJson<{ replayed: boolean }>(replay).replayed).toBe(true);
-
-      // A relation needs the note it answers.
-      const orphan = await agent.callTool('card_log', {
-        action: 'note',
-        card_id: card.id,
-        text: 'not so fast',
-        relation: 'disputes',
-      });
-      expect(orphan.isError ?? false).toBe(true);
 
       const answered = await agent.callTool('card_log', {
         action: 'note',
@@ -244,17 +241,7 @@ test.describe('Project board over MCP', () => {
       expect(still.card?.archived_at).toBeNull();
       expect(still.card?.origin_loop_id).toBe(loop.memory_id);
 
-      // 8. Archiving is terminal and, like every move, needs a reason.
-      expect(
-        (
-          await agent.callTool('card', {
-            action: 'archive',
-            card_id: card.id,
-            reason: '',
-          })
-        ).isError ?? false
-      ).toBe(true);
-
+      // 8. Archiving is terminal.
       const archived = await agent.callTool('card', {
         action: 'archive',
         card_id: card.id,
@@ -298,8 +285,10 @@ test.describe('Project board over MCP', () => {
 
       const created = await owner.callTool('card', {
         action: 'create',
+        no_links: 'e2e fixture',
         scope,
         title: 'Private work nobody else should see',
+        type: 'task',
         body: 'Contains the cutover checklist.',
       });
       expect(created.isError ?? false).toBe(false);
@@ -312,6 +301,13 @@ test.describe('Project board over MCP', () => {
       });
       expect(peek.isError ?? false).toBe(true);
       expect(contentText(peek)).not.toContain('cutover checklist');
+      // Refused the way a card that does not exist is: the stranger cannot
+      // even learn that there is one.
+      const refusal = firstJson<{ error: { code: string; message: string } }>(
+        peek
+      ).error;
+      expect(refusal.code).toBe('not_found');
+      expect(refusal.message).toMatch(/No such card/u);
 
       const listed = await stranger.callTool('board', {
         action: 'list',
@@ -335,6 +331,674 @@ test.describe('Project board over MCP', () => {
     } finally {
       await owner.close();
       await stranger.close();
+    }
+  });
+
+  test('a conversation bound to a card fills its feed, and nothing else does', async () => {
+    const seed = await readSeedState();
+    const agent = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    const elsewhere = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    // A fresh project per run: a memory repeated across runs would be merged
+    // into the earlier run's row — born in an earlier conversation.
+    const hint = `/tmp/zm-e2e-board-feed-${Date.now()}`;
+    const feedOf = async (
+      cardId: string,
+      extra: Record<string, unknown> = {}
+    ): Promise<BoardResult> => {
+      const read = await agent.callTool('board', {
+        action: 'get',
+        card_id: cardId,
+        ...extra,
+      });
+      expect(read.isError ?? false).toBe(false);
+      return firstJson<BoardResult>(read);
+    };
+    const ids = (view: BoardResult): string[] =>
+      view.feed.map((item) => item.memory_id);
+    const remember = async (
+      client: McpTestClient,
+      args: Record<string, unknown>
+    ): Promise<{ memory_id: string; scope: string }> => {
+      const stored = await client.callTool('remember', args);
+      expect(stored.isError ?? false).toBe(false);
+      return firstJson<{ memory_id: string; scope: string }>(stored);
+    };
+
+    try {
+      // Reading first opens the conversation this agent's writes are born in.
+      const pack = firstJson<{ session?: { thread?: string } }>(
+        await agent.callTool('build_context', {
+          topic: 'derived card feed',
+          briefing: true,
+          project_hint: hint,
+        })
+      );
+      const thread = pack.session?.thread;
+      expect(thread).toMatch(/^thr_/u);
+
+      // Written BEFORE the conversation is bound: the feed is derived from
+      // where a memory was born, not from when the binding happened.
+      const early = await remember(agent, {
+        content:
+          'e2e feed marker: the nightly export runs after the vacuum, never ' +
+          'before it',
+        kind: 'fact',
+        project_hint: hint,
+      });
+
+      const created = await agent.callTool('card', {
+        action: 'create',
+        no_links: 'e2e fixture',
+        scope: early.scope,
+        title: 'Keep the nightly jobs from colliding',
+        type: 'task',
+      });
+      expect(created.isError ?? false).toBe(false);
+      const card = firstJson<CardResult>(created).card;
+
+      // Nothing is bound yet, so nothing belongs to the card.
+      expect((await feedOf(card.id)).feed).toHaveLength(0);
+
+      const bound = await agent.callTool('card_log', {
+        action: 'attach',
+        card_id: card.id,
+        ref_kind: 'thread',
+        ref_target: thread,
+      });
+      expect(bound.isError ?? false).toBe(false);
+
+      const late = await remember(agent, {
+        content:
+          'e2e feed marker: the backup window moved to four in the morning ' +
+          'so it no longer overlaps the report build',
+        kind: 'decision',
+        project_hint: hint,
+      });
+      // Same conversation, another scope: a personal note is not the card's.
+      const personal = await remember(agent, {
+        content: 'e2e feed marker: I prefer reading job logs oldest line first',
+        kind: 'preference',
+        scope: 'personal',
+      });
+      // Same project, another conversation: not bound, so not the card's.
+      const other = firstJson<{ session?: { thread?: string } }>(
+        await elsewhere.callTool('build_context', {
+          topic: 'unrelated work',
+          briefing: true,
+          project_hint: hint,
+        })
+      );
+      expect(other.session?.thread).not.toBe(thread);
+      const unrelated = await remember(elsewhere, {
+        content:
+          'e2e feed marker: the staging certificate renews on the first of ' +
+          'the month',
+        kind: 'fact',
+        project_hint: hint,
+      });
+
+      // THE CLAIM: both memories of the bound conversation arrive, newest
+      // first, with no attach call for either — and nothing else does.
+      const filled = await feedOf(card.id);
+      expect(ids(filled)).toEqual([late.memory_id, early.memory_id]);
+      expect(filled.feed.every((item) => item.thread === thread)).toBe(true);
+      expect(ids(filled)).not.toContain(personal.memory_id);
+      expect(ids(filled)).not.toContain(unrelated.memory_id);
+      expect(filled.feed[0]?.preview).toContain('backup window');
+
+      // The feed pages on its own cursor, newest to oldest.
+      const first = await feedOf(card.id, { limit: 1 });
+      expect(ids(first)).toEqual([late.memory_id]);
+      expect(first.feed_has_more).toBe(true);
+      expect(first.feed_next_before).toBe(late.memory_id);
+      const second = await feedOf(card.id, {
+        limit: 1,
+        feed_before: first.feed_next_before,
+      });
+      expect(ids(second)).toEqual([early.memory_id]);
+      expect(second.feed_has_more).toBe(false);
+
+      // Reading the feed is not a recall: nothing was reinforced by it.
+      const { count } = await admin()
+        .from('usage_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_type', 'recall_used')
+        .in('metadata->>mem_id', [early.memory_id, late.memory_id]);
+      expect(count ?? 0).toBe(0);
+
+      // A memory attached on purpose is listed once — as an attachment.
+      const pinned = await agent.callTool('card_log', {
+        action: 'attach',
+        card_id: card.id,
+        ref_kind: 'memory',
+        ref_target: late.memory_id,
+      });
+      expect(pinned.isError ?? false).toBe(false);
+      const withPin = await feedOf(card.id);
+      expect(ids(withPin)).toEqual([early.memory_id]);
+      expect(withPin.refs.map((ref) => ref.target)).toContain(late.memory_id);
+
+      // A retired memory leaves the feed on its own, and comes back with it.
+      const forgotten = await agent.callTool('forget', {
+        memory_id: early.memory_id,
+      });
+      expect(forgotten.isError ?? false).toBe(false);
+      expect((await feedOf(card.id)).feed).toHaveLength(0);
+      const restored = await agent.callTool('restore_memory', {
+        memory_id: early.memory_id,
+      });
+      expect(restored.isError ?? false).toBe(false);
+      expect(ids(await feedOf(card.id))).toEqual([early.memory_id]);
+
+      // Unbinding the conversation is the whole undo: nothing was copied.
+      const unbound = await agent.callTool('card_log', {
+        action: 'detach',
+        card_id: card.id,
+        ref_kind: 'thread',
+        ref_target: thread,
+      });
+      expect(unbound.isError ?? false).toBe(false);
+      expect((await feedOf(card.id)).feed).toHaveLength(0);
+    } finally {
+      await agent.close();
+      await elsewhere.close();
+    }
+  });
+
+  test('a briefing names the board work and reaches attached loops through their card', async () => {
+    const seed = await readSeedState();
+    const agent = await McpTestClient.connect(
+      await passwordGrantToken(seed.userA)
+    );
+    const stamp = Date.now();
+    const hint = `/tmp/zm-e2e-board-brief-${stamp}`;
+    const bareHint = `/tmp/zm-e2e-board-bare-${stamp}`;
+
+    interface Pack {
+      memories: Array<{ id: string }>;
+      open_loops: Array<{ id: string }>;
+      open_loops_total: number;
+      work?: {
+        bound_card: {
+          number: number;
+          state: string;
+          state_reason: string | null;
+          refs: number;
+        } | null;
+        active: number;
+        waiting: number;
+        lead: Array<{ number: number }>;
+      };
+      session?: { thread?: string };
+    }
+    const brief = async (projectHint: string): Promise<Pack> => {
+      const result = await agent.callTool('build_context', {
+        topic: 'nightly jobs',
+        briefing: true,
+        max_tokens: 1200,
+        project_hint: projectHint,
+      });
+      expect(result.isError ?? false).toBe(false);
+      return firstJson<Pack>(result);
+    };
+    const remember = async (args: Record<string, unknown>) => {
+      const stored = await agent.callTool('remember', args);
+      expect(stored.isError ?? false).toBe(false);
+      return firstJson<{ memory_id: string; scope: string }>(stored);
+    };
+
+    try {
+      const first = await brief(hint);
+      const thread = first.session?.thread;
+      expect(thread).toMatch(/^thr_/u);
+      // A project with no board work carries no summary.
+      expect(first.work).toBeUndefined();
+
+      // Enough knowledge that the ranked leg would fill its six rows.
+      const facts = [
+        'the nightly export runs after the vacuum, never before it',
+        'the report build waits for the backup to finish',
+        'the backup window is four in the morning',
+        'the vacuum is skipped on the first of the month',
+        'the export writes to the cold bucket, never the warm one',
+        'the report build retries twice before paging',
+        'the cold bucket keeps ninety days of exports',
+      ];
+      let scope = '';
+      for (const fact of facts) {
+        scope = (
+          await remember({
+            content: `e2e brief marker ${stamp}: ${fact}`,
+            kind: 'fact',
+            project_hint: hint,
+          })
+        ).scope;
+      }
+      const loop = await remember({
+        content: `e2e brief marker ${stamp}: open loop — confirm the vacuum schedule with ops`,
+        kind: 'task',
+        project_hint: hint,
+      });
+
+      const created = await agent.callTool('card', {
+        action: 'create',
+        no_links: 'e2e fixture',
+        scope,
+        title: 'Keep the nightly jobs from colliding',
+        type: 'task',
+      });
+      expect(created.isError ?? false).toBe(false);
+      const card = firstJson<CardResult>(created).card;
+      for (const [kind, target] of [
+        ['thread', thread],
+        ['memory', loop.memory_id],
+      ] as const) {
+        const attached = await agent.callTool('card_log', {
+          action: 'attach',
+          card_id: card.id,
+          ref_kind: kind,
+          ref_target: target,
+        });
+        expect(attached.isError ?? false).toBe(false);
+      }
+      const reason = 'the export and the vacuum overlapped twice this week';
+      const moved = await agent.callTool('card', {
+        action: 'move',
+        card_id: card.id,
+        to: 'active',
+        reason,
+        no_branch: 'an e2e fixture card with no code',
+      });
+      expect(moved.isError ?? false).toBe(false);
+
+      const pack = await brief(hint);
+      // THE SUMMARY: this conversation's card, with why it is where it is.
+      expect(pack.work?.bound_card?.number).toBe(card.number);
+      expect(pack.work?.bound_card?.state).toBe('active');
+      expect(pack.work?.bound_card?.state_reason).toBe(reason);
+      expect(pack.work?.bound_card?.refs).toBe(2);
+      expect(pack.work?.active).toBe(1);
+      // The attached loop is reached through its card, not listed again.
+      expect(pack.open_loops.map((l) => l.id)).not.toContain(loop.memory_id);
+      // DISPLACEMENT: 1200 tokens buy six ranked rows; the summary takes one.
+      expect(pack.memories.length).toBeLessThanOrEqual(5);
+
+      // An UNBUDGETED briefing stays exactly as it was: no summary, nothing
+      // displaced, and the loop still listed on its own. Only budgeted
+      // briefings pay a row for the summary — the displacement was measured
+      // harmless at the hooks' size and not at the default.
+      const unbudgeted = await agent.callTool('build_context', {
+        topic: 'nightly jobs',
+        briefing: true,
+        project_hint: hint,
+      });
+      expect(unbudgeted.isError ?? false).toBe(false);
+      const plain = firstJson<Pack>(unbudgeted);
+      expect(plain.work).toBeUndefined();
+      expect(plain.open_loops.map((l) => l.id)).toContain(loop.memory_id);
+
+      // A project with no board work is untouched.
+      const bare = await brief(bareHint);
+      expect(bare.work).toBeUndefined();
+    } finally {
+      await agent.close();
+    }
+  });
+  test('a promoted loop is the card’s to settle: nothing over the loop moves the card', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const agent = await McpTestClient.connect(token);
+    // A second conversation writes the completion-sounding evidence, so no
+    // same-session rule can fold it into the loops.
+    const other = await McpTestClient.connect(token);
+    const stamp = Date.now();
+    const hint = `/tmp/zm-e2e-board-handover-${stamp}`;
+
+    interface Pack {
+      open_loops: Array<{ id: string }>;
+      work?: { bound_card: { number: number } | null };
+      session?: { thread?: string };
+    }
+    const brief = async (): Promise<Pack> => {
+      const result = await agent.callTool('build_context', {
+        topic: 'export migration',
+        briefing: true,
+        max_tokens: 1200,
+        project_hint: hint,
+      });
+      expect(result.isError ?? false).toBe(false);
+      return firstJson<Pack>(result);
+    };
+    const remember = async (
+      client: McpTestClient,
+      args: Record<string, unknown>
+    ) => {
+      const stored = await client.callTool('remember', {
+        project_hint: hint,
+        ...args,
+      });
+      expect(stored.isError ?? false).toBe(false);
+      return firstJson<{ memory_id: string; scope: string }>(stored);
+    };
+    const snapshot = async (cardId: string) => {
+      const got = firstJson<BoardResult>(
+        await agent.callTool('board', { action: 'get', card_id: cardId })
+      );
+      return {
+        state: got.card?.state,
+        revision: got.card?.revision,
+        archived: got.card?.archived_at,
+        events: got.events.length,
+      };
+    };
+
+    try {
+      const thread = (await brief()).session?.thread;
+      expect(thread).toMatch(/^thr_/u);
+
+      const loop = await remember(agent, {
+        content: `e2e handover marker ${stamp}: move the billing export to parquet — schema, backfill and cutover still open`,
+        kind: 'task',
+      });
+      // The unpromoted twin comes from the other conversation and is about
+      // different work: two near-identical loops in ONE session would be read
+      // as a refinement, and the newer would retire the older.
+      const control = await remember(other, {
+        content: `e2e handover marker ${stamp}: rotate the TLS certificates on the edge proxies — inventory, renewal and rollout still open`,
+        kind: 'task',
+      });
+
+      const promoted = await agent.callTool('card', {
+        action: 'promote_loop',
+        no_links: 'e2e fixture',
+        loop_id: loop.memory_id,
+        title: 'Move the billing export to parquet',
+        type: 'task',
+        no_branch: 'an e2e fixture card with no code',
+      });
+      expect(promoted.isError ?? false).toBe(false);
+      const card = firstJson<CardResult>(promoted).card;
+
+      // A second promotion is refused AND names the card that already carries
+      // the work, so the caller can go to it instead of guessing.
+      const twice = await agent.callTool('card', {
+        action: 'promote_loop',
+        no_links: 'e2e fixture',
+        loop_id: loop.memory_id,
+        title: 'The same work again',
+        type: 'task',
+        no_branch: 'an e2e fixture card with no code',
+      });
+      expect(twice.isError ?? false).toBe(true);
+      expect(contentText(twice)).toContain(`ZM-${card.number}`);
+
+      // 1. THE LOOP-CLOSURE JUDGE NEVER SEES A PROMOTED LOOP. Evidence that
+      // reads like completion arrives later, from another conversation; the
+      // unpromoted twin is still offered to the judge, the promoted one is not.
+      await remember(other, {
+        content: `e2e handover marker ${stamp}: the parquet export and the certificate rotation are both finished`,
+        kind: 'fact',
+      });
+      const { data: candidates, error } = await admin().rpc(
+        'find_loop_closure_evidence',
+        { p_min_similarity: 0.2 }
+      );
+      expect(error).toBeNull();
+      const judged = (candidates as Array<{ loop_id: string }>).map(
+        (row) => row.loop_id
+      );
+      expect(judged).toContain(control.memory_id);
+      expect(judged).not.toContain(loop.memory_id);
+
+      // 2. A NAMED CARD BRINGS ITS ORIGIN LOOP: bound to this conversation,
+      // the card carries the loop, and the briefing does not list it again.
+      // The unpromoted loop still arrives on its own.
+      const bound = await agent.callTool('card_log', {
+        action: 'attach',
+        card_id: card.id,
+        ref_kind: 'thread',
+        ref_target: thread,
+      });
+      expect(bound.isError ?? false).toBe(false);
+      const pack = await brief();
+      expect(pack.work?.bound_card?.number).toBe(card.number);
+      const listed = pack.open_loops.map((l) => l.id);
+      expect(listed).not.toContain(loop.memory_id);
+      expect(listed).toContain(control.memory_id);
+
+      // 3. EVERY PATH OVER THE ORIGIN LOOP LEAVES THE CARD WHERE IT WAS.
+      const before = await snapshot(card.id);
+      const forgotten = await agent.callTool('forget', {
+        memory_id: loop.memory_id,
+      });
+      expect(forgotten.isError ?? false).toBe(false);
+      expect(await snapshot(card.id)).toEqual(before);
+
+      const restored = await agent.callTool('restore_memory', {
+        memory_id: loop.memory_id,
+      });
+      expect(restored.isError ?? false).toBe(false);
+      expect(await snapshot(card.id)).toEqual(before);
+
+      await remember(agent, {
+        content: `e2e handover marker ${stamp}: move the billing export to parquet — cutover rescheduled`,
+        kind: 'task',
+        links: [{ type: 'supersedes', dst: loop.memory_id }],
+      });
+      expect(await snapshot(card.id)).toEqual(before);
+
+      // 4. TWO CONVERSATIONS PROMOTING ONE LOOP AT ONCE: exactly one card, and
+      // the other caller is told it already exists rather than hitting an
+      // internal error on the unique index.
+      const race = await Promise.all(
+        [agent, other].map((client) =>
+          client.callTool('card', {
+            action: 'promote_loop',
+            no_links: 'e2e fixture',
+            loop_id: control.memory_id,
+            title: 'Rotate the edge certificates',
+            type: 'task',
+            no_branch: 'an e2e fixture card with no code',
+          })
+        )
+      );
+      expect(race.filter((result) => !(result.isError ?? false))).toHaveLength(
+        1
+      );
+      const refused = race.find((result) => result.isError ?? false);
+      expect(contentText(refused!)).toMatch(/already has a card/u);
+
+      // 5. A CARD CANNOT CLAIM SOMEONE ELSE'S LOOP. Called directly, card_create
+      // would otherwise accept any memory id as an origin (the foreign key
+      // ignores RLS), and that pointer now shields the loop from hygiene. The
+      // stranger writes in their OWN scope; only the origin is not theirs.
+      const foreign = await remember(agent, {
+        content: `e2e handover marker ${stamp}: archive the stale feature flags — owner review still open`,
+        kind: 'task',
+      });
+      const strangerToken = await passwordGrantToken(seed.userB);
+      const strangerAgent = await McpTestClient.connect(strangerToken);
+      let strangerScope = '';
+      try {
+        const own = await strangerAgent.callTool('remember', {
+          content: `e2e handover marker ${stamp}: a loop of the stranger's own`,
+          kind: 'task',
+          project_hint: `/tmp/zm-e2e-board-stranger-${stamp}`,
+        });
+        expect(own.isError ?? false).toBe(false);
+        strangerScope = firstJson<{ scope: string }>(own).scope;
+      } finally {
+        await strangerAgent.close();
+      }
+      const stranger = asUser(strangerToken);
+      const { data: claimed } = await stranger.rpc('card_create', {
+        p_no_links: 'e2e fixture',
+        p_scope: strangerScope,
+        p_title: 'Not mine to claim',
+        p_type: 'task',
+        p_origin_loop_id: foreign.memory_id,
+      });
+      expect((claimed as { error?: string } | null)?.error).toBe('not_found');
+    } finally {
+      await agent.close();
+      await other.close();
+    }
+  });
+  test("an attachment or a history row cannot claim a scope other than its card's", async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const agent = await McpTestClient.connect(token);
+    const stamp = Date.now();
+    let own: string;
+    let other: string;
+    let card: CardRow;
+    try {
+      // Two projects this user may write. A row written in one must not land
+      // on a card of the other, or a writer of any scope could plant rows on
+      // a card it may only read.
+      own = firstJson<{ scope: string }>(
+        await agent.callTool('remember', {
+          content: `e2e board scope marker ${stamp}: the project the row claims`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-board-own-${stamp}`,
+        })
+      ).scope;
+      other = firstJson<{ scope: string }>(
+        await agent.callTool('remember', {
+          content: `e2e board scope marker ${stamp}: the project the card lives in`,
+          kind: 'fact',
+          project_hint: `/tmp/zm-e2e-board-other-${stamp}`,
+        })
+      ).scope;
+      card = firstJson<CardResult>(
+        await agent.callTool('card', {
+          action: 'create',
+          no_links: 'e2e fixture',
+          scope: other,
+          title: 'A card in the other project',
+          type: 'task',
+        })
+      ).card;
+    } finally {
+      await agent.close();
+    }
+
+    const db = asUser(token);
+    const plantedRef = await db.from('card_refs').insert({
+      card_id: card.id,
+      scope: own,
+      kind: 'url',
+      target: 'https://example.invalid/planted',
+    });
+    expect(plantedRef.error?.code).toBe('42501');
+    const plantedEvent = await db.from('card_events').insert({
+      card_id: card.id,
+      scope: own,
+      seq: 999,
+      type: 'noted',
+      note_text: 'planted',
+    });
+    expect(plantedEvent.error?.code).toBe('42501');
+
+    // The card's own scope still takes its writer's rows, as it always did.
+    const legit = await db.from('card_refs').insert({
+      card_id: card.id,
+      scope: other,
+      kind: 'url',
+      target: 'https://example.invalid/legit',
+    });
+    expect(legit.error).toBeNull();
+    const legitEvent = await db.from('card_events').insert({
+      card_id: card.id,
+      scope: other,
+      seq: 999,
+      type: 'noted',
+      note_text: 'written in the card scope',
+    });
+    expect(legitEvent.error).toBeNull();
+
+    // And the card keeps its scope: moving it would strand every row that
+    // copied the old one.
+    const moved = await db
+      .from('cards')
+      .update({ scope: own })
+      .eq('id', card.id)
+      .select('id');
+    expect(moved.error?.code).toBe('42501');
+  });
+});
+
+test.describe('Finding a card on the board', () => {
+  test('a query finds a card by its label or by its title, and nothing else', async () => {
+    const seed = await readSeedState();
+    const token = await passwordGrantToken(seed.userA);
+    const agent = await McpTestClient.connect(token);
+    try {
+      const stamp = Date.now();
+      const scopeOf = async (tag: string): Promise<string> =>
+        firstJson<{ scope: string }>(
+          await agent.callTool('remember', {
+            content: `e2e board filter marker ${stamp} ${tag}: the edge proxy drops long polls`,
+            kind: 'fact',
+            project_hint: `/tmp/zm-e2e-board-filter-${tag}-${stamp}`,
+          })
+        ).scope;
+      const create = async (scope: string, title: string): Promise<CardRow> =>
+        firstJson<CardResult>(
+          await agent.callTool('card', {
+            action: 'create',
+            scope,
+            title,
+            type: 'task',
+            no_links: 'e2e fixture',
+          })
+        ).card;
+
+      const scope = await scopeOf('one');
+      const certs = await create(scope, 'Rotate the edge certificates');
+      const feed = await create(scope, 'Page the memory feed');
+      const list = async (query: string): Promise<string[]> =>
+        firstJson<BoardResult>(
+          await agent.callTool('board', { action: 'list', scope, query })
+        ).cards.map((card) => card.id);
+
+      // Every way a person writes the card's label finds that card alone.
+      for (const query of [
+        `ZM-${feed.number}`,
+        `zm-${feed.number}`,
+        `#${feed.number}`,
+        `${feed.number}`,
+        `  ZM-${feed.number} `,
+      ]) {
+        expect(await list(query), query).toEqual([feed.id]);
+      }
+      // A title fragment, in any case, still finds by title.
+      expect(await list('memory feed')).toEqual([feed.id]);
+      expect(await list('EDGE')).toEqual([certs.id]);
+      // A label nobody holds finds nothing — an empty answer, not another card.
+      expect(await list('ZM-999')).toEqual([]);
+
+      // Every board at once: a label is per project, so ZM-1 is card #1 of
+      // each board the reader can see.
+      const other = await scopeOf('two');
+      const otherFirst = await create(other, 'Tune the recall threshold');
+      const { data, error } = await asUser(token).rpc('board_list', {
+        p_query: `ZM-${certs.number}`,
+        p_limit: 200,
+      });
+      expect(error).toBeNull();
+      const ids = (data as { cards: Array<{ id: string }> }).cards.map(
+        (card) => card.id
+      );
+      expect(certs.number).toBe(otherFirst.number);
+      expect(ids).toEqual(expect.arrayContaining([certs.id, otherFirst.id]));
+      expect(ids).not.toContain(feed.id);
+    } finally {
+      await agent.close();
     }
   });
 });

@@ -40,6 +40,12 @@ platform means adding one row there and building on it — no other file changes
 
 ## Build & release
 
+- `prune-actions-storage.sh` — delete the Actions caches and artifacts a
+  repository can no longer use: caches saved under any ref other than the given
+  one and the default branch, and artifacts of finished runs plus the current
+  run's `bundle-*` artifacts. The release workflow runs it after publishing;
+  `--dry-run` lists what would go. `prune-actions-storage.test.sh` checks the
+  selection against a stub `gh`.
 - `build-watcher.sh` — compile `apps/watcher` into a single self-contained
   binary (`bun --compile`); `TARGET=bun-linux-arm64` cross-compiles.
 - `wire-hooks.sh` — apply the hook set a machine needs to a client's settings
@@ -87,6 +93,18 @@ platform means adding one row there and building on it — no other file changes
   (hit@10 / MRR / reinforced share) and the brief-holdout probes against
   `build_context` (pack hit-rate / junk share); run before and after a ranking
   or briefing-recipe change.
+- `rule-probes-draft.ts` — draft the rule-gate probe set: an owner's recent
+  `build_context` topics judged once each against their unpinned rules, the
+  confident verdicts proposed as `full` / `headline` in
+  `rule-probes-draft.csv` for the owner to confirm; `--import <csv>` inserts
+  the confirmed rows into `rule_probes`.
+- `rule-gate-eval.ts` — replay the confirmed probes through the newest-first
+  and cosine rankings (whole rules within 6,000 characters) and through the
+  judge (bands), and print hit@full / false_full per rule type, the judge's
+  calibration, latency and input tokens; the run's JSON lands in the current
+  directory. Its LLM counterpart, `rules:gate-agreement` in `apps/server`,
+  re-judges logged gated calls with the gateway's model and reports agreement.
+  `rule-gate.utils.ts` is what the two scripts share.
 - `urlencode-stdin.py` — percent-encode stdin for `postgresql://` URLs.
 
 ## Smoke tests

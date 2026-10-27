@@ -3,6 +3,8 @@ import {
   entityIdSchema,
   entityTypeSchema,
   type BuildContextOutput,
+  type EdgeType as EdgeTypeName,
+  type EntityId,
   type MemoryLinkType,
   type RelatedMemory,
 } from '@workspace/contracts';
@@ -12,16 +14,15 @@ import { z } from 'zod';
 import type { EdgeType } from './edge-type.vo.js';
 import type { Scope } from './scope.vo.js';
 
-/** Hard cap of the graph walk — mirrors the SQL guard in traverse_entities. */
-export const TRAVERSE_MAX_DEPTH = 3;
-
-/** Validated traversal parameters (boundary data — schema-first). */
-export const traverseParamsSchema = z.object({
-  startEntityId: entityIdSchema,
-  maxDepth: z.number().int().min(1).max(TRAVERSE_MAX_DEPTH).default(2),
-  edgeTypes: z.array(edgeTypeSchema).optional(),
-});
-export type TraverseParams = z.infer<typeof traverseParamsSchema>;
+/**
+ * Parameters of a graph walk. `traverse_entities` caps the depth itself (at
+ * most three hops), so the bound holds whatever a caller passes.
+ */
+export interface TraverseParams {
+  startEntityId: EntityId;
+  maxDepth: number;
+  edgeTypes?: EdgeTypeName[];
+}
 
 /** One node reached by the walk (depth 0 is the start node itself). */
 export const traverseHopSchema = z.object({

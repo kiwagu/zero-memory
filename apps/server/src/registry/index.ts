@@ -3,7 +3,7 @@ import {
   recordAudit,
   type IAuditRecorder,
 } from '@workspace/audit';
-import { CARD_REPOSITORY } from '@workspace/board';
+import { CARD_REPOSITORY, RELEASE_REPOSITORY } from '@workspace/board';
 import { registerCommands } from '@workspace/command-handlers';
 import { getCurrentUserEntityId, registerContext } from '@workspace/context';
 import { EventBus } from '@workspace/cqrs';
@@ -21,6 +21,17 @@ import {
   setLlmGateway,
 } from '@workspace/llm';
 import {
+  EnvJudgeCredentialResolver,
+  JUDGE_CREDENTIAL_RESOLVER,
+  JUDGE_SETTINGS_READER,
+  JUDGMENT_FACTORY,
+  defaultJudgmentFactory,
+  readJudgeConfig,
+  readRuleGateConfig,
+  type JudgmentFactory,
+} from '@workspace/judgment';
+import { FakeJudgment } from '@workspace/judgment/testing';
+import {
   LlmExtractor,
   LlmUsefulnessJudge,
   EXTRACTOR,
@@ -32,7 +43,7 @@ import {
   DeterministicUsefulnessJudge,
 } from '@workspace/extraction/testing';
 import {
-  ACCOUNT_ERASER,
+  BRIEFING_WORK_READER,
   ENTITY_REPOSITORY,
   EXPORT_METRICS_READER,
   GRAPH_SERVICE,
@@ -41,6 +52,10 @@ import {
   MEMORY_SEARCH_SERVICE,
   SCOPE_META_REPOSITORY,
   PROJECT_RULES_READER,
+  RULE_FATE_READER,
+  RULE_GATE,
+  RULE_GATE_CONFIG,
+  RuleGateService,
   USER_RULES_READER,
   PORTABILITY_JUDGE,
   PROJECT_BINDING_REPOSITORY,
@@ -57,19 +72,23 @@ import {
 } from '@workspace/policy';
 import {
   StoredPolicyProvider,
-  SupabaseAccountEraser,
   SupabaseBudgetWindowReader,
   SupabaseCredentialResolver,
   SupabaseSpendMeter,
   SupabaseEntityRepository,
   SupabaseGraphService,
   SupabaseIngestLogRepository,
+  SupabaseJudgeCredentialResolver,
+  SupabaseJudgeSettingsReader,
+  SupabaseBriefingWorkReader,
   SupabaseCardRepository,
+  SupabaseReleaseRepository,
   SupabaseMemoryExportReader,
   SupabaseMemoryRepository,
   SupabaseMemorySearchService,
   SupabaseScopeMetaRepository,
   SupabaseProjectRulesReader,
+  SupabaseRuleFateReader,
   SupabaseUserRulesReader,
   SupabaseProjectBindingRepository,
   SupabaseSessionThreadRepository,
@@ -93,12 +112,14 @@ export const register = (c = container): void => {
   c.registerSingleton(EMBEDDING_SERVICE, E5SmallEmbeddingService);
   c.registerSingleton(MEMORY_REPOSITORY, SupabaseMemoryRepository);
   c.registerSingleton(CARD_REPOSITORY, SupabaseCardRepository);
+  c.registerSingleton(RELEASE_REPOSITORY, SupabaseReleaseRepository);
+  c.registerSingleton(BRIEFING_WORK_READER, SupabaseBriefingWorkReader);
   c.registerSingleton(MEMORY_EXPORT_READER, SupabaseMemoryExportReader);
-  c.registerSingleton(ACCOUNT_ERASER, SupabaseAccountEraser);
   c.registerSingleton(MEMORY_SEARCH_SERVICE, SupabaseMemorySearchService);
   c.registerSingleton(SCOPE_META_REPOSITORY, SupabaseScopeMetaRepository);
   c.registerSingleton(PROJECT_RULES_READER, SupabaseProjectRulesReader);
   c.registerSingleton(USER_RULES_READER, SupabaseUserRulesReader);
+  c.registerSingleton(RULE_FATE_READER, SupabaseRuleFateReader);
   c.registerSingleton(ENTITY_REPOSITORY, SupabaseEntityRepository);
   c.registerSingleton(GRAPH_SERVICE, SupabaseGraphService);
   c.registerSingleton(SCOPE_ACCESS_SERVICE, SupabaseScopeAccessService);
@@ -179,6 +200,42 @@ export const register = (c = container): void => {
   c.register(BUDGET_GUARD, { useValue: guard });
   c.register(LLM_GATEWAY, { useValue: gateway });
   setLlmGateway(gateway);
+
+  // The rule gate's judge. ZM_JUDGE_FAKE=1 is the e2e/smoke override: a
+  // deterministic judge and a dummy platform key, so the gate's own code
+  // runs without any provider account. Never set it on a serving stack.
+  const judgeConfig = readJudgeConfig(process.env);
+  if (process.env.ZM_JUDGE_FAKE === '1') {
+    const fake = new FakeJudgment();
+    const fakeFactory: JudgmentFactory = () => fake;
+    c.register(JUDGMENT_FACTORY, { useValue: fakeFactory });
+    c.register(JUDGE_CREDENTIAL_RESOLVER, {
+      useValue: {
+        resolve: async () => ({
+          provider: 'typesafe' as const,
+          apiKey: 'fake',
+          model: 'fake',
+          ownedByCaller: false,
+        }),
+      },
+    });
+  } else {
+    c.register(JUDGMENT_FACTORY, { useValue: defaultJudgmentFactory });
+    c.register(JUDGE_CREDENTIAL_RESOLVER, {
+      useValue: new SupabaseJudgeCredentialResolver(
+        new EnvJudgeCredentialResolver(judgeConfig),
+        undefined,
+        judgeConfig.models
+      ),
+    });
+  }
+  c.registerSingleton(JUDGE_SETTINGS_READER, SupabaseJudgeSettingsReader);
+  // Read once, here, so a malformed ZM_RULE_GATE_* value stops the server at
+  // startup instead of failing every briefing.
+  c.register(RULE_GATE_CONFIG, {
+    useValue: readRuleGateConfig(process.env),
+  });
+  c.registerSingleton(RULE_GATE, RuleGateService);
 
   // ZM_EXTRACTOR=deterministic is a smoke/test override (no API key needed);
   // production always runs the model-backed extractor. The usefulness judge and

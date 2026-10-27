@@ -11,10 +11,16 @@ import { z } from 'zod';
  *  - `sessionStart` → `{ additional_context }` injects into the model context
  *    (the clean brief channel, equivalent to Claude's SessionStart).
  *  - `beforeSubmitPrompt` → `{ continue, user_message }` — `user_message` is
- *    USER-facing (no model-context channel here), `continue:false` BLOCKS the
- *    prompt (enforcement stronger than Claude).
+ *    USER-facing (no model-context channel here); `continue:false` would
+ *    block the prompt.
  *  - `preToolUse` / `beforeReadFile` → `{ permission, agent_message }` —
- *    `agent_message` reaches the agent, `permission` gates the tool.
+ *    `agent_message` reaches the agent; `permission` could gate the tool.
+ *
+ * The two gates stay unused by design: what these hooks carry is a reminder,
+ * and blocking a prompt or a tool until memory is read is exactly the hard
+ * gate the product rejects — unenforceable on clients without hooks, and
+ * switched off on the ones that have them. So every frame here passes the
+ * prompt or the tool through.
  *  - `stop` / `sessionEnd` are fire-and-forget: no stdout frame is interpreted.
  *  - `preCompact` → `{ user_message }` and NOTHING else. Cursor's own shipped
  *    code reduces the hook's response to that one field before reading it, and
@@ -71,34 +77,26 @@ export const emitSessionContext = (additionalContext: string): void => {
 };
 
 /**
- * `beforeSubmitPrompt`: `user_message` is shown to the USER (the only channel
- * on this event — no model-context injection); `continue:false` blocks the
- * prompt. Defaults to a non-blocking pass-through.
+ * `beforeSubmitPrompt`: lets the prompt through, with `user_message` shown to
+ * the USER (the only channel on this event — no model-context injection).
  */
-export const emitPromptDecision = (opts: {
-  proceed?: boolean;
-  userMessage?: string;
-}): void => {
+export const emitPromptDecision = (opts: { userMessage?: string }): void => {
   console.log(
     JSON.stringify({
-      continue: opts.proceed ?? true,
+      continue: true,
       ...(opts.userMessage ? { user_message: opts.userMessage } : {}),
     })
   );
 };
 
 /**
- * `preToolUse` / `beforeReadFile`: `agent_message` reaches the agent (the nudge
- * channel), `permission` gates the tool (allow | deny | ask). Defaults to
- * allowing the tool with only an agent-facing message.
+ * `preToolUse` / `beforeReadFile`: allows the tool, with `agent_message`
+ * reaching the agent (the nudge channel).
  */
-export const emitToolDecision = (opts: {
-  permission?: 'allow' | 'deny' | 'ask';
-  agentMessage?: string;
-}): void => {
+export const emitToolDecision = (opts: { agentMessage?: string }): void => {
   console.log(
     JSON.stringify({
-      permission: opts.permission ?? 'allow',
+      permission: 'allow',
       ...(opts.agentMessage ? { agent_message: opts.agentMessage } : {}),
     })
   );

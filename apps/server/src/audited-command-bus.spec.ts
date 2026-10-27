@@ -49,7 +49,8 @@ describe('AuditedCommandBus', () => {
     expect(event.command).toBe('FakeCommand');
     expect(event.outcome).toBe('ok');
     expect(event.error).toBeUndefined();
-    expect(event.payload).toMatchObject({ content: 'chose bun' });
+    // What was written is logged by its length only; the facts stay.
+    expect(event.payload).toMatchObject({ content: '[content, 9 chars]' });
     expect(typeof event.durationMs).toBe('number');
   });
 

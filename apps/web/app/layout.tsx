@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 import { Geist_Mono, Inter } from 'next/font/google';
 
+import { SyncProgressBar } from '@workspace/ui/components/common/sync-progress-bar';
 import { TooltipProvider } from '@workspace/ui/components/tooltip';
 import { cn } from '@workspace/ui/lib/utils';
 
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
+import { getRequestMessages } from '@/lib/i18n';
 import {
   BROWSER_CONFIG_ELEMENT_ID,
   browserSupabaseConfig,
@@ -27,11 +29,12 @@ export const metadata: Metadata = {
   description: 'Shared memory for coding agents — team dashboard',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const { t } = await getRequestMessages();
   return (
     <html
       lang="en"
@@ -54,6 +57,8 @@ export default function RootLayout({
           }}
         />
         <ThemeProvider>
+          {/* One bar for every request the page waits on; see the component. */}
+          <SyncProgressBar label={t('app.syncing')} />
           <TooltipProvider delay={300}>{children}</TooltipProvider>
         </ThemeProvider>
       </body>

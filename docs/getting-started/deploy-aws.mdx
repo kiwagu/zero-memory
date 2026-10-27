@@ -1,0 +1,293 @@
+---
+title: Deploy to AWS
+description: Run the MCP server, the dashboard and this documentation site on AWS Lambda behind CloudFront with the CDK app in infra/aws, next to a Supabase project you already have.
+---
+
+The whole instance except its database can run on AWS Lambda instead of a
+container host. The CDK app in `infra/aws/` deploys the MCP server, the
+dashboard and this documentation site, each behind its own CloudFront
+distribution; keeps MCP sessions and rate-limit counts in DynamoDB; runs the
+server's timed jobs on a schedule; backs the database up daily into S3; and
+watches it all with CloudWatch alarms. Each app runs from the same image the
+container host runs; only the way requests reach it differs.
+
+```
+MCP clients (OAuth)   browsers               AWS (one Region)
+┌──────────────────┐ ┌──────────┐  HTTPS  ┌──────────────────────────────────┐
+│ watcher, agents  │ │ people   │────────►│ CloudFront ── function URL ──    │
+└────────┬─────────┘ └──────────┘         │   (adds the      (refuses        │
+         │                                │    edge header)   anything else) │
+         └───────────────────────────────►│                                  │
+                                          │ Lambda: server (own runtime,     │
+                                          │   3 GB), dashboard and docs      │
+                                          │   (Next.js + Web Adapter)        │
+                                          │ DynamoDB: sessions, rate limits  │
+                                          │ EventBridge Scheduler: jobs      │
+                                          │ S3: daily database backups       │
+                                          │ Secrets Manager, SSM, CloudWatch │
+                                          └────────────────┬─────────────────┘
+                                                           ▼
+                                               Supabase project (HTTPS)
+```
+
+Place the Supabase project in the same Region as the functions: every tool
+call makes several round trips to it.
+
+## Prerequisites
+
+- An AWS account and a CLI v2 profile allowed to deploy (CDK bootstrap
+  creates IAM roles).
+- Docker, Bun, the AWS CLI and `jq` on the machine that deploys. The images
+  are built there.
+- A Supabase project with this repository's migrations applied
+  (`supabase db push`).
+
+## Deploy
+
+From `infra/aws/`, once per account and Region:
+
+```sh
+AWS_PROFILE=<profile> bunx cdk bootstrap
+```
+
+Then deploy a stage (its name is part of every resource):
+
+```sh
+AWS_PROFILE=<profile> bash scripts/deploy.sh prod -c alarmEmail=ops@example.com
+```
+
+The script builds the images of the server, the dashboard and the docs, and
+deploys two stacks: `zero-memory-web-prod` (dashboard and docs) first, then
+`zero-memory-prod` (the server). Then it wakes the dashboard and the docs
+with one request each and invokes the server once to load the embedding
+model. The first read of a new image can take close to a minute; paid there,
+it stays off the first visitor.
+
+The build reports itself on `/healthz` and next to the product name in the
+dashboard as `<version>+<commit>`: the release tag the checkout sits on (or
+the package version) and the checkout's commit. A checkout with uncommitted
+changes reports `dev` in place of the commit.
+
+Each stack publishes its address in SSM, and each app reads the others' at
+start: the server sends people to the dashboard to sign in, and the
+dashboard calls the server's MCP endpoint. You configure neither address.
+
+Write each app's environment into its secret from a file of `KEY=value`
+lines. The server needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`, and a model key if you use model-backed
+features; the dashboard needs `NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`. To run the
+[rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance),
+add `ZM_RULE_GATE_MODE` and a provider key (`ZM_TYPESAFE_API_KEY` or
+`ZM_SNAPQ_API_KEY`) to the server's file, with the optional
+`ZM_RULE_GATE_HI`, `ZM_RULE_GATE_LO`, `ZM_JUDGE_PROVIDER`,
+`ZM_JUDGE_MODEL_TYPESAFE`, `ZM_JUDGE_MODEL_SUBQ` and `ZM_JUDGE_TIMEOUT_MS`,
+and `ZM_JUDGE_PROVIDER` to the dashboard's:
+
+```sh
+AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/server-env server.env
+AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/web-env web.env
+```
+
+An instance reads its secret only when it starts. The deploy script stamps
+each secret's current version into its function, so the next deploy after
+you change a secret replaces that app's running instances; until then they
+keep the old values.
+
+In the Supabase project's Auth settings, set the site URL to the dashboard's
+address (the `DashboardUrl` output) and add `<DashboardUrl>/**` to the
+redirect URLs, so confirmation, recovery and social sign-in come back to it.
+
+## Settings of a stage
+
+Options passed as `-c key=value` hold for that one deploy. To keep a stage's
+settings, put them in `infra/aws/stages/<stage>.json` (not tracked by git):
+every deploy of the stage reads it, its pipeline included, and a `-c` on the
+command line still wins.
+
+```json
+{
+  "mailDomain": "example.com",
+  "mailFrom": "Example <noreply@example.com>",
+  "githubRepo": "<owner>/<repo>",
+  "translationIntervalHours": "24"
+}
+```
+
+## Timed jobs
+
+On a container host the server runs three jobs on timers of its own. On AWS
+a second function from the server's image runs them, started by EventBridge
+Scheduler:
+
+- **Usage upkeep** keeps the usage ledger's monthly partitions ahead and
+  refreshes the daily numbers the dashboard shows. It runs daily, and once
+  after every deploy.
+- **Translation** brings memories written in other languages into English.
+- **Hygiene** looks for duplicates, stale memories and conflicts.
+
+Translation and hygiene call a language model, so, as on a container host,
+they run only when you give them an interval: `translationIntervalHours` and
+`hygieneIntervalHours` in the stage's settings. A job runs for up to 15
+minutes, one at a time, and an alarm fires when one fails.
+
+The same function also finishes what the server starts in the background:
+translating and checking a memory you just saved, a scan you start with
+`scan_hygiene`, and a `benchmark_memory` run. On AWS the server cannot keep
+working after it answers, so it hands that work over and answers at once, as
+it does on a container host.
+
+The same scheduler sends the server a warm-up every five minutes, so one
+instance always has the embedding model loaded and the first search after a
+pause answers as fast as any other. Turn it off with `keepWarmMinutes` set to
+`0`.
+
+## Backups
+
+Every day at 03:30 UTC, and once after every deploy, a function runs the
+same backup script a container host runs (`infra/prod/scripts/db-dump.sh`)
+and stores the result in an S3 bucket. Each backup expires after 30 days and
+is deleted for good a day later; S3 applies both steps in the background, so
+either can lag a little. An alarm fires when a backup fails, and
+another when none has been stored for over a day; that one is checked once an
+hour, so it can take up to an hour to clear after a backup lands.
+
+Give it the database's address once, in the `zero-memory/<stage>/backup-env`
+secret. The function reaches the database over IPv4, so for a Supabase
+project give the session pooler's address: set `POOLER_URL` to the connection
+string the Supabase dashboard shows under Connect → Session pooler, with the
+database password filled in, then:
+
+```sh
+echo "DATABASE_URL=$POOLER_URL" > backup.env
+AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/backup-env backup.env
+rm backup.env
+```
+
+To take one now and wait for it, run `bash scripts/backup.take.sh prod` from
+`infra/aws/`. To restore, download a backup and its manifest from the bucket
+and load them with `infra/prod/scripts/db-restore.sh`, as on a container host. The bucket
+stays when you remove the stacks; delete it yourself when you no longer need
+the backups.
+
+## Mail through Amazon SES
+
+Supabase Auth sends the sign-up confirmation, recovery, address-change and
+invitation mail. On AWS it can send them through Amazon SES instead of SMTP,
+with no mail credential stored anywhere: Auth calls the dashboard's
+send-email hook, and the dashboard renders the mail from the product's own
+templates and sends it under its function's AWS role.
+
+1. Set `mailDomain` (and optionally `mailFrom`) and deploy. The web stack
+   creates the SES identity for the domain and prints three `MailDkim` DNS
+   records and the `MailHookUrl`.
+2. Add the three CNAME records to the domain's DNS. SES verifies the domain
+   once it sees them.
+3. In the Supabase project, enable the Send Email hook (Auth → Hooks) with
+   the `MailHookUrl`, and copy the secret it generates into the dashboard's
+   secret as `ZM_AUTH_HOOK_SECRET`. With the hook on, Auth stops using SMTP.
+4. A new SES account sends only to addresses it has verified (the SES
+   sandbox). Request production access in the SES console before real users
+   sign up.
+
+An SES identity is unique per account and Region. If two stages share an
+account and a mail domain, only the first creates it; deploy the second with
+`mailIdentity=existing` and it sends through the identity that is already
+there. A created identity stays when its stage is removed, since another
+stage may still use it.
+
+## Deploy on every release
+
+To deploy from release tags instead of by hand, create the pipeline stack
+once. CodePipeline takes a tagged commit from GitHub through a CodeConnections
+connection, and CodeBuild takes a backup, applies the migrations and runs the
+same deploy script, inside your account, with no AWS key stored anywhere else.
+The backup comes first so a release that changes the schema always has a dump
+from just before it; a stage deployed without backups skips it. Create the
+stack with:
+
+```sh
+AWS_PROFILE=<profile> bunx cdk deploy zero-memory-pipeline-prod \
+  -c stage=prod -c githubRepo=<owner>/<repo>
+```
+
+Approve the connection: in the Developer Tools console's left menu (not the
+pipeline's own Settings tab), open Settings → Connections →
+`zero-memory-prod` → Update pending connection, and install the AWS
+Connector app on the repository; its status turns to Available. Then put the
+database URL the migrations use into the `zero-memory/prod/database-url` secret
+(`scripts/secret-value.put.ts`). CodeBuild reaches the database over IPv4, so
+for a Supabase project give the session pooler's address. From then on, every
+pushed tag matching `v*` deploys.
+
+## Your own domains
+
+By default each app answers on its CloudFront address. To use host names of
+your own, issue certificates for them in ACM in `us-east-1` (CloudFront takes
+certificates only from there), deploy with the names and certificates, and
+point each name at its distribution's address (the `EdgeDomain` outputs):
+
+```sh
+AWS_PROFILE=<profile> bash scripts/deploy.sh prod \
+  -c domainName=zm.example.com -c certificateArn=arn:aws:acm:us-east-1:… \
+  -c webDomainName=memory.example.com -c webCertificateArn=arn:aws:acm:us-east-1:… \
+  -c docsDomainName=docs.example.com -c docsCertificateArn=arn:aws:acm:us-east-1:…
+```
+
+The server's public URL is the OAuth issuer. Changing it later makes every
+connected client authorize again, so choose that domain before clients
+connect.
+
+## Check it
+
+```sh
+curl https://<PublicUrl>/healthz         # 200 and the build version
+curl https://<FunctionUrl>/healthz       # 403: the function answers only CloudFront
+curl --compressed https://<DashboardUrl>/login   # 200, the sign-in page
+```
+
+Then point an MCP client or the watcher at `<PublicUrl>/mcp` and sign in.
+
+## Operations
+
+- **Alarms.** Eight alarms notify one SNS topic: on the server, failed or
+  timed-out invocations, throttling, an invocation near the 60-second
+  timeout, an instance that failed to start, and repeated 5xx answers; a
+  timed job that failed; a backup that failed, and backups that stopped. With
+  `alarmEmail`, confirm the subscription from the first mail. The CloudWatch
+  dashboard `zero-memory-<stage>` shows the server's metrics.
+- **Spending.** The stacks set no spending limit; set one for the account.
+- **Logs.** Each function's log group keeps one week. A failed start writes
+  its reason there.
+- **Client addresses.** CloudFront writes the address it saw into its own
+  header, and the apps read that, never the `X-Forwarded-For` a client sends.
+
+## Limits
+
+- A request that runs longer than 60 seconds is cut by CloudFront, so the
+  server's timeout is 60 seconds too.
+- A new instance's first search waits for the embedding model to load
+  (seconds). The warm-up keeps one instance past that; a second one, started
+  when requests overlap, still pays it.
+- Uploading pages to this site from its `/upload` form is off: the pages are
+  compiled into the image.
+- A function URL refuses a request whose headers pass about 10 KB, with a 413
+  that names a 6 MB limit. A browser gets there when it keeps the session
+  cookies of two Supabase projects, after an instance moves to another
+  project. When a request's cookies pass 8 KB, the edge clears the Supabase
+  session cookies and sends the browser back to the same address, and the
+  person signs in again.
+- A function URL renames a response's `WWW-Authenticate` header. The edge
+  adds the MCP endpoint's challenge back, naming the authorization metadata
+  when the server has its own domain; without one, clients find the metadata
+  at its well-known address.
+
+## Remove
+
+```sh
+AWS_PROFILE=<profile> bunx cdk destroy zero-memory-prod zero-memory-web-prod -c stage=prod
+```
+
+This deletes the functions, the tables, the secrets, the parameters, the
+schedules, the alarms and the logs. The CDK bootstrap stack, the images it
+pushed and the backup bucket stay.

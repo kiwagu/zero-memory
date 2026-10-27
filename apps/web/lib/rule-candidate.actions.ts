@@ -2,6 +2,9 @@
 
 import { revalidatePath } from 'next/cache';
 
+// The decorator-free subpath: the package root would load the DI container.
+import { guardTextFields } from '@workspace/memory/content-guard';
+
 import { createServerSupabaseClient } from './supabase/server';
 import { currentUserEntityId } from './user';
 
@@ -174,17 +177,23 @@ export async function promoteMemoryToRule(
   return { ok: true };
 }
 
+/** The database bounds applies_when to this many characters. */
+const APPLIES_WHEN_MAX = 400;
+
+/** A guard's name as its refusal reason prints it; the database checks the same. */
+const GUARD_NAME_PATTERN = /^[a-z][a-z0-9_-]{1,63}$/;
+
 /**
- * Toggle the delivery pin of a PROMOTED rule (either layer). A pinned rule is
- * exempt from the delivery cap and the delivery TTL and leads the briefing's
- * rules[] — the owner's guarantee that it reaches the session at all, which
- * matters once there are more rules than any channel can carry. Owner-only
- * via RLS; the status guard keeps the flag meaningful (a pending draft is not
- * delivered anywhere yet).
+ * Update one field of a PROMOTED rule as the signed-in user: row-level
+ * security keeps it to their own rules, and the status guard keeps it to
+ * rules that are delivered.
  */
-export async function setRulePinned(
+async function updatePromotedRule(
   candidateId: string,
-  pinned: boolean
+  patch:
+    | { pinned: boolean }
+    | { applies_when: string | null }
+    | { enforced_by: string | null }
 ): Promise<ActionResult> {
   const supabase = await createServerSupabaseClient();
   const userId = await currentUserEntityId(supabase);
@@ -194,7 +203,7 @@ export async function setRulePinned(
 
   const { data, error } = await supabase
     .from('rule_candidates')
-    .update({ pinned })
+    .update(patch)
     .eq('id', candidateId)
     .eq('status', 'promoted')
     .select('id');
@@ -210,6 +219,74 @@ export async function setRulePinned(
 
   revalidatePath('/rules');
   return { ok: true };
+}
+
+/**
+ * Toggle the delivery pin of a PROMOTED rule (either layer). A pinned rule is
+ * exempt from the delivery cap and the delivery TTL and leads the briefing's
+ * rules[]: your pinned rules always reach the session, and always in full,
+ * which matters once there are more rules than any channel can carry. Only
+ * the rule's own account can change it (RLS); the status guard keeps the flag
+ * meaningful (a pending draft is not delivered anywhere yet).
+ */
+export async function setRulePinned(
+  candidateId: string,
+  pinned: boolean
+): Promise<ActionResult> {
+  return updatePromotedRule(candidateId, { pinned });
+}
+
+/**
+ * Say when a promoted rule applies: one to three lines of observable task
+ * features the delivery judge tests the task against. Empty clears it, and
+ * the judge then reads the whole rule text. The line is delivered into
+ * sessions and sent to the judge's provider, so it is held to the same secret
+ * guard as `promote_rule`'s `applies_when`.
+ */
+export async function setRuleAppliesWhen(
+  candidateId: string,
+  appliesWhen: string | null
+): Promise<ActionResult> {
+  const value = appliesWhen?.trim() || null;
+  if (value !== null && value.length > APPLIES_WHEN_MAX) {
+    return {
+      ok: false,
+      error: `Keep it to ${APPLIES_WHEN_MAX} characters.`,
+    };
+  }
+  const secret = guardTextFields([{ path: 'applies_when', text: value }]);
+  if (secret) {
+    // The server's refusal, word for word: the contracts package that holds
+    // it does not bundle into the dashboard.
+    return {
+      ok: false,
+      error:
+        `secret_content_rejected: ${secret.field} contains what looks like a ` +
+        `secret (${secret.detector}, "${secret.sample}"). Nothing written to the ` +
+        'memory server may hold a secret or credential — rephrase it without the ' +
+        'secret value.',
+    };
+  }
+  return updatePromotedRule(candidateId, { applies_when: value });
+}
+
+/**
+ * Name the client-side guard that enforces a promoted rule, so the guard's
+ * refusals can be joined to the rule. Empty clears it.
+ */
+export async function setRuleEnforcedBy(
+  candidateId: string,
+  enforcedBy: string | null
+): Promise<ActionResult> {
+  const value = enforcedBy?.trim() || null;
+  if (value !== null && !GUARD_NAME_PATTERN.test(value)) {
+    return {
+      ok: false,
+      error:
+        'A guard name is lowercase letters, digits, "_" or "-", starting with a letter (2-64 characters).',
+    };
+  }
+  return updatePromotedRule(candidateId, { enforced_by: value });
 }
 
 /** A revoke reason cannot be empty and is bounded (it is owner free-text). */

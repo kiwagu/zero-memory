@@ -4,11 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  ingestAllowed,
-  ingestMode,
-  projectIgnored,
-} from './project-consent.js';
+import { ingestAllowed, projectIgnored } from './project-consent.js';
 
 describe('project-consent', () => {
   let dir: string;
@@ -37,7 +33,6 @@ describe('project-consent', () => {
     writeFileSync(cfg, JSON.stringify(obj));
 
   it('defaults to off when there is no config', () => {
-    expect(ingestMode()).toBe('off');
     expect(ingestAllowed(proj)).toEqual({ allowed: false, reason: 'mode-off' });
   });
 
@@ -81,8 +76,13 @@ describe('project-consent', () => {
     expect(ingestAllowed(proj).allowed).toBe(true);
   });
 
-  it('treats a config with both/neither list as off', () => {
-    writeCfg({ allowlist: ['*'], denylist: ['*'] });
-    expect(ingestMode()).toBe('off');
+  it.each([
+    ['both lists', { allowlist: ['*'], denylist: ['*'] }],
+    ['neither list', {}],
+  ])('treats a config with %s as off', (_, config) => {
+    // An allowlist of "*" in the mix must not turn capture on: exactly one
+    // list is meaningful, anything else is off.
+    writeCfg(config);
+    expect(ingestAllowed(proj)).toEqual({ allowed: false, reason: 'mode-off' });
   });
 });

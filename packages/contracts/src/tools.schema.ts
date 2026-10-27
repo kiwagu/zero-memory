@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { briefingWorkSchema } from './card.schema.js';
 import { anyRegisteredIdSchema } from './entity-prefixes.js';
 
 import {
@@ -10,6 +11,8 @@ import {
   entityHitSchema,
   relatedMemorySchema,
   entityMentionSchema,
+  ruleCandidateIdSchema,
+  ruleDeliveryLevelSchema,
 } from './graph.schema.js';
 import {
   instanceMetricsSchema,
@@ -171,6 +174,24 @@ export const sessionAttachmentSchema = z.object({
 });
 export type SessionAttachment = z.infer<typeof sessionAttachmentSchema>;
 
+/**
+ * What a supersede did to a promoted rule anchored to the memory it retired.
+ * A rule follows the successor of its memory: `carried` when it took the
+ * successor's text (its text was the memory's own words), `carried_text_kept`
+ * when it kept a curated text that is now flagged for review, `not_carried`
+ * when it stayed on the retired memory and stays promoted there.
+ */
+export const ruleFateSchema = z.object({
+  /** The retired memory the rule was anchored to. */
+  memory_id: memoryIdSchema,
+  outcome: z.enum(['carried', 'carried_text_kept', 'not_carried']),
+  /** The memory that superseded it. */
+  successor_id: memoryIdSchema,
+  /** What happened, and what to do about it, in one sentence or two. */
+  note: z.string(),
+});
+export type RuleFate = z.infer<typeof ruleFateSchema>;
+
 export const rememberOutputSchema = z.object({
   memory_id: memoryIdSchema,
   /** True when an equivalent memory already existed and its id is returned. */
@@ -215,12 +236,26 @@ export const rememberOutputSchema = z.object({
    */
   anchor_hint: z.string().optional(),
   /**
+   * Present only when a `task` write retired an earlier `task` loop: a loop
+   * that keeps being re-cut is the running status of ongoing work, which
+   * belongs on the work's card as a note rather than in another loop. Names
+   * the card the conversation is bound to when there is one. Separate from
+   * `hint` on purpose: the two fire independently and ask for different
+   * things.
+   */
+  status_hint: z.string().optional(),
+  /**
    * Present when a `core` / `personal` request did NOT clear the
    * portable-layer gate: the memory was stored in the project instead, and
    * this says where and why. The write succeeded — this is a routing report,
    * not an error.
    */
   routed_to_project: z.string().optional(),
+  /**
+   * Present when this write superseded a memory a promoted rule was anchored
+   * to: one entry per such memory, saying whether the rule followed.
+   */
+  rules: z.array(ruleFateSchema).optional(),
   /** Session attachment state (absent only on older servers). */
   session: sessionAttachmentSchema.optional(),
 });
@@ -259,7 +294,7 @@ export const recallInputSchema = z.object({
         'decision.'
     ),
   kinds: z.array(memoryKindSchema).optional(),
-  k: z.number().int().positive().optional(),
+  k: z.number().int().positive().max(100).optional(),
   include_graph: z.boolean().optional(),
   project_hint: z
     .string()
@@ -489,6 +524,12 @@ export const buildContextInputSchema = z.object({
    */
   briefing_kind: z.enum(['session', 'task']).optional(),
   /**
+   * False: deliver the standing rules whole, skipping the rule gate. The
+   * session-start hook sets it on its secondary (branch) briefing so one
+   * session start judges once. Default true.
+   */
+  judge_rules: z.boolean().optional(),
+  /**
    * The client's conversation/session id (e.g. Claude Code's `session_id`),
    * passed by the briefing hook. Only meaningful with `briefing: true`: it
    * lands in the `session_briefing` event's metadata as `conversation_id`, so
@@ -500,6 +541,56 @@ export const buildContextInputSchema = z.object({
   conversation_id: z.string().min(1).optional(),
 });
 export type BuildContextInput = z.infer<typeof buildContextInputSchema>;
+
+const nonNegativeInt = z.number().int().nonnegative();
+
+export const ruleGateBlockSchema = z.object({
+  mode: z.enum(['shadow', 'live']),
+  provider: z.enum(['typesafe', 'subq']),
+  model: z.string(),
+  latency_ms: nonNegativeInt,
+  judge_unavailable: z.boolean(),
+  /**
+   * Why a call set to be judged got no answer, when the reason is known:
+   * `settings_unavailable`, `credential_unavailable` or `budget_unavailable`
+   * when the account's judge settings, its key or its extraction allowance
+   * could not be read; `budget_exhausted` when the allowance on the
+   * instance's key is used up; `judge_error` when the judge call failed other
+   * than by not answering in time or refusing for now. Absent when the judge
+   * answered, and when it simply did not answer.
+   */
+  unavailable_reason: z
+    .enum([
+      'budget_exhausted',
+      'settings_unavailable',
+      'credential_unavailable',
+      'budget_unavailable',
+      'judge_error',
+    ])
+    .optional(),
+  bands: z.object({
+    hi: z.number().min(0).max(1),
+    lo: z.number().min(0).max(1),
+  }),
+  chars_baseline: nonNegativeInt,
+  chars_delivered: nonNegativeInt,
+  levels: z.object({
+    full: nonNegativeInt,
+    gate: nonNegativeInt,
+    headline: nonNegativeInt,
+  }),
+  rules: z.array(
+    z.object({
+      id: ruleCandidateIdSchema,
+      /** Null for a rule the judge did not answer (pinned, or missing answer). */
+      p: z.number().min(0).max(1).nullable(),
+      level: ruleDeliveryLevelSchema,
+      chars: nonNegativeInt,
+      pinned: z.boolean(),
+    })
+  ),
+});
+export type RuleGateBlock = z.infer<typeof ruleGateBlockSchema>;
 
 export const buildContextOutputSchema = z.object({
   memories: z.array(contextMemorySchema),
@@ -536,14 +627,45 @@ export const buildContextOutputSchema = z.object({
    */
   rules: z.array(contextRuleSchema).default([]),
   /**
+   * How this call's standing rules were delivered when the rule gate judged
+   * them: the judge's provider and model, its latency, the bands, how many
+   * characters the rules would have cost whole versus what was delivered,
+   * and one probability + level per judged rule (ids and numbers only). In
+   * `shadow` mode the levels are what WOULD have been delivered; delivery
+   * itself was unchanged. A budgeted hook briefing is judged, and carries
+   * this block, only when the conversation has a bound or continuation card
+   * to judge against. Absent when the gate is off or not enabled for this
+   * account, when a hook briefing has no such card, or when the call asked
+   * for `judge_rules: false`.
+   */
+  rule_gate: ruleGateBlockSchema.optional(),
+  /**
    * Active open loops (kind task/open-question) of the briefed scopes,
-   * oldest first, capped — surfaced on EVERY briefing regardless of topic
-   * relevance until closed with `close_loop`. Defaulted so packs from older
+   * oldest first, capped — surfaced on every briefing regardless of topic
+   * relevance while they are inside the soft-TTL window (14 days by
+   * default), until closed with `close_loop`. Defaulted so packs from older
    * servers (no open-loops support) still parse.
    */
   open_loops: z.array(contextMemorySchema).default([]),
   /** Total active open loops, so a capped list can say "and N more". */
   open_loops_total: z.number().int().min(0).default(0),
+  /**
+   * Open loops past the soft-TTL window that sit on no live card (neither a
+   * card's origin nor attached to one). They are not listed, so the briefing
+   * states how many there are instead of hiding them. Defaulted so packs
+   * from older servers still parse.
+   */
+  open_loops_aged: z.number().int().min(0).default(0),
+  /**
+   * The project board's work in progress (briefing calls pinned to a
+   * project that name a `max_tokens` budget — what the session hooks send):
+   * the card bound to this conversation, active/waiting counts and the first
+   * few cards. Present only when the project has such work — and then the
+   * ranked memories leg gives up one row for it, so the pack does not grow.
+   * Open loops attached to a card named here are left out of `open_loops`:
+   * they are reached through their card.
+   */
+  work: briefingWorkSchema.optional(),
   /** Session attachment state (absent only on older servers). */
   session: sessionAttachmentSchema.optional(),
 });
@@ -649,6 +771,17 @@ export type ForgetInput = z.infer<typeof forgetInputSchema>;
 export const forgetOutputSchema = z.object({
   memory_id: memoryIdSchema,
   invalidated: z.boolean(),
+  /**
+   * Present when the forgotten memory carries a promoted rule: forgetting a
+   * memory does not retire its rule, which stays live until the owner
+   * revokes it.
+   */
+  rule: z
+    .object({
+      outcome: z.literal('kept_live'),
+      note: z.string(),
+    })
+    .optional(),
 });
 export type ForgetOutput = z.infer<typeof forgetOutputSchema>;
 
@@ -671,6 +804,8 @@ export const promoteRuleInputSchema = z.object({
   applies_scope: z.string().min(1).optional(),
   /** Override the distilled imperative text (else distilled from the memory). */
   rule_text: z.string().min(1).max(2000).optional(),
+  /** When the rule binds a task: one to three lines of observable task features. */
+  applies_when: z.string().min(1).max(400).optional(),
   /** Re-promote a memory you earlier DISMISSED as a rule (overrides the guard). */
   force: z.boolean().optional(),
 });
@@ -682,6 +817,8 @@ export const promoteRuleOutputSchema = z.object({
   target_layer: z.enum(['user', 'project']),
   applies_scope: z.string().nullable(),
   status: z.literal('promoted'),
+  /** When the rule binds a task, as stored after this promotion; null when unset. */
+  applies_when: z.string().nullable(),
   /**
    * Human-readable note on WHEN the rule actually reaches sessions: MCP
    * instructions are captured at connect and frozen, so a rule promoted
@@ -744,7 +881,7 @@ export type IngestSourceKind = z.infer<typeof ingestSourceKindSchema>;
 export const ingestConversationInputSchema = z.object({
   /** Required for a real ingest; may be empty only when `probe` is set (a
    * ledger lookup needs the hash, not the content). Enforced server-side. */
-  transcript_chunk: z.string(),
+  transcript_chunk: z.string().max(200_000),
   chunk_hash: z.string().min(1),
   client: z.string().min(1),
   conversation_id: z.string().min(1),
@@ -762,7 +899,24 @@ export const ingestConversationInputSchema = z.object({
    * agent actually used in the chunk; content-free (ids only). Loosely typed so
    * a malformed id never fails ingest of the (critical) transcript chunk — the
    * judge validates each id individually. */
-  recalled_ids: z.array(z.string().min(1)).optional(),
+  recalled_ids: z.array(z.string().min(1)).max(200).optional(),
+  /**
+   * Guard-hook refusals seen in this chunk (names and timestamps only): a
+   * client-side PreToolUse guard that refused an action, recognised by the
+   * `[guard:<name>]` tag it prints in its reason. The delivery-quality retro
+   * joins them to the rule each guard enforces. `at` is the transcript
+   * line's own timestamp, forwarded as the client wrote it, so it is bounded
+   * in length rather than checked as a date.
+   */
+  guard_refusals: z
+    .array(
+      z.object({
+        guard: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/u),
+        at: z.string().max(64).nullable(),
+      })
+    )
+    .max(50)
+    .optional(),
   /**
    * Ledger LOOKUP only: answers whether this chunk_hash was already ingested
    * and returns immediately — no claim, no extraction, no tokens, no writes.

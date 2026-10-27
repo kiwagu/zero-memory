@@ -141,7 +141,11 @@ chromium` once. The embedding model is reused from the shared cache
 - `bun --cwd tests/e2e run test:e2e:headed` — watch the browser
 - `bun --cwd tests/e2e run e2e:stack` — bring the stack + apps up and keep them,
   then iterate with `bun --cwd tests/e2e run pw -- --grep @smoke` (the `pw`
-  script presets `E2E_SERVER_URL` / `E2E_WEB_URL` at the persistent apps)
+  script presets `E2E_SERVER_URL` / `E2E_WEB_URL` at the persistent apps,
+  reads the e2e stack's own Supabase URL and keys from `supabase status` so
+  global setup never falls back to the root `.env` of another stand, and, like
+  the launcher, leaves out the `@docs-shot` specs, so a bare run never
+  overwrites the documentation images; take those with `e2e:screenshots`)
 - `bun --cwd tests/e2e run e2e:down` — stop everything
 
 ### Looking at the dashboard yourself
@@ -183,7 +187,8 @@ Rewriting a testid requires migrating the covering spec in the same change.
   `/oauth/token` window (default 30 req/60 s). Suite start waits out a
   lingering window (`awaitRouteCooldown`) so runs against the persistent,
   reused server stay green.
-- To point specs at an already-running stack instead (e.g. the dev stack),
-  run `bun run pw` with `E2E_SERVER_URL` / `E2E_WEB_URL` overridden.
+- To iterate against the already-running e2e stack (`e2e:stack`), run
+  `bun run pw`. Never point specs at another stand: global setup provisions
+  fixture users and memories wherever it is pointed.
 - Stagehand stays a local exploratory tool (MCP server `stagehand-local`);
   the CI gate is deterministic Playwright only.

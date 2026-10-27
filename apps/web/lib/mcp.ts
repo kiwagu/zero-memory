@@ -1,13 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-// ZM_SERVER_URL is the FULL MCP endpoint (the watcher/hooks convention), e.g.
-// https://memory.example.com/mcp — not a base URL. Do not append `/mcp` here.
-// Unset means the server next door: a local dev run, or the compose service
-// that injects the in-network address.
-const mcpEndpoint = (
-  process.env.ZM_SERVER_URL ?? 'http://localhost:8787/mcp'
-).replace(/\/$/, '');
+import { mcpEndpoint } from './server-url';
 
 interface McpToolResult {
   isError?: boolean;
@@ -45,7 +39,7 @@ async function callServerTool<T>(
   name: string,
   args: Record<string, unknown>
 ): Promise<T> {
-  const transport = new StreamableHTTPClientTransport(new URL(mcpEndpoint), {
+  const transport = new StreamableHTTPClientTransport(new URL(mcpEndpoint()), {
     requestInit: { headers: { authorization: `Bearer ${accessToken}` } },
   });
   const client = new Client({ name: 'zm-web', version: '0.1.0' });
@@ -148,28 +142,6 @@ export async function exportMemoriesViaServer(
     'export_memories',
     scopes && scopes.length > 0 ? { scopes } : {}
   );
-}
-
-export interface DeleteAccountResult {
-  /** The erased account's `usr_` id. */
-  subject: string;
-  /** Whether an auth principal was found and removed. */
-  auth_deleted: boolean;
-  memories: number;
-  entities: number;
-}
-
-/**
- * Erases the signed-in user's own account through the server's audited
- * `delete_account` tool — the cascade that removes everything they own, their
- * profile, and their sign-in principal. The tool takes no subject: it always
- * erases the authenticated caller, so this bridge cannot target another account.
- * Irreversible; the caller should offer the export first.
- */
-export async function deleteAccountViaServer(
-  accessToken: string
-): Promise<DeleteAccountResult> {
-  return callServerTool<DeleteAccountResult>(accessToken, 'delete_account', {});
 }
 
 /** Where a re-imported memory lands, mirroring the `import_memory` contract. */

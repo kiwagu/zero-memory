@@ -1,7 +1,9 @@
 /**
- * The scope card title on /scopes links to the memory feed pre-filtered to that
- * scope: clicking it lands on /memories with the `scope` query param set, and
- * the feed shows that scope's memory.
+ * From a scope to its memories and back. The scope card title on /scopes
+ * links to the memory feed pre-filtered to that scope, and a memory opened
+ * from that filtered feed leads back to the same view: the card link carries
+ * the feed's query as `from`, so "back to feed" restores the filter instead of
+ * resetting the feed.
  */
 import { expect, test } from '@playwright/test';
 
@@ -11,7 +13,7 @@ import { passwordGrantToken } from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
 
 test.describe('Scope card feed link', () => {
-  test('the title links to the feed filtered by that scope', async ({
+  test('the title opens the feed filtered by that scope, and a memory leads back to it', async ({
     page,
   }) => {
     const marker = 'scope-feedlink marker: filter redirect fact';
@@ -39,11 +41,23 @@ test.describe('Scope card feed link', () => {
     await card.getByTestId('scope-feed-link').click();
 
     // Landed on the feed with the scope filter set, showing that scope's memory.
-    await expect(page).toHaveURL(
-      new RegExp(`/memories\\?.*scope=${encodeURIComponent(scope)}`)
+    const filtered = new RegExp(
+      `/memories\\?.*scope=${encodeURIComponent(scope)}`
     );
-    await expect(
-      page.getByTestId('memory-feed').getByText(marker)
-    ).toBeVisible();
+    await expect(page).toHaveURL(filtered);
+    const feed = page.getByTestId('memory-feed');
+    await expect(feed.getByText(marker)).toBeVisible();
+
+    // Open the memory from the filtered feed…
+    await feed
+      .getByTestId('memory-card')
+      .filter({ hasText: marker })
+      .getByText(marker)
+      .click();
+
+    // …then come back: the filter must be restored, not reset.
+    await page.getByRole('link', { name: '← Back to feed' }).click();
+    await expect(page).toHaveURL(filtered);
+    await expect(feed.getByText(marker)).toBeVisible();
   });
 });

@@ -35,7 +35,9 @@ second delivery for standing rules that missed the context window.
 
 The prompt itself never leaves the machine. It decides only WHETHER the
 briefing is worth spending: short prompts, common one-word confirmations, and
-slash commands are skipped without any server call. What to ask about is not
+slash commands are skipped without any server call. They still carry the next
+piece of the briefing's remainder, read from local state (see
+[The rest of the briefing follows by itself](#the-rest-of-the-briefing-follows-by-itself)). What to ask about is not
 taken from it: subject-specific retrieval is the agent's own `recall`, in
 English, per the tool contract.
 
@@ -47,6 +49,20 @@ see [Client adapters](/docs/getting-started/client-adapters).
 The two kinds deduplicate on the client: the session hook records which memory
 ids it injected, and the task hook filters those out of its own pack, so the
 same memory never arrives twice.
+
+A **context window** ends at a compaction, which condenses the conversation and
+discards everything the hooks injected into it. What a window carried is then
+owed again, and which parts come back depends on the client:
+
+- **Standing rules and the task briefing** re-arm on every client that reports
+  the boundary. The task briefing also stops leaving out what the old window
+  had been given, so its memories and open loops come back with it.
+- **The session briefing** also comes back on Claude Code, which re-fires its
+  session-start hook, and on Hermes, whose plugin sees that its session
+  briefing has left the replayed context.
+
+See [Client adapters](/docs/getting-started/client-adapters) for how each
+client reports the boundary.
 
 Stored content is canonical English, so an English topic retrieves best. The
 server never translates a topic to get there: what a caller sends is what is
@@ -107,10 +123,23 @@ refinement or a drift").
 The pack has several legs:
 
 - Standing rules: promoted General rules plus rules addressed to the
-  briefed project. `rules[]` carries `{ text, pinned }` objects, pinned first.
-  Pinned rules are exempt from the 12-rule unpinned cap and the 90-day
-  delivery TTL. Hook-capable clients render them above the JSON pack as an
-  imperative **STANDING RULES** section.
+  briefed project. `rules[]` carries one object per rule, pinned first:
+  `text`, `pinned` and the rule's `id`, plus its `level` when the
+  [rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance)
+  delivered the call's rules by level, and its `applies_when` line only on a
+  rule delivered at level `gate`. Pinned rules are exempt from the
+  12-rule unpinned cap and the 90-day delivery TTL. Hook-capable clients
+  render them above the JSON pack as an imperative **STANDING RULES**
+  section. Within the hook's channel budget that section has its own
+  ceiling: pinned rules always arrive in full, the others in full while they
+  fit and by their headline after, with a line saying where their full text
+  is. A budgeted briefing is judged only against the card the conversation is
+  bound to, or the continuation card it is offered, and not at all without
+  one; `judge_rules: false` skips the judge, and the session-start hook sets
+  it on its branch briefing so one session start judges once. A rule the
+  judge delivered by gate keeps its **applies when** line while that fits the
+  ceiling; a rule delivered by gate or headline is marked `[gate]` or
+  `[headline]` with its id, readable in full at `zm://rules/{id}`.
 
 - Memories: top-ranked hits for the topic, scope-isolated by default.
   A briefing with **no resolvable project** narrows to the personal root and
@@ -140,6 +169,26 @@ The pack has several legs:
 - Open loops: active tasks and open questions of the briefed scopes,
   oldest first, limited by the 14-day soft briefing TTL. A loop that ages out
   remains open and recallable.
+- Work, project briefings that name a `max_tokens` budget only: the
+  [project board](/docs/concepts/project-board)'s work in progress — the card
+  bound to this conversation, with its state and the reason for it and how
+  much is attached, the active and waiting counts, and the first three other
+  cards, each with the branches it holds open (`open_branches`, each with the squashes of it the board already recorded). Each named card carries
+  the cards that block it and are not done (`blocked_by`) and whether anyone
+  ever said how it relates to the board (`links_assessed`); the bound card
+  also carries the cards directly above it (`above`): its parent, its
+  blockers and what it depends on, each marked when it was archived. A card
+  on another board carries that board's `scope`, and the line names it
+  `ZM-3 on acme`. When the calling conversation is bound to no card, the work
+  also carries `continuation`: the card the caller worked on last (still
+  active, within 30 days), their two newest entries on it, their last step
+  when it was on another card, and the calling thread for the attach command.
+  It takes the place of one row of the memories leg rather than adding
+  to the pack. It rides budgeted briefings only because that is where giving
+  up the row was measured harmless: on a copy of a real corpus, one of six
+  rows cost no expected hit, while the twelfth row of an unbudgeted call
+  carried two. A loop attached to one of the named cards leaves the open-loops
+  leg; its card points at it.
 
 Every section inlines content only up to its own cap and marks the row as
 `truncated` past it; the full text stays one id away through `recall` or the
@@ -171,6 +220,47 @@ mechanisms exist because a pack is delivered through channels that impose their
 own limits: past a client's threshold an oversized result is spilled to a file
 and replaced by a short preview, which is the worst outcome available. The
 briefing looks delivered while its most valuable payload goes unread.
+
+So the hook briefing is composed against a character budget below that
+threshold, and the budget is split before anything renders:
+
+1. the project line;
+2. a floor held for the work in progress — the board's lines and the open
+   loops — whenever there is any;
+3. a floor held for the memory pack: room for about ten one-line stubs of the
+   project's pack, so a session always sees which memories exist and can pull
+   any of them by id;
+4. the standing rules, up to the ceiling that is left. Rules that are not
+   pinned shorten to their headlines first; pinned rules always arrive whole
+   and, when they alone are long enough, outrank both floors;
+5. the work and the memory pack, rendered against what was actually spent —
+   whole memories while they fit, one-line stubs naming the rest. A second
+   topic (the working branch's) lives on what the project's pack leaves.
+
+The work renders against what the rules actually used, so a short rules block
+leaves it more than its floor. Whatever is shortened says so and names where
+the full text is; nothing high in that order is pushed out by something lower.
+Two empty outcomes are kept apart: a project with no memories says nothing,
+while a pack that had memories but could not show a single line says how many
+there are and that they are on their way.
+
+### The rest of the briefing follows by itself
+
+The first briefing of a context window cannot carry everything, and asking the
+agent to fetch the rest would make delivery depend on its reading discipline —
+the dependence hooks exist to remove. So what did not fit is queued locally,
+per context window, and the following messages deliver it:
+
+- Each message that builds no briefing of its own — a short reply, a session
+  whose task briefing already ran, or one whose server could not be reached —
+  carries one queued memory, framed as a continuation with how many remain and
+  when the snapshot was taken.
+- The one message that does build a task briefing carries that briefing's pack
+  instead, and folds what its pack left over into the queue.
+- The queue drains in the order the server ranked the pack. The prompt never
+  leaves the machine, so there is no per-message relevance to rank by.
+- A compaction ends the window and drops the queue with it; the next window is
+  briefed afresh.
 
 ## Noise control
 

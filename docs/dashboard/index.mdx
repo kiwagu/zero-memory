@@ -7,7 +7,30 @@ The dashboard is the web UI for browsing and managing shared memory. It runs
 alongside the memory server (in a development checkout, `bun dev` from the repo
 root starts everything and serves the dashboard on port 3100) and signs you in
 with a Supabase account — register a new one or use a provisioned account on
-the login page.
+the login page. When the instance has GitHub or Google enabled, the login page
+offers them as buttons above the fields; an account is one per email, so a
+provider sign-in with the address of an existing, confirmed account opens that
+account rather than a second one. A page you were sent to the login form
+from is where you land afterwards.
+
+Connecting an agent runs through the dashboard too. When an MCP client asks for
+access, the browser opens a consent screen here that names the client, lists
+everything it will be able to do as you (memories, the knowledge graph,
+conflicts, rules, project boards, project descriptions, conversations and
+metrics), and shows where the browser returns afterwards and which account is
+deciding;
+**Allow** lets it in and **Deny** refuses. A client you allowed before
+reconnects without the screen when it returns to the same address and the
+browser arrived on its own, as it does when the client opens the link; a page
+elsewhere that sends your browser there, or a different return address, shows
+the screen again. The client's name is its own claim and the screen says so.
+Each agent holds a session of its own, so signing out of the dashboard leaves
+connected agents working. **Connected agents** in Settings lists every client
+you allowed, one row per client with the return address you allowed it for,
+when you allowed it and when it was last active, so two installs of the same
+agent show as two rows. **Revoke** takes access back at once: the client's
+sessions end, the memory server and the database refuse the token it still
+holds, it cannot refresh, and connecting it again shows the consent screen.
 
 Every screen shares the same chrome. The **zero-memory** wordmark and the nav
 sit on the left. In the top-right are the signed-in account, a theme switcher
@@ -25,12 +48,23 @@ works.
 
 </Screenshot>
 
+While a page waits on the server (a save, a refresh after one, moving to
+another screen), a thin bar runs along the very top of the window. It appears
+only when the wait is long enough to notice, about a fifth of a second, and
+leaves once the page has updated. Background prefetching and live updates do
+not light it.
+
 ## The screens
 
 - Insights (`/`) shows what memory is doing for you: value, quality, health,
   and how the corpus ages. See [Insights](/docs/dashboard/insights).
 - Memories (`/memories`) is the memory feed, with filters and
   [advanced search](/docs/dashboard/search). Described below.
+- Board (`/board`) shows the cards agents keep for a project, in columns by
+  state, each with its severity as ticks under its label, its type as an
+  icon before them, and the reason it was moved. It is read-only: cards move
+  through the tools. See
+  [Project board](/docs/concepts/project-board).
 - Entities (`/entities`) holds the knowledge graph's nodes. Described below.
 - Scopes (`/scopes`) is team sharing and scope management. Described below.
 - Review (`/review`) lists pairs of conflicting memories (duplicate,
@@ -40,7 +74,17 @@ works.
 - Rules (`/rules`) collects standing-rule candidates from the
   [rules incubator](/docs/guides/rules-incubator). Review drafted rules,
   promote or dismiss them, pin the ones that must always be delivered, and see
-  the "Delivered N of M" delivery budget per layer.
+  the "Delivered N of M" delivery budget per layer. Filter by pinned and by
+  delivered to list exactly the rules a session receives, or the promoted
+  ones it does not; a rule that moved with its memory, or whose memory is
+  gone, is flagged on its card. A promoted rule's card edits when it applies
+  (**Applies when**) and which guard enforces it (**Enforced by guard**), and
+  shows how the
+  [rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance)
+  delivered it over the last 30 days: how often it was judged, the full, gate
+  and headline counts, the mean probability, and how often its full text was
+  read back by id. Guard refusals over the same 30 days are listed per guard
+  at the foot of the page.
 - Reflections (`/reflections`) holds clusters of related episodes distilled
   into one consolidated fact, awaiting your approval. See
   [Decay, reflection, and reinforcement](/docs/hygiene/decay-and-reinforcement).
@@ -54,8 +98,39 @@ works.
   and an editable **display name** the dashboard shows in place of it, where
   saving takes effect immediately and clearing it restores the fallback — plus
   [export](/docs/guides/export) and [import](/docs/guides/import) of your
-  memory, your own model-provider key, and account deletion. Account deletion
-  still demands the exact address, not the display name.
+  memory, your own model-provider key, the rule delivery judge, two-factor
+  authentication, the agents connected to your account, and account
+  deletion. **Rule delivery judge** turns per-call judging of your standing
+  rules on or off, picks the provider (the instance default, TypeSafe Jev or
+  SubQ Snap), and optionally installs your own key the same way as the
+  model-provider key — stored encrypted, named afterwards only by its
+  provider and last four characters — with an optional model name beside it
+  (left empty, the provider's default model runs). It is off by default, and
+  switching it on has an effect only on an instance that runs the gate:
+  `ZM_RULE_GATE_MODE` is `off` by default, `live` delivers by the judgment,
+  and `shadow` judges and records but still delivers every rule whole. See
+  [Delivery by task relevance](/docs/guides/rules-incubator#delivery-by-task-relevance).
+  Two-factor authentication adds a code from an authenticator app after
+  every sign-in — six cells in the middle of the step that take a typed,
+  pasted or autofilled code and send it as soon as the last digit is in, with
+  no button to press (Enter sends a complete code too), dimmed while the code
+  is checked — and until the code is given a sign-in reaches nothing: not the
+  dashboard, not the memory server, not a single memory or card through the
+  database. The code also stands before the consent screen for agents and a
+  password reset; removing the app asks for a code from it.
+  Agents you have allowed keep working without a code: the session each one
+  received from the consent screen is on record as an agent's. Turning
+  two-factor on, or changing your password, signs out the agents connected
+  before it, so each of them authorizes once more and gets a session of its
+  own; giving the code when you sign in does not sign them out. Account
+  deletion happens only here — the memory server offers agents no tool for
+  it — and needs two-factor turned on and the code given in this session,
+  besides the exact address. An agent you allow acts with a real session of
+  your account, so what keeps it from deleting the account, changing your
+  password or connecting more agents is a code it does not have, and the
+  dashboard refuses an agent's session outright: turn two-factor on before
+  you connect agents. On an account without it, an agent's session could set
+  up a factor of its own.
 
 Activity and Settings sit at the bottom of the sidebar; the rest are the
 primary navigation.
@@ -74,6 +149,11 @@ private or only sharable memories, and **All projects** narrows to one project
 scope, offered by name or by its alias. **Filter / Refresh** applies the
 current search box and dropdowns, and doubles as a feed refresh when nothing
 changed.
+
+The feed follows the agents while it is open. A memory written, retired,
+rewritten or moved while you watch shows up in its place without a reload, and
+the current search and filters apply to it as to the rest of the feed. A page
+opened moments ago starts following a few seconds late.
 
 The **Lifecycle status** dropdown defaults to **Active (no history)**, which
 hides superseded historical versions but keeps memories retired without a

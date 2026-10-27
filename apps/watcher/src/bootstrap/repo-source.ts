@@ -17,10 +17,10 @@ export interface BootstrapChunk {
  * its context, small enough for one extraction call. A larger file is split;
  * a git history is batched under the same cap.
  */
-export const MAX_CHUNK_CHARS = 24_000;
+const MAX_CHUNK_CHARS = 24_000;
 
 /** Commit batch cap — keeps one history chunk to a readable arc. */
-export const MAX_COMMITS_PER_BATCH = 100;
+const MAX_COMMITS_PER_BATCH = 100;
 
 /** Default history depth: enough arc for a bootstrap without archaeology. */
 export const DEFAULT_HISTORY_DEPTH = 300;
@@ -32,7 +32,7 @@ const isMarkdown = (name: string): boolean =>
   name.toLowerCase().endsWith('.md');
 
 /** README*.md at the repo root + every *.md under docs/ (recursively). */
-export const discoverDocFiles = (repoDir: string): string[] => {
+const discoverDocFiles = (repoDir: string): string[] => {
   const files: string[] = [];
   for (const entry of readdirSync(repoDir)) {
     const path = join(repoDir, entry);
@@ -73,7 +73,7 @@ const collectMarkdownRecursive = (dir: string, out: string[]): void => {
 };
 
 /** Splits one text into <= MAX_CHUNK_CHARS parts on paragraph boundaries. */
-export const splitText = (text: string, maxChars: number): string[] => {
+const splitText = (text: string, maxChars: number): string[] => {
   if (text.length <= maxChars) {
     return [text];
   }

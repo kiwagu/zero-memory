@@ -36,11 +36,14 @@ export function MoveMemory({
   currentScope,
   projectScopes,
   labels,
+  onDone,
 }: {
   memoryId: string;
   currentScope: string;
   projectScopes: Array<{ value: string; label: string }>;
   labels: MoveMemoryLabels;
+  /** Replaces the page refresh after the move — a panel reloads itself. */
+  onDone?: () => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -69,7 +72,11 @@ export function MoveMemory({
       }
       setDone(true);
       setOpen(false);
-      router.refresh();
+      if (onDone) {
+        onDone();
+      } else {
+        router.refresh();
+      }
     });
   }
 

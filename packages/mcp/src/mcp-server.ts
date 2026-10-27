@@ -14,15 +14,15 @@ import {
   ForgetMemoryCommand,
   DescribeScopeCommand,
   ExportMemoriesCommand,
-  HardDeleteAccountCommand,
   ImportMemoryCommand,
   IngestConversationCommand,
   LinkCommand,
   RememberCommand,
   MoveMemoriesCommand,
+  ReleaseCommand,
   ShareMemoryCommand,
 } from '@workspace/commands';
-import { mustGetCurrentUserEntityId } from '@workspace/context';
+import { getAccessToken, mustGetCurrentUserEntityId } from '@workspace/context';
 import { RULE_DELIVERY } from '@workspace/db';
 import {
   boardInputSchema,
@@ -36,8 +36,6 @@ import {
   closeLoopInputSchema,
   closeLoopOutputSchema,
   CONTRACT_VERSION,
-  deleteAccountInputSchema,
-  deleteAccountOutputSchema,
   entitiesInputSchema,
   entitiesOutputSchema,
   exportMetricsInputSchema,
@@ -63,11 +61,14 @@ import {
   listConflictsOutputSchema,
   recallInputSchema,
   recallOutputSchema,
+  releaseInputSchema,
+  releaseOutputSchema,
   rememberInputSchema,
   rememberOutputSchema,
   restoreMemoryInputSchema,
   restoreMemoryOutputSchema,
   memoryIdSchema,
+  ruleCandidateIdSchema,
   sessionReceiptInputSchema,
   sessionReceiptOutputSchema,
   moveMemoriesInputSchema,
@@ -75,9 +76,11 @@ import {
   shareInputSchema,
   shareOutputSchema,
   ZM_MEMORY_URI_TEMPLATE,
+  ZM_RULE_URI_TEMPLATE,
   ZM_RULES_URI,
   zmMemoryUri,
   type ExportedMemory,
+  type PromotedRuleResource,
   type PromotedRulesResource,
   type BuildContextOutput,
   type BoardOutput,
@@ -85,7 +88,6 @@ import {
   type CardOutput,
   type CloseLoopOutput,
   type ContextRule,
-  type DeleteAccountOutput,
   type EntitiesOutput,
   type ExportMetricsOutput,
   type ForgetOutput,
@@ -96,7 +98,9 @@ import {
   type IngestConversationOutput,
   type LinkOutput,
   type RecallOutput,
+  type ReleaseOutput,
   type RememberOutput,
+  type RuleGateBlock,
   type SessionReceiptOutput,
   type MoveMemoriesOutput,
   type ShareOutput,
@@ -111,19 +115,14 @@ import type { ICommandBus, IQueryBus } from '@workspace/cqrs';
 import {
   HygieneResolver,
   HygieneScanner,
-  JudgeRescanDetector,
-  LoopClosureDetector,
-  PortabilityDetector,
-  ReflectionDetector,
-  ReinforcementRollup,
   RuleCandidateDetector,
-  StaleSuspectDetector,
+  runOwnerScan,
   type BulkPolicy,
   type BulkResolveResult,
   type TriageResult,
   type ConflictDecision,
 } from '@workspace/hygiene';
-import { createLogger } from '@workspace/logger';
+import { createLogger, runInBackground } from '@workspace/logger';
 import {
   BoardQuery,
   BuildContextQuery,
@@ -136,7 +135,13 @@ import {
 import { createRoiRunner, type RoiProbeCase } from '@workspace/roi';
 import { z } from 'zod';
 
+import { renderRulesFooter } from './rules-footer.js';
 import { toolError, toolErrorFromThrown } from './tool-error.js';
+import {
+  InProcessWorkClaims,
+  workClaimKey,
+  type IWorkClaims,
+} from './work-claims.js';
 
 /**
  * Appended to the WRITE-side tool descriptions only (remember,
@@ -241,6 +246,12 @@ export interface McpSessionScope {
 export interface McpServerDeps {
   commandBus: ICommandBus;
   queryBus: IQueryBus;
+  /**
+   * Claims on per-owner background work (a hygiene scan, a benchmark). The
+   * default holds them in this process; a deployment whose background work
+   * runs on a worker of its own supplies shared ones, released by the worker.
+   */
+  workClaims?: IWorkClaims;
   /** Wraps every tool call in an authenticated execution context. */
   runInToolContext: <T>(fn: () => Promise<T>) => Promise<T>;
   /**
@@ -305,6 +316,18 @@ export interface McpServerDeps {
    * absent the rules resource is not registered at all (honest capability).
    */
   readPromotedRules?: () => Promise<ContextRule[]>;
+  /** One promoted rule by id, under the caller's credential; null when absent or not theirs. */
+  readPromotedRule?: (id: string) => Promise<ContextRule | null>;
+  /**
+   * A one-rule resource read happened (the fetch-after-headline signal).
+   * Fires inside the authenticated context so the event attributes the
+   * caller; fire-and-forget, never awaited.
+   */
+  onResourceRead?: (metering: {
+    resource: 'rule';
+    ruleId: string;
+    found: boolean;
+  }) => void;
   /**
    * The caller's PROMOTED user-layer rules, pinned first, read by the
    * transport at session creation under the caller's JWT. How much of them
@@ -316,7 +339,9 @@ export interface McpServerDeps {
    * The connecting client's self-declared `clientInfo.name` from the
    * initialize request, when the transport can see it before the server
    * object is built (HTTP can: the request body is parsed first). Drives how
-   * much rule text the instructions carry.
+   * much rule text the instructions carry, and names the agent in the
+   * activity feed when this server object did not receive the handshake
+   * itself (HTTP builds one per request and keeps the name with the session).
    */
   clientName?: string | null;
 }
@@ -501,12 +526,14 @@ export const composeInstructions = (
  * `build_context` carry the `mem_` ids they surfaced (via
  * {@link McpServerDeps.onToolResult}); `remember` carries the supersede-
  * candidate ids it surfaced (via {@link McpServerDeps.onRememberResult}) so the
- * rediscovery metric is computable post-hoc.
+ * rediscovery metric is computable post-hoc; a `resource:rule` read carries the
+ * rule id and whether it was found (via {@link McpServerDeps.onResourceRead}).
  */
 export const RESULT_ATTRIBUTED_TOOLS = [
   'recall',
   'build_context',
   'remember',
+  'resource:rule',
 ] as const;
 
 /**
@@ -538,6 +565,12 @@ export interface ToolResultMetering {
      * transport session id cannot provide).
      */
     conversationId: string | null;
+    /**
+     * The card the briefing offered a new session to continue, when it
+     * offered one. Emitted into the `session_briefing` metadata: the forward
+     * measure of whether new sessions pick up where they left off.
+     */
+    continuationCard?: string | null;
   } | null;
   /**
    * The MCP client's self-declared name from the initialize handshake
@@ -567,6 +600,8 @@ export interface ToolResultMetering {
    * counts only — never content.
    */
   scopes: ReadScopeMetering;
+  /** The rule gate's content-free summary for this call, when it ran (ids, levels, numbers). */
+  ruleGate?: RuleGateBlock | null;
 }
 
 /** How a read's search set was decided — the audit key of read metering. */
@@ -801,7 +836,10 @@ export const TOOL_ANNOTATIONS = {
   // Appends to a card's stream. Attaching a target already attached is a
   // no-op, and a repeated note with the same key writes once.
   card_log: ADDITIVE_IDEMPOTENT,
-  delete_account: DESTRUCTIVE,
+  // configure replaces the whole settings row with the same inputs each
+  // time; a repeat of record writes no new card event and only refreshes
+  // when the state was last seen.
+  release: ADDITIVE_IDEMPOTENT,
 } as const satisfies Record<string, ToolAnnotations>;
 
 /**
@@ -905,6 +943,13 @@ const sessionStateLine = (state: SessionAttachment): string => {
 const footerOf = (...segments: Array<string | null | undefined>): string =>
   segments.filter(Boolean).join('\n\n');
 
+// Owners with a background hygiene scan or benchmark queued or running: such
+// work far outlives a request round-trip and must not stack on repeated
+// triggers. Held per PROCESS unless the deployment supplies shared claims
+// (where the work runs on a worker of its own): one owner opening several
+// sessions still gets one scan at a time.
+const processWorkClaims = new InProcessWorkClaims();
+
 export const buildMcpServer = (deps: McpServerDeps): McpServer => {
   const logger = createLogger('mcp-server');
   const composed = composeInstructions(
@@ -942,19 +987,14 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
 
   // The agent principal the activity feed attributes: the client's
   // self-declared name from the initialize handshake. Resolved lazily at call
-  // time (initialize has completed by the time any tool runs).
+  // time (initialize has completed by the time any tool runs). A server built
+  // for one request of an existing session never saw that handshake itself,
+  // so the name the session recorded at initialize stands in for it.
   const clientName = (): string | null =>
-    server.server.getClientVersion()?.name ?? null;
+    server.server.getClientVersion()?.name ?? deps.clientName ?? null;
 
   const readLinks = (links: ResourceLink[]): ResourceLink[] =>
     resourceLinksForClient(links, clientName());
-
-  // Owners with a background hygiene scan currently running (see scan_hygiene):
-  // a full scan far outlives a request round-trip, so it is fire-and-forget and
-  // must not stack on repeated triggers.
-  const scansInFlight = new Set<string>();
-  // Same guard for the ROI benchmark (see benchmark_memory).
-  const benchmarksInFlight = new Set<string>();
 
   server.registerTool(
     'remember',
@@ -973,10 +1013,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'your project is the DEFAULT — omit `scope` (pass project_hint or ' +
         '`thread` while it has none). "core"/"personal" REQUEST to leave it ' +
         'and are VERIFIED; unconfirmed, it lands in the project. ' +
-        'OPEN LOOPS: kind "task" (work handed over) and "open-question" ' +
-        '(awaiting an answer) surface in every briefing until closed with ' +
-        'close_loop; a task carries a pointer plus a distilled note, never ' +
-        'logs or dumps. ' +
+        'OPEN LOOPS: "task" (a one-off handover) and "open-question" show in ' +
+        'briefings for 14 days or until close_loop: a pointer plus a short ' +
+        'note, never logs. Ongoing work STATUS goes on its card as ' +
+        '`card_log note`, not a re-cut loop. ' +
         'REDISCOVERY GUARD: before storing something you just "discovered", ' +
         'recall it first — if a memory already covers it, follow or ' +
         'explicitly challenge that memory instead of writing a second one. ' +
@@ -1048,11 +1088,12 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           !result.deduplicated
         ) {
           const memoryId = result.memory_id;
-          void new HygieneScanner().scanOne(memoryId).catch((error) =>
-            logger.error('write-triggered hygiene scan failed', {
-              memoryId,
-              error: String(error),
-            })
+          void runInBackground(
+            { kind: 'hygiene-one', args: { memoryId } },
+            () => new HygieneScanner().scanOne(memoryId),
+            logger,
+            'write-triggered hygiene scan failed',
+            { memoryId }
           );
         }
         // No personal-fallback note lives here any more: a write the server
@@ -1110,107 +1151,29 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('scan_hygiene');
           return Promise.resolve(mustGetCurrentUserEntityId());
         });
-        if (scansInFlight.has(ownerId)) {
+        const claims = deps.workClaims ?? processWorkClaims;
+        const claimKey = workClaimKey('hygiene-scan', ownerId);
+        const claimToken = await claims.claim(claimKey);
+        if (!claimToken) {
           return asToolResult({ started: false, reason: 'already_running' });
         }
-        // Fire-and-forget: a full scan makes many LLM-judge calls and far
-        // outlives the request. Run it in the background (service-role, no
-        // request context needed) and return immediately.
-        scansInFlight.add(ownerId);
-        const scanner = new HygieneScanner();
-        void scanner
-          .scan(ownerId, limit)
-          .then(async (result) => {
-            logger.info('background hygiene scan complete', {
-              ownerId,
-              ...result,
-            });
-            // Kind audit: demote changelog-style change notes stuck in
-            // durable kinds (they outrank real knowledge in recall).
-            const audited = await scanner.auditKinds(ownerId, limit);
-            logger.info('background hygiene kind audit complete', {
-              ownerId,
-              ...audited,
-            });
-            // On-demand full re-judge of this owner's queue: the user asked for
-            // a scan, so pay to re-classify pending conflicts with the current
-            // judge and dismiss (keep_both) the ones it no longer sees.
-            const healed = await scanner.readjudicatePending({
-              ownerId,
-              rejudge: true,
-            });
-            logger.info('background hygiene readjudicate complete', {
-              ownerId,
-              ...healed,
-            });
-            // Rules incubator: detect this owner's memories that earned
-            // always-on promotion and distill drafts for the review queue.
-            const incubated = await new RuleCandidateDetector().detect(
-              ownerId,
-              limit
-            );
-            logger.info('background rule-candidate detection complete', {
-              ownerId,
-              ...incubated,
-            });
-            // Reflection: consolidate this owner's related-episode clusters
-            // into living-fact drafts for the review queue.
-            const reflected = await new ReflectionDetector().detect(
-              ownerId,
-              limit
-            );
-            logger.info('background reflection detection complete', {
-              ownerId,
-              ...reflected,
-            });
-            // Loop closure: auto-close this owner's open loops whose
-            // completion newer memories assert (judge-gated, reversible).
-            const loopsClosed = await new LoopClosureDetector().detect(ownerId);
-            logger.info('background loop-closure detection complete', {
-              ownerId,
-              ...loopsClosed,
-            });
-            // Usage reinforcement: refresh the precomputed ranking
-            // multipliers (system-wide — the rollup is one free query).
-            const reinforced = await new ReinforcementRollup().rollup();
-            logger.info('background reinforcement rollup complete', {
-              ownerId,
-              ...reinforced,
-            });
-            // Portability audit: propose re-scoping this owner's portable
-            // project-scope world facts into core (judge-gated proposals;
-            // the owner approves from the dashboard).
-            const portability = await new PortabilityDetector().detect(
-              ownerId,
-              limit
-            );
-            logger.info('background portability detection complete', {
-              ownerId,
-              ...portability,
-            });
-            // Stale suspects: queue memories with repeated misled signals
-            // for review (free, never auto-invalidates).
-            const staleSuspects = await new StaleSuspectDetector().detect();
-            logger.info('background stale-suspect detection complete', {
-              ownerId,
-              ...staleSuspects,
-            });
-            // Judge re-examination: a second opinion on this owner's
-            // high-traffic memories from the configured judge, at most once
-            // per model (guarded, capped per run).
-            const judgeRescan = await new JudgeRescanDetector().detect(ownerId);
-            logger.info('background judge re-examination complete', {
-              ownerId,
-              ...judgeRescan,
-            });
-          })
-          .catch((error) =>
-            logger.error('background hygiene scan failed', {
-              ownerId,
-              error: String(error),
-            })
-          )
-          .finally(() => scansInFlight.delete(ownerId));
+        // A full scan makes many judge calls and far outlives the request: it
+        // runs in the background (service role, no request context needed),
+        // here or on a worker the runtime hands it to, and the tool returns
+        // immediately. Whoever runs it releases the claim when it ends.
+        void runInBackground(
+          {
+            kind: 'hygiene-scan',
+            args: { ownerId, limit: limit ?? null, claimToken },
+          },
+          () =>
+            runOwnerScan(ownerId, limit).finally(() =>
+              claims.release(claimKey, claimToken)
+            ),
+          logger,
+          'background hygiene scan failed',
+          { ownerId }
+        );
         return asToolResult({ started: true });
       } catch (error) {
         logger.error('scan_hygiene failed', { error: String(error) });
@@ -1247,7 +1210,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
       try {
         const conflicts = await deps.runInToolContext(() => {
           deps.onToolInvocation?.('list_conflicts');
-          return new HygieneResolver().listConflicts(
+          return HygieneResolver.forCaller(getAccessToken()).listConflicts(
             mustGetCurrentUserEntityId(),
             { status, verdict, limit }
           );
@@ -1277,7 +1240,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
       try {
         const conflict = await deps.runInToolContext(() => {
           deps.onToolInvocation?.('get_conflict');
-          return new HygieneResolver().getConflict(
+          return HygieneResolver.forCaller(getAccessToken()).getConflict(
             mustGetCurrentUserEntityId(),
             dispute_id
           );
@@ -1460,7 +1423,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           TriageResult | BulkResolveResult
         >(() => {
           deps.onToolInvocation?.('resolve_conflicts');
-          const resolver = new HygieneResolver();
+          const resolver = HygieneResolver.forCaller(getAccessToken());
           const ownerId = mustGetCurrentUserEntityId();
           return resolutions?.length
             ? resolver.resolveMany(ownerId, resolutions)
@@ -1510,74 +1473,101 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('benchmark_memory');
           return Promise.resolve(mustGetCurrentUserEntityId());
         });
-        if (benchmarksInFlight.has(ownerId)) {
+        const claims = deps.workClaims ?? processWorkClaims;
+        const claimKey = workClaimKey('benchmark', ownerId);
+        const claimToken = await claims.claim(claimKey);
+        if (!claimToken) {
           return asToolResult({ started: false, reason: 'already_running' });
         }
-        const runner = createRoiRunner();
-        const probes = await runner.activeProbes(ownerId);
-        if (probes.length === 0) {
-          // Phase 1: no holdout set yet — generate it in the background and
-          // let the caller re-invoke once it exists.
-          benchmarksInFlight.add(ownerId);
-          void runner
-            .ensureProbes(ownerId)
-            .catch((error) =>
-              logger.error('roi probe generation failed', {
-                ownerId,
-                error: String(error),
-              })
-            )
-            .finally(() => benchmarksInFlight.delete(ownerId));
-          return asToolResult({
-            started: true,
-            phase: 'generating_probes',
-            note: 'Holdout questions are being generated — call benchmark_memory again shortly to run the benchmark.',
-          });
-        }
-
-        // Phase 2: recall each question INSIDE the authenticated context —
-        // the benchmark must see exactly what the user's own recall sees
-        // (RLS-honest), never a service-role view.
-        const cases: RoiProbeCase[] = await deps.runInToolContext(async () => {
-          const collected: RoiProbeCase[] = [];
-          for (const probe of probes) {
-            const result = await deps.queryBus.execute<
-              RecallQuery,
-              RecallOutput
-            >(
-              new RecallQuery({
-                query: probe.question,
-                scopes: probeReadScopes(probe.sourceScope),
-              })
+        // Until the work is handed to the background, a failure here is this
+        // request's to clean up; from then on whoever runs it releases.
+        let handedOff = false;
+        try {
+          const runner = createRoiRunner();
+          const probes = await runner.activeProbes(ownerId);
+          if (probes.length === 0) {
+            // Phase 1: no holdout set yet — generate it in the background and
+            // let the caller re-invoke once it exists.
+            void runInBackground(
+              { kind: 'benchmark-probes', args: { ownerId, claimToken } },
+              () =>
+                runner
+                  .ensureProbes(ownerId)
+                  .finally(() => claims.release(claimKey, claimToken)),
+              logger,
+              'roi probe generation failed',
+              { ownerId }
             );
-            collected.push({
-              probeId: probe.probeId,
-              question: probe.question,
-              groundTruthId: probe.groundTruthId,
-              groundTruth: probe.groundTruth,
-              surfaced: result.memories.map((memory) => ({
-                id: memory.id,
-                content: memory.content,
-              })),
+            handedOff = true;
+            return asToolResult({
+              started: true,
+              phase: 'generating_probes',
+              note: 'Holdout questions are being generated — call benchmark_memory again shortly to run the benchmark.',
             });
           }
-          return collected;
-        });
 
-        // Phase 3: judging + result rows run in the background (LLM-bound);
-        // a probe top-up rides along so the NEXT run covers fresh memories.
-        benchmarksInFlight.add(ownerId);
-        void runner
-          .judgeAndRecord(ownerId, cases)
-          .then(() => runner.ensureProbes(ownerId))
-          .catch((error) =>
-            logger.error('roi benchmark run failed', {
-              ownerId,
-              error: String(error),
-            })
-          )
-          .finally(() => benchmarksInFlight.delete(ownerId));
-        return asToolResult({ started: true, probes: cases.length });
+          // Phase 2: recall each question INSIDE the authenticated context —
+          // the benchmark must see exactly what the user's own recall sees
+          // (RLS-honest), never a service-role view.
+          const cases: RoiProbeCase[] = await deps.runInToolContext(
+            async () => {
+              const collected: RoiProbeCase[] = [];
+              for (const probe of probes) {
+                const result = await deps.queryBus.execute<
+                  RecallQuery,
+                  RecallOutput
+                >(
+                  new RecallQuery({
+                    query: probe.question,
+                    scopes: probeReadScopes(probe.sourceScope),
+                  })
+                );
+                collected.push({
+                  probeId: probe.probeId,
+                  question: probe.question,
+                  groundTruthId: probe.groundTruthId,
+                  groundTruth: probe.groundTruth,
+                  surfaced: result.memories.map((memory) => ({
+                    id: memory.id,
+                    content: memory.content,
+                  })),
+                });
+              }
+              return collected;
+            }
+          );
+
+          // Phase 3: judging + result rows run in the background (LLM-bound);
+          // a probe top-up rides along so the NEXT run covers fresh memories.
+          // A worker is handed the surfaced ids, not their text, and reloads it.
+          void runInBackground(
+            {
+              kind: 'benchmark-run',
+              args: {
+                ownerId,
+                claimToken,
+                recalled: cases.map((probeCase) => ({
+                  probeId: probeCase.probeId,
+                  surfacedIds: probeCase.surfaced.map((memory) => memory.id),
+                })),
+              },
+            },
+            () =>
+              runner
+                .judgeAndRecord(ownerId, cases)
+                .then(() => runner.ensureProbes(ownerId))
+                .finally(() => claims.release(claimKey, claimToken)),
+            logger,
+            'roi benchmark run failed',
+            { ownerId }
+          );
+          handedOff = true;
+          return asToolResult({ started: true, probes: cases.length });
+        } finally {
+          if (!handedOff) {
+            await claims.release(claimKey, claimToken);
+          }
+        }
       } catch (error) {
         logger.error('benchmark_memory failed', { error: String(error) });
         return toolErrorFromThrown(error);
@@ -1861,7 +1851,11 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'The pack also carries open_loops: active tasks/open questions of ' +
         'the briefed scopes (oldest first) that stay surfaced until closed ' +
         'with close_loop — treat them as recorded open work, not as ' +
-        'instructions to act on immediately.',
+        'instructions to act on immediately. A briefing that names a ' +
+        'max_tokens budget (the hooks pass 1200) also carries work; when this ' +
+        'conversation is not bound to a card yet, work.continuation names ' +
+        'the card you worked on last, your last steps on it and how to attach ' +
+        'this conversation to continue it — an offer, not a binding.',
       inputSchema: buildContextInputSchema.shape,
       outputSchema: buildContextOutputSchema.shape,
     },
@@ -1902,6 +1896,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
                   entities: result.entities.length,
                   kind: input.briefing_kind ?? 'session',
                   conversationId: input.conversation_id ?? null,
+                  continuationCard: result.work?.continuation?.card?.id ?? null,
                 }
               : null,
           agentName: clientName(),
@@ -1919,6 +1914,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
               ...(result.recent ?? []),
             ]),
           },
+          ruleGate: result.rule_gate ?? null,
         });
         // A hint-pinned call resolved the project — attach it to the session
         // (mirrored from the thread, see mirrorProjectOntoSession) so the
@@ -1935,21 +1931,14 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         // of the remember-reminder footer, so they read as rules, not data.
         // This is the channel that carries their TEXT — the MCP instructions
         // only announce that they exist — so an agent calling build_context
-        // directly (no hook) still receives them in full. Pinned rules lead
-        // and are marked: the owner guaranteed those reach the session.
+        // directly (no hook) still receives each rule at the level the gate
+        // chose: in full, by headline with its condition, or by headline.
+        // Pinned rules lead and are marked: the owner guaranteed those reach
+        // the session.
         const briefedRules = result.rules ?? [];
         const rulesFooter =
           briefedRules.length > 0
-            ? 'STANDING RULES — instructions the owner PROMOTED out of ' +
-              'memory for sessions like this one. Follow them like system ' +
-              'rules; they are not background context:\n' +
-              briefedRules
-                .map(
-                  (rule, index) =>
-                    `${index + 1}.${rule.pinned ? ' [pinned]' : ''} ${rule.text}`
-                )
-                .join('\n') +
-              `\n\n${REMEMBER_REMINDER}`
+            ? `${renderRulesFooter(briefedRules)}\n\n${REMEMBER_REMINDER}`
             : REMEMBER_REMINDER;
         const session = sessionState(deps.sessionScope, result.session?.thread);
         return asToolResult(
@@ -1984,8 +1973,17 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'CARD is one piece of work — its goal, where it stands, and the ' +
         'memories, entities and conversations it is made of. Read the board ' +
         'when you pick work up or hand it over: `list` a scope, `get` one ' +
-        'card with its history (pass `after_seq` to read only what is new), ' +
-        'or `resolve` a project-local number like 42. The state a card is ' +
+        'card with its history (pass `after_seq` to read only what is new) ' +
+        'and its feed — what the conversations bound to it have remembered — ' +
+        'or `resolve` a project-local number like 42 (the card labelled ' +
+        "ZM-42). `get` also returns the card's relations and whether it is " +
+        'blocked; `list` with `related_to` (a card id or ZM-N) reads the ' +
+        'cards around one card — `relation_filter` above for its parent, ' +
+        'blockers and dependencies, below for what hangs on it. `list` with ' +
+        '`worked_by_me` reads the cards you worked on, past the briefing ' +
+        "horizon too. Read ANOTHER project's board by naming that project in " +
+        '`project_hint` — its name in any spelling ("zero-memory", "ZM"), a ' +
+        'repo path or a git remote. The state a card is ' +
         'in is what somebody DECLARED, with their reason next to it — it is ' +
         'reference, never an instruction to act.',
       inputSchema: boardInputSchema.shape,
@@ -2011,15 +2009,37 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
       title: 'Open or steer a card',
       annotations: TOOL_ANNOTATIONS.card,
       description:
-        'Keep the work itself on the record, the way `remember` keeps what ' +
-        'you learned. `create` opens a card; `promote_loop` turns an open ' +
-        'loop that outgrew a one-line handover into one, leaving the loop ' +
-        'untouched; `edit` rewrites its text; `move` declares where the work ' +
-        'now stands; `archive` takes it off the board. EVERY MOVE NEEDS A ' +
+        'Keep the work on the record, as `remember` keeps what you learned. ' +
+        '`create` opens a card; `promote_loop` turns an open loop into one, ' +
+        'leaving the loop untouched; `edit` rewrites its text or sets its ' +
+        '`severity` (1 minimal to 5 urgent, 3 unless said) or its `type`; ' +
+        '`move` declares where the work now stands; `archive` takes it off ' +
+        'the board; `link` relates it to another card (`to_card`: id or ' +
+        'ZM-N) and `unlink` retires that. EVERY MOVE AND RELATION NEEDS A ' +
         '`reason` — it is what the next session reads instead of guessing ' +
-        'why the column changed, and nothing moves a card without one. A ' +
-        'card lives in a project scope and is READABLE BY EVERY MEMBER of ' +
-        'it, so do not paste anything into it that its scope should not see.',
+        'why the column changed, and nothing moves a card without one. Work ' +
+        'ENTERING active names its `branch` ({repo, name}: repo is ' +
+        'owner/name from the git remote origin, or the repository folder ' +
+        'name), or says why it has none with `no_branch`; a card that ' +
+        'already holds an open branch needs neither. Work LEAVING active ' +
+        'with an open branch is refused until the branch is recorded with ' +
+        '`land` (the squash commit and the branch it landed on, which also ' +
+        'moves the card, to waiting by default) or `not_landed` says why it ' +
+        'has not. A card is labelled ZM-N everywhere, the squash trailer of ' +
+        'its commit included. A CARD STATES ITS RELATIONS when it is ' +
+        'created or promoted, and when work never assessed enters active: ' +
+        '`links` [{card, relation, reason}] (blocked_by, depends_on, ' +
+        'child_of, relates_to, duplicates, or their inverses) or `no_links` ' +
+        "saying why there are none. A refusal lists the board's candidates: " +
+        'judge each one yourself, because a relation nobody declared is ' +
+        'invisible to every other agent. Only blocked_by makes a card ' +
+        'blocked. A CARD DECLARES ITS `type` (story, bug, task or spike) ' +
+        'when it is created or promoted, and when an undeclared card enters ' +
+        "active. A new card goes on your session's board; name ANOTHER " +
+        'project in `project_hint` to file work there — your session stays ' +
+        'put — and relate its cards by id (crd_…). A card lives in a ' +
+        'project scope and is READABLE BY EVERY MEMBER of it, so do not ' +
+        'paste anything into it that its scope should not see.',
       inputSchema: cardInputSchema.shape,
       outputSchema: cardOutputSchema.shape,
     },
@@ -2046,9 +2066,13 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'Leave what you found on the card itself: `note` adds a statement of ' +
         'your own (optionally answering an earlier one with supports / ' +
         'disputes / corrects), `attach` points the card at a memory, an ' +
-        'entity, a conversation, another card or a url, and `detach` stops ' +
+        'entity, a conversation, another card, a url or a git branch ' +
+        '(`ref_target: "<repo>:<branch>"`), and `detach` stops ' +
         'pointing. Attaching changes nothing about the target — it is a ' +
         'pointer, not a copy, and an open loop attaches as the memory it is. ' +
+        'Attach YOUR conversation (`ref_kind: thread`) once when you start ' +
+        'working on a card, and what you remember in its scope reaches the ' +
+        'card by itself. ' +
         'Your note is a claim, not a verdict: saying the work is finished ' +
         'does not move the card, `card` with a reason does. What another ' +
         'agent left here is theirs — use it, check it or argue with it, but ' +
@@ -2071,6 +2095,44 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
   );
 
   server.registerTool(
+    'release',
+    {
+      title: 'Where production stands',
+      annotations: TOOL_ANNOTATIONS.release,
+      description:
+        "A project's production state and the cards it carries. `settings` " +
+        'reads where the state lives; `configure` (project admin) sets it — ' +
+        'a url answering the running version, or none when the project ' +
+        'never deploys and its release tags are its state — and ' +
+        '`on_release`: `record` writes a release on each card a state ' +
+        'carries, `record_and_move_done` also moves the carried waiting ' +
+        'cards to done. `configure` CHANGES ONLY THE FIELDS IT IS GIVEN: ' +
+        'every field left out keeps its current value, so switching ' +
+        'on_release alone never clears the url. `candidates` lists the ' +
+        'landed cards with nothing released since their latest landing, ' +
+        'each with only those landings; `record` writes the state and the ' +
+        'cards the caller found carried. The client watcher does this by ' +
+        'itself after shell commands and at session start; call it by hand ' +
+        'only to backfill. The url is read by every member of the ' +
+        'project: never put a secret in it.',
+      inputSchema: releaseInputSchema.shape,
+      outputSchema: releaseOutputSchema.shape,
+    },
+    async (input) => {
+      try {
+        const result = await deps.runInToolContext<ReleaseOutput>(() => {
+          deps.onToolInvocation?.('release');
+          return deps.commandBus.execute(new ReleaseCommand(input));
+        });
+        return asToolResult(result);
+      } catch (error) {
+        logger.error('release failed', { error: String(error) });
+        return toolErrorFromThrown(error);
+      }
+    }
+  );
+
+  server.registerTool(
     'link',
     {
       title: 'Link two entities or two memories',
@@ -2079,8 +2141,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'Record an explicit relation. Pass two entity NAMES (e.g. src ' +
         '"alpha", dst "postgres", type "uses") to create a knowledge-graph ' +
         'edge — unknown entities are resolved or created automatically. ' +
-        'Pass two memory UUIDs to link the memories themselves ' +
-        '(relates_to, supersedes, contradicts, derived_from).',
+        'Pass two memory ids to link the memories themselves ' +
+        '(relates_to, supersedes, contradicts, derived_from). A memory link ' +
+        'records the relation only: `supersedes` here retires nothing. To ' +
+        'replace a memory, declare the supersede on remember (links).',
       inputSchema: linkInputSchema.shape,
       outputSchema: linkOutputSchema.shape,
     },
@@ -2288,8 +2352,12 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'waiting for it to earn candidacy across sessions. Use when you ' +
         'already know a decision/preference/convention is a standing rule. ' +
         'The imperative text is distilled from the memory (pass rule_text to ' +
-        'override). By default it becomes a GENERAL (user-layer) rule when ' +
-        'the memory sits in a personal scope, delivered to every session via ' +
+        'override), and so is applies_when: the observable task features ' +
+        'under which the rule binds (pass it to set your own). With ' +
+        'rule_text nothing is distilled, so pass applies_when too or the ' +
+        'stored one is kept. By default it ' +
+        'becomes a GENERAL (user-layer) rule when the memory sits in a ' +
+        'personal scope, delivered to every session via ' +
         'the MCP instructions; pass applies_scope to make it a PROJECT rule ' +
         "delivered only in that project's briefings. Owner-only (your " +
         'memory). Reversible via the /rules revoke.',
@@ -2307,6 +2375,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           ownerId,
           appliesScope: input.applies_scope,
           ruleText: input.rule_text,
+          appliesWhen: input.applies_when,
           force: input.force,
         });
         // Instructions are frozen at connect, so a freshly promoted rule does
@@ -2352,43 +2421,6 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         return asToolResult(result);
       } catch (error) {
         logger.error('export_memories failed', { error: String(error) });
-        return toolErrorFromThrown(error);
-      }
-    }
-  );
-
-  server.registerTool(
-    'delete_account',
-    {
-      title: 'Erase the caller account',
-      annotations: TOOL_ANNOTATIONS.delete_account,
-      description:
-        "Permanently erase the caller's own account and everything it owns " +
-        '(memories, entities, edges, links, and per-user operational rows), ' +
-        'then remove the profile and sign-in principal. Irreversible and ' +
-        'self-only: it takes no subject, so it can never target another ' +
-        'account; the subject is the authenticated caller. Recorded in the ' +
-        'audit log. Offer the export tool first (data portability). Intended ' +
-        'for the dashboard delete-account flow.',
-      inputSchema: deleteAccountInputSchema.shape,
-      outputSchema: deleteAccountOutputSchema.shape,
-    },
-    async () => {
-      try {
-        // Deliberately NOT volume-metered: the pre-execution `mcp_tool_call`
-        // emit is fire-and-forget on a separate connection, and this tool
-        // deletes the caller's own usage_events inside the cascade. A metering
-        // row for THIS call would race the erasure and commit between the
-        // cascade's usage_events delete and its profiles delete, dangling a
-        // usage_events → profiles reference and aborting the whole erasure. The
-        // deletion is audited in audit_log (a content-free erasure record), so
-        // no metering signal is lost that matters.
-        const result = await deps.runInToolContext<DeleteAccountOutput>(() =>
-          deps.commandBus.execute(new HardDeleteAccountCommand())
-        );
-        return asToolResult(result);
-      } catch (error) {
-        logger.error('delete_account failed', { error: String(error) });
         return toolErrorFromThrown(error);
       }
     }
@@ -2565,6 +2597,58 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           return readPromotedRules();
         });
         const payload: PromotedRulesResource = { rules };
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: 'application/json',
+              text: JSON.stringify(payload),
+            },
+          ],
+        };
+      }
+    );
+  }
+
+  // One rule in full, by id: the way out of a rule that a briefing delivered
+  // by headline or gate. Same honest-capability rule as zm://rules — absent
+  // without the transport's read.
+  const readPromotedRule = deps.readPromotedRule;
+  if (readPromotedRule) {
+    server.registerResource(
+      'rule',
+      new ResourceTemplate(ZM_RULE_URI_TEMPLATE, { list: undefined }),
+      {
+        title: 'One standing rule, in full',
+        description:
+          'The whole text of one promoted standing rule by its rlc_ id — the way to read a rule ' +
+          'that a briefing delivered by headline or gate before acting on it.',
+        mimeType: 'application/json',
+        annotations: { audience: ['assistant'], priority: 1 },
+      },
+      async (uri, variables) => {
+        const raw = Array.isArray(variables.id)
+          ? variables.id[0]
+          : variables.id;
+        const parsed = ruleCandidateIdSchema.safeParse(raw);
+        if (!parsed.success) throw new Error(`Not a rule id: ${String(raw)}`);
+        const rule = await deps.runInToolContext<ContextRule | null>(
+          async () => {
+            deps.onToolInvocation?.('resource:rule');
+            const read = await readPromotedRule(parsed.data);
+            // Inside the context, so the usage row attributes the caller on
+            // a transport whose context wraps only this callback (stdio).
+            deps.onResourceRead?.({
+              resource: 'rule',
+              ruleId: parsed.data,
+              found: read !== null,
+            });
+            return read;
+          }
+        );
+        // One answer for "absent", "revoked" and "not yours", as for memories.
+        if (!rule) throw new Error(`Rule ${parsed.data} not found.`);
+        const payload: PromotedRuleResource = { rule };
         return {
           contents: [
             {

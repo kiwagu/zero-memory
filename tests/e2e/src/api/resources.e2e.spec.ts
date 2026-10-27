@@ -3,7 +3,7 @@
  * lists and dereferences zm:// resources against the e2e server. Covers the
  * three promises the plane makes — full-fidelity read by id, RLS as the
  * visibility boundary, and dereferenceable resource_link blocks on recall
- * hits — plus the prompts inventory.
+ * hits.
  */
 import { expect, test } from '@playwright/test';
 
@@ -33,9 +33,6 @@ test.describe('MCP resources plane', () => {
       }>(memoryUri(seed.rlsPrivateMemoryId));
       expect(memory.id).toBe(seed.rlsPrivateMemoryId);
       expect(memory.content.length).toBeGreaterThan(0);
-
-      const prompts = await mcp.listPromptNames();
-      expect(prompts.sort()).toEqual(['brief', 'receipt', 'triage']);
     } finally {
       await mcp.close();
     }

@@ -49,10 +49,6 @@ describe('export_metrics metric keys (twin of the operator surface)', () => {
     );
   });
 
-  it('carries the owner-only top_facts the operator surface omits', () => {
-    expect(exportMetricsMetricsSchema.shape).toHaveProperty('top_facts');
-  });
-
   it('series point is the operator point minus the aggregate users_active', () => {
     const expected = new Set(
       Object.keys(instanceMetricsSeriesPointSchema.shape).filter(
@@ -88,10 +84,6 @@ describe('export_metrics output (stable-keyed contract)', () => {
     metrics,
     series: [seriesPoint],
   };
-
-  it('accepts a well-formed payload', () => {
-    expect(exportMetricsOutputSchema.parse(payload)).toBeTruthy();
-  });
 
   it('has a stable top-level and metric key set', () => {
     const parsed = exportMetricsOutputSchema.parse(payload);
@@ -136,13 +128,42 @@ describe('export_metrics output (stable-keyed contract)', () => {
         "briefing_total",
         "captured",
         "date",
+        "guard_refusals",
+        "judge_input_tokens",
+        "judge_latency_ms_sum",
+        "judge_unavailable",
         "judged",
         "recall_calls",
         "relevant",
+        "rule_fetches",
+        "rule_gate_calls",
+        "rules_chars_baseline",
+        "rules_chars_delivered",
+        "rules_full",
+        "rules_judged",
         "saved_tokens",
         "used",
         "write_tokens",
       ]
     `);
+  });
+
+  it('parses a point written before the rule-gate measures, as zeros', () => {
+    const earlier = {
+      date: '1970-01-01',
+      recall_calls: 3,
+      captured: 1,
+      saved_tokens: 0,
+      write_tokens: 0,
+      briefing_hits: 1,
+      briefing_total: 2,
+      judged: 0,
+      relevant: 0,
+      used: 0,
+    };
+    const point = exportMetricsSeriesPointSchema.parse(earlier);
+    expect(point.recall_calls).toBe(3);
+    expect(point.rule_gate_calls).toBe(0);
+    expect(point.judge_input_tokens).toBe(0);
   });
 });

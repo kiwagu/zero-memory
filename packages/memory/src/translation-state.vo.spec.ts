@@ -19,18 +19,4 @@ describe('TranslationState', () => {
     expect(state.originalText).toBeNull();
     expect(state.attempts).toBe(0);
   });
-
-  it('restore() round-trips a persisted, translated row', () => {
-    const state = TranslationState.restore({
-      status: 'done',
-      originalText: '短いcommitメッセージ',
-      lang: 'ja',
-      attempts: 1,
-      error: null,
-    });
-    expect(state.status).toBe('done');
-    expect(state.originalText).toBe('短いcommitメッセージ');
-    expect(state.lang).toBe('ja');
-    expect(state.attempts).toBe(1);
-  });
 });

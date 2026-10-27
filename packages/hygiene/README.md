@@ -18,11 +18,18 @@ For each recently-written active memory (`lookbackDays` window):
 unrelated` with a confidence.
 3. **Act** — `HygieneScanner`:
    - **Tier-AUTO** (confidence ≥ `autoConfidence`): reversible lifecycle writes
-     — invalidate a duplicate's older twin, or supersede the losing memory —
-     plus a `supersedes` link and an `audit_log` entry (auditable + reversible).
+     — supersede a duplicate's older twin by the twin that stays, or the
+     losing memory by the winner — plus a `supersedes` link and an
+     `audit_log` entry (auditable + reversible). Both record the winner in
+     `superseded_by`, so a promoted rule anchored to the loser follows it.
    - **Tier-HUMAN** (contradictions, low-confidence pairs): a row in
      `public.memory_review_queue` (deny-all) plus a `contradicts` link, for a
      person to resolve.
+   - An auto-resolution whose loser is a loop promoted to a card
+     (`cards.origin_loop_id`) is downgraded to Tier-HUMAN
+     (`protectPromotedLoop`): the card now carries that work, so retiring the
+     loop is a call for a person to make. The loop-closure judge skips such
+     loops entirely, in its SQL candidate query.
 
 Tuning lives in one place: `DEFAULT_HYGIENE_CONFIG` (`hygiene-verdict.ts`).
 
@@ -73,6 +80,13 @@ place in the standing-rule catalog (a fact recalled with a useful verdict in
    fallback for client-owned instruction files; the server never writes them.
 
 Tuning: `DEFAULT_INCUBATOR_CONFIG` (`rule-candidate.ts`).
+
+`AppliesWhenDrafter` (`applies-when.drafter.ts`) writes the same
+`applies_when` line for a rule that was promoted before the distiller wrote
+one: the condition the rule gate judges a task against. It reads only the
+rule text and answers `null` for a rule that binds every task. The server's
+`rules:applies-when-draft` command runs it over an owner's promoted rules and
+stores each drafted line, which the owner reviews and edits on `/rules`.
 
 ## Usage valence: reinforcement and stale suspects
 
@@ -172,6 +186,20 @@ waved through.
 
 Tuning: `DEFAULT_JUDGE_RESCAN_CONFIG` (`judge-rescan.ts`).
 
+## Loop closure
+
+`LoopClosureDetector` closes open loops whose work newer memories report as
+done: the `find_loop_closure_evidence` rollup pairs each live loop with its
+newest similar non-loop memories, `LoopClosureJudge` decides, and only a
+confident verdict naming shown evidence closes the loop (reversibly, audited).
+`loop_closure_checks` is the re-judge guard, keyed on the newest evidence a
+loop was judged against: a loop is judged again only when newer evidence
+appears. Restoring a loop (`HygieneResolver.restoreMemory`) re-arms that guard
+on the current evidence (`holdReopened`), so a person's reopen is not undone
+on the next run by the same evidence.
+
+Tuning: `DEFAULT_LOOP_CLOSURE_CONFIG` (`loop-closure.ts`).
+
 ## Single-subject disputes (challenge / stale-suspect)
 
 The review queue holds two dispute shapes: judge PAIRS (`duplicate |
@@ -192,7 +220,9 @@ is system-wide, not owner-scoped):
 - `apps/server/src/hygiene-scheduler.ts` — periodic in-process tick
   (`ZM_HYGIENE_SCAN_INTERVAL_HOURS`).
 - the `scan_hygiene` MCP tool (owner-scoped, fire-and-forget) — also behind
-  the dashboard scan button.
+  the dashboard scan button. It runs `runOwnerScan` (`src/owner-scan.ts`) in
+  the background of the request, or, on AWS Lambda, on the jobs function the
+  server hands it to.
 - `apps/server/src/hygiene-scan.ts` (`bun run hygiene:scan` in `apps/server`)
   — manual CLI pass. Requires `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
   and `ANTHROPIC_API_KEY`.

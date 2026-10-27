@@ -1,7 +1,6 @@
 export * from './card.command.js';
 export * from './card-log.command.js';
 export * from './close-loop.command.js';
-export * from './delete-account.command.js';
 export * from './export-memories.command.js';
 export * from './forget-memory.command.js';
 export * from './import-memory.command.js';
@@ -10,4 +9,5 @@ export * from './describe-scope.command.js';
 export * from './link.command.js';
 export * from './remember.command.js';
 export * from './move-memories.command.js';
+export * from './release.command.js';
 export * from './share-memory.command.js';

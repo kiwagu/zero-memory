@@ -1,3 +1,6 @@
+// Types only: the dashboard loads this module on its own through the
+// `@workspace/memory/content-guard` subpath, which must stay free of runtime
+// imports (the package root loads the DI container).
 import type { SecretDetectorId, SecretFinding } from '@workspace/contracts';
 
 /**
@@ -104,6 +107,34 @@ const stringLeaves = (
   return [];
 };
 
+/** One free-text field of a write, under the name a rejection reports. */
+export interface GuardedText {
+  readonly path: string;
+  readonly text: string | null | undefined;
+}
+
+/**
+ * Checks free-text fields for secrets, in order, and returns the first
+ * finding (one is enough to reject) or null when every field is clean. An
+ * absent or empty field has nothing to check. Every write that persists text
+ * a caller typed goes through this: memories, card text, entity names, rule
+ * text — a secret refused in one place must not be storable in another.
+ */
+export const guardTextFields = (
+  fields: readonly GuardedText[]
+): SecretFinding | null => {
+  for (const { path, text } of fields) {
+    if (!text) {
+      continue;
+    }
+    const [finding] = detectSecrets(text, path);
+    if (finding) {
+      return finding;
+    }
+  }
+  return null;
+};
+
 /**
  * Guards every text field of a memory write: the content itself, the verbatim
  * idiom anchor, all string leaves of the provenance source descriptor, and
@@ -116,21 +147,13 @@ export const guardMemoryWrite = (write: {
   verbatim?: string | null;
   source?: Record<string, unknown> | null;
   entityNames?: string[];
-}): SecretFinding | null => {
-  const fields = [
+}): SecretFinding | null =>
+  guardTextFields([
     { path: 'content', text: write.content },
-    ...(write.verbatim ? [{ path: 'verbatim', text: write.verbatim }] : []),
+    { path: 'verbatim', text: write.verbatim },
     ...(write.source ? stringLeaves(write.source, 'source') : []),
     ...(write.entityNames ?? []).map((name, index) => ({
       path: `entities[${index}].name`,
       text: name,
     })),
-  ];
-  for (const { path, text } of fields) {
-    const [finding] = detectSecrets(text, path);
-    if (finding) {
-      return finding;
-    }
-  }
-  return null;
-};
+  ]);

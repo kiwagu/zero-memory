@@ -11,9 +11,11 @@
  * tables and impossible to read off the schema. This registry states it once.
  *
  * Consumers:
- *   - `public.hard_delete_user()` — the deletion cascade is authored to mirror
+ *   - `private.erase_account()` — the deletion cascade is authored to mirror
  *     this map (children before parents), and the e2e completeness guard proves
  *     the two agree by asserting zero user rows remain in every mapped table.
+ *     It runs from `public.hard_delete_user()` and from the delete trigger on
+ *     `auth.users`, so deleting the user in Auth erases the same rows.
  *   - takeout — export completeness is audited against this same map.
  *   - relocation — extract an account's data by the map, import it elsewhere.
  *   - the e2e drift guard — every `public` base/partitioned table must appear
@@ -61,6 +63,10 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   // Directly owned — per-user operational and identity rows.
   ingest_log: { kind: 'owned', ownerColumn: 'user_id' },
   oauth_codes: { kind: 'owned', ownerColumn: 'user_id' },
+  // An authorization request the user opened on the consent screen, and the
+  // clients they approved. Unbound pending requests (null user) are nobody's.
+  oauth_authorizations: { kind: 'owned', ownerColumn: 'user_id' },
+  oauth_consents: { kind: 'owned', ownerColumn: 'user_id' },
   usage_events: { kind: 'owned', ownerColumn: 'user_id' },
   usage_daily: { kind: 'owned', ownerColumn: 'user_id' },
   scope_members: { kind: 'owned', ownerColumn: 'user_id' },
@@ -68,6 +74,10 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   scopes: { kind: 'owned', ownerColumn: 'created_by' },
   policy_allowances: { kind: 'owned', ownerColumn: 'subject_id' },
   provider_credentials: { kind: 'owned', ownerColumn: 'subject_id' },
+  // The account's rule-gate choice and its own decision-model key. Erasure
+  // revokes the key through its function, so the Vault secret leaves too.
+  judge_settings: { kind: 'owned', ownerColumn: 'subject_id' },
+  judge_credentials: { kind: 'owned', ownerColumn: 'subject_id' },
 
   // Directly owned — the engine's per-user derived queues and probes.
   reflection_candidates: { kind: 'owned', ownerColumn: 'owner_id' },
@@ -80,20 +90,26 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   roi_probes: { kind: 'owned', ownerColumn: 'owner_id' },
   roi_results: { kind: 'owned', ownerColumn: 'owner_id' },
   brief_probes: { kind: 'owned', ownerColumn: 'owner_id' },
+  // The owner's labelled set for measuring the rule gate. Both of its foreign
+  // keys (owner, rule) cascade, so erasure needs no explicit statement: the
+  // rows leave with the rules erasure deletes and with the profile.
+  rule_probes: { kind: 'owned', ownerColumn: 'owner_id' },
   // Which project a conversation works in. Owned and short-lived: the row is
   // working state, and its FK to profiles carries ON DELETE CASCADE, so
   // erasure needs no explicit statement — the disposition is declared here so
   // the drift guard sees it as deliberate rather than forgotten.
   session_threads: { kind: 'owned', ownerColumn: 'owner_id' },
   // Board rows are owned by WHOEVER WROTE THEM, not by the card's author. A
-  // card lives in a shared scope, so a co-member's notes and attachments on it
-  // are that person's content and leave with them; the card itself leaves with
-  // the person who opened it, taking the rest of its stream along its foreign
-  // keys. Splitting the three this way is what keeps one member's erasure from
-  // deleting another member's words.
+  // card lives in a shared scope, so a co-member's notes, attachments and
+  // recorded branches on it are that person's content and leave with them; the
+  // card itself leaves with the person who opened it, taking the rest of its
+  // stream along its foreign keys. Splitting them this way is what keeps one
+  // member's erasure from deleting another member's words.
   cards: { kind: 'owned', ownerColumn: 'created_by' },
   card_events: { kind: 'owned', ownerColumn: 'actor_id' },
   card_refs: { kind: 'owned', ownerColumn: 'attached_by' },
+  card_branches: { kind: 'owned', ownerColumn: 'attached_by' },
+  card_links: { kind: 'owned', ownerColumn: 'created_by' },
 
   // Transitively owned through the memory (no owner column of their own).
   memory_entities: {
@@ -159,12 +175,27 @@ export const ACCOUNT_OWNERSHIP_MAP = {
   // `actor_id` but carries no personal content (ids, counters, flags only);
   // erasure severs the reference and keeps the audit row.
   audit_log: { kind: 'anonymize', column: 'actor_id' },
+  // A project's release setting and the production states it was observed
+  // in: configuration and a log, content-free. Erasure keeps the rows and
+  // severs who wrote them.
+  scope_release_settings: { kind: 'anonymize', column: 'updated_by' },
+  scope_releases: { kind: 'anonymize', column: 'observed_by' },
 
   // Not user data.
   oauth_clients: {
     kind: 'excluded',
     reason:
       'OAuth client registry (RFC 7591 dynamic registration); no owner column, shared across users',
+  },
+  agent_grants: {
+    kind: 'excluded',
+    reason:
+      'Auth-level record of each approved agent between refreshes, keyed by the Auth user uuid (not the usr_ id); holds tokens, no user content; removed by the foreign-key cascade when the Auth user is deleted, which the lifecycle guard asserts',
+  },
+  agent_sessions: {
+    kind: 'excluded',
+    reason:
+      'Auth-level record of the sessions the authorization server opened for agents, keyed by Auth session and user uuids (not the usr_ id); content-free (session id, client, time); removed by the foreign-key cascade when the Auth user is deleted, which the lifecycle guard asserts',
   },
   ranking_config: {
     kind: 'excluded',
@@ -218,6 +249,9 @@ export const USER_BACK_REFERENCES: readonly UserBackReference[] = [
   // the memory it is about — so the row outlives the departing adjudicator.
   { table: 'portability_candidates', column: 'resolved_by', refersTo: 'user' },
   { table: 'scope_members', column: 'granted_by', refersTo: 'user' },
+  // Who RETIRED a relation between two cards, which need not be whoever stated
+  // it — so the retired row outlives the departing user.
+  { table: 'card_links', column: 'invalidated_by', refersTo: 'user' },
 ] as const;
 
 const entries = (): ReadonlyArray<
@@ -235,8 +269,8 @@ export const deletableTables = (): MappedTable[] =>
 
 /**
  * Tables that must hold zero rows attributable to a user after erasure — the
- * deleted tables plus the anonymized one (its reference is nulled, so no row
- * still points at the user).
+ * deleted tables plus the anonymized ones (their reference is nulled, so no
+ * row still points at the user).
  */
 export const userDataTables = (): MappedTable[] =>
   entries()

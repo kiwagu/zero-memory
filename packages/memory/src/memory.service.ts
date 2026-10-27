@@ -26,7 +26,6 @@ import {
   PORTABLE_LAYER_MIN_CONFIDENCE,
   PORTABLE_SUBJECT_KINDS,
   portableLayerDeniedMessage,
-  projectHintUnresolvableMessage,
   scopeTargetRequiredMessage,
   type RecallInput,
   type RecallOutput,
@@ -34,6 +33,7 @@ import {
   type RememberInput,
   type UserId,
   type RememberOutput,
+  type RuleFate,
   type MoveMemoriesInput,
   type MoveMemoriesOutput,
   type ShareInput,
@@ -62,10 +62,10 @@ import {
   passageWindows,
   type IEmbeddingService,
 } from '@workspace/embedding';
-import { createLogger } from '@workspace/logger';
+import { createLogger, runInBackground } from '@workspace/logger';
 import { Err, Ok, type Result } from 'oxide.ts';
 
-import { guardMemoryWrite } from './content-guard.js';
+import { guardMemoryWrite, guardTextFields } from './content-guard.js';
 import type {
   IPortabilityJudge,
   PortabilityOpinion,
@@ -91,18 +91,38 @@ import { injectGraphService } from './graph.service.provider.js';
 import type { IGraphService } from './graph.service.js';
 import { MemoryContent } from './memory-content.vo.js';
 import { oversizeDirective } from './oversize-directive.js';
+import { shouldHintStatus, statusHint } from './status-hint.js';
 import { MemoryFragment } from './memory-fragment.do.js';
 import { injectMemorySearchService } from './memory-search.provider.js';
 import type { IMemorySearchService } from './memory-search.service.js';
 import { injectMemoryRepository } from './memory.repository.provider.js';
-import type { IMemoryRepository } from './memory.repository.js';
+import type {
+  IMemoryRepository,
+  SupersededPredecessor,
+} from './memory.repository.js';
 import { Provenance } from './provenance.vo.js';
 import { injectProjectRulesReader } from './project-rules.reader.provider.js';
+import type {
+  BriefingWorkRead,
+  IBriefingWorkReader,
+} from './briefing-work.reader.js';
+import { injectBriefingWorkReader } from './briefing-work.reader.provider.js';
 import type { IProjectRulesReader } from './project-rules.reader.js';
+import { keptLiveRule, ruleFateReport } from './rule-fate.js';
+import { injectRuleFateReader } from './rule-fate.reader.provider.js';
+import type { IRuleFateReader } from './rule-fate.reader.js';
+import { injectRuleGate } from './rule-gate.provider.js';
+import {
+  deliverUnjudged,
+  hookTaskStatement,
+  type IRuleGate,
+  type RuleGateOutcome,
+} from './rule-gate.service.js';
 import { injectUserRulesReader } from './user-rules.reader.provider.js';
 import type { IUserRulesReader } from './user-rules.reader.js';
 import { injectScopeAccessService } from './scope-access.provider.js';
 import type { IScopeAccessService } from './scope-access.service.js';
+import { projectHintMissMessage } from './project-name.utils.js';
 import { ScopeRoutingService } from './scope-routing.service.js';
 import {
   SUPERSEDE_APERTURE_CAP,
@@ -145,15 +165,23 @@ const isMemoryEndpoint = (value: string): boolean =>
  */
 const MAX_DECLARED_SUPERSEDES = 10;
 
+/**
+ * How far back a re-cut write walks its loop's supersede chain to number the
+ * cut. The longest chain measured on production was eight cuts, so this only
+ * bounds a corrupt or cyclic chain.
+ */
+const MAX_LOOP_CUT_STEPS = 50;
+
 /** Chars of candidate content shown — enough to recognise, not a full read. */
 const SUPERSEDE_CONTENT_PREVIEW = 200;
 const MS_PER_DAY = 86_400_000;
 const SUPERSEDE_HINT =
   'Live memories similar to what you just wrote. If this write REPLACES one of ' +
   'them, declare it — call remember again with ' +
-  'links:[{type:"supersedes",dst:"<id>"}] (or link(supersedes)) so the old ' +
-  'version is retired instead of left as a duplicate someone must later ' +
-  'reconcile. If they are different facets of the topic, ignore this.';
+  'links:[{type:"supersedes",dst:"<id>"}] so the old version is retired ' +
+  'instead of left as a duplicate someone must later reconcile. The link ' +
+  'tool is not a substitute: it records the relation and retires nothing. ' +
+  'If they are different facets of the topic, ignore this.';
 
 /**
  * How many typed-link neighbours a single hit may contribute, and how many a
@@ -215,18 +243,19 @@ export class MemoryService {
     @injectTranslator()
     private readonly translator: ITranslator,
     @injectProjectRulesReader()
-    private readonly projectRules?: IProjectRulesReader,
+    private readonly projectRules: IProjectRulesReader,
     @injectUserRulesReader()
-    private readonly userRules?: IUserRulesReader,
-    // Optional like the rules readers: without the adapter the gate denies
-    // every un-prefiltered request, which is the safe direction (the write
-    // lands in the project) rather than a boot failure.
+    private readonly userRules: IUserRulesReader,
     @injectPortabilityJudge()
-    private readonly portabilityJudge?: IPortabilityJudge,
-    // Optional like the rules readers: without the adapter the server behaves
-    // as it did before threads — per-call hints — rather than failing to boot.
+    private readonly portabilityJudge: IPortabilityJudge,
     @injectSessionThreadRepository()
-    private readonly threads?: ISessionThreadRepository
+    private readonly threads: ISessionThreadRepository,
+    @injectBriefingWorkReader()
+    private readonly briefingWork: IBriefingWorkReader,
+    @injectRuleFateReader()
+    private readonly ruleFates: IRuleFateReader,
+    @injectRuleGate()
+    private readonly ruleGate: IRuleGate
   ) {}
 
   async remember(
@@ -283,15 +312,20 @@ export class MemoryService {
     // An explicit scope wins outright, so the hint is not even resolved:
     // resolving it would bind (and possibly bootstrap) a project the caller
     // never asked to write into.
-    const hintScopePath =
+    // A hint naming no project is refused with the projects the caller can
+    // retry with: a typed name never creates one.
+    const hintTarget =
       !input.scope && input.project_hint
-        ? await this.#resolveWriteHintScope(input.project_hint)
+        ? await this.scopeRouting.resolveProjectTarget(input.project_hint)
         : null;
-    if (!input.scope && input.project_hint && !hintScopePath) {
+    if (hintTarget?.isErr()) {
       return Err(
-        validationFailed(projectHintUnresolvableMessage(input.project_hint))
+        validationFailed(
+          projectHintMissMessage(input.project_hint!, hintTarget.unwrapErr())
+        )
       );
     }
+    const hintScopePath = hintTarget ? hintTarget.unwrap().path : null;
     // The project this write defaults to, if any — named separately from the
     // target because the portable-layer gate below needs somewhere to send a
     // write whose portability is not confirmed.
@@ -491,17 +525,24 @@ export class MemoryService {
         }
         // A declared supersede survives absorption: the absorbing memory
         // becomes the successor of the named old versions.
-        if (!isProvisionalAgentName(provenance?.agentName ?? null)) {
-          await this.#applyDeclaredSupersedes(
-            existing.id,
-            ownerId,
-            input.links
-          );
-        }
+        const absorbedRetired = isProvisionalAgentName(
+          provenance?.agentName ?? null
+        )
+          ? []
+          : await this.#applyDeclaredSupersedes(
+              existing.id,
+              ownerId,
+              input.links
+            );
+        const absorbedRules = await this.#ruleFates(
+          absorbedRetired,
+          existing.id
+        );
         return Ok({
           memory_id: existing.id,
           deduplicated: true,
           scope: scope.path,
+          ...(absorbedRules.length > 0 && { rules: absorbedRules }),
         });
       }
       // Same-session refinement BY CONSTRUCTION: the existing near-match was
@@ -586,22 +627,25 @@ export class MemoryService {
 
     // Declared supersede is an authoritative-writer affordance; a provisional
     // (watcher/bootstrap) extraction must never retire knowledge by naming it.
-    if (!isProvisionalAgentName(provenance?.agentName ?? null)) {
-      await this.#applyDeclaredSupersedes(fragment.id, ownerId, input.links);
-    }
+    const retired = isProvisionalAgentName(provenance?.agentName ?? null)
+      ? []
+      : await this.#applyDeclaredSupersedes(fragment.id, ownerId, input.links);
 
     // Write-triggered canonicalization: a non-English memory is canonicalized
-    // to English right after it is stored, in the background (fire-and-forget) —
-    // the write returns immediately and does not block on the model or wait for
-    // the cron. A failure is logged and the row stays 'pending' for the async
-    // worker to retry. Runs inside the request's async context, so the
-    // repository update keeps the caller's identity.
+    // to English right after it is stored, in the background — the write
+    // returns immediately and does not block on the model or wait for the
+    // cron. A failure is logged and the row stays 'pending' for the async
+    // worker to retry. In-process it runs inside the request's async context,
+    // so the repository update keeps the caller's identity; a runtime that
+    // hands background work to a worker of its own translates this one memory
+    // there instead.
     if (translation.status === 'pending') {
-      void this.#canonicalize(fragment.id, content).catch((error: unknown) =>
-        this.#logger.warn('write-triggered canonicalization failed', {
-          id: fragment.id,
-          error: error instanceof Error ? error.message : String(error),
-        })
+      void runInBackground(
+        { kind: 'translate-one', args: { memoryId: fragment.id } },
+        () => this.#canonicalize(fragment.id, content),
+        this.#logger,
+        'write-triggered canonicalization failed',
+        { id: fragment.id }
       );
     }
 
@@ -614,7 +658,8 @@ export class MemoryService {
       const collapsed = await this.#supersedeTargets(fragment.id, ownerId, [
         sessionRefined,
       ]);
-      if (collapsed > 0) {
+      retired.push(...collapsed);
+      if (collapsed.length > 0) {
         this.#logger.info('same-session refinement collapsed', {
           successor: fragment.id,
           target: sessionRefined,
@@ -644,9 +689,21 @@ export class MemoryService {
       new Set([fragment.id, ...(sessionRefined ? [sessionRefined] : [])])
     );
 
+    // A promoted rule anchored to a memory this write retired follows it to
+    // the new one (the store moves it); the writer hears whether it did.
+    const rules = await this.#ruleFates(retired, fragment.id);
+
+    // A task loop that keeps being re-cut is the running status of ongoing
+    // work, so the writer is pointed at the work's card. Interactive writers
+    // only, like the other hints: a provisional extraction cannot act on it.
+    const statusHintText = isProvisionalAgentName(provenance?.agentName ?? null)
+      ? null
+      : await this.#statusHint(content.kind, retired, thread);
+
     return Ok({
       memory_id: fragment.id,
       scope: scope.path,
+      ...(rules.length > 0 && { rules }),
       // The write outgrew one input window, so the writer is told — at the one
       // moment they can act on it. Reactive by construction: it fires on a real
       // miss rather than on every write, which is what lets it share a response
@@ -682,7 +739,95 @@ export class MemoryService {
         !isProvisionalAgentName(provenance?.agentName ?? null) && {
           anchor_hint: ANCHOR_HINT,
         }),
+      ...(statusHintText && { status_hint: statusHintText }),
     });
+  }
+
+  /**
+   * The re-cut hint for a task write that retired an earlier task loop, or
+   * null. Best-effort: a failed read costs the cut number or the card's name,
+   * never the write.
+   */
+  async #statusHint(
+    kind: MemoryKind,
+    retired: readonly SupersededPredecessor[],
+    thread: SessionThread | null
+  ): Promise<string | null> {
+    if (
+      !shouldHintStatus(
+        kind,
+        retired.map((memory) => memory.kind)
+      )
+    ) {
+      return null;
+    }
+    const loops = retired
+      .filter((memory) => memory.kind === 'task')
+      .map((memory) => memory.id);
+    const [cut, boundCard] = await Promise.all([
+      this.#loopCut(loops),
+      this.#boundCardNumber(thread),
+    ]);
+    return statusHint(cut, boundCard);
+  }
+
+  /**
+   * Which cut of one loop a write is: 2 for the first re-cut, plus one for
+   * every earlier task loop behind the ones it retired. Walks the
+   * `superseded_by` chain backwards, bounded so a corrupt cycle cannot spin.
+   */
+  async #loopCut(retiredLoops: readonly string[]): Promise<number> {
+    let cut = 2;
+    let frontier = [...retiredLoops];
+    const seen = new Set(frontier);
+    try {
+      for (
+        let step = 0;
+        step < MAX_LOOP_CUT_STEPS && frontier.length > 0;
+        step += 1
+      ) {
+        const earlier: string[] = [];
+        for (const id of frontier) {
+          for (const predecessor of await this.repository.findPredecessors(
+            id
+          )) {
+            if (predecessor.kind === 'task' && !seen.has(predecessor.id)) {
+              seen.add(predecessor.id);
+              earlier.push(predecessor.id);
+            }
+          }
+        }
+        if (earlier.length === 0) {
+          break;
+        }
+        cut += 1;
+        frontier = earlier;
+      }
+    } catch (error) {
+      this.#logger.warn('loop cut lookup failed; reporting the cuts found', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return cut;
+  }
+
+  /** The number of the card this conversation is bound to, or null. */
+  async #boundCardNumber(thread: SessionThread | null): Promise<number | null> {
+    if (!thread) {
+      return null;
+    }
+    try {
+      const read = await this.briefingWork.forBriefing(
+        thread.scope.path,
+        thread.token
+      );
+      return read?.work.bound_card?.number ?? null;
+    } catch (error) {
+      this.#logger.warn('bound card lookup failed; hint names no card', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   /**
@@ -980,7 +1125,19 @@ export class MemoryService {
       }
       scope = await this.#canonicalWriteScope(scopeResult.unwrap(), byUserId);
     } else {
-      scope = await this.scopeRouting.resolveProjectScope(input.project_hint!);
+      const target = await this.scopeRouting.resolveProjectTarget(
+        input.project_hint!
+      );
+      if (target.isErr()) {
+        return Err(
+          validationFailed(
+            projectHintMissMessage(input.project_hint!, target.unwrapErr(), {
+              portableLayers: false,
+            })
+          )
+        );
+      }
+      scope = target.unwrap();
     }
     // A move is a project-convergence gesture: refusing a personal target
     // keeps an unroutable hint from silently "moving" memories to where they
@@ -1046,7 +1203,16 @@ export class MemoryService {
     if (updated.isErr()) {
       return Err(internalFailure(updated.unwrapErr()));
     }
-    return Ok({ memory_id: fragment.id, invalidated: true });
+    // Forgetting a memory does not retire a rule promoted from it; the
+    // caller is told the rule stays live, and who can revoke it.
+    const rule = (await this.#holdsPromotedRule(fragment.id))
+      ? keptLiveRule(fragment.id)
+      : null;
+    return Ok({
+      memory_id: fragment.id,
+      invalidated: true,
+      ...(rule && { rule }),
+    });
   }
 
   /**
@@ -1143,6 +1309,16 @@ export class MemoryService {
     }
     const edgeType = edgeTypeResult.unwrap();
 
+    // An unknown name becomes a new entity row, readable by everyone who can
+    // see the scope — the same reason entity mentions on a memory are guarded.
+    const secret = guardTextFields([
+      { path: 'src', text: input.src },
+      { path: 'dst', text: input.dst },
+    ]);
+    if (secret) {
+      return Err(validationFailed(secretContentRejectedMessage(secret)));
+    }
+
     const scope = Scope.user(this.context.mustGetCurrentUserEntityId());
 
     // Only names are known here: resolve type-agnostically so an existing
@@ -1214,13 +1390,71 @@ export class MemoryService {
       const ownerId = this.context.mustGetCurrentUserEntityId();
       scopes = [Scope.user(ownerId), Scope.core(ownerId)];
     }
-    const briefing = await this.graphService.buildContext({
+    // The thread assertion. A briefing is what the client hook runs on every
+    // user message, so this is where the environment states where the work is
+    // — and where an echoed token that disagrees with it gets overwritten.
+    // An echoed token with nothing new to assert rides back unchanged, so a
+    // conversation keeps one stable token for its lifetime. Asserted before
+    // the pack is built: the work summary needs it to find the card this
+    // conversation is bound to.
+    const threadToken =
+      (await this.#assertThread(
+        input.conversation_id,
+        pinnedScope,
+        input.thread
+      )) ?? input.thread;
+
+    // THE WORK SUMMARY (a BUDGETED briefing pinned to a project): the board's
+    // work in progress, named in a few lines. It DISPLACES rather than
+    // inflates — the ranked memories leg gives up one row for it — because a
+    // briefing that only ever grows is one the client spills to a file unread.
+    //
+    // Budgeted only, because that is where the displacement was measured
+    // harmless: on a production clone, 6 → 5 ranked rows (what the hooks ask
+    // for) kept every brief probe, while 12 → 11 (the unbudgeted default)
+    // lost two that sat exactly at rank 12. An unbudgeted call therefore
+    // briefs exactly as before; the board stays one `board` call away.
+    // Fail-open: a board problem never costs the session its briefing.
+    const budgets = contextBudgets(input.max_tokens);
+    let work: BriefingWorkRead | null = null;
+    if (
+      input.briefing === true &&
+      pinnedScope &&
+      budgets.maxMemories !== undefined
+    ) {
+      try {
+        work = await this.briefingWork.forBriefing(pinnedScope, threadToken);
+      } catch (error) {
+        this.#logger.warn('briefing work lookup failed; briefing without it', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const pack = await this.graphService.buildContext({
       topicEmbedding,
       topicText,
       scopes,
       briefing: input.briefing === true,
-      ...contextBudgets(input.max_tokens),
+      ...budgets,
+      ...(work && budgets.maxMemories !== undefined
+        ? { maxMemories: Math.max(1, budgets.maxMemories - 1) }
+        : {}),
     });
+
+    // ONE work section, not two: a loop attached to a card the summary names
+    // is reached through that card. Only the listed loops can be subtracted
+    // from the total — one attached beyond the list's cap stays counted,
+    // which over-reports by one rather than hiding a loop.
+    const attached = new Set(work?.attachedLoopIds ?? []);
+    const openLoops = pack.open_loops.filter((loop) => !attached.has(loop.id));
+    const briefing = {
+      ...pack,
+      open_loops: openLoops,
+      open_loops_total: Math.max(
+        openLoops.length,
+        pack.open_loops_total - (pack.open_loops.length - openLoops.length)
+      ),
+    };
 
     // RULES in a briefing come from two channels, merged General-first:
     //   - GENERAL (user-layer): the owner's promoted user-layer rules. They
@@ -1236,16 +1470,14 @@ export class MemoryService {
     let generalRules: ContextRule[] = [];
     let projectRules: ContextRule[] = [];
     if (input.briefing === true) {
-      if (this.userRules) {
-        try {
-          generalRules = await this.userRules.listPromoted();
-        } catch (error) {
-          this.#logger.warn('user rules lookup failed; briefing unruled', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+      try {
+        generalRules = await this.userRules.listPromoted();
+      } catch (error) {
+        this.#logger.warn('user rules lookup failed; briefing unruled', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-      if (this.projectRules && scopes) {
+      if (scopes) {
         const projectScopes = scopes.filter((scope) => scope.isShareable);
         try {
           projectRules = await this.projectRules.listForScopes(projectScopes);
@@ -1275,17 +1507,40 @@ export class MemoryService {
       (a, b) => Number(b.pinned) - Number(a.pinned)
     );
 
-    // The thread assertion. A briefing is what the client hook runs on every
-    // user message, so this is where the environment states where the work is
-    // — and where an echoed token that disagrees with it gets overwritten.
-    // An echoed token with nothing new to assert rides back unchanged, so a
-    // conversation keeps one stable token for its lifetime.
-    const threadToken =
-      (await this.#assertThread(
-        input.conversation_id,
-        pinnedScope,
-        input.thread
-      )) ?? input.thread;
+    // THE RULE GATE: an agent call (no budget) states its task in `topic`, so
+    // a decision model can say which unpinned rules bind it and the rest can
+    // arrive by headline. A hook briefing carries a project name, not a task,
+    // so it is judged only against what the server knows of the conversation
+    // — its bound or continuation card — and not at all without one. The
+    // prompt never reaches the server, so it is never part of this.
+    // Fail-open like the lookups above. Whatever happens, the session gets
+    // only what it reads: a rule's condition of application is for the judge.
+    let gated: RuleGateOutcome = {
+      rules: rules.map(deliverUnjudged),
+      block: null,
+    };
+    if (input.briefing === true && rules.length > 0) {
+      try {
+        gated = await this.ruleGate.apply({
+          rules,
+          subjectId: this.context.mustGetCurrentUserEntityId(),
+          // `judge_rules: false` — the hook's secondary briefing — leaves the
+          // judging to the primary one, so one session start judges once.
+          task:
+            input.judge_rules === false
+              ? null
+              : budgets.maxMemories !== undefined
+                ? hookTaskStatement(work?.work)
+                : topicText,
+        });
+      } catch (error) {
+        // The last resort: the gate reports its own failures in rule_gate,
+        // so only something unexpected lands here.
+        this.#logger.warn('rule gate failed; rules delivered whole', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     // Translation transparency: when the topic was rewritten, tell the caller
     // what was actually briefed on. project_scope reports the pin so clients
@@ -1293,8 +1548,10 @@ export class MemoryService {
     // session default for later scope-less writes).
     return Ok({
       ...briefing,
-      rules,
+      rules: gated.rules,
+      ...(gated.block ? { rule_gate: gated.block } : {}),
       ...(pinnedScope ? { project_scope: pinnedScope } : {}),
+      ...(work ? { work: work.work } : {}),
       ...(threadToken
         ? { session: { attached_project: null, thread: threadToken } }
         : {}),
@@ -1346,21 +1603,6 @@ export class MemoryService {
   }
 
   /**
-   * Resolves a write's `project_hint` to a PROJECT scope, or null when it does
-   * not name one. Routing degrades an unusable hint to the personal scope
-   * (fail-safe for the read side, where a narrowed set is worse than a wide
-   * one); on the write side that degradation IS the silent mis-routing this
-   * path exists to prevent, so it is reported as "unresolvable" and refused.
-   */
-  async #resolveWriteHintScope(projectHint: string): Promise<string | null> {
-    const resolved = await this.scopeRouting.resolveProjectScope(projectHint);
-    if (!resolved.isShareable) {
-      return null;
-    }
-    return resolved.path;
-  }
-
-  /**
    * Decides whether a write may leave the project for the owner's portable
    * (`core`) or personal layer.
    *
@@ -1406,16 +1648,6 @@ export class MemoryService {
         opinion: { portable: true, confidence: 1, rationale: '' },
       };
     }
-    if (!this.portabilityJudge) {
-      return {
-        granted: false,
-        opinion: {
-          portable: false,
-          confidence: 0,
-          rationale: 'no portability judge is configured',
-        },
-      };
-    }
     const opinion = await this.portabilityJudge.judgePortability(
       effectiveKind,
       content,
@@ -1443,7 +1675,7 @@ export class MemoryService {
    * `null` and the call behaves exactly as it would have without it.
    */
   async #liveThread(token: string | undefined): Promise<SessionThread | null> {
-    if (!token || !this.threads) {
+    if (!token) {
       return null;
     }
     try {
@@ -1482,6 +1714,22 @@ export class MemoryService {
       });
       return undefined;
     }
+  }
+
+  /**
+   * The project this conversation works in, as a scope-less `remember` would
+   * find it: the thread the caller echoed, else the transport session's
+   * thread, else the session default. Undefined when the session has none.
+   *
+   * Public for work written outside this service — a card opened without
+   * naming its board lands where a memory written in the same breath would.
+   */
+  async sessionProjectScope(
+    thread: string | undefined
+  ): Promise<string | undefined> {
+    const live =
+      (await this.#liveThread(thread)) ?? (await this.#transportThread());
+    return this.#threadScopePath(live) ?? this.context.getDefaultScope();
   }
 
   /**
@@ -1529,7 +1777,7 @@ export class MemoryService {
       conversationId ??
       (await this.#liveThread(echoedToken))?.conversationId ??
       this.#transportConversationId();
-    if (!identity || !scopePath || !this.threads) {
+    if (!identity || !scopePath) {
       return undefined;
     }
     const scope = Scope.fromStored(scopePath);
@@ -1603,7 +1851,7 @@ export class MemoryService {
    */
   async #transportThread(): Promise<SessionThread | null> {
     const conversationId = this.#transportConversationId();
-    if (!conversationId || !this.threads) {
+    if (!conversationId) {
       return null;
     }
     try {
@@ -1794,15 +2042,55 @@ export class MemoryService {
    * log — a bad target must never fail the write. Capped to
    * MAX_DECLARED_SUPERSEDES per call.
    */
+  /**
+   * What happened to the promoted rules of the memories a write just retired.
+   * Only a report — the store has already moved the rules — so a failed read
+   * costs the report, never the write.
+   */
+  async #ruleFates(
+    retired: readonly SupersededPredecessor[],
+    successorId: string
+  ): Promise<RuleFate[]> {
+    if (retired.length === 0) {
+      return [];
+    }
+    try {
+      const facts = await this.ruleFates.afterSupersede(
+        retired.map((memory) => memory.id),
+        successorId
+      );
+      return facts.map(ruleFateReport);
+    } catch (error) {
+      this.#logger.warn('rule fate lookup failed; supersede unreported', {
+        successor: successorId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /** Whether a memory carries a promoted rule; a failed read says no. */
+  async #holdsPromotedRule(memoryId: string): Promise<boolean> {
+    try {
+      return await this.ruleFates.hasPromotedRule(memoryId);
+    } catch (error) {
+      this.#logger.warn('promoted rule lookup failed; forget unreported', {
+        memoryId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
   async #applyDeclaredSupersedes(
     successorId: string,
     byUserId: UserId,
     links: RememberInput['links']
-  ): Promise<void> {
+  ): Promise<SupersededPredecessor[]> {
     const targets = (links ?? [])
       .filter((link) => link.type === 'supersedes')
       .map((link) => link.dst);
-    await this.#supersedeTargets(successorId, byUserId, targets);
+    return this.#supersedeTargets(successorId, byUserId, targets);
   }
 
   /**
@@ -1813,23 +2101,23 @@ export class MemoryService {
    * lifecycle as forget. Best-effort per target: a missing, foreign,
    * already-invalidated, duplicate, or self target is skipped with a log — a
    * bad target must never fail the write. Capped to MAX_DECLARED_SUPERSEDES
-   * per call. Returns how many targets were actually retired.
+   * per call. Returns the targets that were actually retired, with their kinds.
    */
   async #supersedeTargets(
     successorId: string,
     byUserId: UserId,
     targetIds: string[]
-  ): Promise<number> {
+  ): Promise<SupersededPredecessor[]> {
     const targets = [
       ...new Set(
         targetIds.filter((dst) => isMemoryEndpoint(dst) && dst !== successorId)
       ),
     ].slice(0, MAX_DECLARED_SUPERSEDES);
     if (targets.length === 0) {
-      return 0;
+      return [];
     }
     const successor = memoryIdSchema.parse(successorId);
-    let applied = 0;
+    const applied: SupersededPredecessor[] = [];
 
     for (const target of targets) {
       const found = await this.repository.findOneById(target);
@@ -1862,7 +2150,7 @@ export class MemoryService {
         });
         continue;
       }
-      applied += 1;
+      applied.push({ id: target, kind: fragment.content.kind });
       this.#logger.info('supersede applied', {
         target,
         successor: successorId,

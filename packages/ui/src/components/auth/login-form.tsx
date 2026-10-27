@@ -12,6 +12,11 @@ import {
 } from '@workspace/ui/components/card';
 import { Field, FieldLabel } from '@workspace/ui/components/field';
 import { Input } from '@workspace/ui/components/input';
+import {
+  ConsentSentence,
+  type ConsentCopy,
+} from '@workspace/ui/components/auth/consent-sentence';
+import { ProviderMark } from '@workspace/ui/components/auth/provider-mark';
 
 /**
  * LoginForm — combined sign-in/sign-up card. Mechanism only: all copy arrives
@@ -39,22 +44,38 @@ interface LoginFormLabels {
 }
 
 /**
- * What a deployment asks a new account to accept. Absent = the instance
- * publishes no documents, and then nothing about consent is rendered at all.
- *
- * `template` carries the two placeholders `{terms}` and `{privacy}`; each is
- * replaced by a link when its address is configured and by plain text when it
- * is not, so an instance that publishes only one document still reads as a
- * sentence.
+ * What a deployment asks a new account to accept, plus the checkbox state.
+ * Absent = the instance publishes no documents, and then nothing about
+ * consent is rendered at all. The sentence itself is ConsentSentence's.
  */
-interface LoginFormConsent {
-  template: string;
-  termsLabel: string;
-  privacyLabel: string;
-  termsHref?: string;
-  privacyHref?: string;
+interface LoginFormConsent extends ConsentCopy {
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
+}
+
+/** One social provider the instance has switched on. */
+interface LoginFormProvider {
+  id: 'github' | 'google';
+  /** Button text, already translated — "Continue with GitHub". */
+  label: string;
+}
+
+/**
+ * The providers to offer above the fields. Absent, or with no items, the
+ * form draws nothing about providers at all: an instance that configured none
+ * must look exactly as it did before they existed.
+ */
+interface LoginFormProviders {
+  items: LoginFormProvider[];
+  /** The word between the buttons and the fields — "or". */
+  dividerLabel: string;
+  /**
+   * Shown under the buttons in sign-up mode only: an account that already
+   * exists for this email through a provider answers a password sign-up
+   * silently, so the form has to say which door to use before that happens.
+   */
+  linkedHint: string;
+  onSelect: (id: LoginFormProvider['id']) => void;
 }
 
 interface LoginFormProps {
@@ -72,45 +93,61 @@ interface LoginFormProps {
   forgotPasswordHref: string;
   /** Only rendered in sign-up mode, and only when the instance has documents. */
   consent?: LoginFormConsent;
+  /** Social providers to offer; see LoginFormProviders. */
+  providers?: LoginFormProviders;
   /** Client-router link injected by the app (e.g. next/link); plain <a> by default. */
   linkComponent?: React.ElementType;
 }
 
 /**
- * The consent sentence with its links in place. The copy arrives already
- * translated, so the only thing decided here is where a link goes — splitting
- * on the placeholders keeps the word order of every language intact, which
- * concatenating fragments would not.
+ * The provider buttons, the divider and the sign-up hint. Rendered only when
+ * there is at least one provider; the buttons are `type="button"` so a click
+ * never submits the password form around them.
  */
-function ConsentSentence({ consent }: { consent: LoginFormConsent }) {
-  const parts = consent.template.split(/(\{terms\}|\{privacy\})/g);
+function ProviderButtons({
+  providers,
+  isSignUp,
+  pending,
+}: {
+  providers: LoginFormProviders;
+  isSignUp: boolean;
+  pending: boolean;
+}) {
   return (
-    <span>
-      {parts.map((part, index) => {
-        const isTerms = part === '{terms}';
-        const isPrivacy = part === '{privacy}';
-        if (!isTerms && !isPrivacy) {
-          return <React.Fragment key={index}>{part}</React.Fragment>;
-        }
-        const label = isTerms ? consent.termsLabel : consent.privacyLabel;
-        const href = isTerms ? consent.termsHref : consent.privacyHref;
-        if (!href) {
-          return <React.Fragment key={index}>{label}</React.Fragment>;
-        }
-        return (
-          <a
-            key={index}
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            data-testid={isTerms ? 'auth-login-terms' : 'auth-login-privacy'}
-            className="text-foreground underline underline-offset-2"
+    <div className="space-y-3">
+      <div className="space-y-2">
+        {providers.items.map((provider) => (
+          <Button
+            key={provider.id}
+            type="button"
+            variant="outline"
+            data-testid={`auth-login-provider-${provider.id}`}
+            disabled={pending}
+            className="w-full gap-2"
+            onClick={() => providers.onSelect(provider.id)}
           >
-            {label}
-          </a>
-        );
-      })}
-    </span>
+            <ProviderMark id={provider.id} />
+            {provider.label}
+          </Button>
+        ))}
+      </div>
+      {isSignUp ? (
+        <p
+          data-testid="auth-login-linked-hint"
+          className="text-muted-foreground text-center text-xs"
+        >
+          {providers.linkedHint}
+        </p>
+      ) : null}
+      <div
+        data-testid="auth-login-divider"
+        className="text-muted-foreground flex items-center gap-3 text-xs uppercase"
+      >
+        <span className="bg-border h-px flex-1" />
+        <span>{providers.dividerLabel}</span>
+        <span className="bg-border h-px flex-1" />
+      </div>
+    </div>
   );
 }
 
@@ -128,9 +165,11 @@ function LoginForm({
   onSubmit,
   forgotPasswordHref,
   consent,
+  providers,
   linkComponent: LinkComponent = 'a',
 }: LoginFormProps) {
   const isSignUp = mode === 'sign-up';
+  const hasProviders = Boolean(providers && providers.items.length > 0);
 
   return (
     <Card className="w-full max-w-sm">
@@ -140,7 +179,14 @@ function LoginForm({
           {isSignUp ? labels.signUpDescription : labels.signInDescription}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
+        {hasProviders && providers ? (
+          <ProviderButtons
+            providers={providers}
+            isSignUp={isSignUp}
+            pending={pending}
+          />
+        ) : null}
         <form
           data-testid="auth-login-form"
           onSubmit={(event) => {
@@ -257,5 +303,7 @@ export {
   type LoginFormConsent,
   type LoginFormLabels,
   type LoginFormProps,
+  type LoginFormProvider,
+  type LoginFormProviders,
   type LoginMode,
 };

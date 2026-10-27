@@ -18,7 +18,10 @@
     "@workspace/di": "workspace:*",
     "@workspace/domain": "workspace:*",
     "@workspace/embedding": "workspace:*",
+    "@workspace/judgment": "workspace:*",
     "@workspace/logger": "workspace:*",
+    "@workspace/policy": "workspace:*",
+    "@workspace/usage": "workspace:*",
     "oxide.ts": "catalog:",
     "zod": "catalog:"
   },
@@ -35,6 +38,16 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    },
+    "./content-guard": {
+      "types": "./src/content-guard.ts",
+      "import": "./src/content-guard.ts",
+      "default": "./src/content-guard.ts"
     }
   }
 }

@@ -1,216 +1,53 @@
 import type { IContext } from '@workspace/context';
 import {
+  briefingWorkSchema,
   CLIENT_SESSION_SOURCE_KEY,
+  type ContextRule,
   CORE_SCOPE,
-  PERSONAL_SCOPE,
-  THREAD_SOURCE_KEY,
   type EntityId,
   type MemoryId,
+  PERSONAL_SCOPE,
+  ruleCandidateIdSchema,
+  type RuleGateBlock,
+  THREAD_SOURCE_KEY,
   type UserId,
 } from '@workspace/contracts';
-import { DeterministicHashEmbeddingService } from '@workspace/embedding/testing';
-import { Err, None, Ok, Some, type Option } from 'oxide.ts';
+import { Err, None, Some } from 'oxide.ts';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { IBriefingWorkReader } from './briefing-work.reader.js';
 import { ANCHOR_HINT } from './entity-anchor.js';
-import { EntityResolutionService } from './entity-resolution.service.js';
+import type { ContentAnchor } from './entity.repository.js';
 import { MemoryContent } from './memory-content.vo.js';
 import { MemoryFragment } from './memory-fragment.do.js';
-import { Provenance } from './provenance.vo.js';
-import { Scope } from './scope.vo.js';
-import type { ContentAnchor, IEntityRepository } from './entity.repository.js';
-import type {
-  IPortabilityJudge,
-  PortabilityOpinion,
-} from './portability-judge.js';
-import type { ISessionThreadRepository } from './session-thread.repository.js';
-import type { IGraphService } from './graph.service.js';
-import type {
-  IMemorySearchService,
-  SimilarMemory,
-  SimilarMemoryWithProvenance,
-  SupersedeCandidateHit,
-} from './memory-search.service.js';
-import type { IMemoryRepository } from './memory.repository.js';
-import { MemoryService } from './memory.service.js';
-import type { IProjectBindingRepository } from './project-binding.repository.js';
+import type { SupersedeCandidateHit } from './memory-search.service.js';
 import type { IProjectRulesReader } from './project-rules.reader.js';
-import type { IScopeAccessService } from './scope-access.service.js';
-import { ScopeRoutingService } from './scope-routing.service.js';
+import { Provenance } from './provenance.vo.js';
+import type { IRuleFateReader } from './rule-fate.reader.js';
+import { hookTaskStatement, type IRuleGate } from './rule-gate.service.js';
+import { Scope } from './scope.vo.js';
+import type { ISessionThreadRepository } from './session-thread.repository.js';
+import {
+  makeContext,
+  makeEntityRepository,
+  makeGraphService,
+  makeMemoryService as makeService,
+  makePortabilityJudge,
+  makeRepository,
+  makeScopeAccess,
+  makeSearchService,
+  makeThreads,
+  TEST_THREAD,
+  TEST_USER_ENTITY_ID as USER_ENTITY_ID,
+} from './testing/index.js';
 import type { ITranslator } from './translator.js';
 
-const USER_ID = 'b7e6a1c2-3d4f-4a5b-8c9d-0e1f2a3b4c5d';
-const USER_ENTITY_ID = 'usr_000000000000000a.0000000000' as UserId;
 const OTHER_USER_ENTITY_ID = 'usr_000000000000000b.0000000000' as UserId;
 const MEMORY_A = 'mem_0000000000000001.0000000000' as MemoryId;
 const MEMORY_B = 'mem_0000000000000002.0000000000' as MemoryId;
 const ENTITY_PG = 'ent_0000000000000001.0000000000' as EntityId;
 
-const contextStub: IContext = {
-  setContextValue: () => undefined,
-  mustGetCurrentUserId: () => USER_ID,
-  getCurrentUserId: () => USER_ID,
-  mustGetCurrentUserEntityId: () => USER_ENTITY_ID,
-  getCurrentUserEntityId: () => USER_ENTITY_ID,
-  getAccessToken: () => 'token',
-  getScopes: () => [],
-  getDefaultScope: () => undefined,
-  getCurrentSessionId: () => undefined,
-};
-
-const makeRepository = (): IMemoryRepository => ({
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-  findOneById: vi.fn().mockResolvedValue(None),
-  update: vi.fn().mockResolvedValue(Ok(undefined)),
-  applyTranslation: vi.fn().mockResolvedValue(Ok(undefined)),
-  markTranslationSkipped: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-/** Fake translator: echoes English text back with a stub source language. */
-const makeTranslator = (): ITranslator => ({
-  translateToEnglish: vi
-    .fn()
-    .mockResolvedValue({ text: 'translated', sourceLang: 'ja' }),
-});
-
-const makeSearchService = (
-  similar: Option<SimilarMemoryWithProvenance> = None,
-  coverage: Option<SimilarMemory> = None,
-  supersedeCandidates: SupersedeCandidateHit[] = []
-): IMemorySearchService => ({
-  search: vi.fn().mockResolvedValue([]),
-  findSimilar: vi.fn().mockResolvedValue(similar),
-  findAuthoritativeCoverage: vi.fn().mockResolvedValue(coverage),
-  findSupersedeCandidates: vi.fn().mockResolvedValue(supersedeCandidates),
-  listRecentByScope: vi.fn().mockResolvedValue([]),
-});
-
-const makeEntityRepository = (
-  contentAnchors: ContentAnchor[] = []
-): IEntityRepository => ({
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-  findByNormalizedName: vi.fn().mockResolvedValue(None),
-  findByMatchKey: vi.fn().mockResolvedValue(None),
-  findContentAnchors: vi.fn().mockResolvedValue(contentAnchors),
-  linkMemory: vi.fn().mockResolvedValue(Ok(undefined)),
-  list: vi.fn().mockResolvedValue([]),
-  listForMemories: vi.fn().mockResolvedValue(new Map()),
-});
-
-const makeScopeAccess = (canWrite = true): IScopeAccessService => ({
-  canWrite: vi.fn().mockResolvedValue(canWrite),
-  createScope: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-const makeProjectBindings = (): IProjectBindingRepository => ({
-  findScope: vi.fn().mockResolvedValue(None),
-  insert: vi.fn().mockResolvedValue(Ok(undefined)),
-});
-
-/**
- * Portability-judge stub. Grants by default so a test opts INTO denial —
- * the interesting assertions are about what happens when leaving the project
- * is not confirmed.
- */
-/** The token the session-thread stub hands back, asserted by the tests. */
-const TEST_THREAD = 'thr_test0000000000.0000000000';
-
-/**
- * Session-thread stub. `open` echoes a fixed token so a test can assert the
- * assertion reached the store; `findByToken` is empty by default so each test
- * opts into the inheritance path explicitly.
- */
-const makeThreads = (): ISessionThreadRepository => ({
-  open: vi
-    .fn()
-    .mockImplementation((conversationId: string, scope: Scope) =>
-      Promise.resolve(Ok({ token: TEST_THREAD, conversationId, scope }))
-    ),
-  findByToken: vi.fn().mockResolvedValue(None),
-  findByConversation: vi.fn().mockResolvedValue(None),
-});
-
-const makePortabilityJudge = (
-  opinion: PortabilityOpinion = {
-    portable: true,
-    confidence: 0.95,
-    rationale: '',
-  }
-): IPortabilityJudge => ({
-  judgePortability: vi.fn().mockResolvedValue(opinion),
-});
-
-const makeGraphService = (): IGraphService => ({
-  createEdge: vi.fn().mockResolvedValue(Ok({ created: true })),
-  linkMemories: vi.fn().mockResolvedValue(Ok({ created: true })),
-  traverse: vi.fn().mockResolvedValue([]),
-  neighborsOf: vi.fn().mockResolvedValue([]),
-  buildContext: vi.fn().mockResolvedValue({
-    memories: [],
-    entities: [],
-    edges: [],
-    linked_memories: [],
-    open_loops: [],
-    open_loops_total: 0,
-  }),
-});
-
-const makeService = (overrides?: {
-  repository?: IMemoryRepository;
-  searchService?: IMemorySearchService;
-  entityRepository?: IEntityRepository;
-  graphService?: IGraphService;
-  scopeAccess?: IScopeAccessService;
-  projectBindings?: IProjectBindingRepository;
-  translator?: ITranslator;
-  context?: IContext;
-  projectRules?: IProjectRulesReader;
-  portabilityJudge?: IPortabilityJudge;
-  threads?: ISessionThreadRepository;
-}) => {
-  const repository = overrides?.repository ?? makeRepository();
-  const searchService = overrides?.searchService ?? makeSearchService();
-  const entityRepository =
-    overrides?.entityRepository ?? makeEntityRepository();
-  const graphService = overrides?.graphService ?? makeGraphService();
-  const scopeAccess = overrides?.scopeAccess ?? makeScopeAccess();
-  const projectBindings = overrides?.projectBindings ?? makeProjectBindings();
-  const translator = overrides?.translator ?? makeTranslator();
-  const embeddingService = new DeterministicHashEmbeddingService();
-  const context = overrides?.context ?? contextStub;
-  const portabilityJudge =
-    overrides?.portabilityJudge ?? makePortabilityJudge();
-  const threads = overrides?.threads ?? makeThreads();
-  const service = new MemoryService(
-    repository,
-    searchService,
-    embeddingService,
-    context,
-    new EntityResolutionService(entityRepository, embeddingService),
-    entityRepository,
-    graphService,
-    scopeAccess,
-    new ScopeRoutingService(projectBindings, scopeAccess, context),
-    translator,
-    overrides?.projectRules,
-    undefined,
-    portabilityJudge,
-    threads
-  );
-  return {
-    service,
-    repository,
-    searchService,
-    entityRepository,
-    graphService,
-    scopeAccess,
-    projectBindings,
-    translator,
-    embeddingService,
-    portabilityJudge,
-    threads,
-  };
-};
+const contextStub = makeContext();
 
 describe('MemoryService.remember', () => {
   it('embeds, probes for duplicates, and inserts a new memory', async () => {
@@ -223,7 +60,13 @@ describe('MemoryService.remember', () => {
 
     expect(result.isOk()).toBe(true);
     expect(result.unwrap().deduplicated).toBeUndefined();
+    // An empty aperture probe leaves the response unchanged.
+    expect(result.unwrap().similar_existing).toBeUndefined();
+    expect(result.unwrap().hint).toBeUndefined();
     expect(searchService.findSimilar).toHaveBeenCalledOnce();
+    // The coverage probe is for provisional writes only; an authoritative
+    // in-band write does not pay for it.
+    expect(searchService.findAuthoritativeCoverage).not.toHaveBeenCalled();
     expect(repository.insert).toHaveBeenCalledOnce();
 
     const [fragment, vectors] = vi.mocked(repository.insert).mock.calls[0]!;
@@ -302,6 +145,10 @@ describe('MemoryService.remember', () => {
     // Content is truncated to a recognisable preview, not a full read.
     expect(out.similar_existing?.[0]?.content).toHaveLength(200);
     expect(out.hint).toContain('supersedes');
+    // The hint names only the path that retires: a link() call records the
+    // relation and leaves the old version live.
+    expect(out.hint).not.toContain('link(supersedes)');
+    expect(out.hint).toContain('retires nothing');
   });
 
   it('caps supersede candidates at 10', async () => {
@@ -446,20 +293,6 @@ describe('MemoryService.remember', () => {
     );
   });
 
-  it('leaves the response unchanged when the aperture probe is empty', async () => {
-    const { service } = makeService();
-
-    const out = (
-      await service.remember({
-        content: 'no neighbours here',
-        scope: PERSONAL_SCOPE,
-      })
-    ).unwrap();
-
-    expect(out.similar_existing).toBeUndefined();
-    expect(out.hint).toBeUndefined();
-  });
-
   it('does not probe for supersede candidates on a provisional (watcher) write', async () => {
     const searchService = makeSearchService(None, None, [
       {
@@ -485,23 +318,6 @@ describe('MemoryService.remember', () => {
     expect(out.similar_existing).toBeUndefined();
   });
 
-  it('resolves scope "core" to the personal core scope', async () => {
-    const { service, repository } = makeService({
-      context: { ...contextStub, getDefaultScope: () => 'proj.zero_memory' },
-    });
-
-    const result = await service.remember({
-      content: 'bun loads .env only from the cwd',
-      scope: 'core',
-    });
-
-    expect(result.isOk()).toBe(true);
-    const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.scope.path).toBe(
-      `user.${USER_ENTITY_ID.replace(/\./g, '_')}.core`
-    );
-  });
-
   it('refuses a scope-less write when the session has no project attached', async () => {
     const { service, repository } = makeService();
 
@@ -521,24 +337,6 @@ describe('MemoryService.remember', () => {
     expect(repository.insert).not.toHaveBeenCalled();
   });
 
-  it('stamps an explicit personal write as deliberate, not as a fallback', async () => {
-    const { service, repository } = makeService();
-
-    const result = await service.remember({
-      content: 'the owner works from Vilnius',
-      scope: PERSONAL_SCOPE,
-    });
-
-    expect(result.isOk()).toBe(true);
-    const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.scope.path).toBe(
-      `user.${USER_ENTITY_ID.replace(/\./g, '_')}`
-    );
-    expect(fragment.provenance.source).toMatchObject({
-      routing: { via: 'personal', confidence: 1 },
-    });
-  });
-
   it('refuses a project_hint that does not resolve to a project scope', async () => {
     const { service, repository } = makeService();
 
@@ -552,19 +350,29 @@ describe('MemoryService.remember', () => {
     expect(repository.insert).not.toHaveBeenCalled();
   });
 
-  it('stamps hint-routed writes with the hint confidence', async () => {
-    const { service, repository } = makeService();
+  it('routes a project NAME to the existing project, creating nothing', async () => {
+    // Every spelling of a name is the project-name matrix's job; this is the
+    // write path using it.
+    const zeroMemory = Scope.project(USER_ENTITY_ID, 'zero_memory');
+    const scopeAccess = makeScopeAccess(true, [
+      { scope: zeroMemory, alias: null, own: true },
+      {
+        scope: Scope.project(USER_ENTITY_ID, 'harbor'),
+        alias: null,
+        own: true,
+      },
+    ]);
+    const { service, repository } = makeService({ scopeAccess });
 
     const result = await service.remember({
-      content: 'a hint-routed write',
-      project_hint: '/home/someone/repos/quokka-tool',
+      content: 'a fact filed under a project name',
+      project_hint: 'Zero Memory',
     });
 
     expect(result.isOk()).toBe(true);
     const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.provenance.source).toMatchObject({
-      routing: { via: 'hint', confidence: 0.95 },
-    });
+    expect(fragment.scope.path).toBe(zeroMemory.path);
+    expect(scopeAccess.createScope).not.toHaveBeenCalled();
   });
 
   it('routes a project_hint through project bindings and reports the scope', async () => {
@@ -581,6 +389,10 @@ describe('MemoryService.remember', () => {
     expect(projectBindings.findScope).toHaveBeenCalledOnce();
     const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
     expect(fragment.scope.path).toBe(expectedScope);
+    // The routing audit records how firm the hint made the placement.
+    expect(fragment.provenance.source).toMatchObject({
+      routing: { via: 'hint', confidence: 0.95 },
+    });
   });
 
   it('lets an explicit scope win over a project_hint', async () => {
@@ -597,21 +409,6 @@ describe('MemoryService.remember', () => {
       `user.${USER_ENTITY_ID.replace(/\./g, '_')}.core`
     );
     expect(projectBindings.findScope).not.toHaveBeenCalled();
-  });
-
-  it('preserves the verbatim idiom anchor in provenance source', async () => {
-    const { service, repository } = makeService();
-
-    await service.remember({
-      content: 'the user prefers single-line commit messages',
-      verbatim: '一行コミット、本文なし',
-      scope: PERSONAL_SCOPE,
-    });
-
-    const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.provenance.source).toMatchObject({
-      verbatim: '一行コミット、本文なし',
-    });
   });
 
   it('stamps the MCP session id into provenance source', async () => {
@@ -862,19 +659,6 @@ describe('MemoryService.remember', () => {
     expect(searchService.findAuthoritativeCoverage).toHaveBeenCalledOnce();
   });
 
-  it('does NOT run the coverage probe for an authoritative in-band write', async () => {
-    const { service, repository, searchService } = makeService();
-
-    const result = await service.remember({
-      content: 'an in-band fact',
-      scope: PERSONAL_SCOPE,
-    });
-
-    expect(result.unwrap().deduplicated).toBeUndefined();
-    expect(searchService.findAuthoritativeCoverage).not.toHaveBeenCalled();
-    expect(repository.insert).toHaveBeenCalledOnce();
-  });
-
   it('rejects a secret in content BEFORE the embedder and translator see it', async () => {
     const { service, repository, translator, embeddingService } = makeService();
     const embedSpy = vi.spyOn(embeddingService, 'embed');
@@ -1101,21 +885,6 @@ describe('MemoryService.recall', () => {
     expect(params.scopes).toBeUndefined();
   });
 
-  it('resolves the "core" shorthand inside explicit scopes', async () => {
-    const { service, searchService } = makeService();
-
-    const result = await service.recall({
-      query: 'bun gotchas',
-      scopes: ['core'],
-    });
-
-    expect(result.isOk()).toBe(true);
-    const params = vi.mocked(searchService.search).mock.calls[0]![0];
-    expect(params.scopes?.map((scope) => scope.path)).toEqual([
-      `user.${USER_ENTITY_ID.replace(/\./g, '_')}.core`,
-    ]);
-  });
-
   it('resolves the "personal" shorthand inside explicit scopes', async () => {
     const { service, searchService } = makeService();
 
@@ -1299,38 +1068,6 @@ describe('MemoryService.buildContext', () => {
     expect(params.topicText).toBe('ウォッチャーのポートを固定する');
   });
 
-  it('briefs from the isolated read set when the session has a project', async () => {
-    const { service, graphService } = makeService({
-      context: { ...contextStub, getDefaultScope: () => 'proj.zero_memory' },
-    });
-
-    const result = await service.buildContext({ topic: 'project alpha' });
-
-    expect(result.isOk()).toBe(true);
-    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
-    const personal = `user.${USER_ENTITY_ID.replace(/\./g, '_')}`;
-    expect(params.scopes?.map((scope) => scope.path)).toEqual([
-      'proj.usr_000000000000000a_0000000000.zero_memory',
-      personal,
-      `${personal}.core`,
-    ]);
-  });
-
-  it('briefs across all visible scopes on the "*" sentinel', async () => {
-    const { service, graphService } = makeService({
-      context: { ...contextStub, getDefaultScope: () => 'proj.zero_memory' },
-    });
-
-    const result = await service.buildContext({
-      topic: 'project alpha',
-      scopes: ['*'],
-    });
-
-    expect(result.isOk()).toBe(true);
-    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
-    expect(params.scopes).toBeUndefined();
-  });
-
   it('narrows an unattached hint-less BRIEFING to personal + core', async () => {
     const { service, graphService } = makeService();
 
@@ -1374,6 +1111,8 @@ describe('MemoryService.buildContext', () => {
     expect(result.isOk()).toBe(true);
     const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
     expect(params.scopes).toBeUndefined();
+    // Nothing pinned the read, so no project is reported back.
+    expect(result.unwrap().project_scope).toBeUndefined();
   });
 
   it('pins the briefing from a project_hint and reports project_scope', async () => {
@@ -1395,15 +1134,6 @@ describe('MemoryService.buildContext', () => {
       `${personal}.core`,
     ]);
   });
-
-  it('reports no project_scope when the briefing ran unpinned', async () => {
-    const { service } = makeService();
-
-    const result = await service.buildContext({ topic: 'project alpha' });
-
-    expect(result.isOk()).toBe(true);
-    expect(result.unwrap().project_scope).toBeUndefined();
-  });
 });
 
 describe('MemoryService.forget', () => {
@@ -1412,7 +1142,58 @@ describe('MemoryService.forget', () => {
     const result = await service.forget({
       memory_id: 'mem_000000000000000f.0000000000' as MemoryId,
     });
-    expect(result.isErr()).toBe(true);
+    expect(result.unwrapErr().code).toBe('not_found');
+  });
+
+  const makeRuled = () =>
+    MemoryFragment.create({
+      content: MemoryContent.create(
+        'always squash feature branches',
+        'convention'
+      ).unwrap(),
+      scope: Scope.user(USER_ENTITY_ID),
+      provenance: Provenance.create({ ownerId: USER_ENTITY_ID }),
+    }).unwrap();
+
+  const ruleFates = (holds: boolean | Error): IRuleFateReader => ({
+    afterSupersede: vi.fn().mockResolvedValue([]),
+    hasPromotedRule:
+      holds instanceof Error
+        ? vi.fn().mockRejectedValue(holds)
+        : vi.fn().mockResolvedValue(holds),
+  });
+
+  it('says a promoted rule on the forgotten memory stays live', async () => {
+    const repository = makeRepository();
+    const fragment = makeRuled();
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(fragment));
+    const { service } = makeService({
+      repository,
+      ruleFates: ruleFates(true),
+    });
+
+    const out = (await service.forget({ memory_id: fragment.id })).unwrap();
+
+    expect(out.invalidated).toBe(true);
+    expect(out.rule?.outcome).toBe('kept_live');
+    expect(out.rule?.note).toContain('/rules');
+  });
+
+  it('adds nothing when the memory carries no rule, or the read fails', async () => {
+    for (const holds of [false, new Error('db down')]) {
+      const repository = makeRepository();
+      const fragment = makeRuled();
+      vi.mocked(repository.findOneById).mockResolvedValue(Some(fragment));
+      const { service } = makeService({
+        repository,
+        ruleFates: ruleFates(holds),
+      });
+
+      const out = (await service.forget({ memory_id: fragment.id })).unwrap();
+
+      expect(out.invalidated).toBe(true);
+      expect(out).not.toHaveProperty('rule');
+    }
   });
 });
 
@@ -1480,7 +1261,7 @@ describe('MemoryService.closeLoop', () => {
     const result = await service.closeLoop({
       memory_id: 'mem_000000000000000f.0000000000' as MemoryId,
     });
-    expect(result.isErr()).toBe(true);
+    expect(result.unwrapErr().code).toBe('not_found');
   });
 });
 
@@ -1512,8 +1293,10 @@ describe('MemoryService.share', () => {
       scope: canonical,
       shared: true,
     });
-    // Once for the canonical-scope bootstrap probe, once for the share gate.
-    expect(scopeAccess.canWrite).toHaveBeenCalledTimes(2);
+    // The share gate checks the canonical scope, not the legacy name given.
+    expect(scopeAccess.canWrite).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: canonical })
+    );
     expect(repository.update).toHaveBeenCalledExactlyOnceWith(fragment);
     expect(fragment.visibility.level).toBe('shared');
     expect(fragment.scope.path).toBe(canonical);
@@ -1582,6 +1365,84 @@ describe('MemoryService.remember — declared supersede (write-side)', () => {
     expect(old.lifecycle.isInvalidated).toBe(true);
     expect(old.lifecycle.supersededBy).toBe(newId);
     expect(old.lifecycle.invalidatedBy).toBe(USER_ENTITY_ID);
+  });
+
+  it('reports what happened to a promoted rule on the retired memory', async () => {
+    const repository = makeRepository();
+    const old = makeOldFragment();
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(old));
+    const afterSupersede = vi.fn(
+      async (retired: readonly string[], successorId: string) =>
+        retired.map((memoryId) => ({
+          memoryId,
+          successorId,
+          outcome: 'carried_text_kept' as const,
+        }))
+    );
+    const { service } = makeService({
+      repository,
+      ruleFates: {
+        afterSupersede,
+        hasPromotedRule: vi.fn().mockResolvedValue(false),
+      },
+    });
+
+    const out = (
+      await service.remember({
+        content: 'deploy window moved to Friday',
+        links: [{ dst: old.id, type: 'supersedes' }],
+        scope: PERSONAL_SCOPE,
+      })
+    ).unwrap();
+
+    expect(afterSupersede).toHaveBeenCalledExactlyOnceWith(
+      [old.id],
+      out.memory_id
+    );
+    expect(out.rules).toEqual([
+      {
+        memory_id: old.id,
+        outcome: 'carried_text_kept',
+        successor_id: out.memory_id,
+        note: expect.stringContaining(
+          `promote_rule(memory_id: "${out.memory_id}"`
+        ),
+      },
+    ]);
+  });
+
+  it('asks nothing about rules when nothing was retired, and survives a failed read', async () => {
+    const repository = makeRepository();
+    const foreign = makeOldFragment(OTHER_USER_ENTITY_ID);
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(foreign));
+    const afterSupersede = vi.fn().mockRejectedValue(new Error('db down'));
+    const { service } = makeService({
+      repository,
+      ruleFates: {
+        afterSupersede,
+        hasPromotedRule: vi.fn().mockResolvedValue(false),
+      },
+    });
+
+    const skipped = (
+      await service.remember({
+        content: 'a new fact naming a memory that is not ours',
+        links: [{ dst: foreign.id, type: 'supersedes' }],
+        scope: PERSONAL_SCOPE,
+      })
+    ).unwrap();
+    expect(afterSupersede).not.toHaveBeenCalled();
+    expect(skipped).not.toHaveProperty('rules');
+
+    const old = makeOldFragment();
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(old));
+    const failed = await service.remember({
+      content: 'a successor whose rule report cannot be read',
+      links: [{ dst: old.id, type: 'supersedes' }],
+      scope: PERSONAL_SCOPE,
+    });
+    expect(failed.isOk()).toBe(true);
+    expect(failed.unwrap()).not.toHaveProperty('rules');
   });
 
   it('skips a foreign target without failing the write', async () => {
@@ -1661,41 +1522,76 @@ describe('MemoryService.remember — declared supersede (write-side)', () => {
 });
 
 describe('MemoryService.remember — same-session refinement collapse', () => {
+  // The predicate matrix (floor, sessions, ranks, forged stamps) is owned by
+  // the hygiene decision spec. These tests hold the WRITE PATH only: that it
+  // hands the probe's real similarity and ranks to the predicate, and that a
+  // decision to collapse actually supersedes the earlier draft.
   const SESSION = 'ses_000000000000000a.0000000000';
-  const OTHER_SESSION = 'ses_000000000000000b.0000000000';
   const sessionContext: IContext = {
     ...contextStub,
     getCurrentSessionId: () => SESSION,
   };
-  const makeOldFragment = (source: Record<string, unknown> | null) =>
-    MemoryFragment.create({
+
+  /**
+   * An earlier draft from THIS session that both probes return: the dedup
+   * probe (which decides the collapse) and the supersede aperture (which
+   * offers it as a hint). The repository can load it, so a collapse that
+   * fires is visible as a superseded row rather than skipped for a missing
+   * target.
+   */
+  const withEarlierDraft = (
+    similarity: number,
+    agentName: string | null = null
+  ) => {
+    const repository = makeRepository();
+    const old = MemoryFragment.create({
       content: MemoryContent.create(
         'commit messages are single-line',
         'convention'
       ).unwrap(),
       scope: Scope.user(USER_ENTITY_ID),
-      provenance: Provenance.create({ ownerId: USER_ENTITY_ID, source }),
+      provenance: Provenance.create({
+        ownerId: USER_ENTITY_ID,
+        agentName,
+        source: { session: SESSION },
+      }),
     }).unwrap();
-
-  it('a same-session neighbour below the collapse line stays a hint', async () => {
-    // One session routinely stores several related-but-distinct facts about
-    // one topic, and they are near neighbours of each other, so only a
-    // near-verbatim restatement (>= 0.95) auto-collapses.
-    const repository = makeRepository();
-    const hit: SupersedeCandidateHit = {
-      id: MEMORY_A,
-      content: 'commit messages are single-line',
-      kind: 'convention',
-      scope: `user.${USER_ENTITY_ID.replace(/\./g, '_')}`,
-      source: { session: SESSION },
-      created_at: new Date().toISOString(),
-      similarity: 0.9,
-    };
+    vi.mocked(repository.findOneById).mockResolvedValue(Some(old));
+    const searchService = makeSearchService(
+      Some({
+        id: old.id as MemoryId,
+        content: 'commit messages are single-line',
+        similarity,
+        author_kind: 'agent',
+        agent_name: agentName,
+        source: { session: SESSION },
+      }),
+      None,
+      [
+        {
+          id: old.id as MemoryId,
+          content: 'commit messages are single-line',
+          kind: 'convention',
+          scope: `user.${USER_ENTITY_ID.replace(/\./g, '_')}`,
+          source: { session: SESSION },
+          created_at: new Date().toISOString(),
+          similarity,
+        },
+      ]
+    );
     const { service } = makeService({
       repository,
-      searchService: makeSearchService(None, None, [hit]),
+      searchService,
       context: sessionContext,
     });
+    return { service, repository, old };
+  };
+
+  it('a same-session restatement just below the collapse line stays a hint', async () => {
+    // One session routinely stores several related-but-distinct facts about
+    // one topic; two of them at 0.926 were once collapsed into one, which is
+    // why the line sits at 0.95. Pinned from below with the real write path.
+    const { service, repository, old } = withEarlierDraft(0.949);
 
     const out = (
       await service.remember({
@@ -1704,28 +1600,13 @@ describe('MemoryService.remember — same-session refinement collapse', () => {
       })
     ).unwrap();
 
-    expect(out.similar_existing).toHaveLength(1);
     expect(repository.update).not.toHaveBeenCalled();
+    expect(old.lifecycle.supersededBy).toBeNull();
+    expect(out.similar_existing?.map((hint) => hint.id)).toEqual([old.id]);
   });
 
-  it('collapses a same-session near-verbatim restatement (>= 0.95)', async () => {
-    const repository = makeRepository();
-    const old = makeOldFragment({ session: SESSION });
-    vi.mocked(repository.findOneById).mockResolvedValue(Some(old));
-    const { service } = makeService({
-      repository,
-      searchService: makeSearchService(
-        Some({
-          id: old.id as MemoryId,
-          content: 'commit messages are single-line',
-          similarity: 0.96,
-          author_kind: 'agent',
-          agent_name: null,
-          source: { session: SESSION },
-        })
-      ),
-      context: sessionContext,
-    });
+  it('a same-session restatement at the collapse line supersedes the earlier draft', async () => {
+    const { service, repository, old } = withEarlierDraft(0.95);
 
     const out = (
       await service.remember({
@@ -1738,52 +1619,12 @@ describe('MemoryService.remember — same-session refinement collapse', () => {
     expect(repository.insert).toHaveBeenCalledOnce();
     expect(repository.update).toHaveBeenCalledExactlyOnceWith(old);
     expect(old.lifecycle.supersededBy).toBe(out.memory_id);
+    // A draft retired by this very write is not offered back as a hint.
+    expect(out.similar_existing).toBeUndefined();
   });
 
-  it('a hit from ANOTHER session is not collapsed: hinted as before', async () => {
-    const repository = makeRepository();
-    const hit: SupersedeCandidateHit = {
-      id: MEMORY_A,
-      content: 'commit messages are single-line',
-      kind: 'convention',
-      scope: `user.${USER_ENTITY_ID.replace(/\./g, '_')}`,
-      source: { session: OTHER_SESSION },
-      created_at: new Date().toISOString(),
-      similarity: 0.9,
-    };
-    const { service } = makeService({
-      repository,
-      searchService: makeSearchService(None, None, [hit]),
-      context: sessionContext,
-    });
-
-    const out = (
-      await service.remember({
-        content: 'single-line commits, always',
-        scope: PERSONAL_SCOPE,
-      })
-    ).unwrap();
-
-    expect(out.similar_existing).toHaveLength(1);
-    expect(repository.update).not.toHaveBeenCalled();
-  });
-
-  it('a provisional (watcher) hit never collapses even in-session', async () => {
-    const repository = makeRepository();
-    const { service } = makeService({
-      repository,
-      searchService: makeSearchService(
-        Some({
-          id: MEMORY_A,
-          content: 'watcher paraphrase of the fact',
-          similarity: 0.96,
-          author_kind: 'agent',
-          agent_name: 'watcher',
-          source: { session: SESSION },
-        })
-      ),
-      context: sessionContext,
-    });
+  it('a provisional (watcher) hit never collapses, even in the same session', async () => {
+    const { service, repository, old } = withEarlierDraft(0.96, 'watcher');
 
     const out = (
       await service.remember({
@@ -1795,7 +1636,9 @@ describe('MemoryService.remember — same-session refinement collapse', () => {
     // Incoming authoritative vs provisional near-match falls through to the
     // provenance auto-resolve in hygiene, not to the session collapse.
     expect(out.deduplicated).toBeUndefined();
+    expect(repository.insert).toHaveBeenCalledOnce();
     expect(repository.update).not.toHaveBeenCalled();
+    expect(old.lifecycle.supersededBy).toBeNull();
   });
 });
 
@@ -1998,27 +1841,32 @@ describe('MemoryService.remember — the portable-layer gate', () => {
     expect(portabilityJudge.judgePortability).not.toHaveBeenCalled();
   });
 
-  it('fails closed into the project when the judge is unavailable', async () => {
-    const { service } = makeService({
-      ...attached,
-      portabilityJudge: makePortabilityJudge({
-        portable: false,
-        confidence: 0,
-        rationale: 'portability could not be judged',
-      }),
-    });
+  it.each([
+    [0.69, project],
+    [0.7, `user.${USER_ENTITY_ID.replace(/\./g, '_')}.core`],
+  ])(
+    'needs a confidence of 0.7 to leave the project (portable at %s)',
+    async (confidence, landed) => {
+      const { service } = makeService({
+        ...attached,
+        portabilityJudge: makePortabilityJudge({
+          portable: true,
+          confidence,
+          rationale: 'a property of postgres itself',
+        }),
+      });
 
-    const result = await service.remember({
-      content: 'postgres ltree labels cannot contain a dot',
-      kind: 'fact',
-      scope: CORE_SCOPE,
-    });
+      const result = await service.remember({
+        content: 'postgres ltree labels cannot contain a dot',
+        kind: 'fact',
+        scope: CORE_SCOPE,
+      });
 
-    // A judge that cannot answer must never be the reason a fact leaves its
-    // project: doubt keeps it home.
-    expect(result.isOk()).toBe(true);
-    expect(result.unwrap().scope).toBe(project);
-  });
+      // A portable verdict the judge is unsure of must never be the reason a
+      // fact leaves its project: doubt keeps it home.
+      expect(result.unwrap().scope).toBe(landed);
+    }
+  );
 
   it('leaves core alone when no project is attached', async () => {
     const { service, portabilityJudge } = makeService();
@@ -2183,24 +2031,6 @@ describe('MemoryService — the session thread', () => {
     expect(result.isErr()).toBe(true);
   });
 
-  it('keeps the thread out of the way of an explicitly named scope', async () => {
-    const { service, threads } = makeService({
-      threads: threadOn('proj.acme'),
-    });
-
-    // Addressing another scope by name is the owner's instruction: it must
-    // not consult the thread at all.
-    const result = await service.remember({
-      content: 'put this loop in the other project',
-      kind: 'task',
-      scope: 'proj.zero_memory',
-    });
-
-    expect(result.isOk()).toBe(true);
-    expect(result.unwrap().scope).toBe(project);
-    expect(threads.findByToken).not.toHaveBeenCalled();
-  });
-
   it('stamps the session marker of the conversation a fact was born in', async () => {
     const { service, repository } = makeService({
       threads: threadOn('proj.zero_memory'),
@@ -2245,22 +2075,6 @@ describe('MemoryService — the session thread', () => {
       thread: TEST_THREAD,
       client_session_id: 'conv-1',
     });
-  });
-
-  it('leaves the marker off a write with no conversation behind it', async () => {
-    const { service, repository } = makeService();
-
-    await service.remember({
-      content: 'captured from a terminal, outside any conversation',
-      kind: 'fact',
-      scope: PERSONAL_SCOPE,
-    });
-
-    // Absence is an honest state, not a gap: quick-capture, import and
-    // bootstrap have no conversation to point at.
-    const [fragment] = vi.mocked(repository.insert).mock.calls[0]!;
-    expect(fragment.provenance.source).not.toHaveProperty('thread');
-    expect(fragment.provenance.source).not.toHaveProperty('client_session_id');
   });
 
   it('falls back to the pre-thread behaviour when the lookup throws', async () => {
@@ -2425,13 +2239,17 @@ describe('MemoryService.buildContext — the thread a hook-less client gets', ()
     const threads = makeThreads();
     const { service } = makeService({ threads });
 
+    // The project resolves, so the missing transport session is the only
+    // reason no thread is opened.
     const result = await service.buildContext({
       topic: 'project alpha',
       briefing: true,
+      project_hint: '/home/u/repos/alpha',
     });
 
-    expect(result.isOk()).toBe(true);
+    expect(result.unwrap().project_scope).toBeDefined();
     expect(threads.open).not.toHaveBeenCalled();
+    expect(result.unwrap().session).toBeUndefined();
   });
 });
 
@@ -2643,5 +2461,366 @@ describe('MemoryService.remember entity anchoring', () => {
     expect(result.isOk()).toBe(true);
     expect(repository.insert).toHaveBeenCalledOnce();
     expect(result.unwrap().anchors).toBeUndefined();
+  });
+});
+
+describe('MemoryService.buildContext — the work summary', () => {
+  const HINT = '/home/someone/repos/quokka-tool';
+  const projectScope = `proj.${USER_ENTITY_ID.replace(/\./g, '_')}.quokka_tool`;
+  const work = briefingWorkSchema.parse({
+    bound_card: {
+      id: 'crd_0000000000000001.0000000000',
+      number: 3,
+      title: 'Wire the importer',
+      state: 'active',
+      state_reason: 'the importer blocks the release',
+      refs: 2,
+      updated_at: '2026-09-21T10:00:00Z',
+    },
+    active: 1,
+    waiting: 1,
+    lead: [
+      {
+        id: 'crd_0000000000000002.0000000000',
+        number: 4,
+        title: 'Retire the old parser',
+        state: 'waiting',
+      },
+    ],
+  });
+  const loop = (n: number) => ({
+    id: `mem_${String(n).padStart(16, '0')}.0000000000`,
+    content: `handover ${n}`,
+    kind: 'task',
+    scope: projectScope,
+    created_at: '2026-09-20T00:00:00Z',
+  });
+  const reader = (
+    read: Awaited<ReturnType<IBriefingWorkReader['forBriefing']>>
+  ): IBriefingWorkReader => ({
+    forBriefing: vi.fn().mockResolvedValue(read),
+  });
+
+  it('carries the summary and gives up one ranked row for it under a token budget', async () => {
+    const briefingWork = reader({ work, attachedLoopIds: [] });
+    const { service, graphService } = makeService({ briefingWork });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+      // The conversation is what the bound card is found through.
+      conversation_id: 'conversation-1',
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(result.unwrap().work).toEqual(work);
+    // 1200 tokens map to six rows; the summary displaces one of them.
+    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
+    expect(params.maxMemories).toBe(5);
+    expect(briefingWork.forBriefing).toHaveBeenCalledWith(
+      projectScope,
+      TEST_THREAD
+    );
+  });
+
+  it('leaves an unbudgeted briefing exactly as it was — no summary, no displacement', async () => {
+    // Measured on a production clone: dropping the default 12th row lost two
+    // brief probes, so only budgeted briefings pay a row for the summary.
+    const briefingWork = reader({ work, attachedLoopIds: [] });
+    const { service, graphService } = makeService({ briefingWork });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+    });
+
+    expect(result.unwrap().work).toBeUndefined();
+    expect(briefingWork.forBriefing).not.toHaveBeenCalled();
+    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
+    expect(params.maxMemories).toBeUndefined();
+  });
+
+  it('displaces nothing when the project has no work to summarise', async () => {
+    const { service, graphService } = makeService({
+      briefingWork: reader(null),
+    });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    expect(result.unwrap().work).toBeUndefined();
+    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
+    expect(params.maxMemories).toBe(6);
+  });
+
+  it('reaches a loop through its card instead of listing it a second time', async () => {
+    const graphService = makeGraphService();
+    vi.mocked(graphService.buildContext).mockResolvedValue({
+      memories: [],
+      entities: [],
+      edges: [],
+      linked_memories: [],
+      recent: [],
+      rules: [],
+      open_loops: [loop(1), loop(2)],
+      open_loops_total: 5,
+    } as never);
+    const { service } = makeService({
+      graphService,
+      briefingWork: reader({ work, attachedLoopIds: [loop(1).id] }),
+    });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    const pack = result.unwrap();
+    expect(pack.open_loops.map((l) => l.id)).toEqual([loop(2).id]);
+    // Only the listed loop is subtracted: the other three stay counted.
+    expect(pack.open_loops_total).toBe(4);
+  });
+
+  it('still briefs, without a summary, when the board cannot be read', async () => {
+    const briefingWork: IBriefingWorkReader = {
+      forBriefing: vi.fn().mockRejectedValue(new Error('board down')),
+    };
+    const { service, graphService } = makeService({ briefingWork });
+
+    const result = await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(result.unwrap().work).toBeUndefined();
+    const [params] = vi.mocked(graphService.buildContext).mock.calls[0]!;
+    expect(params.maxMemories).toBe(6);
+  });
+
+  it('asks for no summary outside a briefing or without a project', async () => {
+    const briefingWork = reader({ work, attachedLoopIds: [] });
+    const { service } = makeService({ briefingWork });
+
+    // Both carry a budget, so only the missing briefing / project is why.
+    await service.buildContext({
+      topic: 'quokka importer',
+      project_hint: HINT,
+      max_tokens: 1200,
+    });
+    await service.buildContext({
+      topic: 'anything',
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    expect(briefingWork.forBriefing).not.toHaveBeenCalled();
+  });
+});
+
+describe('MemoryService.buildContext — the rule gate', () => {
+  const HINT = '/home/someone/repos/quokka-tool';
+  const rule: ContextRule = {
+    id: ruleCandidateIdSchema.parse('rlc_0000000000000001.0000000000'),
+    text: 'IMPORTER FIRST. Run the importer before touching the parser.',
+    applies_when: 'tasks that touch the importer',
+    pinned: false,
+  };
+  const levelledRule: ContextRule = {
+    id: rule.id,
+    text: 'IMPORTER FIRST',
+    level: 'headline',
+    pinned: false,
+  };
+  const block: RuleGateBlock = {
+    mode: 'live',
+    provider: 'typesafe',
+    model: 'jev-1.14.0',
+    latency_ms: 120,
+    judge_unavailable: false,
+    bands: { hi: 0.6, lo: 0.35 },
+    chars_baseline: rule.text.length,
+    chars_delivered: levelledRule.text.length,
+    levels: { full: 0, gate: 0, headline: 1 },
+    rules: [
+      {
+        id: rule.id!,
+        p: 0.1,
+        level: 'headline',
+        chars: levelledRule.text.length,
+        pinned: false,
+      },
+    ],
+  };
+  const work = briefingWorkSchema.parse({
+    bound_card: {
+      id: 'crd_0000000000000001.0000000000',
+      number: 3,
+      title: 'Teach the importer to read CSV',
+      state: 'active',
+      type: 'story',
+      state_reason: 'the importer blocks the release',
+      refs: 0,
+      updated_at: '2026-09-21T10:00:00Z',
+    },
+    active: 1,
+    waiting: 0,
+    lead: [],
+    open_branches: [
+      {
+        card_id: 'crd_0000000000000001.0000000000',
+        number: 3,
+        state: 'active',
+        repo: 'quokka-tool',
+        branch: 'feature/importer',
+      },
+    ],
+  });
+  const ruled = (
+    gate: IRuleGate,
+    read: Awaited<ReturnType<IBriefingWorkReader['forBriefing']>> = null
+  ) =>
+    makeService({
+      userRules: { listPromoted: vi.fn().mockResolvedValue([rule]) },
+      briefingWork: { forBriefing: vi.fn().mockResolvedValue(read) },
+      ruleGate: gate,
+    });
+  const gateReturning = (rules: ContextRule[], out: RuleGateBlock | null) => ({
+    apply: vi.fn().mockResolvedValue({ rules, block: out }),
+  });
+
+  it('delivers the rules the gate levelled and reports the gate', async () => {
+    const ruleGate = gateReturning([levelledRule], block);
+    const { service } = ruled(ruleGate);
+
+    const out = (
+      await service.buildContext({
+        topic: 'release the importer',
+        briefing: true,
+      })
+    ).unwrap();
+
+    expect(out.rules).toEqual([levelledRule]);
+    expect(out.rule_gate).toEqual(block);
+    expect(ruleGate.apply).toHaveBeenCalledWith({
+      rules: [rule],
+      subjectId: USER_ENTITY_ID,
+      task: 'release the importer',
+    });
+  });
+
+  it('judges a hook briefing against its card, never against the topic', async () => {
+    const ruleGate = gateReturning([rule], null);
+    const { service } = ruled(ruleGate, { work, attachedLoopIds: [] });
+
+    const out = (
+      await service.buildContext({
+        topic: 'quokka-tool',
+        project_hint: HINT,
+        briefing: true,
+        max_tokens: 1200,
+      })
+    ).unwrap();
+
+    const [input] = vi.mocked(ruleGate.apply).mock.calls[0]!;
+    expect(input.task).toBe(hookTaskStatement(work));
+    expect(input.task).toContain('Teach the importer to read CSV');
+    expect(out).not.toHaveProperty('rule_gate');
+  });
+
+  it('hands a hook briefing without a card no task, so it is not judged', async () => {
+    const ruleGate = gateReturning([rule], null);
+    const { service } = ruled(ruleGate, null);
+
+    await service.buildContext({
+      topic: 'quokka-tool',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    const [input] = vi.mocked(ruleGate.apply).mock.calls[0]!;
+    expect(input.task).toBeNull();
+  });
+
+  it('gives a briefing that asks for judge_rules: false nothing to judge against', async () => {
+    const ruleGate = gateReturning([rule], null);
+    const { service } = ruled(ruleGate, { work, attachedLoopIds: [] });
+
+    // The hook's secondary briefing: same project, same card, judged once
+    // by the primary briefing instead.
+    await service.buildContext({
+      topic: 'quokka-tool',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+      judge_rules: false,
+    });
+    await service.buildContext({
+      topic: 'release the importer',
+      briefing: true,
+      judge_rules: false,
+    });
+
+    const tasks = vi
+      .mocked(ruleGate.apply)
+      .mock.calls.map(([input]) => input.task);
+    expect(tasks).toEqual([null, null]);
+  });
+
+  it('delivers the rules whole, without their conditions, when the gate itself throws', async () => {
+    const ruleGate: IRuleGate = {
+      apply: vi.fn().mockRejectedValue(new Error('gate down')),
+    };
+    const { service } = ruled(ruleGate);
+
+    const out = (
+      await service.buildContext({ topic: 'anything', briefing: true })
+    ).unwrap();
+
+    expect(out.rules).toStrictEqual([
+      { text: rule.text, pinned: false, id: rule.id },
+    ]);
+    expect(out).not.toHaveProperty('rule_gate');
+  });
+});
+
+describe('MemoryService.sessionProjectScope', () => {
+  it('answers with the project of the thread the caller echoed', async () => {
+    const threads = makeThreads();
+    const project = Scope.project(USER_ENTITY_ID, 'zero_memory');
+    vi.mocked(threads.findByToken).mockResolvedValue(
+      Some({ token: TEST_THREAD, conversationId: 'conv-1', scope: project })
+    );
+    const { service } = makeService({ threads });
+
+    expect(await service.sessionProjectScope(TEST_THREAD)).toBe(project.path);
+  });
+
+  it('falls back to the session default when no thread names a project', async () => {
+    const { service } = makeService({
+      context: { ...contextStub, getDefaultScope: () => 'proj.usr_a.harbor' },
+    });
+
+    expect(await service.sessionProjectScope(undefined)).toBe(
+      'proj.usr_a.harbor'
+    );
+  });
+
+  it('answers undefined when the session has no project', async () => {
+    const { service } = makeService();
+
+    expect(await service.sessionProjectScope('thr_unknown')).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { newCardId, newMemoryId } from '@workspace/contracts';
+import { newCardId, newMemoryId, type CardType } from '@workspace/contracts';
 import { Ok, type Result } from 'oxide.ts';
 import { beforeEach, describe, expect, it } from 'vitest';
 
@@ -13,6 +13,8 @@ import { CardService } from './card.service.js';
  */
 class RecordingRepository implements ICardRepository {
   calls: string[] = [];
+  /** The type of the card every write returns. */
+  cardType: CardType | null = null;
 
   #ok(): Promise<Result<CardWrite, CardFailure>> {
     return Promise.resolve(
@@ -24,6 +26,7 @@ class RecordingRepository implements ICardRepository {
           title: 'Ship it',
           body: '',
           state: 'idea',
+          type: this.cardType,
           revision: 1,
           origin_loop_id: null,
           created_by: 'usr_0000000000000000.0000000000',
@@ -80,6 +83,18 @@ class RecordingRepository implements ICardRepository {
   resolve = async (): Promise<never> => {
     throw new Error('not used');
   };
+  land = async (): Promise<Result<CardWrite, CardFailure>> => {
+    this.calls.push('land');
+    return this.#ok();
+  };
+  link = async (): Promise<Result<CardWrite, CardFailure>> => {
+    this.calls.push('link');
+    return this.#ok();
+  };
+  unlink = async (): Promise<Result<CardWrite, CardFailure>> => {
+    this.calls.push('unlink');
+    return this.#ok();
+  };
 }
 
 describe('CardService', () => {
@@ -117,6 +132,9 @@ describe('CardService', () => {
   });
 
   it('passes a real move through', async () => {
+    // Into active with no branch named: whether the card already holds an
+    // open branch is known only under the store's lock, so that question is
+    // left to the store.
     const result = await service.moveCard({
       cardId,
       to: 'active',
@@ -175,8 +193,265 @@ describe('CardService', () => {
     expect(repository.calls).toEqual([]);
   });
 
+  const branch = { repo: 'kiwagu/zero-memory', name: 'feature/x' };
+
+  it('refuses a branch and a no-code declaration together', async () => {
+    const result = await service.moveCard({
+      cardId,
+      to: 'active',
+      reason: 'start',
+      branch,
+      noBranch: 'research',
+    });
+    expect(result.unwrapErr().message).toMatch(/not both/u);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a blank declaration', async () => {
+    expect(
+      (
+        await service.moveCard({
+          cardId,
+          to: 'active',
+          reason: 'start',
+          noBranch: '  ',
+        })
+      ).isErr()
+    ).toBe(true);
+    expect(
+      (
+        await service.moveCard({
+          cardId,
+          to: 'waiting',
+          reason: 'hold',
+          notLanded: '',
+        })
+      ).isErr()
+    ).toBe(true);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a branch on a move that is not into active', async () => {
+    const result = await service.moveCard({
+      cardId,
+      to: 'waiting',
+      reason: 'hold',
+      branch,
+    });
+    expect(result.unwrapErr().message).toMatch(/entering active/u);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a branch on a card opened outside active', async () => {
+    const result = await service.createCard({
+      scope: 'proj.x',
+      title: 'Idea',
+      branch,
+    });
+    expect(result.isErr()).toBe(true);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a landing without its commit, target or reason before a round trip', async () => {
+    for (const bad of [
+      { squashSha: 'nope', target: 'main', reason: 'ok' },
+      { squashSha: 'abcdef1', target: 'has space', reason: 'ok' },
+      { squashSha: 'abcdef1', target: 'main', reason: '  ' },
+    ]) {
+      expect((await service.landCard({ cardId, branch, ...bad })).isErr()).toBe(
+        true
+      );
+    }
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('passes a landing through with a normalized sha', async () => {
+    const result = await service.landCard({
+      cardId,
+      branch,
+      squashSha: 'ABCDEF1',
+      target: 'main',
+      reason: 'gate green',
+    });
+    expect(result.isOk()).toBe(true);
+    expect(repository.calls).toEqual(['land']);
+  });
+
+  it('refuses relations and a no-relations statement together', async () => {
+    const result = await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Ship it',
+      type: 'task',
+      links: [{ card: 'ZM-2', relation: 'depends_on', reason: 'needs it' }],
+      noLinks: 'standalone',
+    });
+    expect(result.unwrapErr().message).toMatch(/not both/u);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a blank no-relations statement', async () => {
+    const result = await service.promoteLoop({
+      loopId: newMemoryId(),
+      title: 'Ship it',
+      type: 'spike',
+      noBranch: 'research',
+      noLinks: '   ',
+    });
+    expect(result.unwrapErr().code).toBe('invalid');
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a relations statement on a move that is not into active', async () => {
+    const result = await service.moveCard({
+      cardId,
+      to: 'waiting',
+      reason: 'paused',
+      noLinks: 'standalone',
+    });
+    expect(result.unwrapErr().message).toMatch(/entering active/u);
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('leaves a missing statement to the store, which knows the candidates', async () => {
+    await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Ship it',
+      type: 'task',
+    });
+    expect(repository.calls).toEqual(['create']);
+  });
+
+  it('refuses a link with an unknown relation, no other card or no reason', async () => {
+    for (const params of [
+      { toCard: 'ZM-2', relation: 'causes', reason: 'why' },
+      { toCard: ' ', relation: 'blocks', reason: 'why' },
+      { toCard: 'ZM-2', relation: 'blocks', reason: '  ' },
+    ]) {
+      const result = await service.linkCard({ cardId, ...params } as never);
+      expect(result.unwrapErr().code).toBe('invalid');
+    }
+    expect(
+      (
+        await service.unlinkCard({
+          cardId,
+          toCard: 'ZM-2',
+          relation: 'blocks',
+          reason: '',
+        })
+      ).unwrapErr().code
+    ).toBe('invalid');
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('passes a link and an unlink through', async () => {
+    await service.linkCard({
+      cardId,
+      toCard: 'ZM-2',
+      relation: 'blocked_by',
+      reason: 'needs the keys',
+    });
+    await service.unlinkCard({
+      cardId,
+      toCard: 'ZM-2',
+      relation: 'blocked_by',
+      reason: 'keys rotated',
+    });
+    expect(repository.calls).toEqual(['link', 'unlink']);
+  });
+
   it('refuses a card address that is not a positive number', async () => {
     expect((await service.resolveCard('proj.x', 0)).isErr()).toBe(true);
     expect((await service.resolveCard('proj.x', 1.5)).isErr()).toBe(true);
+  });
+
+  it('refuses a severity outside 1..5 before it costs a round trip', async () => {
+    const created = await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Hotfix',
+      type: 'bug',
+      severity: 6,
+      noLinks: 'a test',
+    });
+    expect(created.isErr()).toBe(true);
+    expect(created.unwrapErr().code).toBe('invalid');
+    expect(created.unwrapErr().message).toMatch(/severity/i);
+
+    const edited = await service.editCard({ cardId, severity: 0 });
+    expect(edited.isErr()).toBe(true);
+    expect(edited.unwrapErr().code).toBe('invalid');
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('accepts an edit that changes only the severity', async () => {
+    const result = await service.editCard({ cardId, severity: 5 });
+
+    expect(result.isOk()).toBe(true);
+    expect(repository.calls).toEqual(['edit']);
+  });
+
+  it('refuses a new card that does not say why its work exists, before its relations', async () => {
+    const created = await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Ship it',
+    });
+    expect(created.unwrapErr().code).toBe('type_required');
+    expect(created.unwrapErr().message).toMatch(/story, bug, task or spike/u);
+
+    const promoted = await service.promoteLoop({
+      loopId: newMemoryId(),
+      title: 'Ship it',
+      noBranch: 'research',
+      noLinks: 'standalone',
+    });
+    expect(promoted.unwrapErr().code).toBe('type_required');
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('refuses a type the vocabulary does not have, wherever it is passed', async () => {
+    const created = await service.createCard({
+      scope: 'proj.usr_test.board',
+      title: 'Ship it',
+      type: 'Bug' as never,
+      noLinks: 'a test',
+    });
+    const moved = await service.moveCard({
+      cardId,
+      to: 'active',
+      reason: 'picked up',
+      noBranch: 'research',
+      type: 'epic' as never,
+    });
+    const edited = await service.editCard({ cardId, type: 'epic' as never });
+    for (const result of [created, moved, edited]) {
+      expect(result.unwrapErr().code).toBe('invalid');
+      expect(result.unwrapErr().message).toMatch(/story, bug, task or spike/u);
+    }
+    expect(repository.calls).toEqual([]);
+  });
+
+  it('accepts an edit that changes only the type', async () => {
+    const result = await service.editCard({ cardId, type: 'bug' });
+
+    expect(result.isOk()).toBe(true);
+    expect(repository.calls).toEqual(['edit']);
+  });
+
+  it('suggests remembering a gotcha after a bug lands, and nothing after other work', async () => {
+    const land = () =>
+      service.landCard({
+        cardId,
+        branch,
+        squashSha: 'abcdef1',
+        target: 'main',
+        reason: 'gate green',
+      });
+
+    repository.cardType = 'bug';
+    expect((await land()).unwrap().hint).toMatch(/gotcha/u);
+
+    for (const other of ['story', 'task', 'spike', null] as const) {
+      repository.cardType = other;
+      expect((await land()).unwrap().hint ?? null).toBeNull();
+    }
   });
 });

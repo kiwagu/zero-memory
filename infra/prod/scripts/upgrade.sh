@@ -58,6 +58,25 @@ if [ ${#missing[@]} -gt 0 ]; then
   exit 1
 fi
 
+# --- room on the disk, before anything writes to it ---------------------------
+# Every release pulls its images onto this disk and nothing else takes them
+# away. A full disk fails the pre-schema dump, or worse the pull, which comes
+# AFTER the schema has already moved on. So the older release images go first,
+# keeping ZM_KEEP_RELEASES releases (5 by default), the one being deployed
+# among them. Unused build cache and dangling layers go too. This is
+# housekeeping: a failure here is reported and the deploy goes ahead.
+image_tag="$(grep -E '^ZM_IMAGE_TAG=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+if [ -n "$image_tag" ]; then
+  echo "→ making room for ${image_tag}"
+  image_prefix="$(grep -E '^ZM_IMAGE_PREFIX=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  keep_releases="$(grep -E '^ZM_KEEP_RELEASES=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  ZM_IMAGE_PREFIX="$image_prefix" ZM_KEEP_RELEASES="$keep_releases" \
+    infra/prod/scripts/prune-images.sh "$image_tag" \
+    || echo "  pruning release images failed; the deploy goes ahead" >&2
+  docker image prune -f >/dev/null || true
+  docker builder prune -af >/dev/null || true
+fi
+
 # --- schema, before code ------------------------------------------------------
 # Opt-in (ZM_MIGRATE_ON_DEPLOY=1 in infra/prod/.env): the host applies the
 # pending migration tail itself, AFTER the release passed CI and BEFORE the
@@ -114,3 +133,25 @@ echo "→ applying"
 # meets a service that is still starting and reads it as a failed release.
 "${compose[@]}" up -d --wait
 "${compose[@]}" ps
+
+# The edge's Caddyfile is a single bind-mounted file. A pull that changes it
+# writes a new inode and the running container keeps the old one, so neither
+# `up -d` (the compose config is unchanged) nor `caddy reload` (it reads the
+# stale mount) brings the new file live. Compare what the running edge
+# actually reads with the file on disk and recreate the edge when they
+# differ. Comparing contents, rather than asking whether this run's pull
+# changed the file, also covers a pull done before this script started —
+# which is what the deploy hook does.
+caddyfile="$(grep -E '^CADDYFILE_PATH=' infra/prod/.env 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+caddyfile="${caddyfile:-./caddy/Caddyfile.template}"
+case "$caddyfile" in
+  /*) ;;
+  *) caddyfile="infra/prod/${caddyfile#./}" ;;
+esac
+caddy_on_disk="$(sha256sum "$caddyfile" 2>/dev/null | cut -d' ' -f1 || true)"
+caddy_served="$("${compose[@]}" exec -T caddy sha256sum /etc/caddy/Caddyfile 2>/dev/null | cut -d' ' -f1 || true)"
+if [ -n "$caddy_on_disk" ] && [ -n "$caddy_served" ] &&
+  [ "$caddy_on_disk" != "$caddy_served" ]; then
+  echo "→ the edge reads an older Caddyfile than the checkout holds; recreating the edge so it mounts the current one"
+  "${compose[@]}" up -d --force-recreate --wait caddy
+fi

@@ -1,13 +1,21 @@
 import {
   cardBodySchema,
+  cardBranchSchema,
+  cardDeclarationSchema,
+  cardLinkRelationSchema,
   cardNoteTextSchema,
   cardReasonSchema,
+  cardSeveritySchema,
   cardStateSchema,
   cardTitleSchema,
+  cardTypeSchema,
+  gitBranchNameSchema,
+  gitCommitShaSchema,
   type Card,
+  type CardBranch,
 } from '@workspace/contracts';
 import { singleton } from '@workspace/di';
-import { Err, type Result } from 'oxide.ts';
+import { Err, Ok, type Result } from 'oxide.ts';
 
 import { toCardFailure, type CardFailure } from './card.errors.js';
 import {
@@ -22,6 +30,8 @@ import type {
   CardWrite,
   CreateCardParams,
   EditCardParams,
+  LandCardParams,
+  LinkCardParams,
   ListBoardParams,
   MoveCardParams,
   NoteCardParams,
@@ -31,6 +41,98 @@ import type {
 
 const invalid = (message: string): CardFailure =>
   toCardFailure('invalid', message);
+
+/** A level that is not one of the five is refused before any round trip. */
+const severityFailure = (severity: unknown): CardFailure | null =>
+  severity === undefined || cardSeveritySchema.safeParse(severity).success
+    ? null
+    : invalid('A severity is a whole number from 1 (minimal) to 5 (urgent).');
+
+const TYPE_WORDS = 'story, bug, task or spike';
+
+/** A type the vocabulary does not have is refused before any round trip. */
+const typeFailure = (type: unknown): CardFailure | null =>
+  type === undefined || cardTypeSchema.safeParse(type).success
+    ? null
+    : invalid(`A card's type is one of ${TYPE_WORDS}.`);
+
+/**
+ * Every new card says why its work exists. A missing type is answerable
+ * without the card, so it is refused here, before the relation rule the store
+ * decides; whether an existing card still lacks one is the store's call.
+ */
+const typeDeclarationFailure = (type: unknown): CardFailure | null =>
+  type === undefined
+    ? toCardFailure(
+        'type_required',
+        `Say why the work exists: pass type — ${TYPE_WORDS}.`
+      )
+    : typeFailure(type);
+
+/**
+ * What a landed bug leaves to do: the fix is in, but what it taught is only
+ * kept if someone writes it down. A suggestion, never a gate.
+ */
+const BUG_LANDED_HINT =
+  'This bug landed. If the fix taught something a future session must not ' +
+  'relearn, remember it as a gotcha and attach it to this card (card_log ' +
+  'attach, ref_kind: memory).';
+
+/**
+ * What can be refused about the branch rule without reading the card: a
+ * branch together with a no-code declaration, a blank declaration, or a
+ * branch offered to work that is not entering active. Whether the card
+ * already holds an open branch is the store's call, under the card's lock.
+ */
+const branchDeclarationFailure = (
+  entering: boolean,
+  params: { branch?: CardBranch; noBranch?: string; notLanded?: string }
+): CardFailure | null => {
+  if (params.branch && params.noBranch !== undefined) {
+    return invalid('Pass `branch` or `no_branch`, not both.');
+  }
+  if (params.noBranch !== undefined && params.noBranch.trim() === '') {
+    return invalid('`no_branch` must say why the work has no code.');
+  }
+  if (params.notLanded !== undefined && params.notLanded.trim() === '') {
+    return invalid('`not_landed` must say why the open branch has not landed.');
+  }
+  if (!entering && (params.branch || params.noBranch !== undefined)) {
+    return invalid('`branch` and `no_branch` apply to work entering active.');
+  }
+  return null;
+};
+
+/**
+ * What can be refused about the relation rule without reading the card: a
+ * list of relations together with a statement that there are none, a blank
+ * statement, or either offered to a move that is not into active. Whether a
+ * statement is REQUIRED is the store's call — only it knows whether the card
+ * was ever assessed, and only it can offer candidates.
+ */
+const linkDeclarationFailure = (
+  entering: boolean,
+  params: { links?: unknown[]; noLinks?: string }
+): CardFailure | null => {
+  if (params.links !== undefined && params.noLinks !== undefined) {
+    return invalid('Pass `links` or `no_links`, not both.');
+  }
+  if (params.noLinks !== undefined && params.noLinks.trim() === '') {
+    return invalid(
+      '`no_links` must say why the card relates to no other card.'
+    );
+  }
+  if (
+    !entering &&
+    (params.links !== undefined || params.noLinks !== undefined)
+  ) {
+    return invalid(
+      '`links` and `no_links` apply to work entering active; relate cards at ' +
+        'any time with link.'
+    );
+  }
+  return null;
+};
 
 /**
  * The board's application service.
@@ -60,6 +162,14 @@ export class CardService {
     if (!body.success) {
       return Err(invalid('The card body is longer than the limit.'));
     }
+    const rule =
+      typeDeclarationFailure(params.type) ??
+      severityFailure(params.severity) ??
+      branchDeclarationFailure((params.state ?? 'idea') === 'active', params) ??
+      linkDeclarationFailure(true, params);
+    if (rule) {
+      return Err(rule);
+    }
     return this.repository.create({
       ...params,
       title: title.data,
@@ -73,6 +183,17 @@ export class CardService {
     const title = cardTitleSchema.safeParse(params.title);
     if (!title.success) {
       return Err(invalid('A card needs a title.'));
+    }
+    const rule =
+      typeDeclarationFailure(params.type) ??
+      severityFailure(params.severity) ??
+      branchDeclarationFailure(
+        (params.state ?? 'active') === 'active',
+        params
+      ) ??
+      linkDeclarationFailure(true, params);
+    if (rule) {
+      return Err(rule);
     }
     return this.repository.promoteLoop({ ...params, title: title.data });
   }
@@ -94,6 +215,13 @@ export class CardService {
         invalid('A move must carry a reason saying why the state changed.')
       );
     }
+    const rule =
+      typeFailure(params.type) ??
+      branchDeclarationFailure(state.data === 'active', params) ??
+      linkDeclarationFailure(state.data === 'active', params);
+    if (rule) {
+      return Err(rule);
+    }
     return this.repository.move({
       ...params,
       to: state.data,
@@ -104,8 +232,21 @@ export class CardService {
   async editCard(
     params: EditCardParams
   ): Promise<Result<CardWrite, CardFailure>> {
-    if (params.title === undefined && params.body === undefined) {
-      return Err(invalid('An edit must change the title or the body.'));
+    if (
+      params.title === undefined &&
+      params.body === undefined &&
+      params.severity === undefined &&
+      params.type === undefined
+    ) {
+      return Err(
+        invalid(
+          'An edit must change the title, the body, the severity or the type.'
+        )
+      );
+    }
+    const marker = severityFailure(params.severity) ?? typeFailure(params.type);
+    if (marker) {
+      return Err(marker);
     }
     if (params.title !== undefined) {
       const title = cardTitleSchema.safeParse(params.title);
@@ -166,6 +307,101 @@ export class CardService {
     return this.repository.note({ ...params, text: text.data });
   }
 
+  async landCard(
+    params: LandCardParams
+  ): Promise<Result<CardWrite, CardFailure>> {
+    const branch = cardBranchSchema.safeParse(params.branch);
+    if (!branch.success) {
+      return Err(invalid('A landing names its branch: {repo, name}.'));
+    }
+    const sha = gitCommitShaSchema.safeParse(params.squashSha);
+    if (!sha.success) {
+      return Err(
+        invalid('`squash_sha` is the landed commit: 7 to 64 hex characters.')
+      );
+    }
+    const target = gitBranchNameSchema.safeParse(params.target);
+    if (!target.success) {
+      return Err(invalid('`target` is the branch it landed on, e.g. main.'));
+    }
+    const reason = cardReasonSchema.safeParse(params.reason);
+    if (!reason.success) {
+      return Err(
+        invalid(
+          'A landing must carry a reason: what the gate proved and what the ' +
+            'card waits for.'
+        )
+      );
+    }
+    if (
+      params.to !== undefined &&
+      !cardStateSchema.safeParse(params.to).success
+    ) {
+      return Err(
+        invalid(
+          `Unknown state: expected one of ${cardStateSchema.options.join(', ')}.`
+        )
+      );
+    }
+    const rule = branchDeclarationFailure(false, {
+      notLanded: params.notLanded,
+    });
+    if (rule) {
+      return Err(rule);
+    }
+    const landed = await this.repository.land({
+      ...params,
+      branch: branch.data,
+      squashSha: sha.data,
+      target: target.data,
+      reason: reason.data,
+    });
+    return landed.map((write) =>
+      write.card.type === 'bug' ? { ...write, hint: BUG_LANDED_HINT } : write
+    );
+  }
+
+  /** State how this card relates to another, with a reason. */
+  async linkCard(
+    params: LinkCardParams
+  ): Promise<Result<CardWrite, CardFailure>> {
+    const checked = this.#linkParams(params);
+    return checked.isErr() ? checked : this.repository.link(checked.unwrap());
+  }
+
+  /** Retire how this card relates to another, with a reason. */
+  async unlinkCard(
+    params: LinkCardParams
+  ): Promise<Result<CardWrite, CardFailure>> {
+    const checked = this.#linkParams(params);
+    return checked.isErr() ? checked : this.repository.unlink(checked.unwrap());
+  }
+
+  #linkParams(params: LinkCardParams): Result<LinkCardParams, CardFailure> {
+    const relation = cardLinkRelationSchema.safeParse(params.relation);
+    if (!relation.success) {
+      return Err(
+        invalid(
+          `Unknown relation: expected one of ${cardLinkRelationSchema.options.join(', ')}.`
+        )
+      );
+    }
+    const toCard = params.toCard?.trim() ?? '';
+    if (toCard === '') {
+      return Err(invalid('Name the other card: its id, or its label (ZM-42).'));
+    }
+    const reason = cardDeclarationSchema.safeParse(params.reason);
+    if (!reason.success) {
+      return Err(invalid('A relation needs a reason saying why it holds.'));
+    }
+    return Ok({
+      ...params,
+      toCard,
+      relation: relation.data,
+      reason: reason.data,
+    });
+  }
+
   async readCard(
     params: ReadCardParams
   ): Promise<Result<CardReadView, CardFailure>> {
@@ -183,7 +419,7 @@ export class CardService {
     number: number
   ): Promise<Result<Card, CardFailure>> {
     if (!Number.isInteger(number) || number < 1) {
-      return Err(invalid('A card address is a positive number, like #42.'));
+      return Err(invalid('A card address is a positive number, like ZM-42.'));
     }
     return this.repository.resolve(scope, number);
   }

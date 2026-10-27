@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
-import { ConversationChunker, sha256 } from './chunker.js';
-import { decodeProjectDir } from './watcher.js';
+import { ConversationChunker } from './chunker.js';
 
 describe('ConversationChunker', () => {
   it('flushes on the size cap with a stable sha256 hash', () => {
@@ -13,7 +14,10 @@ describe('ConversationChunker', () => {
     expect(chunk).toBeDefined();
     expect(chunk!.conversationId).toBe('conv-1');
     expect(chunk!.text).toBe('user: short\nassistant: enough now');
-    expect(chunk!.hash).toBe(sha256(chunk!.text));
+    // The ingest idempotency key, computed here independently of the chunker.
+    expect(chunk!.hash).toBe(
+      createHash('sha256').update(chunk!.text, 'utf8').digest('hex')
+    );
     expect(chunk!.projectHint).toBe('/p');
     // Buffer is reset after the flush.
     expect(chunker.flushAll()).toEqual([]);
@@ -122,14 +126,5 @@ describe('ConversationChunker — overlap', () => {
     const [second] = chunker.append('c', 'NEXTPAYLOAD');
 
     expect(second!.text).toBe('NEXTPAYLOAD'); // no carried prefix
-  });
-});
-
-describe('decodeProjectDir', () => {
-  it('decodes flattened transcript directory names (best effort)', () => {
-    expect(decodeProjectDir('-home-dev-repos-alpha')).toBe(
-      '/home/dev/repos/alpha'
-    );
-    expect(decodeProjectDir('not-flattened')).toBeUndefined();
   });
 });

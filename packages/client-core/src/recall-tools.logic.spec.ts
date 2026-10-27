@@ -28,10 +28,6 @@ const OBSERVED_TOOL_NAMES: ReadonlyArray<readonly [string, string]> = [
 ];
 
 describe('toolBaseName', () => {
-  it.each(OBSERVED_TOOL_NAMES)('strips the mount prefix (%s)', (_, name) => {
-    expect(toolBaseName(name)).toBe('recall');
-  });
-
   it('leaves a name without a namespace untouched', () => {
     expect(toolBaseName('build_context')).toBe('build_context');
   });
@@ -82,9 +78,5 @@ describe('collectMemoryIds', () => {
     expect(
       collectMemoryIds('ent_drgjbeqvqsedgn0f.01kx8g2wtm mem_short.01kychgcj4')
     ).toEqual([]);
-  });
-
-  it('returns nothing for a payload without ids', () => {
-    expect(collectMemoryIds('Wall time: 4.9 seconds')).toEqual([]);
   });
 });

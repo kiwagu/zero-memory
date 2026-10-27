@@ -43,16 +43,22 @@ derived view.
 
 | Event type         | Emitted when                                                                                                                                                                                                                                                                               | Unit     |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
-| `llm_extraction`   | A metered LLM call completes — ingest extraction, translation, or background judging (hygiene, usefulness, benchmark); metadata carries the input/output token split, the model id, and a `purpose` tag                                                                                    | `tokens` |
+| `llm_extraction`   | A metered model call completes — ingest extraction, translation, background judging (hygiene, usefulness, benchmark), or the rule delivery judge (`purpose: rule_gate`); metadata carries the input/output token split, the model id, and a `purpose` tag                                  | `tokens` |
 | `embedding`        | An embedding batch runs; quantity is the number of texts                                                                                                                                                                                                                                   | `count`  |
 | `mcp_tool_call`    | Any MCP tool is dispatched; metadata carries the tool name and bounded result counters. Read tools add the scope-usage audit trail: `read_mode` (`explicit`, `all`, `hint`, `session`, or `open`), the session's attached project at call time, and a per-scope count of what was returned | `count`  |
-| `ingest_chunk`     | The ingest path accepts a chunk                                                                                                                                                                                                                                                            | `count`  |
+| `ingest_chunk`     | The ingest path accepts a chunk; `guard_refusals` names the guard hooks that refused an action in it                                                                                                                                                                                       | `count`  |
 | `session_briefing` | A briefing `build_context` call is delivered                                                                                                                                                                                                                                               | `tokens` |
 | `recall_used`      | A recall outcome is attributed: a later `remember` supersedes or derives from a recalled memory, the usefulness judge credits it, or a `challenge` records the negative counterpart (`valence: misled`)                                                                                    | `count`  |
 
 Emission is centralized on purpose: MCP tool calls are counted once at the
 tool dispatcher, not inside every tool, so adding a tool never requires
 adding instrumentation.
+
+The rule delivery judge adds two kinds of `mcp_tool_call` metadata (see
+[Value metering](/docs/platform/value-metering#rule-gate-metering)): a
+`build_context` whose standing rules were judged carries `rule_gate`, ids and
+numbers only, and a read of one rule at `zm://rules/{id}` is its own row,
+tool `resource:rule`, with the `rule_id` and whether it was `found`.
 
 ### Recording is fire-and-forget
 

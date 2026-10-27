@@ -53,6 +53,23 @@ describe('clearsReflectionGate', () => {
       )
     ).toBe(false);
   });
+
+  it('never queues an empty draft, however confident', () => {
+    // The schema defaults content to '' so a terse negative answer parses;
+    // the gate is what keeps such a default from reaching the owner.
+    expect(
+      clearsReflectionGate(
+        {
+          consolidate: true,
+          content: '   ',
+          kind: 'fact',
+          confidence: 0.9,
+          rationale: '',
+        },
+        gate
+      )
+    ).toBe(false);
+  });
 });
 
 describe('reflectionDistillationSchema', () => {

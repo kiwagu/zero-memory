@@ -27,14 +27,30 @@ const adminClient = (): SupabaseClient =>
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-/** Creates the user if missing, otherwise re-syncs the known e2e password. */
-export const provisionE2EUser = async (email: string): Promise<E2EUser> => {
+/**
+ * Creates the user if missing, otherwise re-syncs the known e2e password.
+ *
+ * The stand publishes legal documents, and the dashboard asks an account
+ * that never accepted them to do so once before any page — so a fixture
+ * account carries an acceptance, the way a password sign-up records one. A
+ * spec that wants the un-accepted state (a provider-created account) passes
+ * `acceptedTerms: false`.
+ */
+export const provisionE2EUser = async (
+  email: string,
+  options: { acceptedTerms?: boolean } = {}
+): Promise<E2EUser> => {
   assertE2EEmail(email);
   const admin = adminClient();
+  const acceptedTerms = options.acceptedTerms ?? true;
+  const userMetadata = acceptedTerms
+    ? { terms_accepted_at: new Date().toISOString() }
+    : { terms_accepted_at: null };
   const created = await admin.auth.admin.createUser({
     email,
     password: e2eEnv.password,
     email_confirm: true,
+    user_metadata: userMetadata,
   });
   if (!created.error) {
     return { id: created.data.user.id, email, password: e2eEnv.password };
@@ -55,6 +71,7 @@ export const provisionE2EUser = async (email: string): Promise<E2EUser> => {
   }
   const updated = await admin.auth.admin.updateUserById(existing.id, {
     password: e2eEnv.password,
+    user_metadata: userMetadata,
   });
   if (updated.error) {
     throw new Error(
@@ -62,6 +79,55 @@ export const provisionE2EUser = async (email: string): Promise<E2EUser> => {
     );
   }
   return { id: existing.id, email, password: e2eEnv.password };
+};
+
+/**
+ * The `usr_` entity id behind an auth uuid, read past RLS with the service
+ * role. Deliberately not "the first row of profiles the caller can see": once
+ * the caller has co-members that set holds several people, and picking the
+ * first one silently attributes someone else's id to the caller.
+ */
+export const entityIdOf = async (authUserId: string): Promise<string> => {
+  const { data, error } = await adminClient()
+    .from('profiles')
+    .select('id')
+    .eq('user_id', authUserId)
+    .single();
+  if (error) {
+    throw new Error(`no profile for ${authUserId}: ${error.message}`);
+  }
+  return (data as { id: string }).id;
+};
+
+/** A membership as the database holds it. */
+export interface MembershipRow {
+  scope: string;
+  user_id: string;
+  role: string;
+  granted_by: string | null;
+  accepted_at: string | null;
+  invited_email: string | null;
+  created_at: string;
+}
+
+/**
+ * Every membership of `scope` as the database holds it, read past RLS with
+ * the service role. What a spec checks after a refused write is the stored
+ * row, not the part of it the refused caller is allowed to see.
+ */
+export const scopeMemberships = async (
+  scope: string
+): Promise<MembershipRow[]> => {
+  const { data, error } = await adminClient()
+    .from('scope_members')
+    .select(
+      'scope, user_id, role, granted_by, accepted_at, invited_email, created_at'
+    )
+    .eq('scope', scope);
+  if (error) {
+    throw new Error(`cannot read the members of ${scope}: ${error.message}`);
+  }
+  return (data ?? []) as MembershipRow[];
 };
 
 /**

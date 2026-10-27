@@ -8,9 +8,11 @@ that operate on them.
 
 Domain + application layer. Depends on the shared kernel
 (`@workspace/domain`, `@workspace/contracts`, `@workspace/context`,
-`@workspace/di`, `@workspace/logger`) and the embedding port
-(`@workspace/embedding`). It defines the persistence ports; the Supabase
-adapters live in `@workspace/persistence` and are bound in the app host.
+`@workspace/di`, `@workspace/logger`), the embedding port
+(`@workspace/embedding`), the typed-judgment port (`@workspace/judgment`) and
+the usage meter (`@workspace/usage`). It defines the persistence ports; the
+Supabase adapters live in `@workspace/persistence` and are bound in the app
+host.
 
 ## Model
 
@@ -56,12 +58,25 @@ adapters live in `@workspace/persistence` and are bound in the app host.
   with `anchor_hint`, because only its author can name a subject the graph
   has never seen. No model runs on this path: the judgement it needs is the
   writing agent's, which already has it in context.
-- `ScopeRoutingService` — routes a project identity (git remote, path,
-  project name) to the scope its auto-populated memories belong in. On the
-  READ side an unusable hint degrades to the personal scope (a narrowed read
-  set is worse than a wide one); on the WRITE side that degradation is
-  reported as unresolvable, because writing on a guess is the failure this
-  package refuses.
+- `ScopeRoutingService` — routes a project identity to the scope its
+  memories belong in. A git remote or a path is what a machine reports about
+  a repository, and the first sight of one sets its project up. A project
+  NAME is what a person or an agent typed, and it only ever points at a
+  project the caller already belongs to (`project-name.utils.ts`): the same
+  spelling key entities resolve by, the dashboard alias under that key, then
+  initials when exactly one project has them — `zero-memory`, `Zero Memory`,
+  `ZeroMemory` and `ZM` are one project. Projects shared with the caller
+  count too, but another owner's name or alias never wins over one of the
+  caller's own projects that fits the same name — both are offered. A name
+  never creates a project or a binding. On the READ side an unusable hint degrades to the personal scope (a
+  narrowed read set is worse than a wide one); on the WRITE side
+  (`resolveProjectTarget`) it is refused with the caller's projects to pick
+  from, because writing on a guess is the failure this package refuses.
+- `ProjectTargetService` — which project board a card call means: its
+  `scope`, else the project its `project_hint` names, else, for a new card,
+  the session's project (`MemoryService.sessionProjectScope`, found the way a
+  scope-less `remember` finds it). Naming another project's board never moves
+  the session.
 - Write targeting — `remember` needs a target: an explicit `scope` (`"core"`
   for portable knowledge, `"personal"` for facts about the owner), a
   `project_hint`, or a session default attached by an earlier hint-pinned
@@ -71,7 +86,9 @@ adapters live in `@workspace/persistence` and are bound in the app host.
   (`ProjectAttachmentRegistry`, in-process and lossy) so the retry is
   deterministic — a suggestion the caller must echo, never an attachment.
 - `ScopeAccessService` port — fail-closed write-access checks before
-  mutating an aggregate (RLS stays the enforcement boundary in the DB).
+  mutating an aggregate (RLS stays the enforcement boundary in the DB), and
+  the caller's accepted project memberships with their aliases, which is all
+  a project name may point at.
 
 ## Ports and DI tokens
 
@@ -79,7 +96,56 @@ adapters live in `@workspace/persistence` and are bound in the app host.
 `MEMORY_SEARCH_SERVICE`, `IEntityRepository` / `ENTITY_REPOSITORY`,
 `IGraphService` / `GRAPH_SERVICE`, `IScopeAccessService` /
 `SCOPE_ACCESS_SERVICE`, `IProjectBindingRepository` /
-`PROJECT_BINDING_REPOSITORY` — each with an `injectX()` decorator helper.
+`PROJECT_BINDING_REPOSITORY`, `IProjectRulesReader` / `PROJECT_RULES_READER`,
+`IUserRulesReader` / `USER_RULES_READER`, `IPortabilityJudge` /
+`PORTABILITY_JUDGE`, `ISessionThreadRepository` /
+`SESSION_THREAD_REPOSITORY` — each with an `injectX()` decorator helper.
+`MemoryService` needs every port it names, the two below included: the host
+registers an adapter for each, and a missing one fails at resolution rather
+than quietly switching a feature off.
+
+`IBriefingWorkReader` / `BRIEFING_WORK_READER` supplies the project board's
+work summary for a briefing. The service asks for it only on a BUDGETED
+briefing pinned to a project, and pays for it with one row of the ranked
+memories leg: on a production clone, six → five rows kept every brief probe
+while twelve → eleven lost two, so an unbudgeted call briefs exactly as
+before. Loops attached to a card the summary names leave `open_loops`. A read
+failure costs the summary, never the briefing.
+
+`IRuleFateReader` / `RULE_FATE_READER` reports what happened to a promoted
+rule when a write retired the memory it was anchored to. The database moves
+the rule to the successor on the retirement itself, on every path that records
+one; the service only reads the result back, so `remember` can list it under
+`rules` (carried, carried with a curated text kept for review, or not carried)
+and `forget` can say the rule stays live. A read failure costs the report,
+never the write.
+
+`IRuleGate` / `RULE_GATE` (`RuleGateService`, configured through
+`RULE_GATE_CONFIG`, which the host reads from `ZM_RULE_GATE_*` and
+`ZM_JUDGE_TIMEOUT_MS` once at startup) decides how much of each standing rule
+a briefing delivers. It asks a decision model one yes/no question per unpinned
+rule — does it bind this task? — and maps the answer to `full`, `gate`
+(headline plus `applies_when`) or `headline` by two probability bands. Pinned
+rules are never judged and every rule keeps its name. An agent call is judged
+against its `topic`; a budgeted hook briefing only against the statement
+`hookTaskStatement` builds from the conversation's bound or continuation card,
+and not at all without one, nor when the call passes `judge_rules: false` (the
+hook's secondary briefing, so one session start judges once). The gate runs only for an account that turned it
+on and has a judge credential; `shadow` records the levels in `rule_gate`
+without changing what is delivered. A judge failure delivers the rules as
+before, flagged `judge_unavailable`, and never falls back to another provider;
+a gate failure costs the levelling, never the briefing. On the instance's key
+the gate first asks the budget guard (`@workspace/policy`) whether the
+account's `extraction` allowance has room, and delivers the rules whole with
+`unavailable_reason: 'budget_exhausted'` when it has none; an account's own
+key is never held back. A settings, credential or allowance read that fails,
+and a judge call that fails other than by not answering, are reported the same
+way, with `settings_unavailable`, `credential_unavailable`,
+`budget_unavailable` or `judge_error`. Every way out of the
+briefing sends a rule as the agent reads it: its text, pin, id and level, and
+its `applies_when` only at `gate` (`deliverAtLevel`; `deliverUnjudged` when
+nothing judged it). `chars_baseline` sums the rules' whole texts and
+`chars_delivered` what was sent, over the same rules.
 
 A write carries `PassageVectors` — a named `{ primary, overflow }` shape
 rather than a bare array, because the embedding model truncates its input to a
@@ -94,3 +160,9 @@ duplicate of it.
 ## Testing
 
 `bun run test:vitest` — specs live next to the sources.
+
+`@workspace/memory/testing` exports vitest fakes of every `MemoryService`
+port and `makeMemoryService`, which wires a real service over them (inert by
+default: empty stores, a writable scope, a granting portability judge). It is
+spec support shared with the packages built on this one — it imports vitest,
+so nothing outside a spec may import it.

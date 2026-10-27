@@ -65,29 +65,38 @@ export function parseFeedStatus(raw: string | undefined): FeedStatus {
   return FEED_STATUSES.find((status) => status === raw) ?? DEFAULT_FEED_STATUS;
 }
 
+/** The two columns a memory's lifecycle status is read from. */
+type LifecycleColumn = 'invalidated_at' | 'superseded_by';
+
+/** The part of a PostgREST filter builder the status filter needs. */
+interface FeedStatusQuery<Q> {
+  or(filters: string): Q;
+  is(column: LifecycleColumn, value: null): Q;
+  not(column: LifecycleColumn, operator: 'is', value: null): Q;
+}
+
 /**
- * Does a memory belong in the feed under this status? The twin of the SQL
- * filter the feed query applies (see the memories page) — kept pure so the
- * realtime insert path can reuse it client-side.
+ * Narrows the feed query to a status, selecting exactly the memories it
+ * admits. `all` adds nothing.
  */
-export function matchesFeedStatus(
-  memory: Pick<MemoryRow, 'invalidated_at' | 'superseded_by'>,
+export function filterFeedStatus<Q extends FeedStatusQuery<Q>>(
+  query: Q,
   status: FeedStatus
-): boolean {
-  const retired = Boolean(memory.invalidated_at);
-  const replaced = Boolean(memory.superseded_by);
+): Q {
   switch (status) {
     case 'active':
       // Everything except a historical version (retired AND replaced).
-      return !retired || !replaced;
+      return query.or('invalidated_at.is.null,superseded_by.is.null');
     case 'live':
-      return !retired;
+      return query.is('invalidated_at', null);
     case 'superseded':
-      return retired && replaced;
+      return query
+        .not('invalidated_at', 'is', null)
+        .not('superseded_by', 'is', null);
     case 'invalidated':
-      return retired && !replaced;
+      return query.not('invalidated_at', 'is', null).is('superseded_by', null);
     case 'all':
-      return true;
+      return query;
   }
 }
 

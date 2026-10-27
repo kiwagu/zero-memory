@@ -1,8 +1,8 @@
 import { createLogger, type Logger } from '@workspace/logger';
 import { Resend } from 'resend';
 
-import type { IMailSender, OutgoingMail } from './mail-sender.js';
-import { MailSendFailedError } from './mail-sender.js';
+import type { IMailSender, OutgoingMail } from './mail-sender';
+import { MailSendFailedError } from './mail-sender';
 
 export type ResendMailSenderConfig = {
   apiKey: string;

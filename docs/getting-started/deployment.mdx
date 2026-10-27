@@ -7,7 +7,9 @@ A production(-ish) zero-memory install is one server host running three
 things — the MCP server, the dashboard, and Supabase — behind a TLS edge,
 plus a small client footprint (MCP registration, hooks, optionally a watcher
 daemon) on each developer machine. Detail lives next to the artifacts in the
-repository; this page is the map.
+repository; this page is the map. The whole instance but its database can
+also run on AWS Lambda instead of the host; see
+[Deploy to AWS](/docs/getting-started/deploy-aws).
 
 ```
 developer machines                        server host
@@ -154,7 +156,13 @@ snapshot. In outline:
    `ZM_TRUST_PROXY=true` (which is what "deployed behind the edge" means)
    the server refuses to start on a missing or non-HTTPS public URL rather
    than booting into a silently broken issuer. Keep `ZM_TRUST_PROXY=true`
-   only when the server sits behind the edge.
+   only when the server sits behind the edge. The server also needs the
+   dashboard's external origin, **`ZM_WEB_URL`**: authorizing an agent sends
+   the person there to sign in and approve it. The production compose file
+   derives it as `https://${ZM_WEB_HOST}`, so set it only when the dashboard
+   is reached some other way. It follows the same rules as the issuer — a
+   bare origin, https outside loopback — and behind the edge the server
+   refuses to start without a valid one.
 3. Bring the stack up:
 
    ```sh
@@ -199,6 +207,90 @@ default) on the dashboard hostname, so a file `terms.html` there answers at
 `/terms`. Nothing about them is baked into an image: publishing, editing or
 withdrawing a document is a file change and a reload, never a rebuild.
 
+An account that arrives without an acceptance — one created through a social
+provider, or one that existed before the documents were configured — is asked
+once, on `/accept-terms`, before any dashboard page opens, and then never
+again. An instance without documents never shows that page.
+
+## Social login
+
+The dashboard can sign people in with GitHub and Google. The buttons appear by
+themselves: at render time the login page asks Auth which providers this
+instance has enabled, so there is nothing to configure in the dashboard and
+nothing baked into its image. Enabling a provider is a Supabase setting:
+
+- Register an OAuth app at the provider with the callback
+  `https://<your-supabase-host>/auth/v1/callback` — Auth's own address, not
+  the dashboard's. On a hosted project that is
+  `https://<project-ref>.supabase.co/auth/v1/callback`.
+- Hosted project: paste the client id and secret under Authentication →
+  Providers in the Supabase dashboard.
+- Self-hosted stack: set `GITHUB_ENABLED=true`, `GITHUB_CLIENT_ID`,
+  `GITHUB_SECRET` (and the `GOOGLE_*` trio) in the stack's `.env` and restart
+  the auth container; the compose file wires them with disabled defaults.
+- Local CLI stack: `[auth.external.github]` and `[auth.external.google]` in
+  `supabase/config.toml` read their credentials through `env(...)`; flip
+  `enabled` locally and restart the stack.
+
+The same sign-in serves agents. Authorizing an MCP client opens the dashboard,
+so an account created through a provider connects its agents exactly like a
+password account does.
+
+Accounts are one per email. Signing in with a provider whose email matches an
+existing, confirmed account links the provider to that account: the password
+keeps working and nothing is replaced. Two things are worth telling users: a
+password sign-up for an email that already belongs to a provider account is
+answered quietly with no confirmation mail (the sign-in form says so above
+its fields), and a password can be added to a provider account from the
+password-reset flow.
+
+## Two-factor authentication
+
+People can protect their account with an authenticator app: they turn it on
+in Settings, and from then on every sign-in — password, GitHub or Google —
+asks for a six-digit code before the dashboard opens. Until the code is
+given, the sign-in reaches no data at all: the dashboard sends it to the code
+step and refuses its requests, the memory server answers `401` with
+`insufficient_aal`, and the database itself shows it no row and accepts no
+write, because the row-level policies apply the same rule. The same code
+guards the consent screen that lets an agent in, a password reset, and
+deleting the account, which cannot be done at all until the account has a
+second factor. Agents keep working: the session each one receives from the
+consent screen is recorded by the authorization server as an agent's at the
+moment it is opened, and a recorded session is complete without a code.
+Turning two-factor on, or changing the password, ends the agents connected
+before it, so each of them authorizes once more. Giving the code at a later
+sign-in does not: Auth then ends every session of the account below the
+second-factor level, an agent's included, and the authorization server opens
+a new one at the agent's next refresh. The refresh token an agent holds is the
+authorization server's own and stands for the person's approval of that
+client, not for one Auth session; it is rotated on every refresh, and a token
+that was already replaced coming back ends the approval, since only a copy
+would still hold it. A session reaches the data only while it exists: once it
+ends — signed out, ended by a password change or a new factor, or revoked
+with its agent under Connected agents in Settings — its token is refused by
+the memory server and shown no row by the database, even before it expires,
+and the dashboard sends that browser to sign in. The code is also what stops
+an agent
+from acting as the person where only the person should: once an account has
+a factor, Auth refuses a session without the code a password or email change
+and a new factor, and the dashboard refuses an agent's session everywhere. On
+an account without a factor an agent's session could set up one of its own,
+so the advice to people is to turn two-factor on before connecting agents.
+
+Auth must allow TOTP enrolment, or turning it on fails in Settings:
+
+- Hosted project: Authentication → Multi-Factor, enable the authenticator
+  app (TOTP) for enrolment and verification.
+- Self-hosted stack: `MFA_TOTP_ENROLL_ENABLED` and `MFA_TOTP_VERIFY_ENABLED`
+  in the stack's `.env`; the compose file defaults both to `true`.
+- Local CLI stack: `[auth.mfa.totp]` with `enroll_enabled` and
+  `verify_enabled` in `supabase/config.toml`, already on.
+
+Someone who loses their phone is let back in by an operator, after checking
+their identity: `bun scripts/mfa-unenroll.ts <email>` lists the account's
+factors with the service role, and `--yes` removes them.
+
 ## Client machines
 
 The short path for a developer machine is
@@ -207,8 +299,9 @@ per-platform bundle, run one installer, sign in. The pieces it installs:
 
 - MCP client: register `{"type":"http","url":"https://zm.example.com/mcp"}`.
   The client discovers OAuth via the 401 challenge, self-registers through
-  dynamic client registration, and opens the login page. Users sign up and
-  reset passwords in the dashboard.
+  dynamic client registration, and opens the dashboard, where the person signs
+  in and allows the client on a consent screen. Users sign up and reset
+  passwords in the dashboard.
 - Watcher (auto-capture of session transcripts): run
   `zero-memory-watcher login https://zm.example.com` once. It stores the
   server address in `~/.config/zero-memory/config.json` — the one answer
@@ -281,6 +374,13 @@ the images and waits for the containers to report healthy. Compose recreates
 only what changed. By default, apply any new migrations separately; they are
 forward-only.
 
+Before anything is written to the disk, the same run makes room: it removes
+the stack's older release images. It keeps `ZM_KEEP_RELEASES` releases (5
+when unset in `infra/prod/.env`): the one being deployed and the newest others,
+starting with the release it replaces. It never removes
+an image a container was created from, and it also drops unused build cache
+and dangling layers. A failure there is reported and the deploy goes ahead.
+
 A host can manage the migrations itself: set `ZM_MIGRATE_ON_DEPLOY=1` in
 `infra/prod/.env` and point `ZM_DB_ENV_FILE` at an env file carrying
 `SUPABASE_DB_URL` (default `/etc/zero-memory/backup.env`, the same file the
@@ -294,7 +394,8 @@ the previous containers still serve. A host that never sets the flag is
 unaffected.
 
 Rolling back is the same command with the previous tag, and it is fast: the
-rehearsed procedure measured under a minute in each direction. The pin
+rehearsed procedure measured under a minute in each direction. The releases
+the host kept are still there; an older one is pulled from the registry again. The pin
 persists, so a later bare `upgrade.sh` re-run stays on the rolled-back version
 until you name a newer tag. The database does not roll back with it, and
 does not need to: the schema is ADD-only by design, so an older server

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PROJECT_HINT_UNRESOLVABLE,
+  boardTargetRequiredMessage,
   projectHintUnresolvableMessage,
   SCOPE_TARGET_REQUIRED,
   scopeTargetRequiredMessage,
@@ -44,6 +45,53 @@ describe('write refusal messages', () => {
 
     expect(message.startsWith(`${PROJECT_HINT_UNRESOLVABLE}:`)).toBe(true);
     expect(message).toContain('"/"');
+  });
+
+  it('lists the projects a refused name can be retried with', () => {
+    const message = projectHintUnresolvableMessage('zero-memry', {
+      reason: 'unknown',
+      projects: [
+        { name: 'zero_memory', scope: 'proj.usr_a.zero_memory' },
+        { name: 'harbor', scope: 'proj.usr_a.harbor' },
+      ],
+    });
+
+    expect(message.startsWith(`${PROJECT_HINT_UNRESOLVABLE}:`)).toBe(true);
+    expect(message).toContain('zero_memory (proj.usr_a.zero_memory)');
+    expect(message).toContain('harbor (proj.usr_a.harbor)');
+    // A name never creates a project, and the refusal says how one is made.
+    expect(message).toContain('repo root path or git remote URL');
+  });
+
+  it('names only the projects an ambiguous name fits', () => {
+    const message = projectHintUnresolvableMessage('zm', {
+      reason: 'ambiguous',
+      projects: [
+        { name: 'zero_memory', scope: 'proj.usr_a.zero_memory' },
+        { name: 'zoo_map', scope: 'proj.usr_a.zoo_map' },
+      ],
+    });
+
+    expect(message).toContain('more than one of your projects');
+    expect(message).toContain('zoo_map (proj.usr_a.zoo_map)');
+  });
+
+  it('leaves out core and personal where a write cannot go there', () => {
+    const message = projectHintUnresolvableMessage('x', {
+      portableLayers: false,
+    });
+
+    expect(message).not.toContain('"core"');
+  });
+
+  it('refuses a card that names no board, listing the boards it could go to', () => {
+    const message = boardTargetRequiredMessage([
+      { name: 'zero_memory', scope: 'proj.usr_a.zero_memory' },
+    ]);
+
+    expect(writeRefusalReasonOf(message)).toBe(SCOPE_TARGET_REQUIRED);
+    expect(message).toContain('project_hint');
+    expect(message).toContain('zero_memory (proj.usr_a.zero_memory)');
   });
 
   it('classifies refusals by prefix and nothing else', () => {

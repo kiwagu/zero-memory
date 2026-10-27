@@ -65,33 +65,37 @@ test.describe('staleness marker on recall', () => {
           scope: 'core',
         })
       );
-      const project = firstJson<RememberOutput>(
+      const project = firstJson<RememberOutput & { scope: string }>(
         await mcp.callTool('remember', {
           content:
             'This service pins zephyrlint in CI so formatting never drifts ' +
             'between contributors.',
           kind: 'fact',
-          scope: 'personal',
+          project_hint: '/home/someone/repos/zephyr-service-e2e',
         })
       );
+      expect(project.scope).toMatch(/^proj\./u);
 
       // Both far past the fact budget (180 days).
       await ageMemory(admin, core.memory_id, 400);
       await ageMemory(admin, project.memory_id, 400);
 
+      // Both scopes are read: the core fact and the project one.
       const recalled = firstJson<RecallOutput>(
-        await mcp.callTool('recall', { query: 'zephyrlint formatter config' })
+        await mcp.callTool('recall', {
+          query: 'zephyrlint formatter config',
+          scopes: ['*'],
+        })
       );
 
       const coreHit = hitFor(recalled, core.memory_id);
       expect(coreHit, 'the core-scope fact should be recalled').toBeDefined();
       expect(coreHit!.stale_days).toBeGreaterThanOrEqual(400);
 
+      // The control: same age, never marked — its truth is not external.
       const projectHit = hitFor(recalled, project.memory_id);
-      if (projectHit) {
-        // The control: same age, never marked — its truth is not external.
-        expect(projectHit.stale_days).toBeNull();
-      }
+      expect(projectHit, 'the project fact should be recalled').toBeDefined();
+      expect(projectHit!.stale_days).toBeNull();
     } finally {
       await mcp.close();
     }

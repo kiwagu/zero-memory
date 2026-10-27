@@ -25,7 +25,7 @@ schema_paths = []
 [db.seed]
 enabled = false
 
-# Kept: the dashboard subscribes to it (RealtimeFeed), so switching it off
+# Kept: the dashboard's live refresh listens on it, so switching it off
 # would exercise a degraded product rather than a lighter stack.
 [realtime]
 enabled = true
@@ -75,10 +75,34 @@ enable_refresh_token_rotation = true
 refresh_token_reuse_interval = 10
 enable_signup = true
 
+# The second factor: an authenticator app (TOTP). Turning it on is each
+# person's choice in Settings → Security; once they have, the dashboard asks
+# for a code after every first factor, and deleting the account needs one.
+[auth.mfa]
+max_enrolled_factors = 10
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
 [auth.email]
 enable_signup = true
 double_confirm_changes = true
 enable_confirmations = true
+
+# One provider on, one off, with credentials that open nothing: the suite
+# checks that the login page draws exactly the enabled provider and that Auth
+# hands the browser to github.com for it while refusing the disabled one. No
+# real provider account is ever used on this stand.
+[auth.external.github]
+enabled = true
+client_id = "e2e-github-client-id"
+secret = "e2e-github-secret"
+
+[auth.external.google]
+enabled = false
+client_id = "e2e-google-client-id"
+secret = "e2e-google-secret"
 
 # Same templates as every other stack — the point of asserting mail here is that
 # the recovery spec sees what a real user gets, not GoTrue's built-in default.

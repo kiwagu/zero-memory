@@ -20,8 +20,9 @@ default address: the installer asks for this URL, checks it, and stores it in
 `~/.config/zero-memory/config.json`, which the MCP registration, the hooks and
 the ingest daemon all read.
 
-Authentication is **OAuth**. A one-time browser login stores a token that the
-hooks and the MCP client reuse and refresh. No Supabase URL, email, or
+Authentication is **OAuth**. A one-time browser sign-in on the dashboard, and
+an Allow on its consent screen, store a token that the hooks and the MCP
+client reuse and refresh. No Supabase URL, email, or
 password is needed on the client.
 
 ## Install the plugin (recommended)
@@ -36,6 +37,7 @@ binary it calls is installed separately, so the plugin stays tiny. It adds:
 | `UserPromptSubmit` + `status` | Health trailer: warns the agent when the server is unreachable (cached probe, silent when healthy) so an outage is noticed within a turn.                                                                                                                                                                                                                                                                                                      |
 | `SessionStart` + `guide`      | Injects the memory-first mandate when a session opens.                                                                                                                                                                                                                                                                                                                                                                                         |
 | `nudge` (four events)         | The recall reminder, gated on whether the session has consulted memory at all: `PostToolUse` on the memory tools keeps the count, and a reminder fires only while that count is zero — on a failing investigation tool, at end of turn when the session wrote but never read, or on a code search. Each fires at most once per session, and any single read silences all of them.                                                              |
+| `PostToolUse` + `landing`     | Right after a shell command, checks the repository's newest commits for a squash whose board card has no record of its landing, and tells the agent the exact `card` `land` call. Each squash is checked once per machine.                                                                                                                                                                                                                     |
 | `SessionEnd` + `receipt`      | Session value receipt — one chat line, once per session, silent when empty. See [session receipt](/docs/guides/session-receipt).                                                                                                                                                                                                                                                                                                               |
 | `Stop` hook (opt-in)          | Bulk transcript capture — **not installed by default**; enable with `--with-ingest` plus a consent config (see Privacy).                                                                                                                                                                                                                                                                                                                       |
 | `PreCompact` hook (opt-in)    | The compaction boundary, worked from both sides: the epoch about to be condensed is captured while it is still whole, and the summary is handed an anchor naming the project, the thread and the open loops it must keep. Installed with `--with-ingest`, since its capture half ships transcript content and obeys the same consent config; the anchor half is a read, like the briefing hooks. A `.zero-memory-ignore` project gets neither. |
@@ -193,6 +195,13 @@ The full rule texts arrive through two uncapped paths:
   a compaction or a cleared conversation opens a new window and the rules
   are delivered into it again, so a rule never silently misses the context
   the agent is actually working in.
+
+When the account has turned the rule delivery judge on and the instance runs
+the gate (`ZM_RULE_GATE_MODE=live`; it is `off` by default, and `shadow`
+judges and records but delivers every rule whole), both paths may carry an
+unpinned rule that does not bind the task by its headline, marked `[gate]`
+or `[headline]` with the rule id; its full text is at `zm://rules/{id}`. See
+[Delivery by task relevance](/docs/guides/rules-incubator#delivery-by-task-relevance).
 
 Other MCP clients receive the full rules inline unless they have a documented
 cap. Pinned rules are first and are exempt from the delivery count and

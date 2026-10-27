@@ -116,17 +116,6 @@ describe('filterBriefingPack', () => {
     expect(filtered.open_loops.map((m) => m.id)).toEqual([memId(5)]);
     expect(filtered.open_loops_total).toBe(1);
   });
-
-  it('parses an older-server pack without open-loop fields', () => {
-    const parsed = parseBriefingPack({
-      memories: [memory(memId(1))],
-      entities: [],
-      edges: [],
-      linked_memories: [],
-    });
-    expect(parsed.open_loops).toEqual([]);
-    expect(parsed.open_loops_total).toBe(0);
-  });
 });
 
 describe('packMemoryIds', () => {

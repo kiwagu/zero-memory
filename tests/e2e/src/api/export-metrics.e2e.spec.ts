@@ -10,7 +10,10 @@
  */
 import { expect, test } from '@playwright/test';
 
-import { seedInsightsUsage } from '../helpers/insights.js';
+import {
+  RULE_GATE_SERIES_KEYS,
+  seedInsightsUsage,
+} from '../helpers/insights.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import {
   passwordGrantToken,
@@ -35,11 +38,12 @@ test.describe('export_metrics over MCP @smoke', () => {
 
     const mcp = await McpTestClient.connect(token);
     try {
+      // No `days`: the window the tool reports is the one it chose itself.
       const out = firstJson<ExportMetrics>(
-        await mcp.callTool('export_metrics', { days: 30 })
+        await mcp.callTool('export_metrics', {})
       );
 
-      // Window echo and shape.
+      // The default window, echoed, and the shape.
       expect(out.window.days).toBe(30);
       expect(typeof out.window.since).toBe('string');
       expect(Array.isArray(out.series)).toBe(true);
@@ -93,25 +97,35 @@ test.describe('export_metrics over MCP @smoke', () => {
         0
       );
       expect(seriesRecalls).toBe(out.metrics.recall_calls);
-    } finally {
-      await mcp.close();
-    }
-  });
 
-  test('defaults the window to 30 days and rejects an out-of-range horizon', async () => {
-    const user = await provisionE2EUser('export-metrics-b@zm.e2e');
-    const token = await passwordGrantToken(user);
-    const mcp = await McpTestClient.connect(token);
-    try {
-      // Omitted days → the contract default.
-      const def = firstJson<ExportMetrics>(
-        await mcp.callTool('export_metrics', {})
+      // The rule gate's daily measures are on every point, zero or not.
+      for (const point of out.series) {
+        expect(Number.isInteger(point.rule_gate_calls)).toBe(true);
+        expect(point.rule_gate_calls).toBeGreaterThanOrEqual(0);
+      }
+      // …and the SQL emits them itself: the raw series RPC carries every key
+      // on every day, so the contract's defaults are not what fills them.
+      const rest = userRestClient(token);
+      const { data: rawSeries, error: rawError } = await rest.rpc(
+        'dashboard_metrics_series',
+        { p_days: 30 }
       );
-      expect(def.window.days).toBe(30);
+      expect(rawError).toBeNull();
+      for (const point of rawSeries as Array<Record<string, unknown>>) {
+        for (const key of RULE_GATE_SERIES_KEYS) {
+          expect(point).toHaveProperty(key);
+        }
+      }
 
-      // Above the 365-day ceiling → input validation rejects it.
-      const tooWide = await mcp.callTool('export_metrics', { days: 400 });
-      expect(tooWide.isError ?? false).toBe(true);
+      // The per-rule breakdown is the caller's own and open to them.
+      const { data: stats, error: statsError } = await rest.rpc(
+        'rule_gate_stats',
+        { p_days: 30 }
+      );
+      expect(statsError).toBeNull();
+      const breakdown = stats as { rules: unknown[]; refusals: unknown[] };
+      expect(Array.isArray(breakdown.rules)).toBe(true);
+      expect(Array.isArray(breakdown.refusals)).toBe(true);
     } finally {
       await mcp.close();
     }

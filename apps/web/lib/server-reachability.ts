@@ -3,7 +3,7 @@
  * URL. `ZM_SERVER_URL` is the FULL endpoint by convention (…/mcp), so the
  * suffix is stripped rather than appended to.
  */
-export const healthUrlFrom = (endpoint: string): string =>
+const healthUrlFrom = (endpoint: string): string =>
   `${endpoint.replace(/\/$/, '').replace(/\/mcp$/, '')}/healthz`;
 
 export interface ServerReachability {

@@ -137,6 +137,16 @@ if ! command -v zm_resolve_server_url >/dev/null 2>&1; then
 fi
 zm_resolve_server_url || exit 1
 
+# The rules for touching the user's own files (back up first, write in place).
+for cand in "$SCRIPT_DIR/zm-user-files.sh" "$SCRIPT_DIR/../zm-user-files.sh"; do
+  # shellcheck source=scripts/zm-user-files.sh
+  [ -f "$cand" ] && { . "$cand"; break; }
+done
+if ! command -v zm_write_file >/dev/null 2>&1; then
+  echo "ERROR: zm-user-files.sh not found next to this script." >&2
+  exit 1
+fi
+
 # Verify a binary against a SHA-256 digest file (first field = expected hash).
 # A missing digest warns but does not block (older bundles carry no digest).
 verify_digest() {
@@ -341,11 +351,19 @@ say "Installing plugin $PLUGIN_ID (user scope)…"
 # used to be set separately — that is how a machine ended up with its editor on
 # one instance and its briefing on another, both reporting themselves healthy.
 zm_store_server_url
-say "Registering MCP server 'zero-memory' -> $ZM_SERVER_URL (user scope)"
-# drop any stale entry first so a re-run picks up a changed URL
-"$CLAUDE" mcp remove zero-memory --scope user >/dev/null 2>&1 \
-  || "$CLAUDE" mcp remove zero-memory >/dev/null 2>&1 || true
-"$CLAUDE" mcp add --scope user --transport http zero-memory "$ZM_SERVER_URL"
+# A registration that already points at this server is left alone: removing it
+# can drop the user's OAuth login for nothing. Only a changed URL is re-pointed.
+current_mcp="$("$CLAUDE" mcp get zero-memory 2>/dev/null || true)"
+if printf '%s\n' "$current_mcp" | grep -q 'Scope: User config' \
+  && printf '%s\n' "$current_mcp" | grep -qxF "  URL: $ZM_SERVER_URL"; then
+  say "MCP server 'zero-memory' already registered (user scope) -> $ZM_SERVER_URL — left untouched"
+else
+  say "Registering MCP server 'zero-memory' -> $ZM_SERVER_URL (user scope)"
+  # drop any stale entry first so a re-run picks up a changed URL
+  "$CLAUDE" mcp remove zero-memory --scope user >/dev/null 2>&1 \
+    || "$CLAUDE" mcp remove zero-memory >/dev/null 2>&1 || true
+  "$CLAUDE" mcp add --scope user --transport http zero-memory "$ZM_SERVER_URL"
+fi
 
 # --- 4.5 record where updates come from --------------------------------------
 # The watcher's session-start hook compares the installed plugin version with
@@ -400,6 +418,7 @@ if [ -n "$INSTALL_RULE" ]; then
     say "ZM-first rule already present in $CLAUDE_MD — leaving it untouched"
   else
     say "Appending the always-on ZM-first rule to $CLAUDE_MD (--with-rule)"
+    zm_backup_file "$CLAUDE_MD"
     grep -q '^# ' "$CLAUDE_MD" \
       || printf '# Global instructions (all projects on this host)\n' >> "$CLAUDE_MD"
     cat >> "$CLAUDE_MD" <<'ZMRULE'
@@ -437,7 +456,8 @@ fi
 # for…") and points --rules-file at that markdown; --rules-dest chooses the
 # target (default ~/.claude/CLAUDE.md). Written between managed markers and the
 # whole block is REPLACED on every run, so re-materializing refreshes the rules
-# and never stacks duplicates.
+# and never stacks duplicates. Markers that do not pair up (an edit removed one)
+# leave the file untouched: there is then no telling where the block ends.
 if [ -n "$RULES_FILE" ]; then
   if [ ! -f "$RULES_FILE" ]; then
     warn "--rules-file: $RULES_FILE not found — skipping materialization"
@@ -447,20 +467,20 @@ if [ -n "$RULES_FILE" ]; then
     RULES_END="<!-- zero-memory promoted rules: END -->"
     mkdir -p "$(dirname "$RULES_DEST")"
     touch "$RULES_DEST"
-    say "Materializing promoted rules from $RULES_FILE into $RULES_DEST"
     RULES_TMP="$(mktemp)"
     # Drop any prior managed block (idempotent replace), keep everything else.
-    awk -v b="$RULES_BEGIN" -v e="$RULES_END" '
-      $0==b {skip=1; next}
-      skip && $0==e {skip=0; next}
-      !skip {print}
-    ' "$RULES_DEST" > "$RULES_TMP"
-    {
-      printf '%s\n' "$RULES_BEGIN"
-      cat "$RULES_FILE"
-      printf '%s\n' "$RULES_END"
-    } >> "$RULES_TMP"
-    mv "$RULES_TMP" "$RULES_DEST"
+    if zm_strip_block_to "$RULES_DEST" "$RULES_BEGIN" "$RULES_END" "$RULES_TMP"; then
+      say "Materializing promoted rules from $RULES_FILE into $RULES_DEST"
+      {
+        printf '%s\n' "$RULES_BEGIN"
+        cat "$RULES_FILE"
+        printf '%s\n' "$RULES_END"
+      } >> "$RULES_TMP"
+      zm_write_file "$RULES_DEST" "$RULES_TMP"
+    else
+      rm -f "$RULES_TMP"
+      warn "--rules-file: the managed-block markers in $RULES_DEST do not pair up — left untouched. Remove the old block by hand, then re-run."
+    fi
   fi
 fi
 
@@ -509,7 +529,8 @@ if [ -n "$INSTALL_INGEST" ]; then
       wire("Stop"; $ingest; "zero-memory-watcher ingest"; {})
       | wire("PreCompact"; $checkpoint; "zero-memory-watcher checkpoint";
              {timeout: 10})
-    ' "$SETTINGS" > "$tmp" && mv "$tmp" "$SETTINGS"
+    ' "$SETTINGS" > "$tmp"
+    zm_write_file "$SETTINGS" "$tmp"
     say "Wired the capture hooks in $SETTINGS (transcript capture)"
   else
     warn "jq not found — add a Stop hook '$DEST_BIN ingest' and a PreCompact"

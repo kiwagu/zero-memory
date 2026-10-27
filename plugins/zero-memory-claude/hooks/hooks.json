@@ -59,6 +59,15 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/bin/zero-memory-watcher nudge"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/zero-memory-watcher landing"
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [

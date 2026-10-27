@@ -790,7 +790,16 @@ const ensureApps = async (
   // the calling shell when the epic under review needs it on.
   const extractionEnv: Record<string, string> =
     contour.key === 'test'
-      ? { ZM_INGEST_EXTRACT: 'on', ZM_EXTRACTOR: 'deterministic' }
+      ? {
+          ZM_INGEST_EXTRACT: 'on',
+          ZM_EXTRACTOR: 'deterministic',
+          // The rule gate runs live against a deterministic judge, so the e2e
+          // spec can prove the levels, the pinned exemption and the unjudged
+          // paths without a provider account. An account still has to turn
+          // the gate on, so every other spec sees its rules whole.
+          ZM_JUDGE_FAKE: '1',
+          ZM_RULE_GATE_MODE: 'live',
+        }
       : {};
 
   // The web half is `next dev` on both contours and hot-reloads source edits,
@@ -825,6 +834,7 @@ const ensureApps = async (
       ...extractionEnv,
       PORT: String(contour.serverPort),
       ZM_PUBLIC_URL: serverUrl,
+      ZM_WEB_URL: webUrl,
     }
   );
 
@@ -1083,7 +1093,7 @@ const main = async (): Promise<number> => {
       `\n✓ test stack + apps are up and will be reused.\n` +
         `  server: ${serverUrlOf(test)}  web: ${webUrlOf(test)}\n` +
         (mailUrlOf(test) ? `  mail:   ${mailUrlOf(test)}\n` : '') +
-        `  Iterate: bun run pw -- --grep @smoke   (E2E_SERVER_URL/E2E_WEB_URL preset)\n` +
+        `  Iterate: bun run pw -- --grep @smoke   (this stack's URLs and keys preset)\n` +
         `  Stop:    bun run e2e:down`
     );
     return 0;

@@ -77,6 +77,8 @@ export default async function EntitiesPage({
           <EntityCard
             key={entity.id}
             name={entity.name}
+            href={`/entities/${entity.id}`}
+            linkComponent={Link}
             timestamp={formatTimestamp(entity.created_at)}
             badges={[
               { label: entity.type, variant: 'blue' },

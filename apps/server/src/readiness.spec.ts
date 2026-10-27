@@ -1,7 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  checkReadiness,
   createReadinessRoutes,
   createSupabaseProbe,
   readinessReportSchema,
@@ -19,55 +18,45 @@ const probes = (
 const getReadyz = (p: ReadinessProbes): Promise<Response> =>
   createReadinessRoutes(p).handle(new Request('http://localhost/readyz'));
 
-describe('checkReadiness', () => {
-  it('is ok when supabase answers, regardless of a cold embedder', async () => {
-    await expect(checkReadiness(probes(true, 'cold'))).resolves.toEqual({
+describe('GET /readyz', () => {
+  it('returns 200 with the report when supabase answers, however cold the embedder', async () => {
+    // A cold embedder is the normal post-boot state (it loads lazily), so it
+    // must never gate readiness.
+    const response = await getReadyz(probes(true, 'cold'));
+    expect(response.status).toBe(200);
+    const body = readinessReportSchema.parse(await response.json());
+    expect(body).toEqual({
       ok: true,
       checks: { supabase: true, embedder: 'cold' },
     });
   });
 
-  it('is not ok when supabase is unreachable', async () => {
-    await expect(checkReadiness(probes(false, 'ready'))).resolves.toEqual({
+  it('returns 503 with supabase:false when the probe fails, however warm the embedder', async () => {
+    const response = await getReadyz(probes(false, 'ready'));
+    expect(response.status).toBe(503);
+    const body = readinessReportSchema.parse(await response.json());
+    expect(body).toEqual({
       ok: false,
       checks: { supabase: false, embedder: 'ready' },
     });
   });
 });
 
-describe('GET /readyz', () => {
-  it('returns 200 with the report when downstreams are up', async () => {
-    const response = await getReadyz(probes(true, 'ready'));
-    expect(response.status).toBe(200);
-    const body = readinessReportSchema.parse(await response.json());
-    expect(body).toEqual({
-      ok: true,
-      checks: { supabase: true, embedder: 'ready' },
-    });
-  });
-
-  it('returns 503 with supabase:false when the probe fails', async () => {
-    const response = await getReadyz(probes(false, 'cold'));
-    expect(response.status).toBe(503);
-    const body = readinessReportSchema.parse(await response.json());
-    expect(body).toEqual({
-      ok: false,
-      checks: { supabase: false, embedder: 'cold' },
-    });
-  });
-});
-
 describe('createSupabaseProbe', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('fails closed (false, no throw) when the target does not answer', async () => {
-    process.env.SUPABASE_URL = 'http://127.0.0.1:59999';
-    process.env.SUPABASE_ANON_KEY = 'test-key';
+    vi.stubEnv('SUPABASE_URL', 'http://127.0.0.1:59999');
+    vi.stubEnv('SUPABASE_ANON_KEY', 'test-key');
     const probe = createSupabaseProbe({ timeoutMs: 300 });
     await expect(probe()).resolves.toBe(false);
   });
 
   it('reports false when the environment is not configured', async () => {
-    delete process.env.SUPABASE_URL;
-    delete process.env.SUPABASE_ANON_KEY;
+    vi.stubEnv('SUPABASE_URL', '');
+    vi.stubEnv('SUPABASE_ANON_KEY', '');
     await expect(createSupabaseProbe()()).resolves.toBe(false);
   });
 });

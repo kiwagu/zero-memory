@@ -25,7 +25,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@workspace/ui/components/select';
+import { Markdown } from '@workspace/ui/components/common/markdown';
+import { Input } from '@workspace/ui/components/input';
 import { Switch } from '@workspace/ui/components/switch';
+import { Textarea } from '@workspace/ui/components/textarea';
 import {
   RULE_EXPORT_FORMATS,
   renderRuleFile,
@@ -145,6 +148,122 @@ function PendingPromote({
   );
 }
 
+/** The stats line of a promoted rule, from its template. */
+const statsLine = (
+  template: string,
+  stats: NonNullable<RuleCandidateItem['stats']>
+): string =>
+  template
+    .replace('{calls}', String(stats.calls))
+    .replace('{full}', String(stats.full))
+    .replace('{gate}', String(stats.gate))
+    .replace('{headline}', String(stats.headline))
+    .replace('{meanP}', stats.meanP === null ? '—' : stats.meanP.toFixed(2))
+    .replace('{fetches}', String(stats.fetches));
+
+/**
+ * Saves an inline field when it loses focus, or on Enter, and only when its
+ * text changed. Shift+Enter still breaks a line in a textarea.
+ */
+const saveOnCommit = (saved: string, onSave: (value: string) => void) => ({
+  onBlur: (event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const value = event.currentTarget.value.trim();
+    if (value !== saved) {
+      onSave(value);
+    }
+  },
+  onKeyDown: (
+    event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      event.currentTarget.blur();
+    }
+  },
+});
+
+/**
+ * What the delivery judge reads about a promoted rule — when it applies and
+ * which guard enforces it — edited in place, and how the rule was delivered
+ * lately. Each field is keyed by its stored value, so a refresh that brings a
+ * new value back resets the field to it.
+ */
+function PromotedRuleDelivery({
+  item,
+  busy,
+  labels,
+  onAppliesWhen,
+  onEnforcedBy,
+}: {
+  item: RuleCandidateItem;
+  busy: boolean;
+  labels: RuleCandidateQueueLabels;
+  onAppliesWhen?: (item: RuleCandidateItem, value: string) => void;
+  onEnforcedBy?: (item: RuleCandidateItem, value: string) => void;
+}) {
+  const appliesWhen = item.appliesWhen ?? '';
+  const enforcedBy = item.enforcedBy ?? '';
+  const appliesWhenId = `rule-applies-when-${item.id}`;
+  const enforcedById = `rule-enforced-by-${item.id}`;
+  return (
+    <div className="space-y-3">
+      {onAppliesWhen ? (
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium" htmlFor={appliesWhenId}>
+            {labels.appliesWhen.label}
+          </label>
+          <Textarea
+            key={appliesWhen}
+            id={appliesWhenId}
+            data-testid="rule-applies-when"
+            className="min-h-12"
+            maxLength={400}
+            defaultValue={appliesWhen}
+            placeholder={labels.appliesWhen.placeholder}
+            disabled={busy}
+            {...saveOnCommit(appliesWhen, (value) =>
+              onAppliesWhen(item, value)
+            )}
+          />
+          {appliesWhen === '' ? (
+            <p
+              className="text-muted-foreground text-xs"
+              data-testid="rule-applies-when-missing"
+            >
+              {labels.appliesWhen.missing}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {onEnforcedBy ? (
+        <div className="space-y-1.5">
+          <label className="text-sm font-medium" htmlFor={enforcedById}>
+            {labels.enforcedBy.label}
+          </label>
+          <Input
+            key={enforcedBy}
+            id={enforcedById}
+            data-testid="rule-enforced-by"
+            className="max-w-sm font-mono"
+            maxLength={64}
+            defaultValue={enforcedBy}
+            placeholder={labels.enforcedBy.placeholder}
+            disabled={busy}
+            spellCheck={false}
+            {...saveOnCommit(enforcedBy, (value) => onEnforcedBy(item, value))}
+          />
+        </div>
+      ) : null}
+      {item.stats ? (
+        <p className="text-muted-foreground text-xs" data-testid="rule-stats">
+          <span className="font-medium">{labels.stats.title}:</span>{' '}
+          {statsLine(labels.stats.line, item.stats)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Rules-incubator review surface. Mechanism only: rows and labels arrive
  * translated, resolutions are injected callbacks, and the caller owns
@@ -212,6 +331,40 @@ export interface RuleCandidateItem {
    * app pre-formats it; absent/null when the rule still has live evidence.
    */
   staleSignal?: string | null;
+  /**
+   * A PROMOTED rule moved to the successor of its memory but kept a curated
+   * text, which may no longer say what the successor says. Pre-formatted by
+   * the app; absent/null otherwise.
+   */
+  reviewSignal?: string | null;
+  /**
+   * A PROMOTED rule still anchored to a memory that was retired: superseded
+   * without the rule moving along, or forgotten. It stays promoted.
+   * Pre-formatted by the app; absent/null otherwise.
+   */
+  sourceSignal?: string | null;
+  /** The memory this rule last moved away from, when it moved. */
+  carriedFrom?: { id: string; href: string } | null;
+  /**
+   * When a PROMOTED rule binds a task, as observable task features: what the
+   * delivery judge tests the task against. Null until someone says.
+   */
+  appliesWhen?: string | null;
+  /** The client-side guard that enforces the rule, by the name it prints. */
+  enforcedBy?: string | null;
+  /**
+   * How the delivery judge delivered a PROMOTED rule lately: calls that
+   * listed it, per level, the mean probability, and full-text reads after a
+   * headline. Null or absent when nothing was measured.
+   */
+  stats?: {
+    calls: number;
+    full: number;
+    gate: number;
+    headline: number;
+    meanP: number | null;
+    fetches: number;
+  } | null;
 }
 
 export interface RuleCandidateQueueLabels {
@@ -248,6 +401,17 @@ export interface RuleCandidateQueueLabels {
   pinHint: string;
   /** Badge on a pinned rule's card. */
   pinnedBadge: string;
+  /** Label ahead of the memory a rule moved away from. */
+  carriedFrom: string;
+  /** The inline "applies when" editor of a promoted rule. */
+  appliesWhen: { label: string; placeholder: string; missing: string };
+  /** The inline guard-name editor of a promoted rule. */
+  enforcedBy: { label: string; placeholder: string };
+  /**
+   * The delivery stats of a promoted rule. `line` carries {calls}, {full},
+   * {gate}, {headline}, {meanP} and {fetches}.
+   */
+  stats: { title: string; line: string };
 }
 
 /** Client-side download of the rendered rule file for one environment. */
@@ -345,6 +509,8 @@ export function RuleCandidateQueue({
   onRevoke,
   onDelete,
   onTogglePin,
+  onAppliesWhen,
+  onEnforcedBy,
   linkComponent: LinkComponent = 'a',
 }: {
   items: RuleCandidateItem[];
@@ -362,6 +528,10 @@ export function RuleCandidateQueue({
   onDelete?: (item: RuleCandidateItem) => void;
   /** Toggle the instructions pin of a promoted General rule. */
   onTogglePin?: (item: RuleCandidateItem, pinned: boolean) => void;
+  /** Save what a promoted rule's "applies when" field now says ('' clears it). */
+  onAppliesWhen?: (item: RuleCandidateItem, value: string) => void;
+  /** Save the guard a promoted rule is enforced by ('' clears it). */
+  onEnforcedBy?: (item: RuleCandidateItem, value: string) => void;
   /** Client-router link injected by the app (e.g. next/link); plain <a> by default. */
   linkComponent?: React.ElementType;
 }) {
@@ -459,12 +629,9 @@ export function RuleCandidateQueue({
               </CardAction>
             </CardHeader>
             <CardContent className="space-y-3">
-              <pre
-                data-testid="rule-text"
-                className="bg-muted rounded-md p-3 font-mono text-sm break-words whitespace-pre-wrap"
-              >
-                {item.ruleText}
-              </pre>
+              <div data-testid="rule-text" className="bg-muted rounded-md p-3">
+                <Markdown>{item.ruleText}</Markdown>
+              </div>
               <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                 <span data-testid="rule-evidence">{evidence}</span>
                 {item.firstUsed ? (
@@ -493,10 +660,33 @@ export function RuleCandidateQueue({
                   {item.memory.id}
                 </LinkComponent>
                 <span>({item.memory.kind})</span>
+                {item.carriedFrom ? (
+                  <>
+                    <span>·</span>
+                    <span>{labels.carriedFrom}:</span>
+                    <LinkComponent
+                      href={item.carriedFrom.href}
+                      className="text-primary font-mono break-all select-all hover:underline"
+                      data-testid="rule-carried-from"
+                    >
+                      {item.carriedFrom.id}
+                    </LinkComponent>
+                  </>
+                ) : null}
               </div>
               {item.staleSignal ? (
                 <Badge variant="amber" data-testid="rule-stale-signal">
                   {item.staleSignal}
+                </Badge>
+              ) : null}
+              {item.reviewSignal ? (
+                <Badge variant="amber" data-testid="rule-review-signal">
+                  {item.reviewSignal}
+                </Badge>
+              ) : null}
+              {item.sourceSignal ? (
+                <Badge variant="amber" data-testid="rule-source-signal">
+                  {item.sourceSignal}
                 </Badge>
               ) : null}
               {item.scopes.length > 1 ? (
@@ -561,6 +751,13 @@ export function RuleCandidateQueue({
                 </div>
               ) : item.status === 'promoted' ? (
                 <div className="space-y-2">
+                  <PromotedRuleDelivery
+                    item={item}
+                    busy={busy}
+                    labels={labels}
+                    onAppliesWhen={onAppliesWhen}
+                    onEnforcedBy={onEnforcedBy}
+                  />
                   <p className="text-muted-foreground text-sm">
                     {labels.targetHint[item.targetLayer]}
                   </p>

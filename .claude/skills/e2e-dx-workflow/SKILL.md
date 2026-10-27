@@ -62,8 +62,9 @@ raise yourself. Workspace commands: `review:stack` (add `-- --refresh` to re-clo
 that stands up both contours from the current commit, suite on test and a fresh
 clone on review. Detail: [tests/e2e/README.md](/tests/e2e/README.md).
 
-To run specs against an already-up stack instead (dev, or a `--persist`
-session), set `E2E_SERVER_URL` / `E2E_WEB_URL` and use `bun run pw`.
+To iterate against the already-up e2e stack (a `--persist` session), use
+`bun run pw`: it reads the e2e stack's Supabase keys itself. Never point specs
+at another stand — global setup provisions fixture users wherever it is pointed.
 
 ## Runtime model (determinism)
 

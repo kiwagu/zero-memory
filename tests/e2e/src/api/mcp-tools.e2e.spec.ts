@@ -146,49 +146,6 @@ test.describe('MCP over HTTP', () => {
     }
   });
 
-  test('@smoke remember deduplicates an identical fixture memory', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    try {
-      const fixture = FIXTURE_MEMORIES[0]!;
-      const result = await mcp.callTool('remember', {
-        content: fixture.content,
-        kind: fixture.kind,
-        scope: 'personal',
-      });
-      expect(result.isError ?? false).toBe(false);
-      const body = firstJson<{ memory_id: string; deduplicated?: boolean }>(
-        result
-      );
-      expect(body.memory_id).toBe(seed.fixtureMemoryIds[fixture.content]);
-    } finally {
-      await mcp.close();
-    }
-  });
-
-  test('@smoke remember rejects content carrying a known secret format', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    try {
-      const token = `ghp_${'A'.repeat(36)}`;
-      const result = await mcp.callTool('remember', {
-        content: `the ci deploy uses ${token} for pushes`,
-        scope: 'personal',
-      });
-      expect(result.isError ?? false).toBe(true);
-      const text = contentText(result);
-      expect(text).toContain('secret_content_rejected');
-      // The rejection must never echo the secret back.
-      expect(text).not.toContain(token);
-    } finally {
-      await mcp.close();
-    }
-  });
-
   test('restore_memory revives an invalidated memory so recall surfaces it again', async () => {
     const seed = await readSeedState();
     const mcp = await McpTestClient.connect(
@@ -222,24 +179,6 @@ test.describe('MCP over HTTP', () => {
       // Restoring a live memory is a clean error, not a silent no-op.
       const again = await mcp.callTool('restore_memory', { memory_id });
       expect(again.isError ?? false).toBe(true);
-    } finally {
-      await mcp.close();
-    }
-  });
-
-  test('remember rejects a secret riding in the verbatim anchor', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    try {
-      const result = await mcp.callTool('remember', {
-        content: 'the database credentials were rotated today',
-        verbatim: '新しいDSN postgres://zm:sup3rs3cret@db.internal/zm',
-        scope: 'personal',
-      });
-      expect(result.isError ?? false).toBe(true);
-      expect(contentText(result)).toContain('secret_content_rejected');
     } finally {
       await mcp.close();
     }

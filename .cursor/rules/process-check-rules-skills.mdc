@@ -32,6 +32,7 @@ alwaysApply: true
 - Cross-cutting operational rules: `/.cursor/rules/standard-design-patterns.mdc`, `/.cursor/rules/monorepo-env-minimalism.mdc`, `/.cursor/rules/monorepo-new-workspace-scaffold.mdc`
 - Contract rule: `/.cursor/rules/zod-schema-first-contracts.mdc`
 - AI artifact wording rule: `/.cursor/rules/ai-artifacts-generic-wording.mdc`
+- Writing, reviewing, or pruning tests: `/.claude/skills/test-audit/SKILL.md`
 
 For migrations, RLS policies, database functions, or SQL style, enter through the database L1 rule first and then descend into the matching SQL leaf.
 

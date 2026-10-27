@@ -17,6 +17,7 @@ import {
   purgeMailbox,
   waitForMail,
 } from '../helpers/mail.js';
+import { enrollTotp, totpCode } from '../helpers/mfa.js';
 import { passwordGrantToken, provisionE2EUser } from '../helpers/users.js';
 
 const RECOVERY_EMAIL = 'e2e-recovery@zm.e2e';
@@ -72,6 +73,41 @@ test.describe('password recovery', () => {
 
     // The credential itself changed, not just this session — checked out of
     // band so the browser's signed-in state cannot make the assertion vacuous.
+    await expect(
+      passwordGrantToken({ ...user, password: NEW_PASSWORD })
+    ).resolves.toBeTruthy();
+  });
+
+  test('@smoke an account with a second factor gives the code before the new password', async ({
+    page,
+  }) => {
+    // The code step may wait for the authenticator's next 30-second window.
+    test.setTimeout(120_000);
+    const user = await provisionE2EUser(
+      `e2e-recovery-mfa-${Date.now()}@zm.e2e`
+    );
+    const factor = await enrollTotp(await passwordGrantToken(user));
+    await purgeMailbox(user.email);
+
+    await page.goto('/forgot-password');
+    await page.getByTestId('auth-forgot-email').fill(user.email);
+    await page.getByTestId('auth-forgot-submit').click();
+    await expect(page.getByTestId('auth-forgot-sent')).toBeVisible();
+    const mail = await waitForMail(user.email);
+
+    await page.goto(extractActionLink(mail.html));
+    // The link alone opens a session that has not given the code, and Auth
+    // will not change a password for it: the code comes first.
+    await expect(page).toHaveURL(/\/mfa\/verify\?next=%2Freset-password$/);
+    await page
+      .getByTestId('mfa-verify-code')
+      .fill(await totpCode(factor.secret, factor.lastCode));
+
+    await expect(page.getByTestId('auth-reset-form')).toBeVisible();
+    await page.getByTestId('auth-reset-password').fill(NEW_PASSWORD);
+    await page.getByTestId('auth-reset-confirm').fill(NEW_PASSWORD);
+    await page.getByTestId('auth-reset-submit').click();
+    await expect(page.getByTestId('insights-page')).toBeVisible();
     await expect(
       passwordGrantToken({ ...user, password: NEW_PASSWORD })
     ).resolves.toBeTruthy();

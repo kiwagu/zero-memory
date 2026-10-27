@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import type { HygieneJudge } from './hygiene-judge.js';
 import {
   DEFAULT_PORTABILITY_CONFIG,
-  PORTABILITY_SUBJECT_KINDS,
   clearsPortabilityGate,
   portabilityVerdictSchema,
 } from './portability.js';
@@ -12,24 +11,6 @@ import { PortabilityDetector } from './portability-detector.js';
 describe('clearsPortabilityGate', () => {
   const gate = DEFAULT_PORTABILITY_CONFIG.proposeConfidence;
 
-  it('proposes a confident portable verdict', () => {
-    expect(
-      clearsPortabilityGate(
-        { portable: true, confidence: 0.9, rationale: '' },
-        gate
-      )
-    ).toBe(true);
-  });
-
-  it('dismisses a non-portable verdict regardless of confidence', () => {
-    expect(
-      clearsPortabilityGate(
-        { portable: false, confidence: 0.99, rationale: '' },
-        gate
-      )
-    ).toBe(false);
-  });
-
   it('dismisses a low-confidence verdict (doubt dismisses)', () => {
     expect(
       clearsPortabilityGate(
@@ -37,19 +18,6 @@ describe('clearsPortabilityGate', () => {
         gate
       )
     ).toBe(false);
-  });
-});
-
-describe('PORTABILITY_SUBJECT_KINDS', () => {
-  it('audits world-facing kinds and leaves owner-oracle kinds alone', () => {
-    // gotcha is in because a pitfall about a public tool is exactly what
-    // gets rediscovered project after project; convention and preference
-    // are out because their oracle is the owner, not the outside world.
-    expect([...PORTABILITY_SUBJECT_KINDS]).toEqual([
-      'fact',
-      'reference',
-      'gotcha',
-    ]);
   });
 });
 

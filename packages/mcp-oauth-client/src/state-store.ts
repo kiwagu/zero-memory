@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -57,9 +57,20 @@ export class OAuthStateStore {
     return this.read()[key];
   }
 
+  /**
+   * Replaces the file whole: the new content goes to a temporary file created
+   * 0600 and is renamed over the old one. A mode passed to a plain write only
+   * applies when the file is created, so a file that once existed with wider
+   * permissions would have kept them; the rename gives every write a fresh
+   * owner-only file, and a reader never sees half of one.
+   */
   write(state: OAuthState): void {
     mkdirSync(dirname(this.path), { recursive: true });
-    writeFileSync(this.path, JSON.stringify(state, null, 2), { mode: 0o600 });
+    const temporary = `${this.path}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(state, null, 2), {
+      mode: 0o600,
+    });
+    renameSync(temporary, this.path);
   }
 
   /** Merge a patch into one server's entry (read-modify-write). */

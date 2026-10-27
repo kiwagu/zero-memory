@@ -14,13 +14,23 @@ interface BadgeListItem {
   variant?: BadgeListVariant;
   /** Optional stable e2e selector rendered onto this badge. */
   testId?: string;
+  /** Optional explanation, shown on hover. */
+  hint?: string;
 }
 
 function BadgeList({ badges }: { badges: BadgeListItem[] }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      {badges.map(({ label, variant = 'secondary', testId }, index) => (
-        <Badge key={`${label}-${index}`} variant={variant} data-testid={testId}>
+      {badges.map(({ label, variant = 'secondary', testId, hint }, index) => (
+        // The hint is the badge's own title: a badge often sits inside a
+        // link, where an interactive hint trigger would be content inside an
+        // anchor and would not open on hover.
+        <Badge
+          key={`${label}-${index}`}
+          variant={variant}
+          data-testid={testId}
+          title={hint}
+        >
           {label}
         </Badge>
       ))}

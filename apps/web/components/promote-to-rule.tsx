@@ -24,9 +24,12 @@ export interface PromoteToRuleLabels {
 export function PromoteToRule({
   memoryId,
   labels,
+  onDone,
 }: {
   memoryId: string;
   labels: PromoteToRuleLabels;
+  /** Replaces the page refresh after promoting — a panel reloads itself. */
+  onDone?: () => void;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +48,11 @@ export function PromoteToRule({
         return;
       }
       setDone(true);
-      router.refresh();
+      if (onDone) {
+        onDone();
+      } else {
+        router.refresh();
+      }
     });
   }
 

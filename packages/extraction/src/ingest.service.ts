@@ -14,7 +14,7 @@ import {
   type MemoryId,
 } from '@workspace/contracts';
 import { inject, singleton } from '@workspace/di';
-import { createLogger } from '@workspace/logger';
+import { createLogger, runDetached } from '@workspace/logger';
 import {
   isBudgetExhausted,
   BUDGET_EXHAUSTED,
@@ -134,7 +134,7 @@ export class IngestService {
     @injectBudgetGuard()
     private readonly budgetGuard: BudgetGuard,
     @injectSessionThreadRepository()
-    private readonly threads?: ISessionThreadRepository
+    private readonly threads: ISessionThreadRepository
   ) {}
 
   async ingest(
@@ -212,6 +212,10 @@ export class IngestService {
         extract: extractionEnabled ? 'on' : 'off',
         gate_mode: gateMode,
         gate: chunkVerdicts.map((verdict) => verdict.reason).join(','),
+        // The guards that refused an action in this chunk, by name only.
+        ...(input.guard_refusals?.length && {
+          guard_refusals: input.guard_refusals.map((r) => r.guard),
+        }),
       },
     });
 
@@ -450,14 +454,19 @@ export class IngestService {
     // Out-of-band usefulness signal: judge which recalled facts this chunk
     // actually used. Fire-and-forget — the (cheap) model call must not slow or
     // break ingest, and it only runs once per unique chunk (retries short-
-    // circuit on the idempotency claim above).
-    if (input.recalled_ids && input.recalled_ids.length > 0) {
-      void this.#judgeUsefulness(
-        input.transcript_chunk,
-        input.recalled_ids,
-        input.conversation_id
-      ).catch((error) =>
-        this.#logger.warn('usefulness judge failed', { error: String(error) })
+    // circuit on the idempotency claim above). Started as a detached side
+    // write, so a runtime that freezes after the response waits for it first.
+    const recalledIds = input.recalled_ids;
+    if (recalledIds && recalledIds.length > 0) {
+      runDetached(
+        () =>
+          this.#judgeUsefulness(
+            input.transcript_chunk,
+            recalledIds,
+            input.conversation_id
+          ),
+        this.#logger,
+        'usefulness judge failed'
       );
     }
 
@@ -488,9 +497,6 @@ export class IngestService {
    * carries just the client session id, which still addresses the transcript.
    */
   async #threadToken(conversationId: string): Promise<string | null> {
-    if (!this.threads) {
-      return null;
-    }
     try {
       const thread = await this.threads.findByConversation(conversationId);
       return thread.isNone() ? null : thread.unwrap().token;

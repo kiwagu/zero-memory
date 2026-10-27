@@ -8,7 +8,8 @@
     "lint": "eslint .",
     "lint:strict": "eslint . --max-warnings 0",
     "format": "bunx prettier --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:vitest": "vitest run"
   },
   "dependencies": {
     "@workspace/board": "workspace:*",
@@ -26,7 +27,8 @@
     "@workspace/eslint-config": "workspace:^",
     "@workspace/typescript-config": "workspace:^",
     "eslint": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "exports": {
     ".": {

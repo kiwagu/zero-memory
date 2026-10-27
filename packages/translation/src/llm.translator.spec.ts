@@ -44,7 +44,7 @@ describe('translation is metered against its owner', () => {
     setLlmGateway(gatewayReturning(false));
   });
 
-  it('records both the translation and its faithfulness check', async () => {
+  it('records the translation and its faithfulness check against the owner, on the platform key', async () => {
     const { events, recorder } = collectingRecorder();
 
     await new LlmTranslator(recorder).translateToEnglish(
@@ -59,20 +59,13 @@ describe('translation is metered against its owner', () => {
     ]);
     // Both are real spend on a real model; a judge call is not free.
     expect(events.every((event) => event.quantity === 42)).toBe(true);
-  });
-
-  it('attributes the rows to the owner the pass names', async () => {
-    const { events, recorder } = collectingRecorder();
-
-    await new LlmTranslator(recorder).translateToEnglish(
-      'こんにちは',
-      'usr_owner'
-    );
-    await settled();
-
     // The background pass has no ambient user, so naming the owner is the
     // only thing that keeps the row off the instance's ledger.
     expect(events.every((event) => event.subjectId === 'usr_owner')).toBe(true);
+    // Platform-key spend stays unmarked, so it still counts.
+    expect(
+      events.every((event) => event.metadata?.['own_key'] === undefined)
+    ).toBe(true);
   });
 
   it('marks spend made on the owner own key', async () => {
@@ -85,23 +78,10 @@ describe('translation is metered against its owner', () => {
     );
     await settled();
 
+    expect(events).toHaveLength(2);
     expect(events.every((event) => event.metadata?.['own_key'] === true)).toBe(
       true
     );
-  });
-
-  it('leaves platform-key spend unmarked, so it still counts', async () => {
-    const { events, recorder } = collectingRecorder();
-
-    await new LlmTranslator(recorder).translateToEnglish(
-      'こんにちは',
-      'usr_owner'
-    );
-    await settled();
-
-    expect(
-      events.every((event) => event.metadata?.['own_key'] === undefined)
-    ).toBe(true);
   });
 
   it('still translates when nothing is there to meter', async () => {

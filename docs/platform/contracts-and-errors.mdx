@@ -74,10 +74,11 @@ selector, not a credential (see
 [Scopes and isolation](/docs/concepts/scopes-and-isolation)).
 
 Read results append `resource_link` blocks. Every surfaced memory is
-dereferenceable at `zm://memory/{id}` for its full, untruncated row, and the
-caller's standing rules are served at `zm://rules`. Which rows a URI resolves
-to is decided by the caller's authenticated context, never by the URI itself,
-so a pasted URI can leak nothing but an opaque id.
+dereferenceable at `zm://memory/{id}` for its full, untruncated row.
+`zm://rules` lists the caller's General standing rules, and `zm://rules/{id}`
+serves one promoted rule in full, General or project. Which rows a URI
+resolves to is decided by the caller's authenticated context, never by the
+URI itself, so a pasted URI can leak nothing but an opaque id.
 
 Every tool declares MCP `ToolAnnotations` — read-only, destructive,
 idempotent, and open-world hints — verified against its actual handler by an
@@ -138,7 +139,13 @@ fault it can do nothing about.
 Two protocol-owned surfaces deliberately keep their own envelopes. MCP
 transport failures are JSON-RPC errors, and OAuth endpoints use the RFC 6749
 flat `error` / `error_description` body, whose rate-limit response also keeps
-`Retry-After`. Clients should not try to parse those protocol envelopes as
+`Retry-After`. The consent endpoints the dashboard calls while an agent is
+being authorized (`GET /oauth/authorizations/:id`, `POST
+/oauth/authorizations/:id/consent`) answer in that same flat body: `401
+invalid_token` without a signed-in dashboard session, `404 not_found` when
+nothing is pending for the caller under that id (expired, already answered,
+or opened first by someone else), `409 invalid_request` when two decisions
+race, and `503 server_error` when the agent's session could not be created. Clients should not try to parse those protocol envelopes as
 `ToolErrorSchema`.
 
 ### Deprecation policy

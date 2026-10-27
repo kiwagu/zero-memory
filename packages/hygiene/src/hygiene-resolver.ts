@@ -1,14 +1,19 @@
 import {
+  isOpenLoopKind,
   secretContentRejectedMessage,
   type ErrorCode,
+  type MemoryKind,
 } from '@workspace/contracts';
 import { createLogger } from '@workspace/logger';
 import { guardMemoryWrite } from '@workspace/memory';
 import {
   createServiceRoleClient,
+  createUserClient,
   readAllPages,
   type Client,
 } from '@workspace/persistence';
+
+import { LoopClosureDetector } from './loop-closure-detector.js';
 
 /**
  * Outcome of a single owner-scoped resolution. A refusal carries the taxonomy
@@ -126,14 +131,39 @@ const META_LOOKUP_CHUNK = 100;
 
 /**
  * Owner-scoped resolution of review-queue conflicts, shared by the agent MCP
- * tools (single + bulk). Uses the service-role client but explicitly checks
- * ownership, so a caller only ever resolves their own conflicts. Every
- * resolution is reversible (supersede = invalidation) and audited.
+ * tools (single + bulk). Writes use the service-role client and check
+ * ownership explicitly, so a caller only ever resolves their own conflicts.
+ * Every resolution is reversible (supersede = invalidation) and audited.
+ *
+ * Reads that LIST the queue go through `reader`, which for an agent is the
+ * caller's own session: the queue's row policy admits only conflicts whose
+ * memories the caller owns, so a page limit counts the caller's conflicts
+ * rather than the whole instance's, and a bulk resolve never sees — or counts
+ * — anyone else's. Use {@link HygieneResolver.forCaller} at a tool boundary.
  */
 export class HygieneResolver {
   readonly #logger = createLogger('HygieneResolver');
 
-  constructor(private readonly client: Client = createServiceRoleClient()) {}
+  constructor(
+    private readonly client: Client = createServiceRoleClient(),
+    private readonly reader: Client = client
+  ) {}
+
+  /**
+   * A resolver acting for the signed-in caller: queue listings run under the
+   * caller's session, writes under the service role with explicit ownership
+   * checks. Refuses to run without a session rather than fall back to reading
+   * the whole instance.
+   */
+  static forCaller(accessToken: string | undefined): HygieneResolver {
+    if (!accessToken) {
+      throw new Error('No access token in the execution context.');
+    }
+    return new HygieneResolver(
+      createServiceRoleClient(),
+      createUserClient(accessToken)
+    );
+  }
 
   /** Resolve one pending conflict the caller owns. */
   async resolveOne(
@@ -147,6 +177,11 @@ export class HygieneResolver {
       .eq('id', queueId)
       .maybeSingle();
     if (!row) {
+      await this.#audit(
+        'AgentResolveRefused',
+        { conflict: queueId, code: 'not_found' },
+        ownerId
+      );
       return { ok: false, code: 'not_found', error: 'Conflict not found.' };
     }
     // Ownership is checked BEFORE the state of the row is reported. Splitting
@@ -154,6 +189,11 @@ export class HygieneResolver {
     // NON-owner which of the two it is would answer a question they may not
     // ask: whether someone else's conflict is still open.
     if (!(await this.#ownsAll(row.memory_a, row.memory_b, ownerId))) {
+      await this.#audit(
+        'AgentResolveRefused',
+        { conflict: queueId, code: 'forbidden' },
+        ownerId
+      );
       return {
         ok: false,
         code: 'forbidden',
@@ -174,7 +214,11 @@ export class HygieneResolver {
     if (row.memory_b === null) {
       if (decision.kind === 'retire') {
         await this.#invalidate(row.memory_a, ownerId);
-        await this.#audit('AgentRetireMemory', { memory: row.memory_a });
+        await this.#audit(
+          'AgentRetireMemory',
+          { memory: row.memory_a },
+          ownerId
+        );
         await this.#finish(queueId, 'resolved', 'retired', null, ownerId);
         return { ok: true };
       }
@@ -212,10 +256,11 @@ export class HygieneResolver {
         decision.winnerId === row.memory_a ? row.memory_b : row.memory_a;
       await this.#supersede(loser, decision.winnerId, ownerId);
       await this.#link(decision.winnerId, loser);
-      await this.#audit('AgentResolveSupersede', {
-        winner: decision.winnerId,
-        loser,
-      });
+      await this.#audit(
+        'AgentResolveSupersede',
+        { winner: decision.winnerId, loser },
+        ownerId
+      );
       await this.#finish(
         queueId,
         'resolved',
@@ -239,7 +284,7 @@ export class HygieneResolver {
     // would leave rows pending while the count claims the queue was cleared.
     const list = (await readAllPages(
       (from, to) => {
-        let query = this.client
+        let query = this.reader
           .from('memory_review_queue')
           .select('id, memory_a, memory_b')
           .eq('status', 'pending');
@@ -291,7 +336,7 @@ export class HygieneResolver {
     const meta = new Map<string, MemoryMeta>();
     for (let i = 0; i < memIds.length; i += META_LOOKUP_CHUNK) {
       const chunk = memIds.slice(i, i + META_LOOKUP_CHUNK);
-      const { data: mems, error } = await this.client
+      const { data: mems, error } = await this.reader
         .from('memories')
         .select('id, owner_id, created_at')
         .in('id', chunk);
@@ -320,7 +365,11 @@ export class HygieneResolver {
         const loser = winner === row.memory_a ? memoryB : row.memory_a;
         await this.#supersede(loser, winner, ownerId);
         await this.#link(winner, loser);
-        await this.#audit('AgentResolveBulk', { policy, winner, loser });
+        await this.#audit(
+          'AgentResolveBulk',
+          { policy, winner, loser },
+          ownerId
+        );
         await this.#finish(row.id, 'resolved', 'supersedes', winner, ownerId);
       }
       resolved += 1;
@@ -349,13 +398,18 @@ export class HygieneResolver {
   ): Promise<ResolverOutcome> {
     const { data: memory, error: lookupError } = await this.client
       .from('memories')
-      .select('id, owner_id, invalidated_at, superseded_by')
+      .select('id, owner_id, kind, invalidated_at, superseded_by')
       .eq('id', memoryId)
       .maybeSingle();
     if (lookupError) {
       throw new Error(`restore lookup failed: ${lookupError.message}`);
     }
     if (!memory || memory.owner_id !== ownerId) {
+      await this.#audit(
+        'AgentRestoreRefused',
+        { memory: memoryId, code: 'not_found' },
+        ownerId
+      );
       return {
         ok: false,
         code: 'not_found',
@@ -385,17 +439,26 @@ export class HygieneResolver {
       throw new Error(`restore ${memoryId} failed: ${error.message}`);
     }
 
-    // A lingering supersedes link would keep claiming the memory is replaced.
-    await this.client
-      .from('memory_links')
-      .delete()
-      .eq('dst', memoryId)
-      .eq('type', 'supersedes');
+    // A lingering supersedes link of the caller's would keep claiming the
+    // memory is replaced, so those go. A link from another member's memory is
+    // that member's statement and stays: restoring your memory does not get
+    // to erase what someone else recorded about it.
+    await this.#dropOwnSupersedesLinks(memoryId, ownerId);
 
-    await this.#audit('AgentRestoreMemory', {
-      memory: memoryId,
-      superseded_by: memory.superseded_by ?? '',
-    });
+    // Reopening a loop is a person saying "not done": the closure judge must
+    // not close it again on the evidence they have just overruled.
+    if (isOpenLoopKind(memory.kind as MemoryKind)) {
+      await new LoopClosureDetector(this.client).holdReopened(
+        memoryId,
+        ownerId
+      );
+    }
+
+    await this.#audit(
+      'AgentRestoreMemory',
+      { memory: memoryId, superseded_by: memory.superseded_by ?? '' },
+      ownerId
+    );
     this.#logger.info('memory restored', { memoryId, ownerId });
     return { ok: true };
   }
@@ -456,6 +519,11 @@ export class HygieneResolver {
       throw new Error(`challenge lookup failed: ${lookupError.message}`);
     }
     if (!memory || memory.owner_id !== ownerId) {
+      await this.#audit(
+        'AgentChallengeRefused',
+        { memory: memoryId, code: 'not_found' },
+        ownerId
+      );
       return {
         ok: false,
         code: 'not_found',
@@ -522,7 +590,7 @@ export class HygieneResolver {
       throw new Error(`challenge insert failed: ${insertError.message}`);
     }
 
-    await this.#audit('AgentChallengeMemory', { memory: memoryId });
+    await this.#audit('AgentChallengeMemory', { memory: memoryId }, ownerId);
     this.#logger.info('memory challenged', { memoryId, ownerId });
     return { ok: true, disputeId: inserted.id, alreadyPending: false };
   }
@@ -532,7 +600,7 @@ export class HygieneResolver {
     ownerId: string,
     filter: ConflictFilter = {}
   ): Promise<ConflictView[]> {
-    let query = this.client
+    let query = this.reader
       .from('memory_review_queue')
       .select(QUEUE_COLUMNS)
       .eq('status', filter.status ?? 'pending')
@@ -553,7 +621,7 @@ export class HygieneResolver {
     ownerId: string,
     disputeId: string
   ): Promise<ConflictView | null> {
-    const { data: row, error } = await this.client
+    const { data: row, error } = await this.reader
       .from('memory_review_queue')
       .select(QUEUE_COLUMNS)
       .eq('id', disputeId)
@@ -566,6 +634,51 @@ export class HygieneResolver {
     }
     const [view] = await this.#assemble([row as QueueDetailRow], ownerId);
     return view ?? null;
+  }
+
+  /**
+   * Deletes the `supersedes` links pointing at `memoryId` whose source memory
+   * the caller owns, and only those.
+   */
+  async #dropOwnSupersedesLinks(
+    memoryId: string,
+    ownerId: string
+  ): Promise<void> {
+    const { data: links, error: linkError } = await this.client
+      .from('memory_links')
+      .select('src')
+      .eq('dst', memoryId)
+      .eq('type', 'supersedes');
+    if (linkError) {
+      throw new Error(`restore link lookup failed: ${linkError.message}`);
+    }
+    const sources = [...new Set((links ?? []).map((link) => link.src))];
+    if (sources.length === 0) {
+      return;
+    }
+    const { data: owned, error: ownerError } = await this.client
+      .from('memories')
+      .select('id')
+      .in('id', sources)
+      .eq('owner_id', ownerId);
+    if (ownerError) {
+      throw new Error(
+        `restore link owner lookup failed: ${ownerError.message}`
+      );
+    }
+    const ownSources = (owned ?? []).map((memory) => memory.id);
+    if (ownSources.length === 0) {
+      return;
+    }
+    const { error } = await this.client
+      .from('memory_links')
+      .delete()
+      .eq('dst', memoryId)
+      .eq('type', 'supersedes')
+      .in('src', ownSources);
+    if (error) {
+      throw new Error(`restore link cleanup failed: ${error.message}`);
+    }
   }
 
   /**
@@ -590,7 +703,7 @@ export class HygieneResolver {
     const details = new Map<string, MemoryDetail>();
     for (let i = 0; i < memIds.length; i += META_LOOKUP_CHUNK) {
       const chunk = memIds.slice(i, i + META_LOOKUP_CHUNK);
-      const { data, error } = await this.client
+      const { data, error } = await this.reader
         .from('memories')
         .select('id, owner_id, kind, scope, content, created_at')
         .in('id', chunk);
@@ -693,14 +806,21 @@ export class HygieneResolver {
       );
   }
 
+  /**
+   * One audit row for an agent's hygiene action, in the caller's name. A
+   * refused attempt is recorded too (`*Refused` with its code): probing other
+   * people's conflicts or memories must leave a trace.
+   */
   async #audit(
     command: string,
-    payload: Record<string, string | number>
+    payload: Record<string, string | number>,
+    actorId: string
   ): Promise<void> {
     const { error } = await this.client.from('audit_log').insert({
       command,
       payload,
       outcome: 'ok',
+      actor_id: actorId,
       author_kind: 'agent',
       agent_name: 'chat-agent',
     });

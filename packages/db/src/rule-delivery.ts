@@ -79,6 +79,47 @@ export const deliveredRuleCount = (
 ): number =>
   Math.max(0, pinned) + Math.min(Math.max(0, unpinnedWithinTtl), cap);
 
+/** What delivery reads off a live promoted rule: its pin and promotion time. */
+export interface DatedRule {
+  pinned: boolean;
+  promotedAt: string | null;
+}
+
+/**
+ * The live promoted rules a channel still delivers by AGE, in delivery order,
+ * before any cap: a PINNED rule always (the pin is a standing decision, it
+ * does not expire), an unpinned one only while it is within the delivery TTL.
+ * Pinned first, then newest first, so a channel's cap drops the oldest
+ * unpinned rules. A rule with no promotion time sorts as the newest — where
+ * Postgres puts a null in a descending order — and, unpinned, counts as
+ * expired.
+ *
+ * The one owner of the TTL and the order: the readers apply it to the rows
+ * they load and the /rules page to the rows it counts, so what a session
+ * receives and what the owner is told it receives cannot drift apart.
+ */
+export const deliverableRules = <T extends DatedRule>(
+  rules: readonly T[],
+  nowMs: number
+): T[] => {
+  const cutoff = Date.parse(ruleDeliveryCutoff(nowMs));
+  const promotedMs = (rule: DatedRule): number | null =>
+    rule.promotedAt ? Date.parse(rule.promotedAt) : null;
+  const newestFirst = (a: DatedRule, b: DatedRule): number => {
+    const left = promotedMs(a) ?? Number.POSITIVE_INFINITY;
+    const right = promotedMs(b) ?? Number.POSITIVE_INFINITY;
+    return left === right ? 0 : left > right ? -1 : 1;
+  };
+  return rules
+    .filter((rule) => {
+      const promoted = promotedMs(rule);
+      return rule.pinned || (promoted !== null && promoted >= cutoff);
+    })
+    .sort((a, b) =>
+      a.pinned === b.pinned ? newestFirst(a, b) : a.pinned ? -1 : 1
+    );
+};
+
 /**
  * The rules a channel actually delivers, in delivery order: every PINNED rule
  * (the cap never drops one), then the capped remainder. The counterpart of
@@ -92,3 +133,54 @@ export const capUnpinnedRules = <T extends { pinned: boolean }>(
   ...rules.filter((rule) => rule.pinned),
   ...rules.filter((rule) => !rule.pinned).slice(0, Math.max(0, cap)),
 ];
+
+/** A live promoted rule, as far as delivery is concerned. */
+export interface DeliveryCandidate extends DatedRule {
+  id: string;
+  /** `user` rides every session; `project` rides its project's briefing. */
+  targetLayer: 'user' | 'project';
+  /**
+   * Where a project rule is delivered: its explicit address, else its
+   * memory's scope. Not read for a General rule.
+   */
+  effectiveScope: string;
+}
+
+/**
+ * The ids of the rules a session actually receives, out of the owner's live
+ * promoted rules (the caller passes only those). The readers' rule, in one
+ * place for anything that must agree with them: a pinned rule always, then
+ * per channel the newest unpinned rules still within the delivery TTL, up to
+ * the channel's cap. General rules share one channel; each project's rules
+ * share that project's briefing, so a project is capped on its own.
+ */
+export const deliveredRuleIds = (
+  rules: readonly DeliveryCandidate[],
+  nowMs: number
+): Set<string> => {
+  const channels = new Map<string, DeliveryCandidate[]>();
+  for (const rule of deliverableRules(rules, nowMs)) {
+    const channel =
+      rule.targetLayer === 'user' ? 'user' : `project:${rule.effectiveScope}`;
+    channels.set(channel, [...(channels.get(channel) ?? []), rule]);
+  }
+  const delivered = new Set<string>();
+  for (const [channel, members] of channels) {
+    const cap =
+      channel === 'user'
+        ? RULE_DELIVERY.generalRulesCap
+        : RULE_DELIVERY.projectRulesCap;
+    for (const rule of capUnpinnedRules(members, cap)) {
+      delivered.add(rule.id);
+    }
+  }
+  return delivered;
+};
+
+/**
+ * Same set, read against the current time — for React Server Components,
+ * like {@link ruleDeliveryCutoffNow}.
+ */
+export const deliveredRuleIdsNow = (
+  rules: readonly DeliveryCandidate[]
+): Set<string> => deliveredRuleIds(rules, Date.now());

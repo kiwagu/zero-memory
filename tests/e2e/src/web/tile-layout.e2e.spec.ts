@@ -11,39 +11,16 @@
  * KPI row from three tiles into four, so the same page is measured in both
  * arrangements.
  */
-import { createClient } from '@supabase/supabase-js';
 import { expect, test, type Locator } from '@playwright/test';
 
-import { e2eEnv } from '../helpers/env.js';
 import { seedInsightsUsage } from '../helpers/insights.js';
+import { clearAllowance, setAllowance } from '../helpers/policy-allowance.js';
 import { readSeedState } from '../helpers/runtime-state.js';
+import { entityIdOf } from '../helpers/users.js';
 import { signInThroughForm } from '../helpers/web.js';
 
 /** Tolerance in px: sub-pixel rounding of percentage widths is not a hole. */
 const FLUSH_TOLERANCE = 2;
-
-const admin = () =>
-  createClient(e2eEnv.supabaseUrl, e2eEnv.supabaseServiceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-const entityIdOf = async (authUserId: string): Promise<string> => {
-  const { data, error } = await admin()
-    .from('profiles')
-    .select('id')
-    .eq('user_id', authUserId)
-    .single();
-  if (error) throw new Error(`no profile for ${authUserId}: ${error.message}`);
-  return (data as { id: string }).id;
-};
-
-const clearAllowance = async (subjectId: string): Promise<void> => {
-  await admin()
-    .from('policy_allowances')
-    .delete()
-    .eq('subject_id', subjectId)
-    .eq('budget_id', 'extraction');
-};
 
 interface Row {
   top: number;
@@ -100,13 +77,7 @@ test.describe('tile rows end flush', () => {
       expect(rows[0]?.right).toBeLessThanOrEqual(FLUSH_TOLERANCE);
 
       // Four tiles — two even rows, and the second one still reaches the edge.
-      const { error } = await admin().from('policy_allowances').upsert({
-        subject_id: subjectId,
-        budget_id: 'extraction',
-        limit_value: 5_000,
-      });
-      if (error)
-        throw new Error(`could not store an allowance: ${error.message}`);
+      await setAllowance(subjectId, 5_000);
 
       await page.reload();
       await expect(page.getByTestId('insights-metric-budget')).toBeVisible();

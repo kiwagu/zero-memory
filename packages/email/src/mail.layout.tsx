@@ -10,7 +10,7 @@ import {
 } from '@react-email/components';
 import type { ReactNode } from 'react';
 
-import { mailTheme } from './mail.theme.js';
+import { mailTheme } from './mail.theme';
 
 export type MailLayoutProps = {
   /** BCP-47 tag for `<html lang>`; the mail catalog's locale. */

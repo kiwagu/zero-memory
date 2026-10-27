@@ -1,6 +1,7 @@
 import {
   collectMemoryIds,
   isRecallTool,
+  parseJsonLines,
   type ParsedTranscript,
   type TranscriptEntry,
 } from '@workspace/client-core';
@@ -20,11 +21,15 @@ const contentItemSchema = z.looseObject({
   id: z.string().optional(),
   /** tool_result: the id of the tool_use it answers. */
   tool_use_id: z.string().optional(),
+  /** tool_result: set when the call did not run, e.g. a hook denied it. */
+  is_error: z.boolean().optional(),
 });
 
 const transcriptLineSchema = z.looseObject({
   type: z.string().optional(),
   cwd: z.string().optional(),
+  /** When the line was written (ISO 8601); dates a guard refusal. */
+  timestamp: z.string().optional(),
   isMeta: z.boolean().optional(),
   /**
    * Marks the record a context compaction writes back into the transcript.
@@ -46,32 +51,22 @@ const transcriptLineSchema = z.looseObject({
  * tool results surfaced. A recalled id is only taken from a tool_result whose
  * tool_use_id belongs to a recall / build_context call — so a `remember` result
  * (which returns a freshly-created id) is never mistaken for a recall hit.
+ * Guard refusals are read off denied calls only (an error tool_result whose
+ * hook reason opens with the `[guard:<name>]` tag): only the name and the
+ * line's timestamp are kept.
  */
 export const parseTranscript = (jsonl: string): ParsedTranscript => {
   const entries: TranscriptEntry[] = [];
   let cwd: string | undefined;
+  const guardRefusals: ParsedTranscript['guardRefusals'] = [];
   // tool_use ids of recall / build_context calls, so their results (which
   // arrive on a later line) can be matched precisely.
   const recallCallIds = new Set<string>();
   const recalledIds = new Set<string>();
 
-  for (const rawLine of jsonl.split('\n')) {
-    const trimmed = rawLine.trim();
-    if (trimmed.length === 0) {
-      continue;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue; // torn or non-JSON line
-    }
-    const line = transcriptLineSchema.safeParse(parsed);
-    if (!line.success) {
-      continue;
-    }
-    const { type, isMeta, isCompactSummary, message } = line.data;
-    cwd ??= line.data.cwd;
+  for (const line of parseJsonLines(jsonl, transcriptLineSchema)) {
+    const { type, isMeta, isCompactSummary, message } = line;
+    cwd ??= line.cwd;
 
     // A context compaction appends its summary as a record that looks exactly
     // like something the human typed: `type: "user"`, `message.role: "user"`,
@@ -87,6 +82,11 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
     if (isCompactSummary === true) {
       continue;
     }
+
+    // Before the role and meta filters, which do not concern it: a refusal
+    // arrives as the tool_result answering the denied call.
+    collectGuardRefusals(message?.content, line.timestamp, guardRefusals);
+
     if (isMeta === true || (type !== 'user' && type !== 'assistant')) {
       continue;
     }
@@ -114,10 +114,49 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
     entries.push({ role, text: normalized });
   }
 
-  return { entries, cwd, recalledIds: [...recalledIds] };
+  return { entries, cwd, recalledIds: [...recalledIds], guardRefusals };
 };
 
 type ContentItem = z.infer<typeof contentItemSchema>;
+
+/**
+ * A denied call as Claude Code records it: an error tool_result whose content
+ * opens with `PreToolUse:<Tool> hook error: <reason>`, where a guard opens its
+ * reason with its tag, e.g. `[guard:one_line_commit] …`. Anchored to the start
+ * of the content and of the reason: the same words further into an error
+ * result (a tool's output quoting an earlier denial) are not a denial, and a
+ * guard named later in the reason is not the one refusing. The name pattern
+ * is the contract's guard name, so whatever this matches the server accepts.
+ */
+const GUARD_REFUSAL =
+  /^PreToolUse:\S+ hook error:\s*\[guard:([a-z][a-z0-9_-]{1,63})\]/u;
+
+/**
+ * Appends the guard refusals one line records, oldest first: at most one per
+ * denied call. Only an error tool_result counts. A call that succeeded can
+ * still print the tag (a read of a guard script, grep or test output, a recall
+ * quoting a stored refusal), and the tag in prose, in the call's own input or
+ * in a compaction recap is talk about a guard, not a refusal by one.
+ */
+const collectGuardRefusals = (
+  content: string | ContentItem[] | undefined,
+  timestamp: string | undefined,
+  guardRefusals: ParsedTranscript['guardRefusals']
+): void => {
+  if (!Array.isArray(content)) {
+    return;
+  }
+  for (const item of content) {
+    if (item.type !== 'tool_result' || item.is_error !== true) {
+      continue;
+    }
+    const reason = typeof item.content === 'string' ? item.content : '';
+    const guard = GUARD_REFUSAL.exec(reason)?.[1];
+    if (guard) {
+      guardRefusals.push({ guard, at: timestamp ?? null });
+    }
+  }
+};
 
 /**
  * Registers recall / build_context tool_use ids and, for a tool_result that

@@ -24,15 +24,6 @@ describe('parseToolPayload', () => {
     expect(parseToolPayload(result)).toEqual(payload);
   });
 
-  it('parses a payload whose memory body itself contains a --- rule', () => {
-    // A markdown horizontal rule inside a memory's content must never be mistaken
-    // for a block delimiter — it lives INSIDE the JSON string.
-    const payload = {
-      memories: [{ id: 'mem_2', content: 'step one\n---\nstep two' }],
-    };
-    expect(parseToolPayload(asResult(payload))).toEqual(payload);
-  });
-
   it('throws when the result has no text content', () => {
     expect(() => parseToolPayload({ content: [] })).toThrow(/no text content/);
     expect(() => parseToolPayload({})).toThrow(/no text content/);

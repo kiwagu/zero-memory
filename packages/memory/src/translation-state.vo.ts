@@ -49,17 +49,6 @@ export class TranslationState extends ValueObject<TranslationStateProps> {
     });
   }
 
-  /** Content has been canonicalized to English; the source is preserved. */
-  static done(originalText: string, lang: string): TranslationState {
-    return new TranslationState({
-      status: 'done',
-      originalText,
-      lang,
-      attempts: 0,
-      error: null,
-    });
-  }
-
   /** Rebuilds the state from a persisted row. */
   static restore(props: TranslationStateProps): TranslationState {
     return new TranslationState(props);

@@ -1,6 +1,8 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import {
+  loadStateRecord,
+  saveCappedStateRecord,
+  stateFilePath,
+} from './state-file.js';
 
 /**
  * Per-session receipt state shared by the Stop-hook ingest (writer) and the
@@ -26,33 +28,18 @@ export interface SessionReceiptState {
 export type ReceiptStateFile = Record<string, SessionReceiptState>;
 
 /** Oldest entries beyond this are pruned on save (state must not grow forever). */
-export const MAX_TRACKED_RECEIPTS = 200;
+const MAX_TRACKED_RECEIPTS = 200;
 
 /** Default state-file location; tests pass their own path. */
 export const receiptStatePath = (
   env: NodeJS.ProcessEnv = process.env
-): string =>
-  join(
-    env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'session-receipts.json'
-  );
+): string => stateFilePath('session-receipts.json', env);
 
-export const loadReceiptState = (path: string): ReceiptStateFile => {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as ReceiptStateFile;
-  } catch {
-    return {};
-  }
-};
+export const loadReceiptState = (path: string): ReceiptStateFile =>
+  loadStateRecord<SessionReceiptState>(path);
 
-const saveReceiptState = (path: string, state: ReceiptStateFile): void => {
-  const entries = Object.entries(state)
-    .sort(([, a], [, b]) => b.at - a.at)
-    .slice(0, MAX_TRACKED_RECEIPTS);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(Object.fromEntries(entries), null, 2));
-};
+const saveReceiptState = (path: string, state: ReceiptStateFile): void =>
+  saveCappedStateRecord(path, state, MAX_TRACKED_RECEIPTS, (entry) => entry.at);
 
 /** Adds one ingest response's `memories_created` to the session's total. */
 export const recordCapturedMemories = (

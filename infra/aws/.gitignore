@@ -1,0 +1,3 @@
+cdk.out/
+# One deployment's settings (domains, mail sender); see bin/app.ts.
+stages/

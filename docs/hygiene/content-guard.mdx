@@ -35,7 +35,15 @@ import), and the merged memory a reviewer writes when resolving a queued pair
 on the dashboard (the merged text is stored through the same server-side
 `remember`). The `challenge` tool runs the same detectors over the reason and
 evidence it records, because that text is persisted user-authored prose of
-exactly the same class as memory content.
+exactly the same class as memory content. So do the other writes that store
+text a caller typed: a card's title, body and every reason a `card` call
+carries (moves, landings, relations, `no_branch`, `no_links`), a note added
+with `card_log`, the two names a `link` call turns into entities, the
+`rule_text` and `applies_when` passed to `promote_rule`, and the **applies
+when** line edited on the dashboard's `/rules` page. A card is read by
+every member of its project and a rule is delivered into every session of
+its layer, so a secret refused as memory content must not be storable there
+either.
 
 It checks **every text field** of an incoming record, not just the main
 content: the verbatim idiom anchor, all string leaves of the provenance

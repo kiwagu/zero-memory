@@ -130,15 +130,15 @@ test.describe('Project-pinned reads over MCP @smoke', () => {
       );
       expect(briefed.project_scope).toBeUndefined();
 
-      // The session gained no default, and the hint names no project — the
-      // write is REFUSED rather than quietly stored in the personal scope.
+      // The session gained no default: a write that names no target of its
+      // own is REFUSED rather than quietly stored where the hint fell back
+      // to. It carries no hint, so only the missing default can refuse it.
       const raw = await mcp.callTool('remember', {
         content:
           'e2e project-pin marker: unroutable hints must not invent scopes',
-        project_hint: '/',
       });
       expect(raw.isError).toBe(true);
-      expect(contentText(raw)).toContain('does not resolve');
+      expect(contentText(raw)).toContain('scope_target_required');
     } finally {
       await mcp.close();
     }
@@ -160,8 +160,10 @@ test.describe('Project-pinned reads over MCP @smoke', () => {
       });
       expect(refused.isError).toBe(true);
       const message = contentText(refused);
-      // The three routes out, as the JSON-encoded error carries them.
+      // The routes out, as the JSON-encoded error carries them — the thread
+      // among them, since a reconnect is the common cause.
       expect(message).toContain('project_hint');
+      expect(message).toContain('thread');
       expect(message).toContain('core');
       expect(message).toContain('personal');
 
@@ -349,27 +351,6 @@ test.describe('Project-pinned reads over MCP @smoke', () => {
         })
       );
       expect(stored.scope).toBe(project);
-    } finally {
-      await agent.close();
-    }
-  });
-
-  test('a targetless write is refused with every route out named', async () => {
-    const seed = await readSeedState();
-    const agent = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
-    try {
-      // No project, no thread, no explicit scope: the server never guesses.
-      // The refusal is the contract, so it must name each way to satisfy it.
-      const refused = await agent.callTool('remember', {
-        content: 'e2e refusal marker: a fact with nowhere to go',
-      });
-      expect(refused.isError).toBe(true);
-      const message = contentText(refused);
-      expect(message).toContain('project_hint');
-      expect(message).toContain('thread');
-      expect(message).toContain('core');
     } finally {
       await agent.close();
     }

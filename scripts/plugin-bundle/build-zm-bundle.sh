@@ -188,6 +188,13 @@ for cand in "$MARKET_ROOT/scripts/zm-server-url.sh" "$SCRIPT_DIR/../zm-server-ur
   [ -f "$cand" ] && { install -m 0755 "$cand" "$EXPORT_DIR/zm-server-url.sh"; break; }
 done
 [ -f "$EXPORT_DIR/zm-server-url.sh" ] || warn "missing zm-server-url.sh — not staged."
+# And the helper that governs every write into the guest's own files (backup
+# first, write in place, never cut past a managed block): the installers refuse
+# to run without it rather than edit those files unprotected.
+for cand in "$MARKET_ROOT/scripts/zm-user-files.sh" "$SCRIPT_DIR/../zm-user-files.sh"; do
+  [ -f "$cand" ] && { install -m 0755 "$cand" "$EXPORT_DIR/zm-user-files.sh"; break; }
+done
+[ -f "$EXPORT_DIR/zm-user-files.sh" ] || warn "missing zm-user-files.sh — not staged."
 # The platform helper travels too: it is how an installer refuses a bundle built
 # for another machine, which is the mistake a release page with several
 # downloads makes easy to make.

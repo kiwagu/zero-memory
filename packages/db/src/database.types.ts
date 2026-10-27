@@ -9,6 +9,94 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      agent_grants: {
+        Row: {
+          access_expires_at: string;
+          access_token: string;
+          auth_refresh_token: string;
+          client_id: string;
+          created_at: string;
+          credentials_fingerprint: string;
+          generation: number;
+          id: string;
+          revoked_at: string | null;
+          rotated_at: string;
+          scope: string;
+          session_id: string;
+          token_secret: string;
+          user_id: string;
+        };
+        Insert: {
+          access_expires_at: string;
+          access_token: string;
+          auth_refresh_token: string;
+          client_id: string;
+          created_at?: string;
+          credentials_fingerprint: string;
+          generation?: number;
+          id?: string;
+          revoked_at?: string | null;
+          rotated_at?: string;
+          scope: string;
+          session_id: string;
+          token_secret: string;
+          user_id: string;
+        };
+        Update: {
+          access_expires_at?: string;
+          access_token?: string;
+          auth_refresh_token?: string;
+          client_id?: string;
+          created_at?: string;
+          credentials_fingerprint?: string;
+          generation?: number;
+          id?: string;
+          revoked_at?: string | null;
+          rotated_at?: string;
+          scope?: string;
+          session_id?: string;
+          token_secret?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'agent_grants_client_id_fkey';
+            columns: ['client_id'];
+            isOneToOne: false;
+            referencedRelation: 'oauth_clients';
+            referencedColumns: ['client_id'];
+          },
+        ];
+      };
+      agent_sessions: {
+        Row: {
+          client_id: string;
+          created_at: string;
+          session_id: string;
+          user_id: string;
+        };
+        Insert: {
+          client_id: string;
+          created_at?: string;
+          session_id: string;
+          user_id: string;
+        };
+        Update: {
+          client_id?: string;
+          created_at?: string;
+          session_id?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'agent_sessions_client_id_fkey';
+            columns: ['client_id'];
+            isOneToOne: false;
+            referencedRelation: 'oauth_clients';
+            referencedColumns: ['client_id'];
+          },
+        ];
+      };
       audit_log: {
         Row: {
           actor_id: string | null;
@@ -110,67 +198,160 @@ export type Database = {
           },
         ];
       };
+      card_branches: {
+        Row: {
+          attached_at: string;
+          attached_by: string;
+          branch: string;
+          card_id: string;
+          landed_at: string | null;
+          repo: string;
+          scope: unknown;
+          squash_sha: string | null;
+          state: string;
+          target_branch: string | null;
+        };
+        Insert: {
+          attached_at?: string;
+          attached_by?: string;
+          branch: string;
+          card_id: string;
+          landed_at?: string | null;
+          repo: string;
+          scope: unknown;
+          squash_sha?: string | null;
+          state?: string;
+          target_branch?: string | null;
+        };
+        Update: {
+          attached_at?: string;
+          attached_by?: string;
+          branch?: string;
+          card_id?: string;
+          landed_at?: string | null;
+          repo?: string;
+          scope?: unknown;
+          squash_sha?: string | null;
+          state?: string;
+          target_branch?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'card_branches_attached_by_fkey';
+            columns: ['attached_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_branches_card_id_fkey';
+            columns: ['card_id'];
+            isOneToOne: false;
+            referencedRelation: 'cards';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       card_events: {
         Row: {
           actor_id: string;
           agent_label: string | null;
+          branch_note: string | null;
           card_id: string;
           created_at: string;
+          from_card_type: string | null;
+          from_severity: number | null;
           from_state: string | null;
           id: string;
           idempotency_key: string | null;
+          link_direction: string | null;
+          link_type: string | null;
+          links_note: string | null;
           note_text: string | null;
           reason: string | null;
           ref_kind: string | null;
           ref_target: string | null;
           relation: string | null;
+          release_build: string | null;
+          release_commit: string | null;
+          release_version: string | null;
           reply_to: string | null;
           revision: number | null;
           scope: unknown;
           seq: number;
+          squash_sha: string | null;
+          target_branch: string | null;
           thread: string | null;
+          to_card_type: string | null;
+          to_severity: number | null;
           to_state: string | null;
           type: string;
         };
         Insert: {
           actor_id?: string;
           agent_label?: string | null;
+          branch_note?: string | null;
           card_id: string;
           created_at?: string;
+          from_card_type?: string | null;
+          from_severity?: number | null;
           from_state?: string | null;
           id?: string;
           idempotency_key?: string | null;
+          link_direction?: string | null;
+          link_type?: string | null;
+          links_note?: string | null;
           note_text?: string | null;
           reason?: string | null;
           ref_kind?: string | null;
           ref_target?: string | null;
           relation?: string | null;
+          release_build?: string | null;
+          release_commit?: string | null;
+          release_version?: string | null;
           reply_to?: string | null;
           revision?: number | null;
           scope: unknown;
           seq: number;
+          squash_sha?: string | null;
+          target_branch?: string | null;
           thread?: string | null;
+          to_card_type?: string | null;
+          to_severity?: number | null;
           to_state?: string | null;
           type: string;
         };
         Update: {
           actor_id?: string;
           agent_label?: string | null;
+          branch_note?: string | null;
           card_id?: string;
           created_at?: string;
+          from_card_type?: string | null;
+          from_severity?: number | null;
           from_state?: string | null;
           id?: string;
           idempotency_key?: string | null;
+          link_direction?: string | null;
+          link_type?: string | null;
+          links_note?: string | null;
           note_text?: string | null;
           reason?: string | null;
           ref_kind?: string | null;
           ref_target?: string | null;
           relation?: string | null;
+          release_build?: string | null;
+          release_commit?: string | null;
+          release_version?: string | null;
           reply_to?: string | null;
           revision?: number | null;
           scope?: unknown;
           seq?: number;
+          squash_sha?: string | null;
+          target_branch?: string | null;
           thread?: string | null;
+          to_card_type?: string | null;
+          to_severity?: number | null;
           to_state?: string | null;
           type?: string;
         };
@@ -194,6 +375,77 @@ export type Database = {
             columns: ['reply_to'];
             isOneToOne: false;
             referencedRelation: 'card_events';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      card_links: {
+        Row: {
+          created_at: string;
+          created_by: string;
+          declared: boolean;
+          dst_card_id: string;
+          dst_scope: unknown;
+          invalidated_at: string | null;
+          invalidated_by: string | null;
+          reason: string;
+          src_card_id: string;
+          src_scope: unknown;
+          type: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string;
+          declared?: boolean;
+          dst_card_id: string;
+          dst_scope: unknown;
+          invalidated_at?: string | null;
+          invalidated_by?: string | null;
+          reason: string;
+          src_card_id: string;
+          src_scope: unknown;
+          type: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string;
+          declared?: boolean;
+          dst_card_id?: string;
+          dst_scope?: unknown;
+          invalidated_at?: string | null;
+          invalidated_by?: string | null;
+          reason?: string;
+          src_card_id?: string;
+          src_scope?: unknown;
+          type?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'card_links_created_by_fkey';
+            columns: ['created_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_links_dst_card_id_fkey';
+            columns: ['dst_card_id'];
+            isOneToOne: false;
+            referencedRelation: 'cards';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_links_invalidated_by_fkey';
+            columns: ['invalidated_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'card_links_src_card_id_fkey';
+            columns: ['src_card_id'];
+            isOneToOne: false;
+            referencedRelation: 'cards';
             referencedColumns: ['id'];
           },
         ];
@@ -252,8 +504,10 @@ export type Database = {
           origin_loop_id: string | null;
           revision: number;
           scope: unknown;
+          severity: number;
           state: string;
           title: string;
+          type: string | null;
           updated_at: string;
         };
         Insert: {
@@ -267,8 +521,10 @@ export type Database = {
           origin_loop_id?: string | null;
           revision?: number;
           scope: unknown;
+          severity?: number;
           state?: string;
           title: string;
+          type?: string | null;
           updated_at?: string;
         };
         Update: {
@@ -282,8 +538,10 @@ export type Database = {
           origin_loop_id?: string | null;
           revision?: number;
           scope?: unknown;
+          severity?: number;
           state?: string;
           title?: string;
+          type?: string | null;
           updated_at?: string;
         };
         Relationships: [
@@ -521,6 +779,57 @@ export type Database = {
             referencedColumns: ['id'];
           },
         ];
+      };
+      judge_credentials: {
+        Row: {
+          created_at: string;
+          hint: string;
+          model: string | null;
+          provider: string;
+          secret_id: string;
+          subject_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          hint: string;
+          model?: string | null;
+          provider: string;
+          secret_id: string;
+          subject_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          hint?: string;
+          model?: string | null;
+          provider?: string;
+          secret_id?: string;
+          subject_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      judge_settings: {
+        Row: {
+          enabled: boolean;
+          provider: string | null;
+          subject_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          enabled?: boolean;
+          provider?: string | null;
+          subject_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          enabled?: boolean;
+          provider?: string | null;
+          subject_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
       loop_closure_checks: {
         Row: {
@@ -939,6 +1248,66 @@ export type Database = {
           },
         ];
       };
+      oauth_authorizations: {
+        Row: {
+          client_id: string;
+          code_challenge: string;
+          created_at: string;
+          decided_at: string | null;
+          expires_at: string;
+          id: string;
+          redirect_uri: string;
+          resource: string | null;
+          scope: string;
+          state: string | null;
+          status: string;
+          user_id: string | null;
+        };
+        Insert: {
+          client_id: string;
+          code_challenge: string;
+          created_at?: string;
+          decided_at?: string | null;
+          expires_at: string;
+          id?: string;
+          redirect_uri: string;
+          resource?: string | null;
+          scope: string;
+          state?: string | null;
+          status?: string;
+          user_id?: string | null;
+        };
+        Update: {
+          client_id?: string;
+          code_challenge?: string;
+          created_at?: string;
+          decided_at?: string | null;
+          expires_at?: string;
+          id?: string;
+          redirect_uri?: string;
+          resource?: string | null;
+          scope?: string;
+          state?: string | null;
+          status?: string;
+          user_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'oauth_authorizations_client_id_fkey';
+            columns: ['client_id'];
+            isOneToOne: false;
+            referencedRelation: 'oauth_clients';
+            referencedColumns: ['client_id'];
+          },
+          {
+            foreignKeyName: 'oauth_authorizations_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       oauth_clients: {
         Row: {
           client_id: string;
@@ -1013,6 +1382,48 @@ export type Database = {
           },
           {
             foreignKeyName: 'oauth_codes_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      oauth_consents: {
+        Row: {
+          client_id: string;
+          granted_at: string;
+          redirect_uri: string;
+          revoked_at: string | null;
+          scope: string;
+          user_id: string;
+        };
+        Insert: {
+          client_id: string;
+          granted_at?: string;
+          redirect_uri: string;
+          revoked_at?: string | null;
+          scope: string;
+          user_id: string;
+        };
+        Update: {
+          client_id?: string;
+          granted_at?: string;
+          redirect_uri?: string;
+          revoked_at?: string | null;
+          scope?: string;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'oauth_consents_client_id_fkey';
+            columns: ['client_id'];
+            isOneToOne: false;
+            referencedRelation: 'oauth_clients';
+            referencedColumns: ['client_id'];
+          },
+          {
+            foreignKeyName: 'oauth_consents_user_id_fkey';
             columns: ['user_id'];
             isOneToOne: false;
             referencedRelation: 'profiles';
@@ -1426,7 +1837,11 @@ export type Database = {
       rule_candidates: {
         Row: {
           applies_scope: unknown;
+          applies_when: string | null;
+          carried_at: string | null;
+          carried_from: string | null;
           created_at: string;
+          enforced_by: string | null;
           first_used_at: string | null;
           id: string;
           judge_confidence: number | null;
@@ -1447,12 +1862,17 @@ export type Database = {
           status: string;
           suggested_scopes: Json | null;
           target_layer: string | null;
+          text_review_since: string | null;
           useful_sessions: number;
           window_days: number;
         };
         Insert: {
           applies_scope?: unknown;
+          applies_when?: string | null;
+          carried_at?: string | null;
+          carried_from?: string | null;
           created_at?: string;
+          enforced_by?: string | null;
           first_used_at?: string | null;
           id?: string;
           judge_confidence?: number | null;
@@ -1473,12 +1893,17 @@ export type Database = {
           status?: string;
           suggested_scopes?: Json | null;
           target_layer?: string | null;
+          text_review_since?: string | null;
           useful_sessions: number;
           window_days: number;
         };
         Update: {
           applies_scope?: unknown;
+          applies_when?: string | null;
+          carried_at?: string | null;
+          carried_from?: string | null;
           created_at?: string;
+          enforced_by?: string | null;
           first_used_at?: string | null;
           id?: string;
           judge_confidence?: number | null;
@@ -1499,6 +1924,7 @@ export type Database = {
           status?: string;
           suggested_scopes?: Json | null;
           target_layer?: string | null;
+          text_review_since?: string | null;
           useful_sessions?: number;
           window_days?: number;
         };
@@ -1515,6 +1941,54 @@ export type Database = {
             columns: ['resolved_by'];
             isOneToOne: false;
             referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      rule_probes: {
+        Row: {
+          created_at: string;
+          expect: string;
+          id: string;
+          note: string | null;
+          owner_id: string;
+          retired_at: string | null;
+          rule_id: string;
+          topic: string;
+        };
+        Insert: {
+          created_at?: string;
+          expect: string;
+          id?: string;
+          note?: string | null;
+          owner_id: string;
+          retired_at?: string | null;
+          rule_id: string;
+          topic: string;
+        };
+        Update: {
+          created_at?: string;
+          expect?: string;
+          id?: string;
+          note?: string | null;
+          owner_id?: string;
+          retired_at?: string | null;
+          rule_id?: string;
+          topic?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'rule_probes_owner_id_fkey';
+            columns: ['owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'rule_probes_rule_id_fkey';
+            columns: ['rule_id'];
+            isOneToOne: false;
+            referencedRelation: 'rule_candidates';
             referencedColumns: ['id'];
           },
         ];
@@ -1558,6 +2032,88 @@ export type Database = {
           {
             foreignKeyName: 'scope_members_user_id_fkey';
             columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      scope_release_settings: {
+        Row: {
+          on_release: string;
+          scope: unknown;
+          tag_pattern: string;
+          tag_template: string;
+          updated_at: string;
+          updated_by: string | null;
+          version_field: string;
+          version_url: string | null;
+        };
+        Insert: {
+          on_release?: string;
+          scope: unknown;
+          tag_pattern?: string;
+          tag_template?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version_field?: string;
+          version_url?: string | null;
+        };
+        Update: {
+          on_release?: string;
+          scope?: unknown;
+          tag_pattern?: string;
+          tag_template?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+          version_field?: string;
+          version_url?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'scope_release_settings_updated_by_fkey';
+            columns: ['updated_by'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      scope_releases: {
+        Row: {
+          build: string | null;
+          last_observed_at: string;
+          observed_at: string;
+          observed_by: string | null;
+          release_commit: string;
+          scope: unknown;
+          source: string;
+          version: string;
+        };
+        Insert: {
+          build?: string | null;
+          last_observed_at?: string;
+          observed_at?: string;
+          observed_by?: string | null;
+          release_commit: string;
+          scope: unknown;
+          source: string;
+          version: string;
+        };
+        Update: {
+          build?: string | null;
+          last_observed_at?: string;
+          observed_at?: string;
+          observed_by?: string | null;
+          release_commit?: string;
+          scope?: unknown;
+          source?: string;
+          version?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'scope_releases_observed_by_fkey';
+            columns: ['observed_by'];
             isOneToOne: false;
             referencedRelation: 'profiles';
             referencedColumns: ['id'];
@@ -1646,10 +2202,20 @@ export type Database = {
           briefing_total: number;
           captured: number;
           day: string;
+          guard_refusals: number;
+          judge_input_tokens: number;
+          judge_latency_ms_sum: number;
+          judge_unavailable: number;
           judged: number;
           recall_calls: number;
           relevant: number;
           rolled_up_at: string;
+          rule_fetches: number;
+          rule_gate_calls: number;
+          rules_chars_baseline: number;
+          rules_chars_delivered: number;
+          rules_full: number;
+          rules_judged: number;
           saved_tokens: number;
           used: number;
           user_id: string;
@@ -1660,10 +2226,20 @@ export type Database = {
           briefing_total?: number;
           captured?: number;
           day: string;
+          guard_refusals?: number;
+          judge_input_tokens?: number;
+          judge_latency_ms_sum?: number;
+          judge_unavailable?: number;
           judged?: number;
           recall_calls?: number;
           relevant?: number;
           rolled_up_at?: string;
+          rule_fetches?: number;
+          rule_gate_calls?: number;
+          rules_chars_baseline?: number;
+          rules_chars_delivered?: number;
+          rules_full?: number;
+          rules_judged?: number;
           saved_tokens?: number;
           used?: number;
           user_id: string;
@@ -1674,10 +2250,20 @@ export type Database = {
           briefing_total?: number;
           captured?: number;
           day?: string;
+          guard_refusals?: number;
+          judge_input_tokens?: number;
+          judge_latency_ms_sum?: number;
+          judge_unavailable?: number;
           judged?: number;
           recall_calls?: number;
           relevant?: number;
           rolled_up_at?: string;
+          rule_fetches?: number;
+          rule_gate_calls?: number;
+          rules_chars_baseline?: number;
+          rules_chars_delivered?: number;
+          rules_full?: number;
+          rules_judged?: number;
           saved_tokens?: number;
           used?: number;
           user_id?: string;
@@ -1750,17 +2336,29 @@ export type Database = {
         Args: { p_role: string; p_scope: unknown; p_user: string };
         Returns: undefined;
       };
+      agent_credentials_fingerprint: {
+        Args: { p_user_id: string };
+        Returns: string;
+      };
+      board_continuation: { Args: { p_scope?: string }; Returns: Json };
       board_list: {
         Args: {
           p_include_archived?: boolean;
           p_limit?: number;
           p_query?: string;
+          p_related_to?: string;
+          p_relation?: string;
           p_scope?: string;
           p_state?: string;
+          p_worked_by_me?: boolean;
         };
         Returns: Json;
       };
       board_scopes: { Args: never; Returns: Json };
+      briefing_work: {
+        Args: { p_scope: string; p_thread?: string };
+        Returns: Json;
+      };
       build_context: {
         Args: {
           briefing?: boolean;
@@ -1797,12 +2395,19 @@ export type Database = {
         Args: {
           p_agent_label?: string;
           p_body?: string;
+          p_branch_name?: string;
+          p_branch_repo?: string;
           p_idempotency_key?: string;
+          p_links?: Json;
+          p_no_branch?: string;
+          p_no_links?: string;
           p_origin_loop_id?: string;
           p_scope: string;
+          p_severity?: number;
           p_state?: string;
           p_thread?: string;
           p_title: string;
+          p_type?: string;
         };
         Returns: Json;
       };
@@ -1822,23 +2427,64 @@ export type Database = {
           p_body?: string;
           p_card_id: string;
           p_expected_revision?: number;
+          p_severity?: number;
           p_thread?: string;
           p_title?: string;
+          p_type?: string;
         };
+        Returns: Json;
+      };
+      card_feed: {
+        Args: { p_before?: string; p_card_id: string; p_limit?: number };
         Returns: Json;
       };
       card_get: {
         Args: { p_after_seq?: number; p_card_id: string; p_limit?: number };
         Returns: Json;
       };
-      card_move: {
+      card_land: {
+        Args: {
+          p_agent_label?: string;
+          p_branch: string;
+          p_card_id: string;
+          p_idempotency_key?: string;
+          p_not_landed?: string;
+          p_reason: string;
+          p_repo: string;
+          p_squash_sha: string;
+          p_target: string;
+          p_thread?: string;
+          p_to_state?: string;
+        };
+        Returns: Json;
+      };
+      card_link: {
         Args: {
           p_agent_label?: string;
           p_card_id: string;
           p_idempotency_key?: string;
           p_reason: string;
+          p_relation: string;
+          p_thread?: string;
+          p_to: string;
+        };
+        Returns: Json;
+      };
+      card_move: {
+        Args: {
+          p_agent_label?: string;
+          p_branch_name?: string;
+          p_branch_repo?: string;
+          p_card_id: string;
+          p_idempotency_key?: string;
+          p_links?: Json;
+          p_no_branch?: string;
+          p_no_links?: string;
+          p_not_landed?: string;
+          p_reason: string;
           p_thread?: string;
           p_to_state: string;
+          p_type?: string;
         };
         Returns: Json;
       };
@@ -1858,17 +2504,46 @@ export type Database = {
         Args: {
           p_agent_label?: string;
           p_body?: string;
+          p_branch_name?: string;
+          p_branch_repo?: string;
           p_idempotency_key?: string;
+          p_links?: Json;
           p_loop_id: string;
+          p_no_branch?: string;
+          p_no_links?: string;
+          p_severity?: number;
           p_state?: string;
           p_thread?: string;
           p_title: string;
+          p_type?: string;
         };
         Returns: Json;
       };
       card_resolve: {
         Args: { p_number: number; p_scope: string };
         Returns: Json;
+      };
+      card_unlink: {
+        Args: {
+          p_agent_label?: string;
+          p_card_id: string;
+          p_reason: string;
+          p_relation: string;
+          p_thread?: string;
+          p_to: string;
+        };
+        Returns: Json;
+      };
+      connected_agents: {
+        Args: { p_user_id: string };
+        Returns: {
+          client_id: string;
+          client_name: string;
+          granted_at: string;
+          last_used_at: string;
+          redirect_uri: string;
+          sessions: number;
+        }[];
       };
       create_scope: { Args: { p_scope: unknown }; Returns: undefined };
       dashboard_activity: {
@@ -2121,6 +2796,14 @@ export type Database = {
         Args: { prefix: string; value: string };
         Returns: boolean;
       };
+      judge_credential_for: {
+        Args: { p_subject_id: string };
+        Returns: {
+          api_key: string;
+          model: string;
+          provider: string;
+        }[];
+      };
       list_memory_scopes: {
         Args: never;
         Returns: {
@@ -2194,6 +2877,36 @@ export type Database = {
           provider: string;
         }[];
       };
+      release_candidates: {
+        Args: { p_scope: string; p_version: string };
+        Returns: Json;
+      };
+      release_configure: {
+        Args: {
+          p_on_release?: string;
+          p_scope: string;
+          p_tag_pattern?: string;
+          p_tag_template?: string;
+          p_version_field?: string;
+          p_version_url?: string;
+        };
+        Returns: Json;
+      };
+      release_record: {
+        Args: {
+          p_agent_label?: string;
+          p_build: string;
+          p_card_ids?: string[];
+          p_landing_seqs?: number[];
+          p_release_commit: string;
+          p_scope: string;
+          p_source: string;
+          p_thread?: string;
+          p_version: string;
+        };
+        Returns: Json;
+      };
+      release_settings: { Args: { p_scope: string }; Returns: Json };
       rename_scope: {
         Args: { p_new_slug: string; p_scope: unknown };
         Returns: string;
@@ -2212,6 +2925,14 @@ export type Database = {
         Args: { p_email: string; p_scope: unknown };
         Returns: string;
       };
+      revoke_connected_agent: {
+        Args: { p_client_id: string; p_user_id: string };
+        Returns: Json;
+      };
+      revoke_judge_credential: {
+        Args: { p_subject_id: string };
+        Returns: undefined;
+      };
       revoke_provider_credential: {
         Args: { p_subject_id: string };
         Returns: undefined;
@@ -2223,6 +2944,7 @@ export type Database = {
           scope: string;
         }[];
       };
+      rule_gate_stats: { Args: { p_days?: number }; Returns: Json };
       scope_member_identities: {
         Args: never;
         Returns: {
@@ -2254,7 +2976,17 @@ export type Database = {
           visibility: string;
         }[];
       };
+      session_assurance: { Args: never; Returns: Json };
       session_receipt: { Args: { p_since: string }; Returns: Json };
+      set_judge_credential: {
+        Args: {
+          p_api_key: string;
+          p_model?: string;
+          p_provider: string;
+          p_subject_id: string;
+        };
+        Returns: undefined;
+      };
       set_provider_credential: {
         Args: {
           p_api_key: string;

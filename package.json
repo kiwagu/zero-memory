@@ -1,6 +1,6 @@
 {
   "name": "zero-memory",
-  "version": "0.20.0",
+  "version": "0.48.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -19,6 +19,9 @@
     "db:sync": "bun run db:migrate:e2e && bun run db:types",
     "db:types": "bun run --cwd packages/db gen-types",
     "test": "CI=1 turbo run test:vitest",
+    "test:dynamodb": "bun run --cwd apps/server test:dynamodb",
+    "test:installers": "bash scripts/installers.test.sh",
+    "test:prune-actions": "bash scripts/prune-actions-storage.test.sh",
     "test:integration": "CI=1 turbo run test:integration",
     "test:e2e": "CI=1 turbo run test:e2e",
     "test:e2e:smoke": "CI=1 turbo run test:e2e:smoke",
@@ -43,7 +46,8 @@
     "prettier": "^3.9.1",
     "turbo": "^2.10.0",
     "@types/node": "catalog:",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "supabase": "catalog:"
   },
   "engines": {
     "bun": ">=1.3.11"
@@ -53,7 +57,8 @@
     "packages": [
       "apps/*",
       "packages/*",
-      "tests/*"
+      "tests/*",
+      "infra/aws"
     ],
     "catalog": {
       "@ai-sdk/anthropic": "^4.0.16",
@@ -61,6 +66,13 @@
       "@ai-sdk/openai": "^4.0.16",
       "@ai-sdk/openai-compatible": "^3.0.12",
       "@ai-sdk/xai": "^4.0.16",
+      "@aws-sdk/client-dynamodb": "3.1140.0",
+      "@aws-sdk/client-lambda": "3.1140.0",
+      "@aws-sdk/client-s3": "3.1140.0",
+      "@aws-sdk/client-secrets-manager": "3.1140.0",
+      "@aws-sdk/client-sesv2": "3.1140.0",
+      "@aws-sdk/client-ssm": "3.1140.0",
+      "@aws-sdk/lib-dynamodb": "3.1140.0",
       "@huggingface/transformers": "^4.2.0",
       "@modelcontextprotocol/sdk": "^1.29.0",
       "@react-email/components": "^1.0.12",
@@ -72,6 +84,9 @@
       "@types/react": "^19.2.17",
       "@types/react-dom": "^19.2.3",
       "ai": "^7.0.31",
+      "aws-cdk": "2.1143.0",
+      "aws-cdk-lib": "2.270.0",
+      "constructs": "10.8.1",
       "dequal": "^2.0.3",
       "elysia": "^1.4.29",
       "entity-id": "^1.0.0",
@@ -84,14 +99,19 @@
       "prettier": "^3.9.1",
       "react": "^19.2.7",
       "react-dom": "^19.2.7",
+      "react-markdown": "^10.1.0",
       "reflect-metadata": "^0.2.2",
+      "remark-gfm": "^4.0.1",
+      "remark-parse": "^11.0.0",
       "resend": "^6.18.0",
       "shadcn": "^4.12.0",
+      "supabase": "2.117.0",
       "tailwindcss": "^4.3.1",
       "tsyringe": "^4.10.0",
       "tw-animate-css": "^1.4.0",
       "typescript": "^6.0.3",
       "ulid": "^3.0.0",
+      "unified": "^11.0.5",
       "vitest": "^4.1.9",
       "zod": "^4.5.4"
     }

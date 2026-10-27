@@ -1,4 +1,8 @@
-import { provenanceRank, type MemoryAuthorKind } from '@workspace/contracts';
+import {
+  crossProjectPair,
+  provenanceRank,
+  type MemoryAuthorKind,
+} from '@workspace/contracts';
 import { createLogger } from '@workspace/logger';
 import { RETRO_APERTURE_CAP, RETRO_APERTURE_FLOOR } from '@workspace/memory';
 import {
@@ -9,7 +13,9 @@ import {
 
 import {
   decideAction,
+  protectPromotedLoop,
   queueInstead,
+  retiredBy,
   sameSessionCollapseAction,
   type HygieneAction,
 } from './hygiene-decision.js';
@@ -18,7 +24,6 @@ import {
   type HygieneJudgement,
   type MemorySnapshot,
 } from './hygiene-judge.js';
-import { crossProjectPair } from './hygiene-origin.js';
 import {
   KIND_AUDIT_SUBJECT_KINDS,
   isChangeNoteCandidate,
@@ -850,6 +855,25 @@ export class HygieneScanner {
   }
 
   /**
+   * The promoted loops among what `action` would retire: the loser, when a
+   * card was promoted from it. Asked only for an auto-resolution, and only
+   * about its one loser, so a scan pays nothing for pairs that retire nothing.
+   */
+  async #promotedLoops(action: HygieneAction): Promise<Set<string>> {
+    const loser = retiredBy(action);
+    if (loser === null) return new Set();
+    const { data, error } = await this.client
+      .from('cards')
+      .select('origin_loop_id')
+      .eq('origin_loop_id', loser)
+      .limit(1);
+    if (error) {
+      throw new Error(`promoted-loop lookup failed: ${error.message}`);
+    }
+    return new Set((data ?? []).map((row) => row.origin_loop_id as string));
+  }
+
+  /**
    * Applies one verdict. Returns the retired memory id on an auto-resolution,
    * the literal `'queued'` when parked for a human, or null when nothing to do.
    */
@@ -885,7 +909,9 @@ export class HygieneScanner {
         autoInvalidateConfidence: this.config.autoInvalidateConfidence,
       }
     );
-    const action = queueOnly ? queueInstead(decided) : decided;
+    const action = queueOnly
+      ? queueInstead(decided)
+      : protectPromotedLoop(decided, await this.#promotedLoops(decided));
     const audit = {
       confidence: verdict.confidence,
       rationale: verdict.rationale,
@@ -906,7 +932,10 @@ export class HygieneScanner {
         return null;
 
       case 'forget':
-        await this.#forget(action.loser, model);
+        // A duplicate has a known replacement — the twin that stays — so the
+        // loser records it like any supersede: whatever is anchored to the
+        // loser, a promoted rule above all, follows the winner.
+        await this.#supersede(action.loser, action.winner, model);
         await this.#link(action.winner, action.loser, 'supersedes');
         await this.#audit('HygieneAutoDuplicate', {
           winner: action.winner,
@@ -1023,22 +1052,6 @@ export class HygieneScanner {
       this.#logger.warn('hygiene: judge metering failed', {
         error: error.message,
       });
-    }
-  }
-
-  async #forget(memoryId: string, model: string): Promise<void> {
-    // System invalidation: no usr_ actor, so attribute the scanner + judge
-    // model instead of invalidated_by (see the memories column comments).
-    const { error } = await this.client
-      .from('memories')
-      .update({
-        invalidated_at: new Date().toISOString(),
-        invalidated_by_agent: 'hygiene-scanner',
-        invalidated_by_model: model,
-      })
-      .eq('id', memoryId);
-    if (error) {
-      throw new Error(`hygiene: forget ${memoryId} failed: ${error.message}`);
     }
   }
 

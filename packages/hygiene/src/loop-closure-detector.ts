@@ -81,18 +81,7 @@ export class LoopClosureDetector {
       leftOpen: 0,
     };
 
-    const { data: rollup, error } = await this.client.rpc(
-      'find_loop_closure_evidence',
-      {
-        p_owner: ownerId ?? undefined,
-        p_min_similarity: this.config.minSimilarity,
-        p_max_evidence: this.config.maxEvidence,
-      }
-    );
-    if (error) {
-      throw new Error(`loop-closure: evidence rollup failed: ${error.message}`);
-    }
-    const rows = (rollup ?? []) as EvidenceRow[];
+    const rows = await this.#rollup(ownerId);
     result.detected = rows.length;
     if (rows.length === 0) {
       return result;
@@ -147,6 +136,52 @@ export class LoopClosureDetector {
 
     this.#logger.info('loop-closure detection complete', { ...result });
     return result;
+  }
+
+  /**
+   * A person reopened this loop (restore_memory): hold it open against every
+   * piece of evidence that exists right now, so the next run does not close
+   * it again on what they have just overruled. The guard is keyed on the
+   * newest evidence, exactly like a leave-open verdict, so the loop is judged
+   * again only once NEWER evidence appears. A loop with no evidence yet needs
+   * no guard: its first evidence is new by definition.
+   */
+  async holdReopened(loopId: string, ownerId: string): Promise<void> {
+    const row = (await this.#rollup(ownerId)).find(
+      (candidate) => candidate.loop_id === loopId
+    );
+    if (!row) {
+      return;
+    }
+    const { error } = await this.client.from('loop_closure_checks').upsert(
+      {
+        loop_id: loopId,
+        last_evidence_id: row.newest_evidence_id,
+        checked_at: new Date().toISOString(),
+      },
+      { onConflict: 'loop_id' }
+    );
+    if (error) {
+      throw new Error(
+        `loop-closure: holding ${loopId} open failed: ${error.message}`
+      );
+    }
+  }
+
+  /** The evidence rollup, one row per live loop that has candidates. */
+  async #rollup(ownerId?: string): Promise<EvidenceRow[]> {
+    const { data, error } = await this.client.rpc(
+      'find_loop_closure_evidence',
+      {
+        p_owner: ownerId ?? undefined,
+        p_min_similarity: this.config.minSimilarity,
+        p_max_evidence: this.config.maxEvidence,
+      }
+    );
+    if (error) {
+      throw new Error(`loop-closure: evidence rollup failed: ${error.message}`);
+    }
+    return (data ?? []) as EvidenceRow[];
   }
 
   /** Re-judge guard state for the rollup's loops, in one query. */
@@ -250,7 +285,8 @@ export class LoopClosureDetector {
       },
       { onConflict: 'src,dst,type', ignoreDuplicates: true }
     );
-    // The loop left the rollup for good — the guard row is spent.
+    // The loop leaves the rollup, so the guard row is spent. A restore brings
+    // the loop back and re-arms the guard itself (holdReopened).
     await this.client
       .from('loop_closure_checks')
       .delete()

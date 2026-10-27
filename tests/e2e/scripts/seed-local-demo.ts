@@ -6,6 +6,7 @@
  *   - a spread of memories across kinds (populates the feed / a memory to open)
  *   - one pending memory-hygiene conflict (populates /review)
  *   - the queues, metrics and graph the documentation screenshots show
+ *   - a project board with a card in every column
  *
  * The content is REAL prose about this product — not lorem filler and not the
  * maintainer's working corpus, which carries private paths and project names
@@ -133,6 +134,167 @@ const GRAPH_MEMORIES: Array<{
 const CONFLICT = [
   'Rate limiting uses a fixed-window limiter: 30 requests per 60 seconds per IP.',
   'Rate limiting uses a token-bucket limiter: 100 requests per minute per IP.',
+];
+
+/**
+ * The project board on /board: one card per column. A card opens in `idea`
+ * and reaches its column by moves, because a tile shows the reason of the
+ * move that put it there — a card created straight into a column has none.
+ */
+/** The repository the demo board's work runs in. */
+const DEMO_REPO = 'acme/memory-service';
+
+const BOARD: Array<{
+  title: string;
+  body: string;
+  /**
+   * Work entering active names its branch; work leaving it with the branch
+   * still open says why it has not landed.
+   */
+  moves: Array<{
+    to: string;
+    reason: string;
+    branch?: string;
+    notLanded?: string;
+  }>;
+  /** The branch that landed, recorded the way an agent records a squash. */
+  land?: { branch: string; sha: string; to: string; reason: string };
+  note?: string;
+  /** Points the card at the project's first memory. */
+  attachAnchor?: boolean;
+  /**
+   * How the card relates to cards above it in this list — a card states its
+   * relations when it is made, or says why it has none (`noLinks`).
+   */
+  links?: Array<{ title: string; relation: string; reason: string }>;
+  noLinks?: string;
+  /** How much the card matters, 1 to 5; a card without one sits at normal. */
+  severity?: number;
+  /** Why the work exists. */
+  type: 'story' | 'bug' | 'task' | 'spike';
+}> = [
+  {
+    title: 'Weekly decision digest per project',
+    type: 'story',
+    body:
+      'Goal: one short summary a week of the decisions recorded in a project.\n\n' +
+      'Boundaries: reads existing memories only; no new capture path.\n\n' +
+      'Done when: a project owner can opt in and receives one digest a week.',
+    moves: [],
+    noLinks:
+      'A summary over memories already stored; no other card here touches it.',
+    severity: 2,
+  },
+  {
+    title: 'Translate imported memories into the canonical language',
+    type: 'bug',
+    body:
+      'Goal: an import written in any language is found by an English query.\n\n' +
+      'Boundaries: reuse the translator of the write path; each memory keeps ' +
+      'its original phrasing beside the canonical text.\n\n' +
+      'Done when: a non-English export, once imported, answers an English recall.',
+    moves: [
+      {
+        to: 'active',
+        reason:
+          'Imports skip translation today, so a non-English export never ' +
+          'matches an English query.',
+        branch: 'feature/translate-imports',
+      },
+    ],
+    note: 'The translator already records the source language; import only needs to call it.',
+    attachAnchor: true,
+    severity: 4,
+    links: [
+      {
+        title: 'Weekly decision digest per project',
+        relation: 'blocks',
+        reason:
+          'A digest reads every memory in the canonical language, imports ' +
+          'included.',
+      },
+    ],
+  },
+  {
+    title: 'Swap the embedding model without a re-index outage',
+    type: 'task',
+    body:
+      'Goal: move to a stronger embedding model while recall keeps answering.\n\n' +
+      'Boundaries: old and new vectors live side by side until the switch.\n\n' +
+      'Done when: every memory has a new vector and recall reads only those.',
+    links: [
+      {
+        title: 'Translate imported memories into the canonical language',
+        relation: 'relates_to',
+        reason:
+          'Both change what recall matches on; one benchmark run checks them ' +
+          'together.',
+      },
+    ],
+    moves: [
+      {
+        to: 'active',
+        reason:
+          'Long memories are the weakest case in the latest recall benchmark.',
+        branch: 'feature/embedding-swap',
+      },
+      {
+        to: 'waiting',
+        reason:
+          'Waiting for the new model to publish its vector size; the ' +
+          'migration plan depends on it.',
+        notLanded:
+          'The branch waits for the vector size; nothing to squash yet.',
+      },
+    ],
+  },
+  {
+    title: 'Paginate the memory feed',
+    type: 'story',
+    body:
+      'Goal: the feed stays fast however large the corpus grows.\n\n' +
+      'Done when: a visit loads one page, and paging is stable while new ' +
+      'memories arrive.',
+    noLinks: 'A change to the feed alone; no other card waits on it.',
+    moves: [
+      {
+        to: 'active',
+        reason: 'The feed loaded the whole corpus on every visit.',
+        branch: 'feature/feed-pages',
+      },
+    ],
+    land: {
+      branch: 'feature/feed-pages',
+      sha: '4f11a55',
+      to: 'done',
+      reason:
+        'Shipped: keyset pages on (created_at, id), stable under ' +
+        'concurrent writes.',
+    },
+  },
+  {
+    title: 'Browser extension that captures decisions from web chats',
+    type: 'spike',
+    body: 'Goal: decisions made in a browser chat reach memory without copy and paste.',
+    severity: 1,
+    links: [
+      {
+        title: 'Translate imported memories into the canonical language',
+        relation: 'depends_on',
+        reason:
+          'Web chats arrive in any language, so capture needs the translator ' +
+          'first.',
+      },
+    ],
+    moves: [
+      {
+        to: 'parked',
+        reason:
+          'Transcript capture already covers the supported clients; revisit ' +
+          'if a browser-only client matters.',
+      },
+    ],
+  },
 ];
 
 /** Reads the running e2e stack's URL + service-role key from the CLI. */
@@ -364,19 +526,105 @@ const mcp = await McpTestClient.connect(token);
  */
 const write = async (
   args: Record<string, unknown>
-): Promise<{ memory_id: string }> => {
+): Promise<{ memory_id: string; scope: string }> => {
   const result = await mcp.callTool('remember', args);
   if (result.isError) {
     throw new Error(`seed write failed: ${result.content[0]?.text ?? ''}`);
   }
-  return firstJson<{ memory_id: string }>(result);
+  return firstJson<{ memory_id: string; scope: string }>(result);
+};
+
+/** Calls a board tool and fails loudly, for the same reason `write` does. */
+const boardCall = async <T>(
+  tool: 'board' | 'card' | 'card_log',
+  args: Record<string, unknown>
+): Promise<T> => {
+  const result = await mcp.callTool(tool, args);
+  if (result.isError) {
+    throw new Error(`seed ${tool} failed: ${result.content[0]?.text ?? ''}`);
+  }
+  return firstJson<T>(result);
 };
 
 try {
   // Project-scoped, so the scopes screen shows a real project beside the
-  // personal one and feed cards carry a project badge.
+  // personal one and feed cards carry a project badge. Named by a path: on a
+  // fresh stand the project does not exist yet, and only a path or a git
+  // remote sets a project up — a bare name only points at an existing one.
+  const projectWrites = [];
   for (const memory of GRAPH_MEMORIES) {
-    await write({ ...memory, project_hint: 'zero-memory' });
+    projectWrites.push(
+      await write({ ...memory, project_hint: '/demo/zero-memory' })
+    );
+  }
+  const [anchor] = projectWrites;
+  if (!anchor) {
+    throw new Error('seed wrote no project memory to put a board in');
+  }
+
+  // The project's board: a card in every column, each moved with the reason
+  // its tile shows. Matched by title, so a re-run adds nothing.
+  const { cards: existing } = await boardCall<{
+    cards: Array<{ id: string; title: string }>;
+  }>('board', { action: 'list', scope: anchor.scope, limit: 200 });
+  const idByTitle = new Map(existing.map((card) => [card.title, card.id]));
+  for (const spec of BOARD) {
+    if (idByTitle.has(spec.title)) continue;
+    const links = (spec.links ?? []).map((link) => {
+      const target = idByTitle.get(link.title);
+      if (!target) {
+        throw new Error(`seed card "${spec.title}" relates to a missing card`);
+      }
+      return { card: target, relation: link.relation, reason: link.reason };
+    });
+    const { card } = await boardCall<{ card: { id: string } }>('card', {
+      action: 'create',
+      scope: anchor.scope,
+      title: spec.title,
+      type: spec.type,
+      body: spec.body,
+      ...(spec.severity ? { severity: spec.severity } : {}),
+      ...(links.length > 0 ? { links } : { no_links: spec.noLinks }),
+    });
+    idByTitle.set(spec.title, card.id);
+    if (spec.attachAnchor) {
+      await boardCall('card_log', {
+        action: 'attach',
+        card_id: card.id,
+        ref_kind: 'memory',
+        ref_target: anchor.memory_id,
+      });
+    }
+    if (spec.note) {
+      await boardCall('card_log', {
+        action: 'note',
+        card_id: card.id,
+        text: spec.note,
+      });
+    }
+    for (const move of spec.moves) {
+      await boardCall('card', {
+        action: 'move',
+        card_id: card.id,
+        to: move.to,
+        reason: move.reason,
+        ...(move.branch
+          ? { branch: { repo: DEMO_REPO, name: move.branch } }
+          : {}),
+        ...(move.notLanded ? { not_landed: move.notLanded } : {}),
+      });
+    }
+    if (spec.land) {
+      await boardCall('card', {
+        action: 'land',
+        card_id: card.id,
+        branch: { repo: DEMO_REPO, name: spec.land.branch },
+        squash_sha: spec.land.sha,
+        target: 'main',
+        to: spec.land.to,
+        reason: spec.land.reason,
+      });
+    }
   }
   await write({
     content:
@@ -419,5 +667,6 @@ process.stdout.write(
   `\n✓ Local demo ready.\n  URL:   ${WEB_URL}\n  Login: ${DEMO_EMAIL} / ${DEMO_PASSWORD}\n` +
     `  Name:  ${DEMO_NAME}\n` +
     `  Feed:  ${MEMORIES.length} memories + graph, loops and a version chain\n` +
-    `  Queues: review · rules · reflections · insights · ROI\n\n`
+    `  Queues: review · rules · reflections · insights · ROI\n` +
+    `  Board: ${BOARD.length} cards, one per column\n\n`
 );

@@ -35,12 +35,71 @@ export const scopeTargetRequiredMessage = (): string =>
   'work. Both are checked; when the claim does not hold the write lands in ' +
   'the project instead.';
 
-/** Renders the refusal for a hint that names no project scope. */
-export const projectHintUnresolvableMessage = (hint: string): string =>
-  `${PROJECT_HINT_UNRESOLVABLE}: project_hint ${JSON.stringify(hint)} does ` +
-  'not resolve to a project scope. Pass a repo root path, a git remote URL, ' +
-  'or the project name the briefing announced — or target the write ' +
-  `explicitly with scope: "${CORE_SCOPE}" / "${PERSONAL_SCOPE}".`;
+/** A project a refusal offers as a retry: the name to pass, and its scope. */
+export interface ProjectChoice {
+  readonly name: string;
+  readonly scope: string;
+}
+
+const listChoices = (projects: readonly ProjectChoice[]): string =>
+  projects.map((project) => `${project.name} (${project.scope})`).join(', ');
+
+/**
+ * Renders the refusal for a hint that names no project scope.
+ *
+ * A name that fits several projects is `ambiguous`; one that fits none, or a
+ * path that routes nowhere, gets the caller's projects to pick from — a typed
+ * name never creates a project, so the refusal also says what does.
+ */
+export const projectHintUnresolvableMessage = (
+  hint: string,
+  options: {
+    readonly reason?: 'unknown' | 'ambiguous' | 'unroutable';
+    readonly projects?: readonly ProjectChoice[];
+    /** Whether the write may also go to `core` / `personal`. */
+    readonly portableLayers?: boolean;
+  } = {}
+): string => {
+  const {
+    reason = 'unroutable',
+    projects = [],
+    portableLayers = true,
+  } = options;
+  const head = `${PROJECT_HINT_UNRESOLVABLE}: project_hint ${JSON.stringify(hint)}`;
+  if (reason === 'ambiguous') {
+    return (
+      `${head} fits more than one of your projects: ${listChoices(projects)}. ` +
+      'Pass the one you mean by its exact name.'
+    );
+  }
+  return (
+    `${head} ` +
+    (reason === 'unknown'
+      ? 'does not name one of your projects.'
+      : 'does not resolve to a project scope.') +
+    (projects.length > 0 ? ` Your projects: ${listChoices(projects)}.` : '') +
+    ' Pass one of these names, or the project name the briefing announced. ' +
+    'A name never creates a project: to start a new one, pass the repo root ' +
+    'path or git remote URL of its repository.' +
+    (portableLayers
+      ? ' Or target the write explicitly with scope: ' +
+        `"${CORE_SCOPE}" / "${PERSONAL_SCOPE}".`
+      : '')
+  );
+};
+
+/**
+ * Renders the refusal for a card that names no board while the session has
+ * no project to default to — the board-side counterpart of
+ * {@link scopeTargetRequiredMessage}, under the same code.
+ */
+export const boardTargetRequiredMessage = (
+  projects: readonly ProjectChoice[]
+): string =>
+  `${SCOPE_TARGET_REQUIRED}: this card names no board and the session has ` +
+  'no project attached. Pass project_hint: "<project name | repo root path | ' +
+  'git remote URL>" for the project whose board it belongs on, or its scope.' +
+  (projects.length > 0 ? ` Your projects: ${listChoices(projects)}.` : '');
 
 /**
  * Classifies a failure message as one of the write refusals, for the metric

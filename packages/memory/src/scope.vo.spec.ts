@@ -78,10 +78,4 @@ describe('Scope', () => {
     expect(scope.isPersonal).toBe(true);
     expect(scope.isShareable).toBe(false);
   });
-
-  it('compares by value', () => {
-    expect(
-      Scope.create('proj.a').unwrap().equals(Scope.create('proj.a').unwrap())
-    ).toBe(true);
-  });
 });

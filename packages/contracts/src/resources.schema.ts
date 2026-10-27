@@ -20,6 +20,14 @@ export const zmMemoryUri = (id: string): string => `zm://memory/${id}`;
 /** The caller's standing promoted rules, pinned first. */
 export const ZM_RULES_URI = 'zm://rules';
 
+/** One promoted rule in full, by `rule_candidates` id. */
+export const ZM_RULE_URI_TEMPLATE = 'zm://rules/{id}';
+
+export const promotedRuleResourceSchema = z.object({
+  rule: contextRuleSchema,
+});
+export type PromotedRuleResource = z.infer<typeof promotedRuleResourceSchema>;
+
 /**
  * Payload of the `zm://rules` resource: the same rules build_context delivers
  * in `rules[]`, served as a dereferenceable document so a client can pull

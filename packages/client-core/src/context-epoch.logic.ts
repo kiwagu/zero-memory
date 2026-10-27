@@ -28,7 +28,7 @@
  * view). An unknown or absent reason counts as "no boundary" — a client that
  * says nothing must not silently re-arm delivery on every event.
  */
-export const EPOCH_BOUNDARY_SOURCES: readonly string[] = ['compact', 'clear'];
+const EPOCH_BOUNDARY_SOURCES: readonly string[] = ['compact', 'clear'];
 
 /** Does this session-event reason open a new context epoch? */
 export const startsNewEpoch = (source: string | undefined): boolean =>

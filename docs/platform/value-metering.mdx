@@ -63,9 +63,10 @@ nothing breaks; degradation is soft.
 
 ### Recall-hit attribution
 
-`recall`, `build_context` and `remember` are **result-attributed**: instead of
-being counted before they run, their single `mcp_tool_call` event is emitted
-once the result is known, so it can carry that result. The pre-execution
+`recall`, `build_context`, `remember` and the one-rule read `zm://rules/{id}`
+(tool `resource:rule`) are **result-attributed**: instead of being counted
+before they run, their single `mcp_tool_call` event is emitted once the
+result is known, so it can carry that result. The pre-execution
 counter deliberately skips them, which is what keeps the count at one row per
 call.
 
@@ -130,6 +131,64 @@ on the memories the session recalled, filling in the coverage the first two
 cannot reach. These rows carry the verdict and a confidence; see
 [Recall quality](/docs/guides/recall-quality).
 
+### Rule gate metering
+
+When a call's standing rules go through the gate of the
+[rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance),
+that call's `build_context` row carries the outcome as `rule_gate`, whether
+or not the judge answered: the mode, the provider and model, the
+judge's latency, whether it was unavailable and, when the reason is known,
+`unavailable_reason` (`settings_unavailable`, `credential_unavailable` or
+`budget_unavailable` when the account's judge settings, its key or its
+extraction allowance could not be read; `budget_exhausted` when that
+allowance is used up; `judge_error` when the judge call failed other than by
+not answering in time), the bands, `chars_baseline` (the sum of the rules'
+whole texts, what an unjudged call sends) against `chars_delivered` (the
+characters the session receives: each delivered text, plus the **applies
+when** line of a rule delivered by gate), the count per level, and per rule
+its id, probability, level, size and pin. Ids and numbers only, never a
+rule's text. Three more rows complete the picture:
+
+- a read of one rule at `zm://rules/{id}` is its own `mcp_tool_call` row,
+  tool `resource:rule`, with the `rule_id` and whether it was `found`: the
+  fetch after a headline;
+- the judge's spend is an `llm_extraction` row with `purpose: rule_gate`,
+  shaped like every other model call's: input plus output tokens as the
+  quantity, `input_tokens` and `output_tokens` beside it, and `own_key` when
+  it ran on the account's own key. It is written only when the judge
+  answered, and it is not counted against the extraction allowance;
+- an `ingest_chunk` row carries `guard_refusals`, the names of the guard hooks
+  that refused an action in that chunk.
+
+The per-day series that `export_metrics` returns roll these up under ten
+keys:
+
+| Key                     | Per day                                                |
+| ----------------------- | ------------------------------------------------------ |
+| `rule_gate_calls`       | calls whose standing rules went through the gate       |
+| `rules_chars_baseline`  | characters those rules would have taken whole          |
+| `rules_chars_delivered` | characters actually delivered                          |
+| `rules_judged`          | unpinned rules that went through it, over those calls  |
+| `rules_full`            | of those, the ones delivered whole                     |
+| `rule_fetches`          | reads of one rule by id that found it                  |
+| `guard_refusals`        | guard-hook refusals reported with ingested transcripts |
+| `judge_latency_ms_sum`  | the judge's latency, summed over those calls           |
+| `judge_unavailable`     | those calls whose judge did not answer                 |
+| `judge_input_tokens`    | `metadata.input_tokens` summed over the judge's rows   |
+
+`rule_gate_calls` and `rules_judged` include the calls whose judge did not
+answer or was not asked; their rules arrive whole and count in `rules_full`.
+`judge_input_tokens` sums the judge's rows whether it ran on the instance's
+key or on the account's own. A call whose judge did not answer records no
+latency, so the mean is
+`judge_latency_ms_sum / (rule_gate_calls - judge_unavailable)`. Percentiles
+do not add across days and come from the raw rows instead. In `shadow` mode
+the levels are what the judge would have delivered, and the characters
+delivered equal the baseline. The `/rules` page reads the per-rule breakdown
+from `rule_gate_stats(p_days)`, the signed-in user's own numbers only: per
+rule the calls, the count per level, the mean probability and the reads that
+found it, plus the refusals per guard.
+
 ### Attribution
 
 Two rules keep the ledger describing what actually happened.
@@ -146,7 +205,8 @@ Calls made on a user's own provider key are marked and left out. A deployment
 can be configured so that a user's own provider key runs their own calls.
 Those events are still recorded, since the work happened, but they carry an
 `own_key` marker, and the rollups that total the deployment's own token volume
-skip them. The rows outlive the key, so without the marker work the deployment
+skip them. The rule delivery judge's rows are marked the same way when it ran
+on a key the account installed. The rows outlive the key, so without the marker work the deployment
 never performed would start counting against the person who performed it
 themselves.
 

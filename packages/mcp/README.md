@@ -21,14 +21,29 @@ app host connects the returned server to a transport.
   - hygiene: `scan_hygiene`, `list_conflicts`, `get_conflict`,
     `resolve_conflict`, `resolve_conflicts`;
   - rules/quality: `promote_rule`, `benchmark_memory`;
-  - operations: `session_receipt`, `export_metrics`, `export_memories`,
-    `delete_account`.
+  - operations: `session_receipt`, `export_metrics`, `export_memories`.
+    There is deliberately no account-deletion tool: an agent acts as the
+    person, so erasing the account is left to the person in the dashboard.
     Read-tool results carry a reinforcement footer; `build_context` additionally
-    renders applicable standing rules and active open loops.
+    renders applicable standing rules and active open loops. Each rule is
+    rendered at the level the rule gate chose (`rules-footer.ts`): whole, or
+    by headline marked `[gate]` (with its `applies_when`) or `[headline]` and
+    followed by its rule id, with a closing line pointing at `zm://rules/<id>`.
 - `McpServerDeps` — `commandBus`, `queryBus`, `runInToolContext` (wraps every
   tool call in an authenticated execution context), optional `sessionScope`
   and metering hooks (including `onWriteRefused`, fired with the stable reason
-  code when a write named no usable target).
+  code when a write named no usable target), and optional `workClaims`. The
+  optional resource reads register only when supplied: `readPromotedRules`
+  serves `zm://rules`, and `readPromotedRule` serves one rule in full at
+  `zm://rules/{id}`, each such read metered through `onResourceRead` as a
+  `resource:rule` row with the rule id and whether it was found.
+- `IWorkClaims` / `InProcessWorkClaims` / `workClaimKey` — one queued or
+  running background scan or benchmark per owner. The default holds the
+  claims in this process; a deployment whose background work runs on a worker
+  of its own supplies shared claims, and the worker releases them. Each claim
+  hands out a `WorkClaimToken` (a `wcl_` entity id, `newWorkClaimToken`,
+  checked with `workClaimTokenSchema`) that travels with the work; only its
+  holder may end the claim.
 - `McpSessionScope` — how a session learns where its scope-less writes go:
   `attachProjectScope` / `currentProjectScope`. **First attach wins.** A
   `project_hint` that resolves attaches the session only while it has no
@@ -41,6 +56,10 @@ app host connects the returned server to a transport.
   the first text block, so a client branches on `error.code` instead of on
   prose. A thrown value carrying a taxonomy code keeps its class; anything
   else is `internal`.
+- `CONSENT_AREAS` — every tool, grouped into the areas the dashboard's consent
+  screen names when a person allows an agent. Its spec fails when a tool has
+  no area, or an area has no copy in the web catalogs or no line on the
+  consent page, so the screen never describes less than an agent can do.
 - `CONTRACT_CAPABILITY_KEY` — the `capabilities.experimental` key under which
   the initialize handshake announces `CONTRACT_VERSION`. It rides a capability
   rather than `serverInfo` (the SDK client drops unknown keys there) or

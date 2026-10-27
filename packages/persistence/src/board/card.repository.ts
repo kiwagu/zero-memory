@@ -1,6 +1,7 @@
 import {
   flattenCardRef,
   toCardFailure,
+  withLinkCandidates,
   type ArchiveCardParams,
   type AttachRefParams,
   type BoardView,
@@ -10,6 +11,8 @@ import {
   type CreateCardParams,
   type EditCardParams,
   type ICardRepository,
+  type LandCardParams,
+  type LinkCardParams,
   type ListBoardParams,
   type MoveCardParams,
   type NoteCardParams,
@@ -17,7 +20,14 @@ import {
   type ReadCardParams,
 } from '@workspace/board';
 import { injectContext, type IContext } from '@workspace/context';
-import { cardSchema, type Card } from '@workspace/contracts';
+import {
+  cardLinkCandidateSchema,
+  cardLinkViewSchema,
+  cardReleaseSchema,
+  cardSchema,
+  cardTypeSchema,
+  type Card,
+} from '@workspace/contracts';
 import { singleton } from '@workspace/di';
 import type { Database } from '@workspace/db';
 import { Err, Ok, type Result } from 'oxide.ts';
@@ -33,7 +43,10 @@ type BoardCommand =
   | 'card_edit'
   | 'card_archive'
   | 'card_attach'
-  | 'card_detach';
+  | 'card_detach'
+  | 'card_land'
+  | 'card_link'
+  | 'card_unlink';
 
 type BoardCommandArgs<T extends BoardCommand> =
   Database['public']['Functions'][T]['Args'];
@@ -50,6 +63,9 @@ const commandResultSchema = z.object({
   changed: z.boolean().optional(),
   replayed: z.boolean().optional(),
   event_id: z.string().nullish(),
+  /** What the board offers as related: on a refusal to assess, and after
+   * a card said it relates to nothing. */
+  candidates: z.array(cardLinkCandidateSchema).optional(),
 });
 
 const refViewSchema = z.object({
@@ -58,6 +74,7 @@ const refViewSchema = z.object({
   attached_at: z.string(),
   available: z.boolean(),
   preview: z.string().nullable(),
+  memory_kind: z.string().nullable().default(null),
 });
 
 const eventViewSchema = z.object({
@@ -76,19 +93,100 @@ const eventViewSchema = z.object({
   relation: z.string().nullable(),
   ref_kind: z.string().nullable(),
   ref_target: z.string().nullable(),
+  branch_note: z.string().nullable().default(null),
+  squash_sha: z.string().nullable().default(null),
+  target_branch: z.string().nullable().default(null),
+  release_version: z.string().nullable().default(null),
+  release_build: z.string().nullable().default(null),
+  release_commit: z.string().nullable().default(null),
+  link_type: z.string().nullable().default(null),
+  link_direction: z.enum(['out', 'in']).nullable().default(null),
+  links_note: z.string().nullable().default(null),
+  ref_number: z.number().nullable().default(null),
+  // The levels an edit moved the severity between; null on every other row.
+  from_severity: z.number().int().nullable().default(null),
+  to_severity: z.number().int().nullable().default(null),
+  // The types an edit changed between, or a move declared; null elsewhere.
+  from_card_type: cardTypeSchema.nullable().default(null),
+  to_card_type: cardTypeSchema.nullable().default(null),
   created_at: z.string(),
+});
+
+/** A branch as `card_get` returns it, with every landing it had. */
+const branchViewSchema = z.object({
+  repo: z.string(),
+  branch: z.string(),
+  state: z.enum(['open', 'landed']),
+  squash_sha: z.string().nullable(),
+  target: z.string().nullable(),
+  landed_at: z.string().nullable(),
+  attached_at: z.string(),
+  landings: z
+    .array(
+      z.object({
+        squash_sha: z.string(),
+        target: z.string().nullable(),
+        landed_at: z.string(),
+      })
+    )
+    .default([]),
+});
+
+/** The branch rule's arguments, as every command that meets it takes them. */
+const branchArgs = (params: {
+  branch?: { repo: string; name: string };
+  noBranch?: string;
+}) => ({
+  p_branch_repo: params.branch?.repo ?? undefined,
+  p_branch_name: params.branch?.name ?? undefined,
+  p_no_branch: params.noBranch ?? undefined,
+});
+
+/** The relation rule's arguments, as every command that meets it takes them. */
+const linkArgs = (params: {
+  links?: Array<{ card: string; relation: string; reason: string }>;
+  noLinks?: string;
+}) => ({
+  p_links: params.links ?? undefined,
+  p_no_links: params.noLinks ?? undefined,
+});
+
+/** A page of the derived feed, as `card_feed` returns it. */
+const feedViewSchema = z.object({
+  error: z.string().optional(),
+  message: z.string().nullable().optional(),
+  feed: z
+    .array(
+      z.object({
+        memory_id: z.string(),
+        kind: z.string(),
+        preview: z.string(),
+        thread: z.string(),
+        created_at: z.string(),
+      })
+    )
+    .default([]),
+  has_more: z.boolean().default(false),
+  next_before: z.string().nullable().default(null),
 });
 
 const readViewSchema = z.object({
   error: z.string().optional(),
   card: z.unknown().optional(),
   refs: z.array(refViewSchema).default([]),
+  branches: z.array(branchViewSchema).default([]),
+  releases: z.array(cardReleaseSchema).default([]),
   events: z.array(eventViewSchema).default([]),
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
+  links: z.array(cardLinkViewSchema).default([]),
+  blocked: z.boolean().default(false),
+  links_assessed: z.boolean().default(false),
 });
 
 const boardViewSchema = z.object({
+  error: z.string().optional(),
+  message: z.string().nullish(),
   cards: z
     .array(
       z.object({
@@ -107,6 +205,26 @@ const boardViewSchema = z.object({
             created_at: z.string(),
           })
           .nullable(),
+        released_in: z.string().nullable().default(null),
+        // 1 (minimal) to 5 (urgent); a store that predates it reads as
+        // normal, and zod would drop the field without a line here.
+        severity: z.number().int().default(3),
+        // Null on a card that predates types; zod would drop it otherwise.
+        type: cardTypeSchema.nullable().default(null),
+        blocked: z.boolean().default(false),
+        links: z.number().default(0),
+        // Kept, or zod would drop them on the way: my_last only with
+        // worked_by_me, past_horizon on every card.
+        my_last: z
+          .object({
+            type: z.string(),
+            from_state: z.string().nullable(),
+            to_state: z.string().nullable(),
+            text: z.string().nullable(),
+            created_at: z.string(),
+          })
+          .optional(),
+        past_horizon: z.boolean().optional(),
       })
     )
     .default([]),
@@ -136,9 +254,13 @@ export class SupabaseCardRepository implements ICardRepository {
       p_title: params.title,
       p_body: params.body ?? '',
       p_state: params.state ?? 'idea',
+      p_severity: params.severity ?? undefined,
+      p_type: params.type ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
+      ...branchArgs(params),
+      ...linkArgs(params),
     });
   }
 
@@ -150,9 +272,13 @@ export class SupabaseCardRepository implements ICardRepository {
       p_title: params.title,
       p_body: params.body ?? '',
       p_state: params.state ?? 'active',
+      p_severity: params.severity ?? undefined,
+      p_type: params.type ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
+      ...branchArgs(params),
+      ...linkArgs(params),
     });
   }
 
@@ -164,6 +290,51 @@ export class SupabaseCardRepository implements ICardRepository {
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
       p_idempotency_key: params.idempotencyKey ?? undefined,
+      ...branchArgs(params),
+      p_not_landed: params.notLanded ?? undefined,
+      ...linkArgs(params),
+      p_type: params.type ?? undefined,
+    });
+  }
+
+  async link(params: LinkCardParams): Promise<Result<CardWrite, CardFailure>> {
+    return this.#write('card_link', {
+      p_card_id: params.cardId,
+      p_to: params.toCard,
+      p_relation: params.relation,
+      p_reason: params.reason,
+      p_thread: params.thread ?? undefined,
+      p_agent_label: params.agentLabel ?? undefined,
+      p_idempotency_key: params.idempotencyKey ?? undefined,
+    });
+  }
+
+  async unlink(
+    params: LinkCardParams
+  ): Promise<Result<CardWrite, CardFailure>> {
+    return this.#write('card_unlink', {
+      p_card_id: params.cardId,
+      p_to: params.toCard,
+      p_relation: params.relation,
+      p_reason: params.reason,
+      p_thread: params.thread ?? undefined,
+      p_agent_label: params.agentLabel ?? undefined,
+    });
+  }
+
+  async land(params: LandCardParams): Promise<Result<CardWrite, CardFailure>> {
+    return this.#write('card_land', {
+      p_card_id: params.cardId,
+      p_repo: params.branch.repo,
+      p_branch: params.branch.name,
+      p_squash_sha: params.squashSha,
+      p_target: params.target,
+      p_reason: params.reason,
+      p_to_state: params.to ?? undefined,
+      p_not_landed: params.notLanded ?? undefined,
+      p_thread: params.thread ?? undefined,
+      p_agent_label: params.agentLabel ?? undefined,
+      p_idempotency_key: params.idempotencyKey ?? undefined,
     });
   }
 
@@ -172,6 +343,8 @@ export class SupabaseCardRepository implements ICardRepository {
       p_card_id: params.cardId,
       p_title: params.title ?? undefined,
       p_body: params.body ?? undefined,
+      p_severity: params.severity ?? undefined,
+      p_type: params.type ?? undefined,
       p_expected_revision: params.expectedRevision ?? undefined,
       p_thread: params.thread ?? undefined,
       p_agent_label: params.agentLabel ?? undefined,
@@ -258,12 +431,39 @@ export class SupabaseCardRepository implements ICardRepository {
     if (parsed.error || parsed.card === undefined) {
       return Err(toCardFailure(parsed.error));
     }
+
+    // The feed is its own read with its own cursor: history pages forward by
+    // stream position, the feed backwards by when a memory was written.
+    const { data: feedData, error: feedError } = await this.#client().rpc(
+      'card_feed',
+      {
+        p_card_id: params.cardId,
+        p_before: params.feedBefore ?? undefined,
+        p_limit: params.limit ?? 50,
+      }
+    );
+    if (feedError) {
+      throw new Error(`card_feed failed: ${feedError.message}`);
+    }
+    const feed = feedViewSchema.parse(feedData ?? {});
+    if (feed.error) {
+      return Err(toCardFailure(feed.error, feed.message));
+    }
+
     return Ok({
       card: cardSchema.parse(parsed.card),
       refs: parsed.refs,
+      branches: parsed.branches,
+      releases: parsed.releases,
       events: parsed.events as CardReadView['events'],
       has_more: parsed.has_more,
       next_after_seq: parsed.next_after_seq,
+      links: parsed.links,
+      blocked: parsed.blocked,
+      links_assessed: parsed.links_assessed,
+      feed: feed.feed,
+      feed_has_more: feed.has_more,
+      feed_next_before: feed.next_before,
     });
   }
 
@@ -274,12 +474,18 @@ export class SupabaseCardRepository implements ICardRepository {
       p_query: params.query ?? undefined,
       p_include_archived: params.includeArchived ?? false,
       p_limit: params.limit ?? 50,
+      p_related_to: params.relatedTo ?? undefined,
+      p_relation: params.relation ?? undefined,
+      p_worked_by_me: params.workedByMe ?? false,
     });
     if (error) {
       throw new Error(`board_list failed: ${error.message}`);
     }
     const parsed = boardViewSchema.parse(data ?? {});
-    return Ok(parsed as BoardView);
+    if (parsed.error) {
+      return Err(toCardFailure(parsed.error, parsed.message));
+    }
+    return Ok({ cards: parsed.cards, totals: parsed.totals } as BoardView);
   }
 
   async resolve(
@@ -311,12 +517,23 @@ export class SupabaseCardRepository implements ICardRepository {
     }
     const parsed = commandResultSchema.parse(data ?? {});
     if (parsed.error || parsed.card === undefined) {
-      return Err(toCardFailure(parsed.error, parsed.message));
+      const refused = toCardFailure(parsed.error, parsed.message);
+      // The board's candidates travel in the sentence, so an agent that
+      // reads only the error still sees what to relate the card to.
+      return Err(
+        refused.code === 'links_required' && parsed.candidates
+          ? {
+              ...refused,
+              message: withLinkCandidates(refused.message, parsed.candidates),
+            }
+          : refused
+      );
     }
     return Ok({
       card: cardSchema.parse(parsed.card),
       changed: parsed.changed ?? true,
       replayed: parsed.replayed ?? false,
+      ...(parsed.candidates ? { candidates: parsed.candidates } : {}),
     });
   }
 

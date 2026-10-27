@@ -11,6 +11,13 @@ import type { WebTranslator } from '@workspace/i18n-catalogs/web';
  * authority either way — this file only has to describe what it sends.
  */
 
+/**
+ * A card's one label: the dashboard, a briefing and the squash trailer all
+ * call it ZM-N, so a search for one finds the others. Declared here rather
+ * than imported for the same bundler reason as the schemas below.
+ */
+export const cardLabel = (number: number): string => `ZM-${number}`;
+
 export const CARD_STATES = [
   'idea',
   'active',
@@ -22,6 +29,12 @@ export type CardState = (typeof CARD_STATES)[number];
 
 const cardStateSchema = z.enum(CARD_STATES);
 
+/** Why a card's work exists; null on a card that predates types. */
+export const CARD_TYPES = ['story', 'bug', 'task', 'spike'] as const;
+export type CardType = (typeof CARD_TYPES)[number];
+
+const cardTypeSchema = z.enum(CARD_TYPES);
+
 /** One row of the board listing. */
 export const boardCardSchema = z.object({
   id: z.string(),
@@ -29,6 +42,10 @@ export const boardCardSchema = z.object({
   number: z.number(),
   title: z.string(),
   state: cardStateSchema,
+  /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
+  severity: z.number().int().min(1).max(5).default(3),
+  /** Why the work exists. A card or a server that predates types: null. */
+  type: cardTypeSchema.nullable().default(null),
   updated_at: z.string(),
   archived_at: z.string().nullable(),
   refs: z.number(),
@@ -45,6 +62,18 @@ export const boardCardSchema = z.object({
    * only the latest touch would hide exactly the thing the board exists for.
    */
   state_reason: z.string().nullable().default(null),
+  /** The version this card was last carried by. A server that predates
+   * releases, or a card no release has carried yet, reads as null. */
+  released_in: z.string().nullable().default(null),
+  /** A live blocker that is neither done nor archived holds this card. */
+  blocked: z.boolean().default(false),
+  /** How many live relations the card has. */
+  links: z.number().default(0),
+  /**
+   * The card went quiet past the horizon: by its last event, or in the Mine
+   * view by your own last work. Such a card is folded in its column.
+   */
+  past_horizon: z.boolean(),
 });
 export type BoardCard = z.infer<typeof boardCardSchema>;
 
@@ -59,6 +88,21 @@ export type BoardScope = z.infer<typeof boardScopeSchema>;
 export const boardScopesSchema = z.array(boardScopeSchema);
 
 /**
+ * The board to show, or null when it must not show at all: both the listing
+ * and the offer have to be read. A board without its offer would read as "no
+ * card to continue", and a listing that failed would read as an empty board;
+ * either is shown as an error instead.
+ */
+export function readableBoard<T>(
+  listing: { ok: true; value: T } | { ok: false },
+  offer: { ok: boolean }
+): T | null {
+  return listing.ok && offer.ok ? listing.value : null;
+}
+
+export const ALL_BOARDS = 'all';
+
+/**
  * Which board to show, given what the address says and what exists.
  *
  * No parameter means "the one that moved last" — a reader who arrives with no
@@ -71,8 +115,6 @@ export const boardScopesSchema = z.array(boardScopeSchema);
  * — and quietly showing a different board instead would tell the reader the
  * address they are looking at holds something it does not.
  */
-export const ALL_BOARDS = 'all';
-
 export function resolveBoardScope(
   requested: string | undefined,
   boards: BoardScope[]
@@ -91,8 +133,25 @@ export function resolveBoardScope(
 export const boardListSchema = z.object({
   cards: z.array(boardCardSchema).default([]),
   totals: z.record(z.string(), z.number()).default({}),
+  /** The horizon in days, named in the column arrows' hints. */
+  horizon_days: z.number(),
 });
 export type BoardList = z.infer<typeof boardListSchema>;
+
+/**
+ * What a new session would be offered to continue, per board: the card whose
+ * tile carries the offer badge, or none.
+ */
+export const boardContinuationsSchema = z.object({
+  boards: z.array(
+    z.object({
+      scope: z.string(),
+      continuation: z.object({
+        card: z.object({ id: z.string() }).nullable(),
+      }),
+    })
+  ),
+});
 
 export const cardSchema = z.object({
   id: z.string(),
@@ -101,6 +160,10 @@ export const cardSchema = z.object({
   title: z.string(),
   body: z.string(),
   state: cardStateSchema,
+  /** 1 (minimal) to 5 (urgent). A server that predates it reads as normal. */
+  severity: z.number().int().min(1).max(5).default(3),
+  /** Why the work exists. A card or a server that predates types: null. */
+  type: cardTypeSchema.nullable().default(null),
   revision: z.number(),
   origin_loop_id: z.string().nullable(),
   created_by: z.string(),
@@ -117,6 +180,8 @@ export const cardRefSchema = z.object({
   /** False when the target is gone, or when this reader may not open it. */
   available: z.boolean(),
   preview: z.string().nullable(),
+  /** For an attached memory the reader may open: its kind. */
+  memory_kind: z.string().nullable().default(null),
 });
 export type CardRef = z.infer<typeof cardRefSchema>;
 
@@ -136,18 +201,140 @@ export const cardEventSchema = z.object({
   relation: z.string().nullable(),
   ref_kind: z.string().nullable(),
   ref_target: z.string().nullable(),
+  branch_note: z.string().nullable().default(null),
+  squash_sha: z.string().nullable().default(null),
+  target_branch: z.string().nullable().default(null),
+  /** For a `released` event: the production state that carried the card. */
+  release_version: z.string().nullable().default(null),
+  release_build: z.string().nullable().default(null),
+  release_commit: z.string().nullable().default(null),
+  /** For a `linked` or `unlinked` event: the stored type, and which side
+   * of it this card is on. */
+  link_type: z.string().nullable().default(null),
+  link_direction: z.enum(['out', 'in']).nullable().default(null),
+  /** The statement a card made when it said it relates to no other card. */
+  links_note: z.string().nullable().default(null),
+  /** For an event naming another card: that card's number. */
+  ref_number: z.number().nullable().default(null),
+  /** For an edit that moved the severity: the levels it moved between. */
+  from_severity: z.number().nullable().default(null),
+  to_severity: z.number().nullable().default(null),
+  /** For an edit that changed the type, or a move that declared it. */
+  from_card_type: cardTypeSchema.nullable().default(null),
+  to_card_type: cardTypeSchema.nullable().default(null),
   created_at: z.string(),
 });
 export type CardEvent = z.infer<typeof cardEventSchema>;
 
+/**
+ * A git branch the card's work ran on, open or landed. `squash_sha` is its
+ * latest landing; `landings` is every landing, oldest first.
+ */
+export const cardBranchSchema = z.object({
+  repo: z.string(),
+  branch: z.string(),
+  state: z.enum(['open', 'landed']),
+  squash_sha: z.string().nullable(),
+  target: z.string().nullable(),
+  landed_at: z.string().nullable(),
+  attached_at: z.string(),
+  landings: z
+    .array(
+      z.object({
+        squash_sha: z.string(),
+        target: z.string().nullable(),
+        landed_at: z.string(),
+      })
+    )
+    .default([]),
+});
+export type CardBranch = z.infer<typeof cardBranchSchema>;
+
+/**
+ * One production state a card was carried by, as a card reads it back.
+ * Newest first — a card can be carried again once it lands again.
+ */
+export const cardReleaseSchema = z.object({
+  version: z.string(),
+  build: z.string().nullable(),
+  release_commit: z.string(),
+  released_at: z.string(),
+});
+export type CardRelease = z.infer<typeof cardReleaseSchema>;
+
+/** How one card stands to another, named from the reading card's side. */
+export const CARD_LINK_RELATIONS = [
+  'blocks',
+  'blocked_by',
+  'depends_on',
+  'needed_by',
+  'parent_of',
+  'child_of',
+  'relates_to',
+  'duplicates',
+  'duplicated_by',
+] as const;
+export type CardLinkRelation = (typeof CARD_LINK_RELATIONS)[number];
+
+/** A live relation of the card, as `card_get` names it from the card's side. */
+export const cardLinkSchema = z.object({
+  card_id: z.string(),
+  number: z.number(),
+  title: z.string(),
+  state: cardStateSchema,
+  scope: z.string(),
+  archived: z.boolean(),
+  relation: z.enum(CARD_LINK_RELATIONS),
+  reason: z.string(),
+  /** False for a relation carried over from a card attachment. */
+  declared: z.boolean(),
+  created_at: z.string(),
+});
+export type CardLink = z.infer<typeof cardLinkSchema>;
+
 export const cardViewSchema = z.object({
   card: cardSchema,
   refs: z.array(cardRefSchema).default([]),
+  branches: z.array(cardBranchSchema).default([]),
+  releases: z.array(cardReleaseSchema).default([]),
   events: z.array(cardEventSchema).default([]),
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
+  links: z.array(cardLinkSchema).default([]),
+  blocked: z.boolean().default(false),
+  links_assessed: z.boolean().default(false),
 });
 export type CardView = z.infer<typeof cardViewSchema>;
+
+/** A board scope's production setting, as the dashboard reads it: read-only
+ * here — it is edited through the MCP `release` tool's `configure` action. */
+export const releaseSettingsSchema = z.object({
+  version_url: z.string().nullable(),
+  tag_template: z.string(),
+  on_release: z.enum(['record', 'record_and_move_done']),
+});
+export type ReleaseSettingsView = z.infer<typeof releaseSettingsSchema>;
+
+/**
+ * A page of the card's feed: memories born in the conversations bound to it,
+ * newest first. Derived on read, so nothing here is stored on the card.
+ */
+export const cardFeedSchema = z.object({
+  feed: z
+    .array(
+      z.object({
+        memory_id: z.string(),
+        kind: z.string(),
+        preview: z.string(),
+        thread: z.string(),
+        created_at: z.string(),
+      })
+    )
+    .default([]),
+  has_more: z.boolean().default(false),
+  next_before: z.string().nullable().default(null),
+});
+export type CardFeed = z.infer<typeof cardFeedSchema>;
 
 /** Literal keys only (lint-enforced): dynamic `t(\`board.${…}\`)` is banned. */
 export function cardStateLabel(state: string, t: WebTranslator): string {
@@ -184,9 +371,175 @@ export function cardEventLabel(type: string, t: WebTranslator): string {
       return t('board.event.detached');
     case 'noted':
       return t('board.event.noted');
+    case 'landed':
+      return t('board.event.landed');
+    case 'released':
+      return t('board.event.released');
+    case 'linked':
+      return t('board.event.linked');
+    case 'unlinked':
+      return t('board.event.unlinked');
     default:
       return type;
   }
+}
+
+/** A severity level in words. Literal keys only (lint-enforced). */
+export function cardSeverityLabel(level: number, t: WebTranslator): string {
+  switch (level) {
+    case 1:
+      return t('board.severity.1');
+    case 2:
+      return t('board.severity.2');
+    case 3:
+      return t('board.severity.3');
+    case 4:
+      return t('board.severity.4');
+    case 5:
+      return t('board.severity.5');
+    default:
+      return String(level);
+  }
+}
+
+/** A card type in words. Literal keys only (lint-enforced). */
+export function cardTypeLabel(type: CardType | null, t: WebTranslator): string {
+  switch (type) {
+    case 'story':
+      return t('board.type.story');
+    case 'bug':
+      return t('board.type.bug');
+    case 'task':
+      return t('board.type.task');
+    case 'spike':
+      return t('board.type.spike');
+    default:
+      return t('board.type.none');
+  }
+}
+
+/** What the type icon says on hover; a card from before types says so. */
+export function cardTypeHint(type: CardType | null, t: WebTranslator): string {
+  return type
+    ? t('board.type.hint', { label: cardTypeLabel(type, t) })
+    : t('board.type.none');
+}
+
+/** What the severity meter says on hover: the level, the scale, the name. */
+export function cardSeverityHint(level: number, t: WebTranslator): string {
+  return t('board.severity.hint', {
+    level,
+    label: cardSeverityLabel(level, t),
+  });
+}
+
+/** How a card stands to another, in words, from the reading card's side. */
+export function cardLinkRelationLabel(
+  relation: CardLinkRelation,
+  t: WebTranslator
+): string {
+  switch (relation) {
+    case 'blocks':
+      return t('board.link.blocks');
+    case 'blocked_by':
+      return t('board.link.blocked_by');
+    case 'depends_on':
+      return t('board.link.depends_on');
+    case 'needed_by':
+      return t('board.link.needed_by');
+    case 'parent_of':
+      return t('board.link.parent_of');
+    case 'child_of':
+      return t('board.link.child_of');
+    case 'relates_to':
+      return t('board.link.relates_to');
+    case 'duplicates':
+      return t('board.link.duplicates');
+    case 'duplicated_by':
+      return t('board.link.duplicated_by');
+  }
+}
+
+/** The stored type of a relation seen from its other end. */
+const INVERSE_LINK: Record<string, CardLinkRelation> = {
+  blocks: 'blocked_by',
+  depends_on: 'needed_by',
+  parent_of: 'child_of',
+  relates_to: 'relates_to',
+  duplicates: 'duplicated_by',
+};
+
+/**
+ * The relation a `linked` or `unlinked` event records, named from the side
+ * of the card whose history it is in: the stored type on the card that holds
+ * the relation's source end, its inverse on the other.
+ */
+export function cardEventLinkRelation(
+  event: Pick<CardEvent, 'link_type' | 'link_direction'>
+): CardLinkRelation | null {
+  if (!event.link_type || !event.link_direction) return null;
+  const stored = (CARD_LINK_RELATIONS as readonly string[]).includes(
+    event.link_type
+  )
+    ? (event.link_type as CardLinkRelation)
+    : null;
+  if (!stored) return null;
+  return event.link_direction === 'out'
+    ? stored
+    : (INVERSE_LINK[stored] ?? null);
+}
+
+/**
+ * A board's release policy, in words. Literal keys only (lint-enforced): the
+ * setting is one of two enum values, so a switch maps each value to its
+ * literal key.
+ */
+export function releasePolicyLabel(
+  policy: 'record' | 'record_and_move_done',
+  t: WebTranslator
+): string {
+  switch (policy) {
+    case 'record':
+      return t('board.release.policy.record');
+    case 'record_and_move_done':
+      return t('board.release.policy.record_and_move_done');
+  }
+}
+
+/** Where a branch stands, in words: open, or where it landed. */
+export function cardBranchStateLabel(
+  branch: CardBranch,
+  t: WebTranslator
+): string {
+  if (branch.state === 'landed' && branch.squash_sha && branch.target) {
+    return t('board.branch.landed', {
+      sha: branch.squash_sha.slice(0, 7),
+      target: branch.target,
+    });
+  }
+  return t('board.branch.open');
+}
+
+/**
+ * The landings before the latest, in words, or null when the branch landed
+ * at most once. A branch lands again when a fix is made in the branch that
+ * brought the bug; the badge names the latest landing, this the rest.
+ */
+export function cardBranchEarlierLabel(
+  branch: CardBranch,
+  t: WebTranslator
+): string | null {
+  const latest = branch.squash_sha;
+  const earlier = branch.landings
+    .map((landing) => landing.squash_sha)
+    .filter(
+      (sha) =>
+        latest === null || !(sha.startsWith(latest) || latest.startsWith(sha))
+    )
+    .map((sha) => sha.slice(0, 7));
+  return earlier.length > 0
+    ? t('board.branch.earlier', { shas: earlier.join(', ') })
+    : null;
 }
 
 export function cardRelationLabel(relation: string, t: WebTranslator): string {

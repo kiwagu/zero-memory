@@ -5,6 +5,11 @@
  * a deliberate cleanup or a false invalidation. Both are reachable through the
  * status filter, and the successor still advertises its chain.
  *
+ * Which memories each status selects is held by the unit table beside the
+ * feed query (`apps/web/lib/memory.spec.ts`); these specs prove what only a
+ * browser shows: the default view, a switch through the filter row, and the
+ * address.
+ *
  * Every view is narrowed by the shared marker so the assertions hold whatever
  * else the stand's corpus contains (the feed paginates).
  */
@@ -108,37 +113,6 @@ test.describe('feed status filter', () => {
 
     // Getting the default view costs no param: it is the bare feed.
     expect(page.url()).not.toContain('status=');
-  });
-
-  test('the superseded filter shows exactly the hidden version', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    await seedLifecycle(await passwordGrantToken(seed.userA));
-
-    await signInThroughForm(page, seed.userA);
-    await page.goto(feedUrl('superseded'));
-
-    const feed = page.getByTestId('memory-feed');
-    await expect(feed.getByText(OLD.slice(0, 50)).first()).toBeVisible();
-    // Neither the live successor nor the lone retirement is version history.
-    await expect(feed.getByText(NEW.slice(0, 50))).toHaveCount(0);
-    await expect(feed.getByText(LONE.slice(0, 50))).toHaveCount(0);
-  });
-
-  test('the invalidated filter shows the lone retirement, not the versions', async ({
-    page,
-  }) => {
-    const seed = await readSeedState();
-    await seedLifecycle(await passwordGrantToken(seed.userA));
-
-    await signInThroughForm(page, seed.userA);
-    await page.goto(feedUrl('invalidated'));
-
-    const feed = page.getByTestId('memory-feed');
-    await expect(feed.getByText(LONE.slice(0, 50)).first()).toBeVisible();
-    await expect(feed.getByText(OLD.slice(0, 50))).toHaveCount(0);
-    await expect(feed.getByText(NEW.slice(0, 50))).toHaveCount(0);
   });
 
   test('the filter row drives the status, and the default leaves no param', async ({

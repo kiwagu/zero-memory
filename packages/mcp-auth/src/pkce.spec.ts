@@ -32,8 +32,12 @@ describe('PKCE S256', () => {
     expect(verifyPkceS256('a'.repeat(129), challenge)).toBe(false);
   });
 
-  it('produces RFC 7636 base64url challenges (no padding, url-safe)', () => {
-    const challenge = computeS256Challenge(makeVerifier());
-    expect(challenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  it('matches the RFC 7636 Appendix B example (base64url, no padding)', () => {
+    // The specification's own pair: an oracle independent of this module, so
+    // a wrong hash or encoding cannot agree with itself and still pass.
+    const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+    const challenge = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+    expect(computeS256Challenge(verifier)).toBe(challenge);
+    expect(verifyPkceS256(verifier, challenge)).toBe(true);
   });
 });

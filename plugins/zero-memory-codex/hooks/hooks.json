@@ -26,6 +26,17 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zero-memory-watcher landing --client codex"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

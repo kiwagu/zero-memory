@@ -2,9 +2,12 @@
  * Repo-bootstrap ingest over MCP: `ingest_conversation` with a bootstrap
  * source kind (document/history) runs the extraction pipeline, stamps the
  * created memories with bootstrap provenance (agent_name + source.kind), and
- * stays idempotent per chunk_hash. Extraction itself is a live LLM call, so
- * the assertions are structural (acceptance, idempotency, provenance of
- * whatever was created) — not about the extracted content.
+ * stays idempotent per chunk_hash.
+ *
+ * The test stand extracts with the deterministic extractor, which turns a line
+ * that opens with a kind prefix (`CONVENTION: …`) into one memory and ignores
+ * everything else. The chunk therefore carries exactly one such line, so the
+ * provenance assertions run over a row that exists.
  */
 import { expect, test } from '@playwright/test';
 
@@ -26,17 +29,16 @@ const DOCUMENT_CHUNK = [
   '',
   '## Conventions',
   '',
-  'BOOTSTRAP-E2E: this project pins its toolchain to Bun; npm, pnpm and yarn',
-  'are deliberately not supported because the lockfile is bun.lock only.',
+  'CONVENTION: this project pins its toolchain to Bun; npm, pnpm and yarn are not supported because the lockfile is bun.lock only.',
   'All database identifiers use snake_case — a deliberate convention the',
   'linters do not enforce.',
 ].join('\n');
 
 test.describe('ingest_conversation with a bootstrap source', () => {
   test('accepts a document chunk, stamps bootstrap provenance, idempotent per hash', async () => {
-    // A dedicated user: live-LLM extraction writes unpredictable content, and
-    // other specs (running concurrently in the web project) assert invariants
-    // over the shared seed users' datasets.
+    // A dedicated user: extraction writes into the caller's scopes, and other
+    // specs (running concurrently in the web project) assert invariants over
+    // the shared seed users' datasets.
     const user = await provisionE2EUser('bootstrap-ingest@zm.e2e');
     const token = await passwordGrantToken(user);
     const mcp = await McpTestClient.connect(token);
@@ -55,6 +57,7 @@ test.describe('ingest_conversation with a bootstrap source', () => {
         await mcp.callTool('ingest_conversation', args)
       );
       expect(first.duplicate).toBe(false);
+      expect(first.memories_created).toBe(1);
 
       // Idempotent re-run: identical chunk_hash → duplicate, no re-extraction.
       const again = firstJson<IngestOutput>(
@@ -75,6 +78,8 @@ test.describe('ingest_conversation with a bootstrap source', () => {
       const bootstrapRows = (rows ?? []).filter(
         (row) => row.agent_name === 'bootstrap'
       );
+      // The premise: the created memory is one of them.
+      expect(bootstrapRows).toHaveLength(1);
       for (const row of bootstrapRows) {
         const source = (row.source ?? {}) as Record<string, unknown>;
         expect(source.kind).toBe('bootstrap');
@@ -82,11 +87,9 @@ test.describe('ingest_conversation with a bootstrap source', () => {
         expect(source.hash).toBe('e2e-bootstrap-doc-0001');
       }
 
-      // Cleanup: live-LLM extraction writes unpredictable kinds/content into
-      // the shared e2e dataset — forget the created rows so the seed
-      // invariants other specs rely on (e.g. "no episode memories exist")
-      // keep holding. Dedup-absorbed seed memories are deliberately left
-      // alone: forgetting them would corrupt the shared dataset.
+      // Cleanup: forget the created rows so the invariants other specs rely
+      // on keep holding. Dedup-absorbed memories are deliberately left alone:
+      // forgetting them would corrupt the shared dataset.
       for (const row of bootstrapRows) {
         await mcp.callTool('forget', { memory_id: row.id });
       }

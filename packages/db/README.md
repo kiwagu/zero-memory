@@ -5,8 +5,8 @@ rows the app touches, and the account ownership map.
 
 ## Role in the architecture
 
-Shared kernel. Almost entirely types; the one piece of runtime code is the
-ownership map (a plain data declaration). No workspace dependencies;
+Shared kernel. Almost entirely types; the runtime code is the ownership map
+(a plain data declaration) and the promoted-rule delivery rules. No workspace dependencies;
 `@workspace/persistence`, `@workspace/mcp-auth`, and the web app depend on it
 to type their Supabase clients.
 
@@ -24,11 +24,18 @@ to type their Supabase clients.
   the takeout audit, and a drift guard (`ownership-map.spec.ts`) that fails if
   a public table is missing from the map. Selectors: `deletableTables`,
   `userDataTables`, `excludedTables`.
+- Promoted-rule delivery (`src/rule-delivery.ts`) — `RULE_DELIVERY` (the
+  per-channel caps, the instructions budget and the delivery TTL) and the one
+  owner of which rules a session receives: `deliverableRules` (pinned always,
+  unpinned only within the TTL; pinned first, then newest first),
+  `capUnpinnedRules`, `deliveredRuleCount` and `deliveredRuleIds`. The rule
+  readers in `@workspace/persistence` and the dashboard's /rules page both
+  apply these, so the delivered set and the number reported for it agree.
 
 ## Testing
 
 ```sh
-bun run test:vitest            # the ownership-map drift guard
+bun run test:vitest            # the ownership-map drift guard + delivery rules
 ```
 
 ## Regenerating

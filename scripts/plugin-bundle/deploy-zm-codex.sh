@@ -21,8 +21,11 @@
 #                             stdout as structured output, so nothing printed
 #                             there reaches the model writing the summary)
 #      and whose skill carries the memory-first mandate
-#   3. MIGRATION off any legacy config.toml [hooks] block + AGENTS.md ZM section
+#   3. MIGRATION off a legacy config.toml [hooks] block written by an earlier
+#      deploy (AGENTS.md is never edited: a ZM-first section there is the
+#      user's own, kept alongside the plugin skill)
 #   4. a reminder to finish OAuth + TRUST the plugin hooks (Codex /hooks trust)
+# Every file of the user's it changes is backed up first (zm-user-files.sh).
 #
 # Two modes, chosen by whether an export dir is given:
 #   bash deploy-zm-codex.sh                       # INSTALL on this machine
@@ -114,6 +117,10 @@ if [ -n "$EXPORT_DIR" ]; then
     [ -f "$cand" ] && { install -m 0755 "$cand" "$EXPORT_DIR/zm-server-url.sh"; break; }
   done
   [ -f "$EXPORT_DIR/zm-server-url.sh" ] || warn "missing zm-server-url.sh — not staged."
+  for cand in "$SCRIPT_DIR/zm-user-files.sh" "${MARKET_ROOT:-/nonexistent}/scripts/zm-user-files.sh"; do
+    [ -f "$cand" ] && { install -m 0755 "$cand" "$EXPORT_DIR/zm-user-files.sh"; break; }
+  done
+  [ -f "$EXPORT_DIR/zm-user-files.sh" ] || warn "missing zm-user-files.sh — not staged."
   if [ -n "$MARKET_ROOT" ] && [ -d "$MARKET_ROOT/plugins/zero-memory-codex" ]; then
     rm -rf "$EXPORT_DIR/plugins/zero-memory-codex"
     mkdir -p "$EXPORT_DIR/plugins"
@@ -145,6 +152,16 @@ zm_resolve_server_url || exit 1
 zm_store_server_url
 BASE_URL="$ZM_BASE_URL"
 
+# The rules for touching the user's own files (back up first, write in place).
+for cand in "$SCRIPT_DIR/zm-user-files.sh" "$SCRIPT_DIR/../zm-user-files.sh"; do
+  # shellcheck source=scripts/zm-user-files.sh
+  [ -f "$cand" ] && { . "$cand"; break; }
+done
+if ! command -v zm_write_file >/dev/null 2>&1; then
+  echo "ERROR: zm-user-files.sh not found next to this script." >&2
+  exit 1
+fi
+
 # --- install the watcher binary ---------------------------------------------
 if [ "$SRC_BIN" != "$DEST_BIN" ]; then
   install -m 0755 "$SRC_BIN" "$DEST_BIN"; say "Installed watcher binary -> $DEST_BIN"
@@ -153,12 +170,19 @@ else
 fi
 
 # --- register the MCP server (codex mcp add -> ~/.codex/config.toml) ---------
-# `codex mcp add` manages the [mcp_servers.zero-memory] table; remove first so a
-# changed URL re-points cleanly. Codex OAuth-authorizes the server itself.
+# `codex mcp add` manages the [mcp_servers.zero-memory] table. A registration
+# that already points at this server is left alone: removing it drops the
+# user's OAuth login, and adding it again starts a browser authorization that
+# an unattended install cannot finish. Only a changed URL is re-pointed.
 if command -v codex >/dev/null 2>&1; then
-  say "Registering MCP server 'zero-memory' -> $ZM_SERVER_URL (codex mcp add)"
-  codex mcp remove zero-memory >/dev/null 2>&1 || true
-  codex mcp add zero-memory --url "$ZM_SERVER_URL" || warn "codex mcp add failed — add it manually"
+  registered="$(codex mcp get zero-memory --json 2>/dev/null | jq -r '.transport.url // empty' 2>/dev/null || true)"
+  if [ "$registered" = "$ZM_SERVER_URL" ]; then
+    say "MCP server 'zero-memory' already points at $ZM_SERVER_URL — left untouched"
+  else
+    say "Registering MCP server 'zero-memory' -> $ZM_SERVER_URL (codex mcp add)"
+    codex mcp remove zero-memory >/dev/null 2>&1 || true
+    codex mcp add zero-memory --url "$ZM_SERVER_URL" || warn "codex mcp add failed — add it manually"
+  fi
 else
   warn "'codex' not on PATH — add the MCP server manually: codex mcp add zero-memory --url $ZM_SERVER_URL"
 fi
@@ -204,24 +228,18 @@ else
   warn "'codex' not on PATH or plugin source missing — install the plugin from $PLUGIN_SRC"
 fi
 
-# --- migrate OFF the legacy config.toml [hooks] + AGENTS.md rule -------------
-# The plugin now owns the hooks AND the memory-first guidance (skill), so strip
-# any earlier deploy's managed config.toml [hooks] block and AGENTS.md section —
-# otherwise hooks would double-fire and the rule would duplicate.
-if [ -f "$CONFIG_TOML" ] && grep -qF "$HOOKS_BEGIN" "$CONFIG_TOML"; then
-  tmp="$(mktemp)"
-  sed "/$(printf '%s' "$HOOKS_BEGIN" | sed 's/[.[\*^$/]/\\&/g')/,/$(printf '%s' "$HOOKS_END" | sed 's/[.[\*^$/]/\\&/g')/d" "$CONFIG_TOML" > "$tmp" && mv "$tmp" "$CONFIG_TOML"
-  say "Migrated: removed the legacy [hooks] block from $CONFIG_TOML (the plugin owns hooks now)"
-fi
+# --- migrate OFF the legacy config.toml [hooks] block ------------------------
+# The plugin owns the hooks now, so an earlier deploy's managed block would make
+# them fire twice. Only a block whose markers pair up is removed.
+zm_strip_block "$CONFIG_TOML" "$HOOKS_BEGIN" "$HOOKS_END"
+[ "$ZM_FILE_CHANGED" = 1 ] \
+  && say "Migrated: removed the legacy [hooks] block from $CONFIG_TOML (the plugin owns hooks now)"
+
+# AGENTS.md is the user's own instruction file and is never edited here. A
+# ZM-first section in it is a stronger always-on rule than the plugin skill, so
+# keeping both is deliberate: at worst the guidance appears twice.
 if [ -f "$AGENTS_MD" ] && grep -qF "$RULE_MARKER" "$AGENTS_MD"; then
-  # Delete from the ZM heading to the next top-level (##) heading or EOF.
-  tmp="$(mktemp)"
-  awk -v m="$RULE_MARKER" '
-    index($0, m) > 0 { skip = 1 }
-    skip == 1 && /^## / && index($0, m) == 0 { skip = 0 }
-    skip == 0 { print }
-  ' "$AGENTS_MD" > "$tmp" && mv "$tmp" "$AGENTS_MD"
-  say "Migrated: removed the legacy ZM section from $AGENTS_MD (the plugin skill owns it now)"
+  say "Found a ZM-first section in $AGENTS_MD — left as it is"
 fi
 
 # --- next steps -------------------------------------------------------------

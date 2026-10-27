@@ -75,5 +75,19 @@ test.describe('MCP session ownership', () => {
     expect(foreignUser.status()).toBe(404);
     const foreignBody = await foreignUser.json();
     expect(foreignBody.error?.message).toBe('Session not found');
+
+    // …exactly as if it never existed: a session id nobody was issued gets
+    // the same status and the same body, so a refusal cannot confirm that a
+    // session is live.
+    const neverIssued = await request.post(`${e2eEnv.serverUrl}/mcp`, {
+      headers: {
+        authorization: `${AUTH_SCHEME} ${tokenB}`,
+        accept: 'application/json, text/event-stream',
+        'mcp-session-id': '00000000-0000-4000-8000-000000000000',
+      },
+      data: listToolsBody,
+    });
+    expect(neverIssued.status()).toBe(foreignUser.status());
+    expect(await neverIssued.json()).toEqual(foreignBody);
   });
 });

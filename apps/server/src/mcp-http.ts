@@ -1,4 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { getRequestId, runWithContext } from '@workspace/context';
@@ -6,14 +5,20 @@ import { newRequestId, type ContextRule } from '@workspace/contracts';
 import { entityIdSchemas } from '@workspace/contracts';
 import { CommandBus, QueryBus } from '@workspace/cqrs';
 import { container } from '@workspace/di';
-import { createLogger } from '@workspace/logger';
-import { buildMcpServer } from '@workspace/mcp';
-import { unauthorizedResponse } from '@workspace/mcp-auth';
+import { createLogger, runDetached } from '@workspace/logger';
+import { buildMcpServer, type IWorkClaims } from '@workspace/mcp';
+import {
+  incompleteSessionResponse,
+  unauthorizedResponse,
+} from '@workspace/mcp-auth';
 import {
   createAnonClient,
   createUserClient,
+  fetchSessionAssurance,
   listPromotedUserRules,
   fetchUserEntityId,
+  readPromotedRuleById,
+  type SessionAssurance,
 } from '@workspace/persistence';
 import { USAGE_RECORDER, type IUsageRecorder } from '@workspace/usage';
 import { AUDIT_RECORDER, type IAuditRecorder } from '@workspace/audit';
@@ -24,27 +29,16 @@ import {
   recordChallengeMisled,
   recordInBandRecallUsed,
   recordRememberResult,
+  recordResourceRead,
   recordToolError,
   recordToolInvocation,
   recordToolResult,
 } from './metering.js';
 import { incrementCounter } from './metrics.js';
-import { evictSessionsOverCap, maxSessionsFromEnv } from './session-cap.js';
-import { sessionForOwner } from './session-ownership.js';
-
-/** Idle sessions are evicted after this long without a request. */
-const SESSION_IDLE_TTL_MS = 30 * 60 * 1000;
-const SESSION_SWEEP_INTERVAL_MS = 60 * 1000;
-
-interface McpSession {
-  transport: WebStandardStreamableHTTPServerTransport;
-  server: McpServer;
-  lastSeenAt: number;
-  /** Project scope attached to this session (from a caller project_hint). */
-  defaultScope?: string;
-  /** The usr_ id that created this session; a lookup by another user 404s. */
-  ownerUserEntityId: string;
-}
+import type {
+  IMcpSessionStore,
+  McpSessionRecord,
+} from './mcp-session.store.js';
 
 /**
  * The client's self-declared `clientInfo.name` from a parsed initialize
@@ -75,19 +69,33 @@ const jsonRpcError = (
 export interface McpHttpOptions {
   /** Public base URL (OAuth issuer) used in 401 challenges. */
   issuer: string;
+  /** Where sessions live between requests. */
+  sessions: IMcpSessionStore;
+  /**
+   * Answer a POST with one JSON body instead of an SSE stream. Both are valid
+   * Streamable HTTP; JSON suits a runtime that hands back whole responses.
+   */
+  jsonResponse?: boolean;
+  /** Claims on per-owner background work, when a worker elsewhere runs it. */
+  workClaims?: IWorkClaims;
 }
 
 /**
- * Streamable HTTP MCP transport (POST/GET/DELETE /mcp) protected by Bearer
+ * Streamable HTTP MCP transport (POST/DELETE /mcp) protected by Bearer
  * Supabase JWTs. Every request is authenticated via supabase.auth.getUser and
  * runs inside an AsyncLocalStorage context carrying the user id + token, so
  * the persistence adapters act under that user's RLS — exactly like stdio.
- * Transports are kept per MCP session (mcp-session-id) with TTL eviction.
+ *
+ * The McpServer and its transport are built for each request, in the SDK's
+ * stateless mode; the session itself (its id, owner, client name and attached
+ * project) is a record in `options.sessions`. A session therefore survives
+ * the process that opened it, which is what a server spread over instances
+ * that come and go needs. There is no GET stream: the server never pushes a
+ * message outside a response, so GET is answered 405, as the spec allows.
  */
 export const createMcpHttpRoutes = (options: McpHttpOptions) => {
   const logger = createLogger('mcp-http');
-  const sessions = new Map<string, McpSession>();
-  const maxSessions = maxSessionsFromEnv();
+  const { sessions } = options;
 
   const usageRecorder = container.resolve<IUsageRecorder>(USAGE_RECORDER);
   const auditRecorder = container.resolve<IAuditRecorder>(AUDIT_RECORDER);
@@ -98,117 +106,90 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
   );
   const queryBus = container.resolve(QueryBus);
 
-  const sweeper = setInterval(() => {
-    const cutoff = Date.now() - SESSION_IDLE_TTL_MS;
-    for (const [sessionId, session] of sessions) {
-      if (session.lastSeenAt < cutoff) {
-        sessions.delete(sessionId);
-        void session.transport.close().catch(() => undefined);
-        logger.debug('evicted idle mcp session', { sessionId });
-      }
-    }
-  }, SESSION_SWEEP_INTERVAL_MS);
-  sweeper.unref?.();
-
-  const createSession = async (
-    accessToken: string,
-    clientName: string | null,
-    ownerUserEntityId: string
-  ): Promise<McpSession> => {
-    // Network-served rules: the initialize `instructions` announce them, and
-    // carry their full text unless this client is known to truncate that
-    // channel (composeInstructions decides from clientName). Fail-open — a
-    // rules lookup problem must never block the connection — but LOUD: the
-    // client sees base instructions with no signal, so the error log plus the
-    // counter (an alertable /metrics series) are the only visible trace.
-    let instructionRules: ContextRule[] = [];
+  /**
+   * Network-served rules for the initialize `instructions`: they announce the
+   * rules, and carry their full text unless this client is known to truncate
+   * that channel (composeInstructions decides from clientName). Fail-open — a
+   * rules lookup problem must never block the connection — but LOUD: the
+   * client sees base instructions with no signal, so the error log plus the
+   * counter (an alertable /metrics series) are the only visible trace.
+   */
+  const instructionRulesFor = async (
+    accessToken: string
+  ): Promise<ContextRule[]> => {
     try {
-      instructionRules = await listPromotedUserRules(accessToken);
+      return await listPromotedUserRules(accessToken);
     } catch (error) {
       incrementCounter('promoted_rules_lookup_failures_total');
       logger.error('promoted rules lookup failed; instructions stay base', {
         error: error instanceof Error ? error.message : String(error),
       });
+      return [];
     }
-    const session: McpSession = {
-      transport: new WebStandardStreamableHTTPServerTransport({
-        sessionIdGenerator: () => entityIdSchemas.mcp_session.create(),
-        onsessioninitialized: (sessionId) => {
-          sessions.set(sessionId, session);
-          logger.info('mcp session initialized', { sessionId });
-          // Bounded session map (memory-DoS guard): past the cap, the
-          // least-recently-used sessions are evicted and their transports
-          // closed. Evicted clients reconnect via a fresh initialize.
-          for (const [evictedId, evicted] of evictSessionsOverCap(
-            sessions,
-            maxSessions
-          )) {
-            void evicted.transport.close().catch(() => undefined);
-            logger.warn('evicted lru mcp session over cap', {
-              sessionId: evictedId,
-              maxSessions,
-            });
-          }
-        },
-        onsessionclosed: (sessionId) => {
-          sessions.delete(sessionId);
-          logger.info('mcp session closed', { sessionId });
-        },
-      }),
+  };
+
+  const serverFor = (
+    session: McpSessionRecord,
+    accessToken: string,
+    instructionRules: ContextRule[]
+  ) =>
+    buildMcpServer({
+      commandBus,
+      queryBus,
+      workClaims: options.workClaims,
       // The per-request AsyncLocalStorage context (established below) already
       // wraps tool execution, so the tool-context hook is a pass-through.
-      server: buildMcpServer({
-        commandBus,
-        queryBus,
-        runInToolContext: (fn) => fn(),
-        onToolInvocation: (tool) => {
-          incrementCounter('mcp_tool_calls_total', { tool });
-          // Dispatcher-level volume metering. Runs inside the request's
-          // execution context, so the actor (usr_) and request id are
-          // attributed. Result-attributed read tools are metered post-result
-          // instead (recordToolResult). Fire-and-forget.
-          recordToolInvocation(usageRecorder, tool);
+      runInToolContext: (fn) => fn(),
+      onToolInvocation: (tool) => {
+        incrementCounter('mcp_tool_calls_total', { tool });
+        // Dispatcher-level volume metering. Runs inside the request's
+        // execution context, so the actor (usr_) and request id are
+        // attributed. Result-attributed read tools are metered post-result
+        // instead (recordToolResult). Fire-and-forget.
+        recordToolInvocation(usageRecorder, tool);
+      },
+      onToolResult: (metering) => recordToolResult(usageRecorder, metering),
+      onToolError: (metering) => recordToolError(usageRecorder, metering),
+      onRememberResult: (metering) =>
+        recordRememberResult(usageRecorder, metering),
+      onInBandRecallUsed: (usedIds) =>
+        recordInBandRecallUsed(usageRecorder, usedIds),
+      onChallenge: (memoryId) => recordChallengeMisled(usageRecorder, memoryId),
+      instructionRules,
+      clientName: session.clientName,
+      // Live rules read for the zm://rules resource — same credential the
+      // request carries, so a mid-session promote is visible on the next read.
+      readPromotedRules: () => listPromotedUserRules(accessToken),
+      // One rule in full for zm://rules/{id}, and the read's own usage row.
+      readPromotedRule: (id) => readPromotedRuleById(accessToken, id),
+      onResourceRead: (metering) => recordResourceRead(usageRecorder, metering),
+      // How an HTTP session learns its project: a caller passes a
+      // `project_hint` (the briefing hook sends the repo root), the read
+      // tool resolves it, and the resolved scope attaches to the session so
+      // later scope-less writes ride the project. There is no transport-level
+      // alternative — MCP deprecated Roots (SEP-2577) and removed the
+      // streamable-HTTP GET stream, so the server cannot ask the client for
+      // its workspace on its own. The store write is a side write: a runtime
+      // that freezes after the response drains it first.
+      sessionScope: {
+        attachProjectScope: (scope) => {
+          session.defaultScope = scope;
+          runDetached(
+            () => sessions.attachScope(session.sessionId, scope),
+            logger,
+            'failed to attach the session to its project',
+            { sessionId: session.sessionId }
+          );
         },
-        onToolResult: (metering) => recordToolResult(usageRecorder, metering),
-        onToolError: (metering) => recordToolError(usageRecorder, metering),
-        onRememberResult: (metering) =>
-          recordRememberResult(usageRecorder, metering),
-        onInBandRecallUsed: (usedIds) =>
-          recordInBandRecallUsed(usageRecorder, usedIds),
-        onChallenge: (memoryId) =>
-          recordChallengeMisled(usageRecorder, memoryId),
-        instructionRules,
-        clientName,
-        // Live rules read for the zm://rules resource — same credential the
-        // session connected with, so a mid-session promote is visible on the
-        // next read without reconnecting.
-        readPromotedRules: () => listPromotedUserRules(accessToken),
-        // How an HTTP session learns its project: a caller passes a
-        // `project_hint` (the briefing hook sends the repo root), the read
-        // tool resolves it, and the resolved scope attaches here so later
-        // scope-less writes ride the project. There is no transport-level
-        // alternative — MCP deprecated Roots (SEP-2577) and removed the
-        // streamable-HTTP GET stream, so the server cannot ask the client
-        // for its workspace on its own.
-        sessionScope: {
-          attachProjectScope: (scope) => {
-            session.defaultScope = scope;
-          },
-          currentProjectScope: () => session.defaultScope,
-        },
-        // Refused writes are a caller-contract signal, not a server error:
-        // the counter answers whether agents attach on the retry or keep
-        // hitting the wall, which is the only way to see if the refusal is
-        // teaching anything.
-        onWriteRefused: (reason) =>
-          incrementCounter('mcp_write_refused_total', { reason }),
-      }),
-      lastSeenAt: Date.now(),
-      ownerUserEntityId,
-    };
-    await session.server.connect(session.transport);
-    return session;
-  };
+        currentProjectScope: () => session.defaultScope,
+      },
+      // Refused writes are a caller-contract signal, not a server error:
+      // the counter answers whether agents attach on the retry or keep
+      // hitting the wall, which is the only way to see if the refusal is
+      // teaching anything.
+      onWriteRefused: (reason) =>
+        incrementCounter('mcp_write_refused_total', { reason }),
+    });
 
   const handle = async (request: Request): Promise<Response> => {
     // 1. Authentication: a valid Supabase JWT is required for every verb.
@@ -226,6 +207,35 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
         'Invalid or expired access token'
       );
     }
+    // A live token is not yet a complete sign-in. An account with a second
+    // factor admits a session to its data once the code was given, or when
+    // the authorization server opened the session for an agent; the database
+    // applies that rule to every row. Asking first turns what would be empty
+    // answers into a refusal that says why.
+    let assurance: SessionAssurance;
+    try {
+      assurance = await fetchSessionAssurance(createUserClient(token));
+    } catch (thrown) {
+      logger.error('session assurance check failed', {
+        error: thrown instanceof Error ? thrown.message : String(thrown),
+      });
+      return jsonRpcError(
+        503,
+        -32000,
+        'The session could not be checked. Try again.'
+      );
+    }
+    // A token outlives its session by up to an hour; a revoked or signed-out
+    // session is told so, which sends the client to authorize again.
+    if (!assurance.live) {
+      return unauthorizedResponse(
+        options.issuer,
+        'The session has ended. Authorize the client again.'
+      );
+    }
+    if (!assurance.complete) {
+      return incompleteSessionResponse(options.issuer);
+    }
 
     // Resolve the caller's domain user id (usr_) once, so tool execution can
     // attribute ownership by our id while RLS/scope keep the auth uuid.
@@ -234,20 +244,33 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
       data.user.id
     );
 
-    // 2. Session routing per the Streamable HTTP spec.
+    // 2. Session routing per the Streamable HTTP spec. A session belongs to
+    // the user who opened it: another user's id is answered exactly like one
+    // that was never issued (the same 404), so an id never confirms that it
+    // exists.
     const body =
       request.method === 'POST'
         ? await request.json().catch(() => undefined)
         : undefined;
     const sessionId = request.headers.get('mcp-session-id');
-    let session = sessionId
-      ? sessionForOwner(sessions, sessionId, userEntityId)
-      : undefined;
-
-    if (!session) {
-      if (sessionId) {
+    let session: McpSessionRecord;
+    let opened = false;
+    if (sessionId) {
+      const resumed = await sessions.resume(
+        sessionId,
+        userEntityId,
+        Date.now()
+      );
+      if (!resumed) {
         return jsonRpcError(404, -32001, 'Session not found');
       }
+      if (request.method === 'DELETE') {
+        await sessions.close(sessionId, userEntityId);
+        logger.info('mcp session closed', { sessionId });
+        return new Response(null, { status: 200 });
+      }
+      session = resumed;
+    } else {
       if (request.method !== 'POST' || !isInitializeRequest(body)) {
         return jsonRpcError(
           400,
@@ -259,18 +282,35 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
       // self-declared name is available BEFORE the server object (and its
       // instructions) is built — which is what lets the instructions match
       // what this particular client can actually carry.
-      session = await createSession(
-        token,
-        initializeClientName(body),
-        userEntityId
-      );
+      session = {
+        sessionId: entityIdSchemas.mcp_session.create(),
+        ownerUserEntityId: userEntityId,
+        clientName: initializeClientName(body),
+        lastSeenAt: Date.now(),
+      };
+      opened = true;
     }
-    session.lastSeenAt = Date.now();
+    if (request.method !== 'POST') {
+      return new Response(null, {
+        status: 405,
+        headers: { allow: 'POST, DELETE' },
+      });
+    }
+
+    const server = serverFor(
+      session,
+      token,
+      opened ? await instructionRulesFor(token) : []
+    );
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: options.jsonResponse ?? false,
+    });
+    await server.connect(transport);
 
     // 3. Execute under the caller's identity (RLS end-to-end). The session's
-    // default scope (from the roots handshake) rides along for remember/
-    // ingest calls that name no scope.
-    return runWithContext(
+    // default scope rides along for remember/ingest calls that name no scope.
+    const response = await runWithContext(
       {
         // Reuse the correlation id the outer observability wrapper already
         // bound for this HTTP request, so tool-execution logs share it.
@@ -283,8 +323,28 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
         // groups this call with the rest of its MCP session in usage_events.
         sessionId: sessionId ?? undefined,
       },
-      () => session.transport.handleRequest(request, { parsedBody: body })
+      () => transport.handleRequest(request, { parsedBody: body })
     );
+    if (!opened || !response.ok) {
+      return response;
+    }
+
+    // A successful initialize opens the session: only now is it stored, and
+    // its id handed to the client the way a stateful transport would.
+    const dropped = await sessions.open(session);
+    logger.info('mcp session initialized', { sessionId: session.sessionId });
+    for (const droppedId of dropped) {
+      logger.warn('dropped an mcp session over the session caps', {
+        sessionId: droppedId,
+      });
+    }
+    const headers = new Headers(response.headers);
+    headers.set('mcp-session-id', session.sessionId);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
   };
 
   return new Elysia({ name: 'mcp-http' }).all('/mcp', ({ request }) =>

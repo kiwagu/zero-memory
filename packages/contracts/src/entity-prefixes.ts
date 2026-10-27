@@ -43,6 +43,14 @@ export const ENTITY_PREFIXES = {
   // our own OAuth server's client id (packages/mcp-auth); RFC 6749/7591 leave
   // client_id opaque, so it is ours to shape.
   oauth_client: 'oac',
+  // a pending authorization of our OAuth server: the request a client started,
+  // parked while the person signs in to the dashboard and decides. Ours to
+  // shape for the same reason as the client id.
+  oauth_authorization: 'oaa',
+  // an agent's grant on our OAuth server: what a client holds once the person
+  // approved it, renewed on every refresh and ended with the agent. Its
+  // refresh token names it, so it is ours to shape like the client id.
+  agent_grant: 'agg',
   // MCP streamable-HTTP session id, minted by our transport (SoR rule), even
   // though it is ephemeral transport state.
   mcp_session: 'ses',
@@ -80,6 +88,9 @@ export const ENTITY_PREFIXES = {
   // brief-holdout probe: a topic plus the memory a briefing is expected to
   // carry (or, for an anti-probe, expected NOT to carry).
   brief_probe: 'bpr',
+  // rule-gate probe: a task statement plus one rule the gate must deliver
+  // whole for it ('full') or must not ('headline').
+  rule_probe: 'rpb',
   // session thread: the durable identity of one conversation, carrying the
   // project it works in. It outlives the transport session (a reconnect or a
   // session-cap eviction used to reset the project silently), and its id IS
@@ -90,6 +101,11 @@ export const ENTITY_PREFIXES = {
   // append-only stream — a move with its reason, an attachment, or a note.
   card: 'crd',
   card_event: 'cev',
+  // work claim: the token of one claim on an owner's background work (a
+  // hygiene scan, a benchmark). It travels with the handed-off job, and only
+  // the holder of the current token may run the work or end the claim. No
+  // table of its own: it lives in the claim it names, like the session id.
+  work_claim: 'wcl',
 } as const;
 
 export type EntityKind = keyof typeof ENTITY_PREFIXES;

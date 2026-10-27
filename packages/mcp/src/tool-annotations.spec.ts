@@ -36,7 +36,6 @@ const DESTRUCTIVE_TOOLS = [
   'forget',
   'resolve_conflict',
   'resolve_conflicts',
-  'delete_account',
 ] as const;
 
 describe('tool annotations', () => {
@@ -119,6 +118,21 @@ describe('tool annotations', () => {
       const isRead = (READ_TOOLS as readonly string[]).includes(tool.name);
       expect(tool.annotations?.readOnlyHint, tool.name).toBe(isRead);
     }
+  });
+
+  it('tells an agent how to list the cards it worked on', () => {
+    const description =
+      listed.find((tool) => tool.name === 'board')?.description ?? '';
+    expect(description).toContain('worked_by_me');
+  });
+
+  it('tells a new session how to ask for the card it can continue', () => {
+    // The work section, and the continuation in it, rides budgeted briefings
+    // only: a caller that follows the description must know to name a budget.
+    const description =
+      listed.find((tool) => tool.name === 'build_context')?.description ?? '';
+    expect(description).toContain('work.continuation');
+    expect(description).toMatch(/max_tokens/u);
   });
 
   it('keeps every description inside the client-visible budget', () => {

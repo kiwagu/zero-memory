@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,11 +6,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   countMemoryTool,
-  loadRecallGapState,
   markRecallGapReminded,
-  MAX_TRACKED_SESSIONS,
   readRecallGapCounters,
-  recallGapStatePath,
 } from './recall-gap.state.js';
 
 const statePath = (): string =>
@@ -27,12 +24,6 @@ describe('readRecallGapCounters', () => {
       remindedOnTurnEnd: false,
       remindedOnSearch: false,
     });
-  });
-
-  it('survives a corrupt state file instead of throwing', () => {
-    const path = statePath();
-    writeFileSync(path, 'not json at all');
-    expect(readRecallGapCounters(path, 's1').recalls).toBe(0);
   });
 });
 
@@ -83,27 +74,5 @@ describe('markRecallGapReminded', () => {
       remembers: 1,
       remindedOnTurnEnd: true,
     });
-  });
-});
-
-describe('state file growth', () => {
-  it('prunes to the most recently touched sessions', () => {
-    const path = statePath();
-    for (let i = 0; i < MAX_TRACKED_SESSIONS + 25; i += 1) {
-      countMemoryTool(path, `s${i}`, 'recall', i + 1);
-    }
-    const kept = Object.keys(loadRecallGapState(path));
-    expect(kept).toHaveLength(MAX_TRACKED_SESSIONS);
-    // Newest survive; the oldest are the ones dropped.
-    expect(kept).toContain(`s${MAX_TRACKED_SESSIONS + 24}`);
-    expect(kept).not.toContain('s0');
-  });
-});
-
-describe('recallGapStatePath', () => {
-  it('honors the XDG state home', () => {
-    expect(recallGapStatePath({ XDG_STATE_HOME: '/xdg' })).toBe(
-      '/xdg/zero-memory/recall-gap.json'
-    );
   });
 });

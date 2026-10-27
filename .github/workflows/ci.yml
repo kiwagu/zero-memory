@@ -27,6 +27,11 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run test
+      # The DynamoDB adapters (MCP sessions, rate-limit counts) against
+      # DynamoDB Local in a container.
+      - run: bun run test:dynamodb
+      - run: bun run test:installers
+      - run: bun run test:prune-actions
 
   deployment-artifacts:
     name: production compose + edge config
@@ -79,9 +84,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
+      # The CLI version lives in one place, the root package.json catalog,
+      # which `bunx supabase` resolves too. A fixed version downloads
+      # directly; "latest" first asks the rate-limited GitHub API.
+      - id: supabase-cli
+        run: echo "version=$(jq -r '.workspaces.catalog.supabase' package.json)" >> "$GITHUB_OUTPUT"
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: ${{ steps.supabase-cli.outputs.version }}
       - run: bun install --frozen-lockfile
       - name: Cache embedding models
         uses: actions/cache@v4
@@ -137,9 +147,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
+      # The CLI version lives in one place, the root package.json catalog,
+      # which `bunx supabase` resolves too. A fixed version downloads
+      # directly; "latest" first asks the rate-limited GitHub API.
+      - id: supabase-cli
+        run: echo "version=$(jq -r '.workspaces.catalog.supabase' package.json)" >> "$GITHUB_OUTPUT"
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: ${{ steps.supabase-cli.outputs.version }}
       - run: bun install --frozen-lockfile
       - name: Cache embedding models
         uses: actions/cache@v4
@@ -179,9 +194,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.11
+      # The CLI version lives in one place, the root package.json catalog,
+      # which `bunx supabase` resolves too. A fixed version downloads
+      # directly; "latest" first asks the rate-limited GitHub API.
+      - id: supabase-cli
+        run: echo "version=$(jq -r '.workspaces.catalog.supabase' package.json)" >> "$GITHUB_OUTPUT"
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: ${{ steps.supabase-cli.outputs.version }}
       - run: bun install --frozen-lockfile
       # The rehearsal addresses the review stack (its own project and ports),
       # not the test stack — boot that contour's Supabase here.
@@ -268,6 +288,14 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+      # The build names the commit people can look up: a commit copied from
+      # another repository's commit names that one in a `Source-Commit:`
+      # trailer, and any other commit names itself.
+      - id: source
+        run: |
+          trailer="$(git log -1 --format='%(trailers:key=Source-Commit,valueonly)')"
+          commit="${trailer%%$'\n'*}"
+          echo "commit=${commit:-$GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -283,7 +311,7 @@ jobs:
           # arguments their Dockerfile does not declare.
           build-args: |
             ZM_BUILD_VERSION=${{ github.ref_name }}
-            ZM_BUILD_COMMIT=${{ github.sha }}
+            ZM_BUILD_COMMIT=${{ steps.source.outputs.commit }}
             ZM_CLIENT_BUNDLE_URL=${{ vars.ZM_CLIENT_BUNDLE_URL }}
             ZM_CLIENT_BUNDLE_VERSION=${{ vars.ZM_CLIENT_BUNDLE_VERSION }}
             ZM_HOSTED_MCP_URL=${{ vars.ZM_HOSTED_MCP_URL }}
@@ -362,6 +390,29 @@ jobs:
             gh release create "$TAG" dist/bundles/* \
               --title "$TAG" --generate-notes
           fi
+
+  # Every run leaves caches and artifacts behind. A tag run restores caches
+  # saved under its own tag or the default branch only, so an earlier release's
+  # caches are never read again, and its artifacts outlive their use. Each
+  # release clears what the earlier ones left, after this run's bundles are on
+  # the release page. Housekeeping: a failure shows on the job without failing
+  # the release.
+  prune-actions-storage:
+    name: prune caches and artifacts of earlier runs
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/prune-actions-storage.sh "$GITHUB_REF"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
 
   # A published release lands on the instance by itself. The job exists only
   # where a deployment target is configured (repository variable

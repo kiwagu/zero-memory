@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { Badge } from '@workspace/ui/components/badge';
 import { Button } from '@workspace/ui/components/button';
+import { Markdown } from '@workspace/ui/components/common/markdown';
 import {
   Card,
   CardContent,
@@ -112,10 +113,10 @@ export function ReflectionCandidateQueue({
               ) : null}
             </div>
             <CardTitle
-              className="text-base leading-relaxed font-normal whitespace-pre-wrap"
+              className="text-base leading-relaxed font-normal"
               data-testid="reflection-draft"
             >
-              {item.content}
+              <Markdown>{item.content}</Markdown>
             </CardTitle>
             {item.rationale ? (
               <p className="text-muted-foreground text-xs">{item.rationale}</p>

@@ -28,6 +28,9 @@
 #   3. Never fails the caller. It runs from a build/serve command, so a missing
 #      jq or an unreadable settings file warns and skips rather than breaking the
 #      thing that invoked it.
+#   4. The user's file survives the edit. A change is backed up first and
+#      written in place, so a settings file kept as a symlink stays one
+#      (zm-user-files.sh, which sits next to this script).
 #
 # TWO DIFFERENT PATHS, on purpose. The binary this script EXECUTES to read the
 # declaration must be a real path it can run — a `~`-relative string is not
@@ -84,6 +87,14 @@ if [ ! -x "$BIN" ]; then
   exit 0
 fi
 
+USER_FILES="$(cd "$(dirname "$0")" && pwd)/zm-user-files.sh"
+if [ ! -f "$USER_FILES" ]; then
+  echo "wire-hooks: zm-user-files.sh not found next to this script — skipped." >&2
+  exit 0
+fi
+# shellcheck source=scripts/zm-user-files.sh
+. "$USER_FILES"
+
 # The declaration itself, rendered with the spelling the caller wants written. An
 # empty or unparsable answer means the binary is older than this script or
 # broken; either way, wiring nothing is safer than wiring guesses.
@@ -123,7 +134,7 @@ if jq --argjson manifest "$MANIFEST" '
             end
         )
       )
-    ' "$SETTINGS" > "$tmp" 2>/dev/null && [ -s "$tmp" ] && mv "$tmp" "$SETTINGS"; then
+    ' "$SETTINGS" > "$tmp" 2>/dev/null && [ -s "$tmp" ] && zm_write_file "$SETTINGS" "$tmp"; then
   count="$(printf '%s' "$MANIFEST" | jq 'length')"
   echo "wire-hooks: $count hook(s) of profile '$PROFILE' wired in $SETTINGS"
 else

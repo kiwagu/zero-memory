@@ -69,30 +69,4 @@ test.describe('Legacy project scope canonicalization over MCP', () => {
       await mcp.close();
     }
   });
-
-  test('a per-owner scope passes through untouched', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
-    try {
-      const probe = await mcp.callTool('remember', {
-        content: 'e2e scope-canonicalization marker: canonical passthrough',
-        kind: 'fact',
-        scope: 'proj.fluxcap',
-      });
-      const canonical = firstJson<{ scope: string }>(probe).scope;
-
-      const write = await mcp.callTool('remember', {
-        content:
-          'e2e scope-canonicalization marker: explicitly canonical write',
-        kind: 'fact',
-        scope: canonical,
-      });
-      expect(write.isError ?? false).toBe(false);
-      expect(firstJson<{ scope: string }>(write).scope).toBe(canonical);
-    } finally {
-      await mcp.close();
-    }
-  });
 });

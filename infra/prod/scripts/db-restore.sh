@@ -132,16 +132,19 @@ run_psql "$SUPABASE_DB_URL" -tAqc \
      and conparentid = 0" >"$tmp/fk-restore.sql"
 echo "  lifting $(grep -c . "$tmp/fk-drop.sql") foreign keys"
 
-# Only the `public` tables are cleared by name: truncating the partitioned
-# parent empties every `partitions.*` child with it, and a child the target has
-# never created would abort the transaction on a name that does not exist.
-awk -F'\t' '$1 ~ /^public\./ { printf "%s\n", $1 }' "$tmp/expected.tsv" >"$tmp/public-tables"
+# Every table the artifact loads is cleared by name first, the `partitions.*`
+# children included: pg_dump writes a partitioned table's rows under each
+# child, so the parent never appears in the artifact and truncating by name
+# would leave the children's rows in place, to collide with the same rows on
+# load. A child the target has never created is skipped (to_regclass below);
+# the corpus creates it before loading into it.
+awk -F'\t' '$1 ~ /^(public|partitions)\./ { printf "%s\n", $1 }' "$tmp/expected.tsv" >"$tmp/loaded-tables"
 {
   echo 'do $zm$'
   echo 'declare t text;'
   echo 'begin'
   echo '  foreach t in array array['
-  awk 'NR > 1 { printf ",\n" } { printf "    %s", "'"'"'" $0 "'"'"'" }' "$tmp/public-tables"
+  awk 'NR > 1 { printf ",\n" } { printf "    %s", "'"'"'" $0 "'"'"'" }' "$tmp/loaded-tables"
   echo ''
   echo '  ] loop'
   echo '    if to_regclass(t) is not null then execute format('"'"'truncate table %s'"'"', t); end if;'

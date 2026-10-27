@@ -24,15 +24,69 @@ dependency is `@workspace/db` for the generated database types.
 - `/activity` — owner-scoped activity derived from usage events.
 - `/memory/[id]` — one memory with provenance, entities, links, and a
   shared-with dialog listing the scope's members.
-- `/entities` — knowledge-graph entity search and details.
+- `/entities` — knowledge-graph entity search and details;
+  `/entities/[id]` — one entity with its edges and the memories that mention it.
+- `/board` — the project board, read-only, where a blocked card says so on
+  its tile; `/board/[id]` — one card with its relations to other cards. Opened
+  from the board, a card is a dialog over it, and its links and relations open
+  as a chain of panels to its right.
 - `/reflections` — reflection candidates and review actions.
 - `/review` — duplicate/supersede/contradiction hygiene queue.
-- `/rules` — standing-rule candidates, delivery budget, and pins.
+- `/rules` — standing-rule candidates, delivery budget and pins; on a
+  promoted rule, when it applies and which guard enforces it, edited in
+  place, and how the delivery judge delivered it over the last 30 days.
 - `/scopes` — scope creation and membership management.
-- `/settings` — provider credentials, memory transfer, and account deletion.
-- `/login`, `/forgot-password`, `/reset-password` — Supabase auth flows.
-  `proxy.ts` refreshes the session and redirects unauthenticated requests to
-  `/login`.
+- `/settings` — profile, two-factor authentication, memory transfer, provider
+  credentials, the rule-delivery judge (on or off, provider, an optional own
+  key; `settings/judge-provider/route.ts`), and account deletion. Deletion
+  runs here and nowhere else (`settings/delete-account/route.ts`, service
+  role, for the signed-in caller) and needs a verified authenticator app and
+  a session that gave its code.
+- `/api/panels/[kind]/[id]` — the data behind one panel of the chain (`memory`,
+  `card` or `entity`): exactly what that resource's page shows, read under the
+  viewer's session; anything the viewer may not read is a 404.
+- `/login`, `/forgot-password`, `/reset-password` — Supabase auth flows. The
+  login page draws a button for every social provider the instance's Auth
+  settings report as enabled (`lib/auth-providers.ts`), and honours a
+  site-root `next` so a guest returns to the page that sent them. `proxy.ts`
+  refreshes the session and redirects unauthenticated requests to `/login`
+  with that `next`.
+- `/accept-terms` — the one-time acceptance an account owes on an instance
+  that publishes legal documents when it arrived without one (created through
+  a provider). The dashboard layout sends such accounts here first.
+- `/mfa/verify` — the second-factor step. `lib/mfa.ts` decides whether a
+  session still owes the code (an account with a verified factor, below
+  `aal2`); the dashboard layout, `/accept-terms`, `/oauth/consent` and the
+  password reset send such a session here with a `next`. Enforced in the app,
+  never in row-level security, because agent sessions stay `aal1` by design.
+- `/auth/hooks/send-email` — Supabase Auth's send-email hook
+  (`lib/auth-mail.hook.ts`, `@workspace/email`): with the hook enabled on the
+  Supabase project, Auth posts each authentication mail here and the
+  dashboard sends it through `ZM_MAIL_TRANSPORT`. Without
+  `ZM_AUTH_HOOK_SECRET` it answers 404.
+- `/oauth/consent` — where an agent's authorization lands: the person signs
+  in, gives the code if they have a factor, and allows or denies the client.
+
+## Views
+
+A memory, a card and an entity each have one loader in `lib/views/*.view.ts`
+(server-only, the viewer's session) that returns serializable view data, and
+one view in `@workspace/ui`. Pages render the view from the loader; a panel of
+the chain gets the same data from `/api/panels/…` and renders the same view.
+A card's mapping from what the store answers to its view data is the pure
+`lib/views/card.mapper.ts`. The chain's rules — insert after the source, no
+duplicates, close a branch, Escape order — are the pure reducer in
+`lib/panel-chain.ts`.
+
+## Tests
+
+`bun run test:vitest` runs the pure logic under `lib/` in node: the feed's
+status filter (the query and the live feed answer to one table), the card
+mapper, the panel chain, and the other label and parsing helpers. The browser
+specs in `tests/e2e/src/web` prove the wiring on top of them — navigation,
+addresses, reloads, `data-testid` contracts and what a reader sees — and do
+not re-walk a filter or mapping table that a unit test or the `api` e2e
+project already owns.
 
 ## Run
 
@@ -51,3 +105,6 @@ See `.env.example`.
 | `NEXT_PUBLIC_SUPABASE_URL`      | Supabase Data API URL                                                                                                                  |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key                                                                                                                      |
 | `SUPABASE_SERVICE_ROLE_KEY`     | Optional, server-only: member email lookup on `/scopes` and the memory shared-with dialog (without it, emails degrade to raw user ids) |
+| `ZM_AUTH_HOOK_SECRET`           | Optional: the send-email hook's secret from Supabase Auth (`v1,whsec_…`); turns `/auth/hooks/send-email` on                            |
+| `ZM_MAIL_TRANSPORT`             | With the hook: `ses` (the runtime's AWS role) or `resend` (`RESEND_API_KEY`)                                                           |
+| `ZM_MAIL_FROM`                  | With the hook: the sender, an address of a domain the transport has verified                                                           |

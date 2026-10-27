@@ -21,9 +21,14 @@ interfaces.
 - `graph.schema.ts` — entity/edge vocabulary: `entityTypeSchema`,
   `edgeTypeSchema`, `entityMentionSchema`, plus the context/graph result
   shapes (`entityHitSchema`, `contextEntitySchema`, `contextEdgeSchema`,
-  `contextMemorySchema`).
+  `contextMemorySchema`) and the standing rule a briefing delivers
+  (`contextRuleSchema`: its `text`, `pinned`, its `ruleCandidateIdSchema`
+  id, the `ruleDeliveryLevelSchema` level it was delivered at, and its
+  `applies_when` line at level `gate` and on a `zm://rules` read).
+- `rule-headline.ts` — `ruleHeadline`, a rule's opening clause: the one cut
+  the server and every client use when a rule travels by headline.
 - `contract-version.ts` — `CONTRACT_VERSION`, the semver of the tool/response
-  contract itself (currently `2.0.0`, independent of package versions). The
+  contract itself (currently `7.2.0`, independent of package versions). The
   MCP server announces it at
   `capabilities.experimental["zero-memory/contract"].version`; removals are
   listed in `docs/DEPRECATIONS.md`.
@@ -45,4 +50,9 @@ interfaces.
 
 ## Testing
 
-`bun run test:vitest` — schema round-trip specs live next to the schemas.
+`bun run test:vitest` — specs live next to the schemas and own what no
+end-to-end call exercises: rejection rules, defaults a client relies on against
+an older server, the error taxonomy, and the prefix and metrics drift guards.
+They do not re-parse valid tool payloads: the MCP SDK validates every tool's
+input and declared output schema on each call, so the e2e suite already proves
+those.

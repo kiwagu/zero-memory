@@ -20,7 +20,8 @@ audited.
   DI token, and inject decorator.
 - `recordAudit(recorder, event)` — fire-and-forget emit: not awaited and never
   throws into the caller, so auditing can never break or change the outcome of
-  the command it records.
+  the command it records. Built on `runDetached` from `@workspace/logger`,
+  which owns that contract and its test.
 - `sanitizeCommandPayload(command)` — turns a command instance into a safe,
   size-bounded payload: every string field is clipped to `MAX_STRING_LENGTH`
   (500), and if the result still exceeds `MAX_PAYLOAD_BYTES` (8 KB) it collapses

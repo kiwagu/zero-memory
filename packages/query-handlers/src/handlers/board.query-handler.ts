@@ -7,6 +7,7 @@ import {
 } from '@workspace/contracts';
 import { queryHandler, type IQueryHandler } from '@workspace/cqrs';
 import { inject, singleton } from '@workspace/di';
+import { ProjectTargetService } from '@workspace/memory';
 import { BoardQuery } from '@workspace/queries';
 
 const required = (field: string, action: string): never => {
@@ -21,7 +22,11 @@ export class BoardQueryHandler implements IQueryHandler<
   BoardQuery,
   BoardOutput
 > {
-  constructor(@inject(CardService) private readonly service: CardService) {}
+  constructor(
+    @inject(CardService) private readonly service: CardService,
+    @inject(ProjectTargetService)
+    private readonly target: ProjectTargetService
+  ) {}
 
   async execute(query: BoardQuery): Promise<BoardOutput> {
     switch (query.action ?? 'list') {
@@ -30,6 +35,7 @@ export class BoardQueryHandler implements IQueryHandler<
           cardId: query.card_id ?? required('card_id', 'read a card'),
           afterSeq: query.after_seq,
           limit: query.limit,
+          feedBefore: query.feed_before,
         });
         if (read.isErr()) {
           const cardFailure = read.unwrapErr();
@@ -41,14 +47,22 @@ export class BoardQueryHandler implements IQueryHandler<
         return boardOutputSchema.parse({
           card: view.card,
           refs: view.refs,
+          branches: view.branches,
+          releases: view.releases,
           events: view.events,
           has_more: view.has_more,
           next_after_seq: view.next_after_seq,
+          feed: view.feed,
+          feed_has_more: view.feed_has_more,
+          feed_next_before: view.feed_next_before,
+          links: view.links,
+          blocked: view.blocked,
+          links_assessed: view.links_assessed,
         });
       }
       case 'resolve': {
         const resolved = await this.service.resolveCard(
-          query.scope ?? required('scope', 'resolve a number'),
+          (await this.#board(query)) ?? required('scope', 'resolve a number'),
           query.number ?? required('number', 'resolve a number')
         );
         if (resolved.isErr()) {
@@ -61,11 +75,14 @@ export class BoardQueryHandler implements IQueryHandler<
       }
       default: {
         const listed = await this.service.listBoard({
-          scope: query.scope,
+          scope: (await this.#board(query)) ?? undefined,
           state: query.state,
           query: query.query,
           includeArchived: query.include_archived,
           limit: query.limit,
+          relatedTo: query.related_to,
+          relation: query.relation_filter,
+          workedByMe: query.worked_by_me,
         });
         if (listed.isErr()) {
           const cardFailure = listed.unwrapErr();
@@ -80,5 +97,21 @@ export class BoardQueryHandler implements IQueryHandler<
         });
       }
     }
+  }
+
+  /**
+   * The board a read names: its scope, else the project its hint names. A
+   * read naming neither keeps the default it always had.
+   */
+  async #board(query: BoardQuery): Promise<string | null> {
+    const board = await this.target.resolveBoard({
+      scope: query.scope,
+      projectHint: query.project_hint,
+      sessionDefault: false,
+    });
+    if (board.isErr()) {
+      throw new FailureError(board.unwrapErr());
+    }
+    return board.unwrap();
   }
 }

@@ -7,11 +7,14 @@ import { CardLogCommand } from '@workspace/commands';
 import {
   FailureError,
   failure,
+  parseBranchRef,
+  secretContentRejectedMessage,
   type CardLogOutput,
   type CardRef,
 } from '@workspace/contracts';
 import { commandHandler, type ICommandHandler } from '@workspace/cqrs';
 import { inject, singleton } from '@workspace/di';
+import { guardTextFields } from '@workspace/memory';
 
 const invalid = (message: string): FailureError =>
   new FailureError(failure('validation_failed', message));
@@ -26,6 +29,16 @@ const invalid = (message: string): FailureError =>
 const refFrom = (kind?: string, target?: string): CardRef => {
   if (!kind || !target) {
     throw invalid('`ref_kind` and `ref_target` are both required to attach.');
+  }
+  if (kind === 'branch') {
+    const branch = parseBranchRef(target);
+    if (!branch) {
+      throw invalid(
+        'A branch target is `<repo>:<branch>` — the repository as owner/name ' +
+          '(or its folder name) and a git branch name.'
+      );
+    }
+    return { kind: 'branch', ...branch };
   }
   const parsed = parseCardRef(
     kind === 'url' ? { kind, url: target } : { kind, id: target }
@@ -54,6 +67,10 @@ export class CardLogCommandHandler implements ICommandHandler<
     if (command.action === 'note') {
       if (!command.text) {
         throw invalid('`text` is required to add a note.');
+      }
+      const secret = guardTextFields([{ path: 'text', text: command.text }]);
+      if (secret) {
+        throw invalid(secretContentRejectedMessage(secret));
       }
       const noted = await this.service.noteCard({
         ...authorship,

@@ -134,8 +134,18 @@ verify_artifact() { # <file> [counts-file]
   # pg_dump writes this line last. Its absence means the dump was cut off
   # mid-write — which the gzip check alone cannot tell you, because the
   # compressor is perfectly happy to have produced a valid, short file.
-  gzip -dc "$file" | tail -20 | grep -q 'PostgreSQL database dump complete' ||
-    die "$file has no completion trailer — the dump did not finish"
+  #
+  # The tail is read whole before it is searched. Piped into `grep -q`, which
+  # exits at its first match, tail could still be writing the lines after the
+  # trailer: it died of SIGPIPE, and pipefail turned a complete dump into a
+  # missing trailer. Whether it did depended on where tail's write boundaries
+  # fell in the file, so a few backups in a row failed, then one passed.
+  local ending
+  ending="$(gzip -dc "$file" | tail -20)"
+  case "$ending" in
+    *'PostgreSQL database dump complete'*) ;;
+    *) die "$file has no completion trailer — the dump did not finish" ;;
+  esac
 
   if [ -z "$counts" ]; then
     tmp_counts="$(mktemp)"

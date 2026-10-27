@@ -10,7 +10,7 @@ import { Skeleton } from '@workspace/ui/components/skeleton';
 import { AdvancedSearch } from '@/components/advanced-search';
 import { FeedFilters } from '@/components/feed-filters';
 import { RankedResults } from '@/components/ranked-results';
-import { RealtimeFeed } from '@/components/realtime-feed';
+import { LiveRefresh } from '@/components/live-refresh';
 import { getRequestMessages } from '@/lib/i18n';
 import { clampTopK, parseKindsParam } from '@/lib/recall';
 import {
@@ -25,6 +25,7 @@ import {
   facetCountIndex,
   facetTotal,
   feedStatusLabel,
+  filterFeedStatus,
   kindLabel,
   memoryCardProps,
   memoryIdSearchPrefix,
@@ -92,7 +93,7 @@ export default async function FeedPage({
   const status = parseFeedStatus(params.status);
   const page = Math.max(1, Number.parseInt(params.page ?? '1', 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
-  const { messages, t } = await getRequestMessages();
+  const { t } = await getRequestMessages();
 
   const supabase = await createServerSupabaseClient();
 
@@ -268,19 +269,7 @@ export default async function FeedPage({
   if (scope) {
     query = query.eq('scope', scope);
   }
-  // Lifecycle status — the SQL twin of matchesFeedStatus. `all` adds nothing.
-  if (status === 'active') {
-    // Everything except a historical version (retired AND replaced).
-    query = query.or('invalidated_at.is.null,superseded_by.is.null');
-  } else if (status === 'live') {
-    query = query.is('invalidated_at', null);
-  } else if (status === 'superseded') {
-    query = query
-      .not('invalidated_at', 'is', null)
-      .not('superseded_by', 'is', null);
-  } else if (status === 'invalidated') {
-    query = query.not('invalidated_at', 'is', null).is('superseded_by', null);
-  }
+  query = filterFeedStatus(query, status);
   if (q) {
     if (idPrefix) {
       // An id (or id fragment) pasted from a card: prefix-match the id. The
@@ -347,12 +336,7 @@ export default async function FeedPage({
         </Alert>
       ) : null}
 
-      <RealtimeFeed
-        messages={messages}
-        memberCounts={Object.fromEntries(memberCounts)}
-        backTo={backTo}
-        status={status}
-      />
+      <LiveRefresh event="memories" />
 
       <div className="space-y-3" data-testid="memory-feed">
         {memories.map((memory) => (

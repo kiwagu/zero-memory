@@ -36,6 +36,11 @@ services:
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       ZM_PUBLIC_URL: ${ZM_PUBLIC_URL}
+      # External origin of the dashboard: the authorization endpoint sends a
+      # person there to sign in and approve an agent. Derived from the
+      # dashboard's hostname unless set; the server refuses to start behind
+      # the edge when it resolves to anything but an https origin.
+      ZM_WEB_URL: ${ZM_WEB_URL:-https://${ZM_WEB_HOST}}
       # Revision of THIS checkout, stamped by the deploy script. The image and
       # the checkout advance independently, so /healthz reports both.
       ZM_CHECKOUT_SHA: ${ZM_CHECKOUT_SHA:-}
@@ -46,12 +51,24 @@ services:
       ZM_EMAIL: ${ZM_EMAIL}
       ZM_PASSWORD: ${ZM_PASSWORD}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      # Refuse a user-supplied LLM endpoint that resolves into private space.
-      # Passed explicitly because these services take no env_file: without
-      # this line the variable an operator sets in .env would be documented,
-      # accepted, and silently ignored — the guard off on the one deployment
-      # shape it exists for.
+      # A user-supplied LLM endpoint that resolves into private space is
+      # refused by default; a one-person instance with Ollama on such an
+      # address sets this to false in .env. Passed explicitly because these
+      # services take no env_file: without this line the opt-out an operator
+      # writes in .env would be documented, accepted, and silently ignored.
       ZM_POLICY_DENY_PRIVATE_ENDPOINTS: ${ZM_POLICY_DENY_PRIVATE_ENDPOINTS:-}
+      # The rule delivery judge: off until ZM_RULE_GATE_MODE says shadow or
+      # live, and then only for accounts that turn it on. Empty values keep
+      # the server's defaults; passed explicitly for the same reason as above.
+      ZM_RULE_GATE_MODE: ${ZM_RULE_GATE_MODE:-}
+      ZM_RULE_GATE_HI: ${ZM_RULE_GATE_HI:-}
+      ZM_RULE_GATE_LO: ${ZM_RULE_GATE_LO:-}
+      ZM_JUDGE_PROVIDER: ${ZM_JUDGE_PROVIDER:-}
+      ZM_JUDGE_MODEL_TYPESAFE: ${ZM_JUDGE_MODEL_TYPESAFE:-}
+      ZM_JUDGE_MODEL_SUBQ: ${ZM_JUDGE_MODEL_SUBQ:-}
+      ZM_JUDGE_TIMEOUT_MS: ${ZM_JUDGE_TIMEOUT_MS:-}
+      ZM_TYPESAFE_API_KEY: ${ZM_TYPESAFE_API_KEY:-}
+      ZM_SNAPQ_API_KEY: ${ZM_SNAPQ_API_KEY:-}
     volumes:
       # Embedding model cache (ZM_MODEL_CACHE_DIR=/models is baked into the
       # image); survives container recreation, downloaded once.
@@ -90,6 +107,8 @@ services:
       ZM_TERMS_URL: ${ZM_TERMS_URL:-}
       ZM_PRIVACY_URL: ${ZM_PRIVACY_URL:-}
       ZM_TERMS_VERSION: ${ZM_TERMS_VERSION:-}
+      # The settings page names the judge provider the instance defaults to.
+      ZM_JUDGE_PROVIDER: ${ZM_JUDGE_PROVIDER:-}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
 

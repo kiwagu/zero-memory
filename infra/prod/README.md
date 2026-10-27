@@ -224,6 +224,7 @@ Set in `infra/prod/.env` (see `.env.example` for comments):
 | `ZM_BIND_HOST`                  | compose        | Backend bind address (default `127.0.0.1`)             |
 | `ZM_SERVER_PORT`                | compose        | Host port for the MCP server (container: 8787)         |
 | `ZM_PUBLIC_URL`                 | server         | External server URL = OAuth issuer (see TLS)           |
+| `ZM_WEB_URL`                    | server         | Dashboard origin agents approve on (default from host) |
 | `ZM_EMAIL`, `ZM_PASSWORD`       | server         | Local-user/stdio credentials; unused by HTTP MCP       |
 | `ANTHROPIC_API_KEY`             | server         | Optional model-backed extraction and hygiene           |
 | `ZM_WEB_PORT`                   | compose        | Host port for the dashboard (container: 3100)          |
@@ -360,6 +361,7 @@ The manual walkthrough above is also captured as idempotent scripts in
 | `db-restore.sh`       | load such a backup into a schema-only target, and prove it                             | operator machine               |
 | `upgrade.sh`          | pull checkout + images, recreate what changed                                          | on the host, every deploy      |
 | `db-forward-apply.sh` | apply the pending migration tail, strictly forward (opt-in via `ZM_MIGRATE_ON_DEPLOY`) | on the host, from `upgrade.sh` |
+| `prune-images.sh`     | drop older release images, keeping `ZM_KEEP_RELEASES` releases (5 by default)          | on the host, from `upgrade.sh` |
 | `verify-instance.sh`  | external acceptance: health, OAuth issuer, TLS, callback origin                        | anywhere                       |
 | `deploy-hook.sh`      | forced command that lets a CI key deploy one version                                   | on the host, over ssh          |
 

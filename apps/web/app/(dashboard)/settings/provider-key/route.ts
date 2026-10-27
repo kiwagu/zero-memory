@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { notFromDashboard, refusedOrigin } from '@/lib/dashboard-origin';
+import { secondFactorRefusal } from '@/lib/mfa';
+import { currentSubjectId } from '@/lib/subject';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
@@ -37,30 +40,10 @@ const looksLikeKey = (key: string): boolean =>
 const looksLikeBaseUrl = (url: string): boolean =>
   /^https?:\/\/\S+$/.test(url) && url.length <= 400;
 
-/**
- * The caller's own `usr_` id.
- *
- * Derived from `getUser()` — which verifies the session against the auth
- * server — and then matched explicitly on `user_id`. Both halves matter: the
- * profiles table is readable by any signed-in user, so a query without that
- * filter would return everybody's rows, not the caller's.
- */
-const currentSubjectId = async (): Promise<string | null> => {
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const { data } = await supabase
-    .from('profiles')
-    .select('id')
-    .eq('user_id', user.id)
-    .maybeSingle();
-  return (data as { id: string } | null)?.id ?? null;
-};
-
 export async function POST(request: NextRequest) {
+  if (notFromDashboard(request, true)) {
+    return refusedOrigin();
+  }
   const body = (await request.json()) as {
     provider?: unknown;
     apiKey?: unknown;
@@ -110,6 +93,15 @@ export async function POST(request: NextRequest) {
   if (!subjectId) {
     return NextResponse.json({ error: 'Not signed in.' }, { status: 401 });
   }
+  // The key is written with the service role, past the page gate: a session
+  // that owes its second factor does not change it.
+  const refused = await secondFactorRefusal(await createServerSupabaseClient());
+  if (refused) {
+    return NextResponse.json(
+      { error: await refused.text() },
+      { status: refused.status }
+    );
+  }
 
   const admin = createAdminClient();
   if (!admin) {
@@ -138,10 +130,22 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({ hint: apiKey.slice(-4) });
 }
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+  if (notFromDashboard(request, false)) {
+    return refusedOrigin();
+  }
   const subjectId = await currentSubjectId();
   if (!subjectId) {
     return NextResponse.json({ error: 'Not signed in.' }, { status: 401 });
+  }
+  // The key is written with the service role, past the page gate: a session
+  // that owes its second factor does not change it.
+  const refused = await secondFactorRefusal(await createServerSupabaseClient());
+  if (refused) {
+    return NextResponse.json(
+      { error: await refused.text() },
+      { status: refused.status }
+    );
   }
 
   const admin = createAdminClient();

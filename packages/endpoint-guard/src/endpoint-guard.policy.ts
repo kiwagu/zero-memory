@@ -1,19 +1,21 @@
-const TRUE_VALUES = new Set(['1', 'true', 'on', 'yes']);
+const FALSE_VALUES = new Set(['0', 'false', 'off', 'no']);
 
 /**
  * Whether this instance denies user-supplied endpoints (Ollama's
  * `base_url`) that resolve to a private, loopback, or link-local address.
  *
- * Fail-open by construction, matching the rest of the `ZM_POLICY_*` channel:
- * unset or unparseable reads as `false`, the self-host default, because a
- * self-hoster legitimately points Ollama at 127.0.0.1 and a blanket deny
- * would break that. A pooled/managed deployment turns this on explicitly —
- * that is the deployment mode where a user-supplied endpoint on a shared
- * server is a different (and no longer accepted) risk.
+ * Deny is the default: a person can point the server at any address through
+ * their own settings, and on an instance shared by several people that is a
+ * way into another person's network — the cloud metadata address, a service
+ * on the server's own loopback — unless the server refuses it. Unset or
+ * unparseable therefore reads as deny. A self-hoster whose Ollama runs on a
+ * private address opts out explicitly with
+ * `ZM_POLICY_DENY_PRIVATE_ENDPOINTS=false`, a deliberate statement that this
+ * instance is one person's.
  */
 export const resolveDenyPrivateEndpoints = (
   env: NodeJS.ProcessEnv = process.env
 ): boolean =>
-  TRUE_VALUES.has(
+  !FALSE_VALUES.has(
     (env.ZM_POLICY_DENY_PRIVATE_ENDPOINTS ?? '').trim().toLowerCase()
   );

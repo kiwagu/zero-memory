@@ -356,6 +356,21 @@ test.describe('documentation screenshots', () => {
     await captureScreen(page, 'reflections-queue');
   });
 
+  test('@docs-shot project board', async ({ page }) => {
+    await signIn(page);
+    // No scope in the address: the page opens on the board that moved last,
+    // which is the seeded project's.
+    await page.goto('/board');
+
+    await expect(page.getByTestId('board')).toBeVisible();
+    // The columns are one row that scrolls sideways at this width, so the
+    // first ones are what the frame shows.
+    await expect(
+      page.getByTestId('board-column-active').getByTestId('board-card')
+    ).toBeVisible();
+    await captureScreen(page, 'project-board');
+  });
+
   test('@docs-shot entities screen', async ({ page }) => {
     await signIn(page);
     await page.goto('/entities');

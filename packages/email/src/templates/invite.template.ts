@@ -1,8 +1,8 @@
 import type { Translator } from '@workspace/i18n-catalogs';
 
-import { gotrueVariable } from '../gotrue.constants.js';
-import type { AuthTemplateSpec } from './auth-template.type.js';
-import { layoutStrings } from './auth-template.type.js';
+import { gotrueVariable } from '../gotrue.constants';
+import type { AuthTemplateSpec } from './auth-template.type';
+import { layoutStrings } from './auth-template.type';
 
 /** Invitation — Auth's own invite flow, used when a member is added by address. */
 export const inviteTemplate: AuthTemplateSpec = {

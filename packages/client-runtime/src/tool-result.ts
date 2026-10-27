@@ -8,9 +8,10 @@ import { toolErrorSchema } from '@workspace/contracts';
  * reminder — as SEPARATE trailing blocks. So the ONLY correct extraction is to
  * parse the first block. The older heuristic (join every block, then slice on
  * the first `\n---`) corrupted the payload whenever a note block preceded the
- * reminder's rule, or a memory body itself contained a `---` line: the slice
- * then cut mid-JSON and parsing threw, which upstream silently degraded to an
- * "offline" fallback even though the server had answered fine.
+ * reminder's rule: the slice then cut mid-JSON and parsing threw, which
+ * upstream silently degraded to an "offline" fallback even though the server
+ * had answered fine. (A `---` line inside a memory body never reached that
+ * slice: JSON escapes the newline in front of it.)
  */
 
 interface TextBlock {
@@ -46,6 +47,18 @@ export const toolErrorMessage = (result: unknown): string => {
     return parsed.success ? parsed.data.error.message : text;
   } catch {
     return text;
+  }
+};
+
+/** The taxonomy code of a FAILED tool result (`not_found`, …), or null. */
+export const toolErrorCode = (result: unknown): string | null => {
+  try {
+    const parsed = toolErrorSchema.safeParse(
+      JSON.parse(toolTextBlocks(result).join('\n'))
+    );
+    return parsed.success ? parsed.data.error.code : null;
+  } catch {
+    return null;
   }
 };
 

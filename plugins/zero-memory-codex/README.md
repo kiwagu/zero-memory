@@ -22,6 +22,10 @@ plugins/zero-memory-codex/
   so the commands are the watcher subcommands with `--client codex`:
   - `SessionStart` (matcher `startup|resume`) → `brief session-start`
   - `UserPromptSubmit` → `brief task` + `status`
+  - `PostToolUse` (matcher `Bash`) → `landing` — right after a shell command,
+    a squash whose board card has no record of its landing gets one line with
+    the exact `card` `land` call. Codex runs a new hook only after it is
+    trusted in `/hooks`, so updating the plugin asks for that once.
   - `Stop` → `ingest` (labeled `codex-stop-hook` in provenance)
   - `PreCompact` → `checkpoint` — captures the epoch about to be condensed
     while it is still whole, and advances the offset past the boundary. Capture
@@ -55,6 +59,9 @@ ZM_SERVER_URL=https://memory.example.com/mcp bash scripts/plugin-bundle/deploy-z
 
 Installs the binary, registers the MCP server, stages a local marketplace and
 `codex plugin add`s this plugin, and migrates off any legacy `config.toml [hooks]`
-block + `AGENTS.md` section. Then restart Codex, `/mcp` authenticate, and `/hooks`
+block (backing the file up first). `~/.codex/AGENTS.md` is never edited: a
+ZM-first section you keep there stays, beside the plugin skill. An MCP
+registration that already points at the server is left as is, so its login
+survives a re-run. Then restart Codex, `/mcp` authenticate, and `/hooks`
 review + trust (plugin hooks require trust too). Export a guest bundle for a LAN
 machine with `bash scripts/plugin-bundle/deploy-zm-codex.sh <dir>`.

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createZip } from './zip';
 
@@ -24,12 +24,23 @@ describe('createZip', () => {
     expect(view(zip).getUint16(zip.length - 22 + 10, true)).toBe(3);
   });
 
-  it('is deterministic for the same tree', () => {
+  it('is deterministic for the same tree, whenever it is built', () => {
     const entries = [
       { path: 'proj.zm/one.md', content: 'first' },
       { path: 'proj.zm/two.md', content: 'second' },
     ];
-    expect(createZip(entries)).toEqual(createZip(entries));
+    // Two builds years and hours apart: an archive stamped with the clock
+    // (a real modification time) differs, while two builds in the same tick
+    // would compare equal even then.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+      const first = createZip(entries);
+      vi.setSystemTime(new Date('2031-07-15T13:47:31Z'));
+      expect(createZip(entries)).toEqual(first);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('stores content uncompressed and verbatim', () => {

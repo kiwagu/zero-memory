@@ -173,29 +173,32 @@ describe('runImport', () => {
     expect(tally.imported).toBe(1);
   });
 
-  it('computes a stable source_hash for the same (tool, path, content)', async () => {
+  it('keys source_hash on (tool, path, content): stable across runs, distinct per source', async () => {
     const reply = (): ImportMemoryOutput => ({
       skipped: false,
       memory_id: memId('m'),
     });
     const one = new FakeClient(reply);
     const two = new FakeClient(reply);
-    const items = [item({ sourcePath: '/m/a.md', content: 'same' })];
-    await runImport({
-      dryRun: false,
-      homeDir: '/h',
-      cwd: '/c',
-      adapters: [adapterOf(items)],
-      client: one,
-    });
-    await runImport({
-      dryRun: false,
-      homeDir: '/h',
-      cwd: '/c',
-      adapters: [adapterOf(items)],
-      client: two,
-    });
-    expect(one.inputs[0]!.source_hash).toBe(two.inputs[0]!.source_hash);
+    // An edited section must re-import as a fresh fact, and two sections of
+    // one file (or one text in two files) must never collide.
+    const items = [
+      item({ sourcePath: '/m/a.md', content: 'same' }),
+      item({ sourcePath: '/m/a.md', content: 'edited' }),
+      item({ sourcePath: '/m/b.md', content: 'same' }),
+    ];
+    for (const client of [one, two]) {
+      await runImport({
+        dryRun: false,
+        homeDir: '/h',
+        cwd: '/c',
+        adapters: [adapterOf(items)],
+        client,
+      });
+    }
+    const hashes = one.inputs.map((input) => input.source_hash);
+    expect(two.inputs.map((input) => input.source_hash)).toEqual(hashes);
+    expect(new Set(hashes).size).toBe(items.length);
     expect(one.inputs[0]!.source_tool).toBe('claude-code');
   });
 

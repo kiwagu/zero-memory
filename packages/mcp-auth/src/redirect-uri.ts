@@ -44,6 +44,35 @@ export const isAllowedRedirectUri = (raw: string): boolean => {
 };
 
 /**
+ * A client returns either to remote hosts (https) or to the local machine
+ * (loopback http, or a private-use scheme its app owns), never both. The
+ * consent screen names the one address a request returns to, and a remembered
+ * approval is tied to that address; a registration that spans both kinds
+ * would put a remote host behind a client whose screen can look entirely
+ * local. Each URI is expected to have passed `isAllowedRedirectUri` already.
+ */
+export const mixesRemoteAndLocal = (
+  redirectUris: readonly string[]
+): boolean => {
+  let remote = false;
+  let local = false;
+  for (const raw of redirectUris) {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      continue;
+    }
+    if (url.protocol === 'https:') {
+      remote = true;
+    } else {
+      local = true;
+    }
+  }
+  return remote && local;
+};
+
+/**
  * Match against the client's registered redirect URIs: exact for https, but
  * loopback http compares ignoring the port (RFC 8252 §7.3 — native clients
  * bind an ephemeral port per authorization, so the port MUST NOT be pinned).

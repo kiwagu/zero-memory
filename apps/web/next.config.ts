@@ -7,7 +7,10 @@ const nextConfig: NextConfig = {
   // Workspace packages ship TypeScript sources.
   transpilePackages: [
     '@workspace/db',
+    '@workspace/email',
     '@workspace/i18n-catalogs',
+    '@workspace/judgment',
+    '@workspace/memory',
     '@workspace/ui',
   ],
   // Reaching a dev server from another machine goes through a LAN alias, and
@@ -29,10 +32,14 @@ const nextConfig: NextConfig = {
     : {}),
   // Self-contained server bundle for the production container image.
   output: 'standalone',
+  // The framework's name is nobody's business on the wire.
+  poweredByHeader: false,
   // Trace files from the monorepo root so workspace deps are included.
   outputFileTracingRoot: join(dirname(fileURLToPath(import.meta.url)), '../..'),
   // Baseline security headers on every response: no MIME sniffing, no
-  // referrer leakage of app URLs, no framing (clickjacking).
+  // referrer leakage of app URLs, no framing (clickjacking), and https only
+  // once a browser has seen the site over https (browsers ignore the header on
+  // plain http, so a local stand is unaffected).
   headers: async () => [
     {
       source: '/:path*',
@@ -40,6 +47,10 @@ const nextConfig: NextConfig = {
         { key: 'X-Content-Type-Options', value: 'nosniff' },
         { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+        {
+          key: 'Strict-Transport-Security',
+          value: 'max-age=63072000; includeSubDomains',
+        },
       ],
     },
   ],

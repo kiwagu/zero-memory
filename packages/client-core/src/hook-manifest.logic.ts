@@ -115,6 +115,17 @@ const RECALL_ON_FAILURE: HookEntry = {
   command: 'nudge',
 };
 const RECALL_ON_TURN_END: HookEntry = { event: 'Stop', command: 'nudge' };
+/**
+ * The landing check: right after a shell command, look for a fresh squash on
+ * this repository whose card has no record of it, and say so in the same
+ * turn. Every shell command spawns it, and nearly every run is one git read
+ * with nothing to say; the server is asked only about a squash not yet checked.
+ */
+const LANDING: HookEntry = {
+  event: 'PostToolUse',
+  matcher: 'Bash',
+  command: 'landing',
+};
 /** The original search-time reminder, kept for the channel that already ships it. */
 const RECALL_ON_SEARCH: HookEntry = {
   event: 'PreToolUse',
@@ -131,6 +142,7 @@ const PROFILES: Record<HookProfile, readonly HookEntry[]> = {
     RECEIPT,
     RECALL_ON_SEARCH,
     RECALL_TRACK,
+    LANDING,
     RECALL_ON_FAILURE,
     RECALL_ON_TURN_END,
   ],
@@ -144,6 +156,7 @@ const PROFILES: Record<HookProfile, readonly HookEntry[]> = {
     CHECKPOINT,
     RECALL_ON_SEARCH,
     RECALL_TRACK,
+    LANDING,
     RECALL_ON_FAILURE,
     RECALL_ON_TURN_END,
   ],

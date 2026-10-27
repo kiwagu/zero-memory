@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "0.20.0",
+  "version": "0.48.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -10,16 +10,24 @@
     "mcp:stdio": "bun src/mcp-stdio.ts",
     "hygiene:scan": "bun src/hygiene-scan.ts",
     "hygiene:retro": "bun src/hygiene-retro.ts",
+    "rules:applies-when-draft": "bun src/rules-applies-when-draft.ts",
+    "rules:gate-agreement": "bun src/rule-gate-agreement.ts",
     "lint": "eslint .",
     "lint:strict": "eslint . --max-warnings 0",
     "format": "bunx prettier --write .",
     "typecheck": "tsc --noEmit",
-    "test:vitest": "vitest run"
+    "test:vitest": "vitest run",
+    "test:dynamodb": "bash scripts/dynamodb-local.test.sh"
   },
   "bin": {
     "zero-memory-mcp": "./src/mcp-stdio.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "catalog:",
+    "@aws-sdk/client-lambda": "catalog:",
+    "@aws-sdk/client-secrets-manager": "catalog:",
+    "@aws-sdk/client-ssm": "catalog:",
+    "@aws-sdk/lib-dynamodb": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
     "@workspace/audit": "workspace:*",
     "@workspace/board": "workspace:*",
@@ -32,6 +40,7 @@
     "@workspace/embedding": "workspace:*",
     "@workspace/extraction": "workspace:*",
     "@workspace/hygiene": "workspace:*",
+    "@workspace/judgment": "workspace:*",
     "@workspace/llm": "workspace:*",
     "@workspace/logger": "workspace:*",
     "@workspace/mcp": "workspace:*",
@@ -40,6 +49,7 @@
     "@workspace/persistence": "workspace:*",
     "@workspace/policy": "workspace:*",
     "@workspace/query-handlers": "workspace:*",
+    "@workspace/roi": "workspace:*",
     "@workspace/translation": "workspace:*",
     "@workspace/usage": "workspace:*",
     "elysia": "catalog:",

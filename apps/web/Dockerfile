@@ -42,6 +42,7 @@ COPY packages/eslint-config/package.json packages/eslint-config/
 COPY packages/extraction/package.json packages/extraction/
 COPY packages/hygiene/package.json packages/hygiene/
 COPY packages/i18n-catalogs/package.json packages/i18n-catalogs/
+COPY packages/judgment/package.json packages/judgment/
 COPY packages/llm/package.json packages/llm/
 COPY packages/logger/package.json packages/logger/
 COPY packages/mcp/package.json packages/mcp/
@@ -58,6 +59,7 @@ COPY packages/typescript-config/package.json packages/typescript-config/
 COPY packages/ui/package.json packages/ui/
 COPY packages/usage/package.json packages/usage/
 COPY tests/e2e/package.json tests/e2e/
+COPY infra/aws/package.json infra/aws/
 
 # Dev dependencies are needed for `next build` (tailwind, typescript).
 # --ignore-scripts like the build stage below: the root postinstall wires up

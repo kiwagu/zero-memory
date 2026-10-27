@@ -307,7 +307,53 @@ gets misdiagnosed as something else.
 After changing an account's password, re-authenticate everything that signed in
 as it: `zero-memory-watcher login` on every watcher host, and re-authorize the
 MCP connection in each editor. OAuth client registrations survive, because the
-issuer (`ZM_PUBLIC_URL`) did not change — only the sessions are gone.
+issuer (`ZM_PUBLIC_URL`) did not change — only the sessions are gone. The
+consents survive too, so with the dashboard signed in each re-authorization is
+one browser round trip with no screen.
+
+### Locked out of two-factor authentication
+
+Someone who lost the phone with their authenticator app cannot sign in past
+the code step, and cannot remove the factor themselves (removing it needs a
+code). After confirming who they are out of band, take the factor off their
+account with the service role, then tell them to turn two-factor on again in
+Settings:
+
+```sh
+SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… bun scripts/mfa-unenroll.ts person@example.com
+SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… bun scripts/mfa-unenroll.ts person@example.com --yes
+```
+
+The first run only lists the factors; the second removes them. It changes
+nothing else about the account.
+
+### Which clients an account has approved
+
+Approving a client on the consent screen records a row in
+`public.oauth_consents` (person × client, with the scope, the return address
+the person approved, and when), and it is what lets the same client reconnect
+to that address without the screen, when the browser arrived on its own rather
+than sent by another site. A row without a return address was recorded before
+addresses were kept; that client asks once more. Read it with the service role:
+
+```sql
+select c.user_id, k.client_name, c.client_id, c.scope, c.redirect_uri,
+       c.granted_at, c.revoked_at
+from public.oauth_consents c
+join public.oauth_clients k using (client_id)
+order by c.granted_at desc;
+```
+
+To make a client ask again next time, mark the consent revoked:
+
+```sql
+update public.oauth_consents
+set revoked_at = now()
+where user_id = '<usr_…>' and client_id = '<oac_…>';
+```
+
+That does not end an agent that is already connected: its session runs until
+its refresh token is revoked, for example by the password change above.
 
 ### Self-hosted stack — Supabase API keys and JWT secret
 
@@ -485,6 +531,23 @@ loads as `abc`. Escape it as `abc\$Def`, or avoid `$` in passwords
 entirely. When verifying, never print the password — compare length or a
 masked form.
 
+## The edge at deploy
+
+The edge's Caddyfile is one bind-mounted file. A release that changes it
+makes `git pull` write a new inode, and the running container keeps the old
+one: `up -d` leaves Caddy alone (its compose config did not change) and a
+`caddy reload` inside the container re-reads the stale mount, so the change
+never goes live on its own. At the end of every deploy the script therefore
+compares the file the running edge reads (`/etc/caddy/Caddyfile` inside the
+container) with the one on disk (`CADDYFILE_PATH`, the production template by
+default) and, when they differ, recreates the edge container
+(`up -d --force-recreate --wait caddy`). It compares contents rather than
+asking whether its own pull changed anything, because the deploy hook pulls
+before the script starts. That is a few seconds of edge restart on the
+releases that touch the file, and nothing on the others. The same applies to
+a template edited by hand on the host with an editor that writes a new file:
+restart the edge, do not reload it.
+
 ## Migrations at deploy
 
 With `ZM_MIGRATE_ON_DEPLOY=1` in `infra/prod/.env`, `upgrade.sh` manages the
@@ -629,31 +692,85 @@ What is enforced, and where:
   Supabase JWT; Postgres row-level security decides what each user can see or
   write (scope membership via `scope_members`, private-by-default). The
   server never widens access on a user path.
-- **OAuth surface is rate-limited.** `POST /oauth/token`, `POST
-/oauth/authorize`, `POST /oauth/register` — the only unauthenticated,
-  brute-forceable endpoints — share an in-memory fixed-window limiter keyed
+- **OAuth surface is rate-limited.** `POST /oauth/token`, `GET
+/oauth/authorize` (each request parks a pending row), `POST /oauth/register`
+  — the only unauthenticated endpoints — share an in-memory fixed-window limiter keyed
   by client IP + route (`ZM_RATELIMIT_MAX` per `ZM_RATELIMIT_WINDOW_S`,
-  default 30/60 s; over-limit → 429 + `Retry-After`). Client IP is the first
-  `X-Forwarded-For` hop — only trustworthy behind our caddy/nginx edge, with
-  the socket address as fallback.
-- **OAuth tables are deny-all.** `oauth_clients` / `oauth_codes` have RLS
-  enabled with **no** policies; only the service-role adapter behind the
+  default 30/60 s; over-limit → 429 + `Retry-After`). The key is the socket
+  address, which the listening app hands the limiter; with `ZM_TRUST_PROXY`
+  on it is the first `X-Forwarded-For` hop instead, which is only right behind
+  an edge that sets that header itself rather than appending to what the
+  client sent (Caddy does; the nginx example sets `$remote_addr`).
+- **OAuth tables are deny-all.** `oauth_clients`, `oauth_codes`,
+  `oauth_authorizations` and `oauth_consents` grant nothing to API roles and
+  carry an explicit deny-all policy; only the service-role adapter behind the
   OAuth endpoints reaches them.
+- **People sign in on the dashboard, never on the server.** `/oauth/authorize`
+  parks the request (10-minute TTL) and redirects to the dashboard's consent
+  page with only its id. The consent endpoints take the person's own session
+  as a bearer; the first signed-in reader binds the request and anyone else
+  gets 404, so once someone has opened a request nobody else can see or
+  decide it. Binding does not tell who started the request: a link forwarded
+  unopened is bound by whoever opens it, so resisting a deceptive "please
+  approve" request rests on the consent screen, which names the client, where
+  the browser returns and which account is deciding. Approval mints a
+  separate session for the agent, pinned to the approving account; the
+  person's browser session is never handed out.
+- **A remembered consent is as narrow as what the screen showed.** It covers
+  the one return address the person approved (loopback compared without the
+  port), and it skips the screen only when the browser arrived on its own or
+  from the dashboard (`Sec-Fetch-Site` none or same-origin); a navigation some
+  other site set off shows the screen every time. A client registers return
+  addresses on remote hosts or on the local machine, never both, so a client
+  whose screen looks local cannot also return to a remote host.
 - **Authorization codes are single-use and short-lived.** Redemption is an
   atomic `DELETE … RETURNING` (a replayed or raced code loses), TTL 5
   minutes, expired codes swept opportunistically.
 - **PKCE S256 is mandatory** (plain rejected), redirect URIs are exact-match
   against registration, and registration accepts only https or loopback-http
-  URIs. Login failures render one constant message (no user-exists oracle);
-  credentials are never logged.
+  URIs. Credentials never reach the authorization server: sign-in happens on
+  the dashboard through Supabase Auth.
 - **Memories are ADD-only** on the agent path: `remember`/`ingest` append;
   supersede/forget are explicit, provenance-tracked operations.
-- **Bounded server state.** MCP sessions are capped (`ZM_MAX_SESSIONS`,
-  default 200; LRU eviction closes the transport) on top of the 30-minute
-  idle TTL.
+- **Bounded server state.** MCP sessions are capped per account first
+  (`ZM_MAX_SESSIONS_PER_USER`, default 20: a caller opening sessions in a loop
+  displaces only their own oldest) and then overall (`ZM_MAX_SESSIONS`,
+  default 200; LRU eviction closes the transport), on top of the 30-minute
+  idle TTL. Request bodies are capped at 4 MiB; a client registration takes
+  at most 8 return addresses of 2048 characters.
 - **Headers.** OAuth HTML pages and all web responses send
-  `X-Content-Type-Options: nosniff`, a `Referrer-Policy`, and CSP
-  `frame-ancestors 'none'`; OAuth responses are `Cache-Control: no-store`.
+  `X-Content-Type-Options: nosniff`, a `Referrer-Policy`, CSP
+  `frame-ancestors 'none'` and `Strict-Transport-Security` (two years,
+  subdomains included; the edge adds it for the API and docs hosts too); the
+  framework's `X-Powered-By` is off; OAuth responses are
+  `Cache-Control: no-store`.
+- **The session cookie is `Secure` behind https.** The dashboard marks it from
+  the scheme the browser used (`X-Forwarded-Proto` behind the edge), so a
+  local stand over plain http keeps a working cookie and production never
+  sends the session in clear.
+- **Dashboard routes that use the service role answer only the dashboard.**
+  Account deletion and the provider-key route require the browser's
+  `Sec-Fetch-Site: same-origin` mark and, for a body, `application/json`; a
+  same-site sibling origin or a plain form post is refused unread.
+- **Two-factor protects the data, not only the pages.** On an account with a
+  verified factor, a session that has not given the code identifies nobody:
+  the identity function returns null and a restrictive policy on every table
+  admits complete sessions only, so the database API shows it no row; the
+  memory server answers `401 insufficient_aal`; the dashboard proxy sends a
+  navigation to the code step and refuses other requests, on every path, not
+  only in a layout. Agent sessions are recorded by the authorization server
+  the moment they are minted (`public.agent_sessions`) and stay complete
+  without a code; the dashboard refuses a recorded agent session outright.
+  Sessions open at the time this shipped were back-filled from Auth's
+  sign-in record (a session with the `otp` method alone is an agent's).
+- **The login page never shows text from a URL.** A failed callback or a
+  refusal in the URL fragment is reduced to a code, and the page says why in
+  its own words; a description planted in a link reaches nobody.
+- **A user's model endpoint never reaches a private address.** The one
+  endpoint a person may choose (Ollama's base URL) is re-checked, and for
+  plain http pinned, on every call; private, loopback and link-local targets
+  are refused by default. A one-person instance with Ollama on such an
+  address sets `ZM_POLICY_DENY_PRIVATE_ENDPOINTS=false`.
 
 Residual risks and deferred items (honest list):
 
@@ -668,6 +785,12 @@ Residual risks and deferred items (honest list):
   rotation is the manual procedure above ("Key & secret rotation").
 - **Refresh tokens are Supabase's** — revocation is per-session via
   Supabase Auth; there is no client-facing token-revocation endpoint (RFC 7009) yet.
+- **A user's https model endpoint is checked, not pinned** — pinning would
+  send the raw address as the TLS server name, which no certificate for a
+  named host covers, so a DNS answer that changes between the check and the
+  connection is not caught for https. Plain http is pinned. The endpoint's
+  own error text is relayed to the person who configured it, which with the
+  private-address refusal in place tells them only what their own server said.
 - **Advisor residue (accepted):** `public.create_scope` is an intentionally
   authenticated-callable `security definer` RPC (bootstraps scope creation
   past the admin-only RLS insert; validates roots, pins `search_path`);

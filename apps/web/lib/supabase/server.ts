@@ -1,6 +1,8 @@
 import { createServerClient } from '@supabase/ssr';
 import type { Database } from '@workspace/db';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
+
+import { secureCookies } from '@/lib/supabase/cookie-security';
 
 import { serverSupabaseEnvironment } from './env';
 
@@ -10,11 +12,13 @@ import { serverSupabaseEnvironment } from './env';
  */
 export async function createServerSupabaseClient() {
   const cookieStore = await cookies();
+  const secure = secureCookies(await headers());
   const { url, anonKey, authCookieName } = serverSupabaseEnvironment();
 
   return createServerClient<Database>(url, anonKey, {
     cookieOptions: {
       name: authCookieName,
+      secure,
     },
     cookies: {
       getAll() {

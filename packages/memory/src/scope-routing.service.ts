@@ -1,17 +1,24 @@
 import { injectContext, type IContext } from '@workspace/context';
 import { singleton } from '@workspace/di';
 import { createLogger } from '@workspace/logger';
+import { Err, Ok, type Result } from 'oxide.ts';
 
 import { injectProjectBindingRepository } from './project-binding.repository.provider.js';
 import type { IProjectBindingRepository } from './project-binding.repository.js';
-import { normalizeProjectHint } from './project-hint.vo.js';
+import { isProjectNameHint, normalizeProjectHint } from './project-hint.vo.js';
+import {
+  matchProjectName,
+  type ProjectCandidate,
+  type ProjectHintMiss,
+} from './project-name.utils.js';
 import { injectScopeAccessService } from './scope-access.provider.js';
 import type { IScopeAccessService } from './scope-access.service.js';
 import { Scope } from './scope.vo.js';
 
 /**
- * Routes a project identity (git remote or path) to the ltree scope its
- * auto-populated memories belong in:
+ * Routes a project identity to the ltree scope its memories belong in.
+ *
+ * A path or a git remote is what a machine reports about a repository:
  *
  *   normalize hint -> existing binding -> use its scope
  *   -> no binding: derive `proj.<slug>`; if the user cannot already write
@@ -19,7 +26,12 @@ import { Scope } from './scope.vo.js';
  *   -> anything fails -> the caller's personal scope (fail-safe: memories
  *      are stored private, never lost and never leaked).
  *
- * Used by the ingestion pipeline and by the MCP roots handshake.
+ * A NAME is what a person or an agent typed, and it only ever points at a
+ * project that already exists: it is matched against the caller's own
+ * projects ({@link matchProjectName}), and nothing is created or bound for
+ * it. A name that fits no project, or several, degrades like any other
+ * unroutable hint; {@link resolveProjectTarget} reports it with the projects
+ * to choose from instead.
  */
 @singleton()
 export class ScopeRoutingService {
@@ -65,6 +77,17 @@ export class ScopeRoutingService {
    * reasons: every failure path degrades to the personal scope.
    */
   async resolveProjectScope(rawHint: string): Promise<Scope> {
+    if (isProjectNameHint(rawHint)) {
+      const match = matchProjectName(rawHint, await this.listProjects());
+      if (match.kind === 'match') {
+        return match.project.scope;
+      }
+      this.#logger.warn('project name names no single project', {
+        hint: rawHint,
+        match: match.kind,
+      });
+      return this.personalScope();
+    }
     const normalized = normalizeProjectHint(rawHint);
     if (normalized.isErr()) {
       this.#logger.warn('project hint not normalizable, using personal scope', {
@@ -118,5 +141,49 @@ export class ScopeRoutingService {
       });
     }
     return scope;
+  }
+
+  /**
+   * The project a write names by its hint, or why it names none. Unlike
+   * {@link resolveProjectScope} nothing degrades here: a write that asked for
+   * a project and cannot have one is refused, and the refusal carries the
+   * projects the caller can pick from.
+   */
+  async resolveProjectTarget(
+    rawHint: string
+  ): Promise<Result<Scope, ProjectHintMiss>> {
+    if (isProjectNameHint(rawHint)) {
+      const projects = await this.listProjects();
+      const match = matchProjectName(rawHint, projects);
+      if (match.kind === 'match') {
+        return Ok(match.project.scope);
+      }
+      return Err(
+        match.kind === 'ambiguous'
+          ? { reason: 'ambiguous', projects: match.projects }
+          : { reason: 'unknown', projects }
+      );
+    }
+    const scope = await this.resolveProjectScope(rawHint);
+    if (scope.isShareable) {
+      return Ok(scope);
+    }
+    return Err({ reason: 'unroutable', projects: await this.listProjects() });
+  }
+
+  /**
+   * The projects the caller belongs to. An empty list when they cannot be
+   * read: a name then matches nothing and is refused, which is the safe way
+   * for this to fail.
+   */
+  async listProjects(): Promise<ProjectCandidate[]> {
+    const listed = await this.scopeAccess.listMemberProjects();
+    if (listed.isErr()) {
+      this.#logger.warn('member projects could not be listed', {
+        error: listed.unwrapErr(),
+      });
+      return [];
+    }
+    return listed.unwrap();
   }
 }

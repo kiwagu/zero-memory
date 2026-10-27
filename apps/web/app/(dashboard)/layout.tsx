@@ -10,9 +10,16 @@ import {
   type DashboardNavItem,
 } from '@/components/dashboard-sidebar';
 import { DashboardTopbar } from '@/components/dashboard-topbar';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
+
 import { currentAccount } from '@/lib/account';
 import { getRequestMessages } from '@/lib/i18n';
+import { legalLinks } from '@/lib/legal';
+import { requireAssurance } from '@/lib/mfa';
+import { safeNext } from '@/lib/safe-next';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { termsGate } from '@/lib/terms-gate';
 
 export default async function DashboardLayout({
   children,
@@ -28,6 +35,22 @@ export default async function DashboardLayout({
   modal: React.ReactNode;
 }>) {
   const supabase = await createServerSupabaseClient();
+  // The guard put the requested path in a header, because a layout cannot
+  // see the URL by itself; it is the return path after either step below.
+  const requested = safeNext((await headers()).get('x-pathname') ?? '/');
+  // The second factor is part of signing in: an account that has one gives
+  // the code before any dashboard page, and before anything else is asked.
+  await requireAssurance(supabase, requested);
+  // An account that arrived without accepting this instance's documents —
+  // created through a provider — is asked once before any dashboard page.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  if (termsGate(legalLinks(), claimsData?.claims ?? null) === 'accept') {
+    redirect(
+      requested === '/'
+        ? '/accept-terms'
+        : `/accept-terms?next=${encodeURIComponent(requested)}`
+    );
+  }
   const account = await currentAccount(supabase);
   const { t } = await getRequestMessages();
 
@@ -60,7 +83,10 @@ export default async function DashboardLayout({
         items={nav}
         footerItems={footerNav}
       />
-      <SidebarInset>
+      {/* min-w-0: the inset is a flex item beside the sidebar, and without it
+          a page wider than the window (the board's scrolling row) would widen
+          the whole inset instead of scrolling inside its own container. */}
+      <SidebarInset className="min-w-0">
         <DashboardTopbar
           displayName={account.displayName}
           email={account.email}

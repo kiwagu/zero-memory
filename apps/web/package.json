@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "0.20.0",
+  "version": "0.48.0",
   "type": "module",
   "private": true,
   "license": "Apache-2.0",
@@ -19,14 +19,17 @@
     "@supabase/ssr": "catalog:",
     "@supabase/supabase-js": "catalog:",
     "@workspace/db": "workspace:*",
+    "@workspace/email": "workspace:*",
     "@workspace/i18n-catalogs": "workspace:*",
+    "@workspace/judgment": "workspace:*",
+    "@workspace/memory": "workspace:*",
     "@workspace/ui": "workspace:*",
     "lucide-react": "catalog:",
     "next": "catalog:",
     "next-themes": "catalog:",
-    "zod": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "catalog:",

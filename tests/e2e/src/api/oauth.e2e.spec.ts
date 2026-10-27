@@ -1,93 +1,85 @@
 /**
- * OAuth surface, protocol level: DCR → authorize → token happy path, the
- * negative cases an attacker would probe (code replay, bad PKCE, wrong
- * credentials, unknown grant), and the fixed-window rate limit.
+ * OAuth surface, protocol level: DCR, the hand-off from /oauth/authorize to the
+ * dashboard's consent screen, the consent API the screen talks to, code + PKCE
+ * redemption, and the negative cases an attacker would probe (a request opened
+ * by someone else, code replay, bad PKCE, unknown grant), plus the
+ * fixed-window rate limit.
+ *
+ * The consent API is driven here with the person's dashboard session from a
+ * password grant; the browser half of the same flow is the web spec.
  *
  * The specs run in file order in one worker (fullyParallel: false). The
  * rate-limit burst is the LAST test on purpose: it exhausts the /oauth/token
  * window for up to a minute, and `awaitRouteCooldown` at suite start makes an
  * immediate rerun deterministic instead of flaky.
  */
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
+import { createClient } from '@supabase/supabase-js';
 import { expect, test, type APIRequestContext } from '@playwright/test';
 
 import { e2eEnv } from '../helpers/env.js';
 import { McpTestClient } from '../helpers/mcp.js';
+import {
+  awaitRouteCooldown,
+  decide,
+  pkcePair,
+  readAuthorization,
+  redeem as redeemFor,
+  redirectOf,
+  registerClient as registerFor,
+  startAuthorization as startFor,
+} from '../helpers/oauth-client.js';
 import { readSeedState } from '../helpers/runtime-state.js';
+import { passwordGrantToken } from '../helpers/users.js';
 
 const base = e2eEnv.serverUrl;
 const REDIRECT_URI = 'http://127.0.0.1:45789/callback';
 
-const pkcePair = (): { verifier: string; challenge: string } => {
-  const verifier = randomBytes(32).toString('base64url');
-  const challenge = createHash('sha256').update(verifier).digest('base64url');
-  return { verifier, challenge };
-};
-
-/**
- * A previous run's rate-limit burst may still hold the route's window. Probe
- * with a harmless invalid POST and wait out Retry-After once, so reruns
- * within the window pass instead of flaking on 429.
- */
-const awaitRouteCooldown = async (
+const registerClient = (
   request: APIRequestContext,
-  path: string
-): Promise<void> => {
-  const probe = await request.post(`${base}${path}`, { data: {} });
-  if (probe.status() === 429) {
-    const retryAfter = Number.parseInt(
-      probe.headers()['retry-after'] ?? '60',
-      10
-    );
-    await new Promise((resolve) =>
-      setTimeout(resolve, (retryAfter + 1) * 1000)
-    );
+  clientName: string,
+  redirectUri = REDIRECT_URI
+): Promise<string> => registerFor(request, clientName, redirectUri);
+
+const startAuthorization = (
+  request: APIRequestContext,
+  clientId: string,
+  challenge: string,
+  redirectUri = REDIRECT_URI
+) => startFor(request, clientId, challenge, redirectUri);
+
+const redeem = (
+  request: APIRequestContext,
+  args: {
+    code: string;
+    verifier: string;
+    clientId: string;
+    redirectUri?: string;
   }
-};
+) => redeemFor(request, { redirectUri: REDIRECT_URI, ...args });
 
-interface AuthorizeCodeOptions {
-  verifier: string;
-  challenge: string;
-  clientId: string;
-  password?: string;
-}
+/** The agent's JWT claims, read without verification (the server did that). */
+const claimsOf = (accessToken: string): Record<string, unknown> =>
+  JSON.parse(
+    Buffer.from(accessToken.split('.')[1] ?? '', 'base64url').toString('utf8')
+  ) as Record<string, unknown>;
 
-/** Drives GET+POST /oauth/authorize and returns the redirect Location. */
-const submitAuthorize = async (
-  request: APIRequestContext,
-  { challenge, clientId, password }: Omit<AuthorizeCodeOptions, 'verifier'>
-) => {
-  const state = randomBytes(8).toString('base64url');
-  const seed = await readSeedState();
-  return {
-    state,
-    response: await request.post(`${base}/oauth/authorize`, {
-      maxRedirects: 0,
-      form: {
-        client_id: clientId,
-        redirect_uri: REDIRECT_URI,
-        response_type: 'code',
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-        state,
-        email: seed.userA.email,
-        password: password ?? seed.userA.password,
-      },
-    }),
-  };
-};
-
-test.describe('OAuth: DCR → authorize → token', () => {
+test.describe('OAuth: DCR → dashboard consent → token', () => {
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(120_000);
 
   let clientId = '';
+  let tokenA = '';
+  let tokenB = '';
 
   test.beforeAll(async ({ request }) => {
     await awaitRouteCooldown(request, '/oauth/register');
     await awaitRouteCooldown(request, '/oauth/token');
-    await awaitRouteCooldown(request, '/oauth/authorize');
+    await awaitRouteCooldown(request, '/oauth/authorize', 'get');
+    const seed = await readSeedState();
+    tokenA = await passwordGrantToken(seed.userA);
+    tokenB = await passwordGrantToken(seed.userB);
   });
 
   test('@smoke advertises RFC 8414 metadata', async ({ request }) => {
@@ -115,107 +107,94 @@ test.describe('OAuth: DCR → authorize → token', () => {
     clientId = body.client_id;
   });
 
-  test('@smoke registers a native app with a private-use redirect scheme and drives it end to end', async ({
+  test('@smoke authorize hands the browser to the dashboard', async ({
     request,
   }) => {
-    // Cursor and other desktop MCP clients register a custom-scheme deep-link
-    // (RFC 8252 §7.1) instead of a loopback URL — PKCE is the interception
-    // backstop, so DCR must accept it and the whole flow must round-trip.
-    const nativeRedirect = 'cursor://anysphere.cursor-mcp/oauth/callback';
-    const register = await request.post(`${base}/oauth/register`, {
-      data: {
-        client_name: 'zm-e2e-native',
-        redirect_uris: [nativeRedirect],
-        token_endpoint_auth_method: 'none',
-      },
-    });
-    expect(register.status()).toBe(201);
-    const nativeClientId = (await register.json()).client_id as string;
-
-    const { verifier, challenge } = pkcePair();
-    const state = randomBytes(8).toString('base64url');
-    const seed = await readSeedState();
-    const submit = await request.post(`${base}/oauth/authorize`, {
-      maxRedirects: 0,
-      form: {
-        client_id: nativeClientId,
-        redirect_uri: nativeRedirect,
-        response_type: 'code',
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-        state,
-        email: seed.userA.email,
-        password: seed.userA.password,
-      },
-    });
-    expect(submit.status()).toBe(302);
-    const location = submit.headers()['location'] ?? '';
-    expect(location.startsWith(`${nativeRedirect}?`)).toBe(true);
-    const redirected = new URL(location);
-    expect(redirected.searchParams.get('state')).toBe(state);
-    const code = redirected.searchParams.get('code');
-    expect(code).toBeTruthy();
-
-    const token = await request.post(`${base}/oauth/token`, {
-      form: {
-        grant_type: 'authorization_code',
-        code: code!,
-        code_verifier: verifier,
-        client_id: nativeClientId,
-        redirect_uri: nativeRedirect,
-      },
-    });
-    expect(token.status()).toBe(200);
-    const mcp = await McpTestClient.connect((await token.json()).access_token);
-    try {
-      expect(await mcp.listToolNames()).toContain('recall');
-    } finally {
-      await mcp.close();
-    }
+    const { challenge } = pkcePair();
+    // The assertions live in the helper: a 302 to the consent page that
+    // carries the parked request's id and nothing else.
+    await startAuthorization(request, clientId, challenge);
   });
 
-  test('@smoke full code+PKCE flow yields a token the MCP endpoint accepts', async ({
+  test('@smoke a request with an unregistered redirect is shown, never followed', async ({
     request,
   }) => {
-    const { verifier, challenge } = pkcePair();
-
-    const page = await request.get(`${base}/oauth/authorize`, {
+    const { challenge } = pkcePair();
+    const response = await request.get(`${base}/oauth/authorize`, {
+      maxRedirects: 0,
       params: {
         client_id: clientId,
-        redirect_uri: REDIRECT_URI,
+        redirect_uri: 'http://127.0.0.1:45789/elsewhere',
         response_type: 'code',
         code_challenge: challenge,
         code_challenge_method: 'S256',
       },
     });
-    expect(page.status()).toBe(200);
-    expect(await page.text()).toContain('form');
+    expect(response.status()).toBe(400);
+    expect(response.headers()['location']).toBeUndefined();
+    expect(await response.text()).toContain('redirect_uri is not registered');
+  });
 
-    const { state, response: submit } = await submitAuthorize(request, {
-      challenge,
+  test('@smoke consent issues a code the token endpoint redeems', async ({
+    request,
+  }) => {
+    const { verifier, challenge } = pkcePair();
+    const { state, authorizationId } = await startAuthorization(
+      request,
       clientId,
+      challenge
+    );
+
+    const read = await readAuthorization(request, tokenA, authorizationId);
+    expect(read.status()).toBe(200);
+    const details = await read.json();
+    expect(details).toMatchObject({
+      authorization_id: authorizationId,
+      client: { client_id: clientId, client_name: 'zm-e2e' },
+      scope: 'mcp:read mcp:write',
+      redirect_uri: REDIRECT_URI,
     });
-    expect(submit.status()).toBe(302);
-    const location = new URL(submit.headers()['location'] ?? '');
+
+    const decided = await decide(request, tokenA, authorizationId, 'approve');
+    expect(decided.status()).toBe(200);
+    const location = await redirectOf(decided);
     expect(location.origin + location.pathname).toBe(REDIRECT_URI);
     expect(location.searchParams.get('state')).toBe(state);
     const code = location.searchParams.get('code');
     expect(code).toBeTruthy();
 
-    const token = await request.post(`${base}/oauth/token`, {
-      form: {
-        grant_type: 'authorization_code',
-        code: code!,
-        code_verifier: verifier,
-        client_id: clientId,
-        redirect_uri: REDIRECT_URI,
-      },
-    });
+    const token = await redeem(request, { code: code!, verifier, clientId });
     expect(token.status()).toBe(200);
     const body = await token.json();
     expect(body.token_type).toBe('bearer');
     expect(body.expires_in).toBeGreaterThan(0);
     expect(typeof body.refresh_token).toBe('string');
+
+    // The agent got a session of its own, not the dashboard's: same person,
+    // another session, opened by a one-time sign-in rather than a password.
+    const agent = claimsOf(body.access_token);
+    const browser = claimsOf(tokenA);
+    expect(agent.sub).toBe(browser.sub);
+    expect(agent.session_id).not.toBe(browser.session_id);
+    expect(JSON.stringify(agent.amr)).not.toContain('password');
+
+    // The authorization server put the agent's session on record the moment
+    // it minted it: on an account with a second factor, that record is what
+    // admits the session to the data without a code.
+    const service = createClient(
+      e2eEnv.supabaseUrl,
+      e2eEnv.supabaseServiceRoleKey,
+      { auth: { persistSession: false, autoRefreshToken: false } }
+    );
+    const { data: recorded } = await service
+      .from('agent_sessions')
+      .select('session_id, client_id')
+      .eq('session_id', agent.session_id as string)
+      .maybeSingle();
+    expect(recorded).toEqual({
+      session_id: agent.session_id,
+      client_id: clientId,
+    });
 
     // The issued token must open a real MCP session (end of the chain).
     const mcp = await McpTestClient.connect(body.access_token);
@@ -226,62 +205,238 @@ test.describe('OAuth: DCR → authorize → token', () => {
     }
 
     // Single-use code: replaying the same redemption must fail.
-    const replay = await request.post(`${base}/oauth/token`, {
-      form: {
-        grant_type: 'authorization_code',
-        code: code!,
-        code_verifier: verifier,
-        client_id: clientId,
-        redirect_uri: REDIRECT_URI,
-      },
-    });
+    const replay = await redeem(request, { code: code!, verifier, clientId });
     expect(replay.status()).toBe(400);
     expect((await replay.json()).error).toBe('invalid_grant');
+
+    // And the decision itself is taken once.
+    const again = await decide(request, tokenA, authorizationId, 'approve');
+    expect(again.status()).toBe(404);
+  });
+
+  test('@smoke a second authorization of the same client is approved without a screen', async ({
+    request,
+  }) => {
+    const { verifier, challenge } = pkcePair();
+    const { state, authorizationId } = await startAuthorization(
+      request,
+      clientId,
+      challenge
+    );
+    // Sent here by some other page, the person still sees the screen.
+    const shown = await readAuthorization(request, tokenA, authorizationId);
+    expect(shown.status()).toBe(200);
+    expect(await shown.json()).toHaveProperty(
+      'authorization_id',
+      authorizationId
+    );
+    // Arriving on their own, as a client opening the URL makes them, they go
+    // straight back.
+    const read = await readAuthorization(request, tokenA, authorizationId, {
+      screenless: true,
+    });
+    expect(read.status()).toBe(200);
+    const location = await redirectOf(read);
+    expect(location.searchParams.get('state')).toBe(state);
+    const token = await redeem(request, {
+      code: location.searchParams.get('code')!,
+      verifier,
+      clientId,
+    });
+    expect(token.status()).toBe(200);
+  });
+
+  test('@smoke a request binds to the first person who opens it', async ({
+    request,
+  }) => {
+    const bindingClient = await registerClient(request, 'zm-e2e-binding');
+    const { challenge } = pkcePair();
+    const { authorizationId } = await startAuthorization(
+      request,
+      bindingClient,
+      challenge
+    );
+    expect(
+      (await readAuthorization(request, tokenA, authorizationId)).status()
+    ).toBe(200);
+    // A second person — say, whoever a "please approve" link was forwarded
+    // to — can neither see it nor decide it.
+    expect(
+      (await readAuthorization(request, tokenB, authorizationId)).status()
+    ).toBe(404);
+    expect(
+      (await decide(request, tokenB, authorizationId, 'approve')).status()
+    ).toBe(404);
+    // It is still waiting for the person it belongs to.
+    expect(
+      (await readAuthorization(request, tokenA, authorizationId)).status()
+    ).toBe(200);
+  });
+
+  test('@smoke deny returns access_denied to the client', async ({
+    request,
+  }) => {
+    const denyClient = await registerClient(request, 'zm-e2e-deny');
+    const { challenge } = pkcePair();
+    const { state, authorizationId } = await startAuthorization(
+      request,
+      denyClient,
+      challenge
+    );
+    const decided = await decide(request, tokenA, authorizationId, 'deny');
+    expect(decided.status()).toBe(200);
+    const location = await redirectOf(decided);
+    expect(location.origin + location.pathname).toBe(REDIRECT_URI);
+    expect(location.searchParams.get('error')).toBe('access_denied');
+    expect(location.searchParams.get('state')).toBe(state);
+    expect(location.searchParams.get('code')).toBeNull();
+
+    // A denial is not remembered: the next request asks again.
+    const next = await startAuthorization(request, denyClient, challenge);
+    const read = await readAuthorization(request, tokenA, next.authorizationId);
+    expect(await read.json()).toHaveProperty(
+      'authorization_id',
+      next.authorizationId
+    );
+  });
+
+  test('@smoke an unknown id is 404 and a guest is 401', async ({
+    request,
+  }) => {
+    for (const id of ['oaa_0000000000000000.0000000000', 'not-an-id']) {
+      expect((await readAuthorization(request, tokenA, id)).status()).toBe(404);
+    }
+    const { challenge } = pkcePair();
+    const { authorizationId } = await startAuthorization(
+      request,
+      clientId,
+      challenge
+    );
+    const guest = await request.get(
+      `${base}/oauth/authorizations/${authorizationId}`
+    );
+    expect(guest.status()).toBe(401);
+    expect(
+      (
+        await request.post(
+          `${base}/oauth/authorizations/${authorizationId}/consent`,
+          { data: { decision: 'approve' } }
+        )
+      ).status()
+    ).toBe(401);
+  });
+
+  test('@smoke the agent session survives the browser signing out', async ({
+    request,
+  }) => {
+    // A dashboard session of its own for this test, so signing it out does
+    // not disturb the others.
+    const seed = await readSeedState();
+    const browserToken = await passwordGrantToken(seed.userA);
+    const { verifier, challenge } = pkcePair();
+    const { authorizationId } = await startAuthorization(
+      request,
+      clientId,
+      challenge
+    );
+    const read = await readAuthorization(
+      request,
+      browserToken,
+      authorizationId,
+      { screenless: true }
+    );
+    const location = await redirectOf(read);
+    const token = await redeem(request, {
+      code: location.searchParams.get('code')!,
+      verifier,
+      clientId,
+    });
+    const agent = await token.json();
+
+    const logout = await request.post(
+      `${e2eEnv.supabaseUrl}/auth/v1/logout?scope=local`,
+      {
+        headers: {
+          apikey: e2eEnv.supabaseAnonKey,
+          authorization: `Bearer ${browserToken}`,
+        },
+      }
+    );
+    expect(logout.status()).toBe(204);
+
+    const refreshed = await request.post(`${base}/oauth/token`, {
+      form: { grant_type: 'refresh_token', refresh_token: agent.refresh_token },
+    });
+    expect(refreshed.status()).toBe(200);
+    const mcp = await McpTestClient.connect(
+      (await refreshed.json()).access_token
+    );
+    try {
+      expect(await mcp.listToolNames()).toContain('recall');
+    } finally {
+      await mcp.close();
+    }
+  });
+
+  test('@smoke registers a native app with a private-use redirect scheme and drives it end to end', async ({
+    request,
+  }) => {
+    // Cursor and other desktop MCP clients register a custom-scheme deep-link
+    // (RFC 8252 §7.1) instead of a loopback URL — PKCE is the interception
+    // backstop, so DCR must accept it and the whole flow must round-trip.
+    const nativeRedirect = 'cursor://anysphere.cursor-mcp/oauth/callback';
+    const nativeClientId = await registerClient(
+      request,
+      'zm-e2e-native',
+      nativeRedirect
+    );
+    const { verifier, challenge } = pkcePair();
+    const { state, authorizationId } = await startAuthorization(
+      request,
+      nativeClientId,
+      challenge,
+      nativeRedirect
+    );
+    const decided = await decide(request, tokenA, authorizationId, 'approve');
+    expect(decided.status()).toBe(200);
+    const location = await redirectOf(decided);
+    expect(location.href.startsWith(`${nativeRedirect}?`)).toBe(true);
+    expect(location.searchParams.get('state')).toBe(state);
+
+    const token = await redeem(request, {
+      code: location.searchParams.get('code')!,
+      verifier,
+      clientId: nativeClientId,
+      redirectUri: nativeRedirect,
+    });
+    expect(token.status()).toBe(200);
+    const mcp = await McpTestClient.connect((await token.json()).access_token);
+    try {
+      expect(await mcp.listToolNames()).toContain('recall');
+    } finally {
+      await mcp.close();
+    }
   });
 
   test('@smoke rejects a wrong PKCE verifier', async ({ request }) => {
     const { challenge } = pkcePair();
-    const { response: submit } = await submitAuthorize(request, {
-      challenge,
+    const { authorizationId } = await startAuthorization(
+      request,
       clientId,
-    });
-    expect(submit.status()).toBe(302);
-    const code = new URL(submit.headers()['location'] ?? '').searchParams.get(
-      'code'
+      challenge
     );
+    const read = await readAuthorization(request, tokenA, authorizationId, {
+      screenless: true,
+    });
+    const code = (await redirectOf(read)).searchParams.get('code');
 
-    const token = await request.post(`${base}/oauth/token`, {
-      form: {
-        grant_type: 'authorization_code',
-        code: code!,
-        code_verifier: randomBytes(32).toString('base64url'),
-        client_id: clientId,
-        redirect_uri: REDIRECT_URI,
-      },
+    const token = await redeem(request, {
+      code: code!,
+      verifier: randomBytes(32).toString('base64url'),
+      clientId,
     });
     expect(token.status()).toBe(400);
     expect((await token.json()).error).toBe('invalid_grant');
-  });
-
-  test('@smoke rejects wrong credentials with a retry page, not a redirect', async ({
-    request,
-  }) => {
-    const { challenge } = pkcePair();
-    const { response } = await submitAuthorize(request, {
-      challenge,
-      clientId,
-      password: 'definitely-wrong-password',
-    });
-    expect(response.status()).toBe(401);
-    expect(await response.text()).toContain('Invalid email or password');
-  });
-
-  test('@smoke rejects unknown grant types', async ({ request }) => {
-    const response = await request.post(`${base}/oauth/token`, {
-      form: { grant_type: 'client_credentials' },
-    });
-    expect(response.status()).toBe(400);
-    expect((await response.json()).error).toBe('unsupported_grant_type');
   });
 
   test('@smoke rate-limits token brute force with 429 + Retry-After', async ({

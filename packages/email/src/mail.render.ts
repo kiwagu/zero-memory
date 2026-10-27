@@ -2,11 +2,11 @@ import { render } from '@react-email/render';
 import type { MailLocale } from '@workspace/i18n-catalogs';
 import { createMailTranslator } from '@workspace/i18n-catalogs/mail';
 
-import type { AuthTemplateSpec } from './auth-template.registry.js';
-import { findMissingPlaceholders } from './gotrue.constants.js';
-import { AuthNotice } from './templates/auth-notice.template.js';
-import type { DigestStat } from './templates/digest.template.js';
-import { DigestMail } from './templates/digest.template.js';
+import type { AuthTemplateSpec } from './auth-template.registry';
+import { findMissingPlaceholders } from './gotrue.constants';
+import { AuthNotice } from './templates/auth-notice.template';
+import type { DigestStat } from './templates/digest.template';
+import { DigestMail } from './templates/digest.template';
 
 export type RenderedAuthTemplate = {
   name: string;

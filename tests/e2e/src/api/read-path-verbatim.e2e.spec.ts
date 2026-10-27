@@ -1,12 +1,12 @@
 /**
- * The read path searches with the string it was given. Nothing on the server
- * rewrites a query or a topic, so what a caller sent is what the search ran on
- * and what the activity log shows — the three can no longer disagree.
- *
  * The flags a previous contract used to carry (`translate_query`, `query_lang`)
  * are gone. An older client that still sends them must be no worse off than one
- * that does not, which is what the first test pins: they are stripped, not
- * honoured, and they change nothing.
+ * that does not: over the wire they are stripped, not refused, and they change
+ * nothing. That holds for both read tools; build_context is the one the older
+ * session-start hooks sent them on, and it no longer reports a rewritten
+ * `searched_as` either. (That the server searches the string it was given,
+ * unrewritten, is the memory service's unit tests' to pin: they see what
+ * reaches the embedder.)
  */
 import { expect, test } from '@playwright/test';
 
@@ -15,8 +15,6 @@ import { readSeedState } from '../helpers/runtime-state.js';
 import { passwordGrantToken } from '../helpers/users.js';
 
 const EN_QUERY = 'what does the e2e fixture say about the dashboard feed?';
-const NON_ENGLISH_QUERY =
-  'e2eフィクスチャはダッシュボードのフィードについて何と言っていますか？';
 
 test.describe('the read path searches verbatim over MCP', () => {
   test('@smoke a retired translation flag is ignored, not honoured', async () => {
@@ -40,53 +38,24 @@ test.describe('the read path searches verbatim over MCP', () => {
           (memory) => memory.id
         );
       expect(idsOf(stale)).toEqual(idsOf(plain));
-    } finally {
-      await mcp.close();
-    }
-  });
 
-  test('@smoke a non-English query is answered without reporting a rewrite', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    try {
-      const recalled = await mcp.callTool('recall', {
-        query: NON_ENGLISH_QUERY,
-        k: 10,
+      const plainPack = await mcp.callTool('build_context', {
+        topic: EN_QUERY,
+      });
+      const stalePack = await mcp.callTool('build_context', {
+        topic: EN_QUERY,
+        translate_query: true,
+        query_lang: 'ja',
       });
 
-      expect(recalled.isError ?? false).toBe(false);
-      // Whatever it finds against an English corpus is the caller's business;
-      // what matters here is that the server answers without substituting a
-      // query of its own.
-      expect(firstJson<Record<string, unknown>>(recalled)).not.toHaveProperty(
+      expect(plainPack.isError ?? false).toBe(false);
+      expect(stalePack.isError ?? false).toBe(false);
+      expect(firstJson<Record<string, unknown>>(stalePack)).not.toHaveProperty(
         'searched_as'
       );
-    } finally {
-      await mcp.close();
-    }
-  });
-
-  test('@smoke build_context briefs on the topic it was given, with its kind', async () => {
-    const seed = await readSeedState();
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userA)
-    );
-    try {
-      const pack = await mcp.callTool('build_context', {
-        topic: NON_ENGLISH_QUERY,
-        briefing: true,
-        // The marker the server meters task briefings by — accepted on the
-        // wire, and not a translation gate.
-        briefing_kind: 'task',
-        max_tokens: 1200,
-      });
-
-      expect(pack.isError ?? false).toBe(false);
-      expect(firstJson<Record<string, unknown>>(pack)).not.toHaveProperty(
-        'searched_as'
-      );
+      // The premise: the pack found something, so equal ids are a comparison.
+      expect(idsOf(plainPack).length).toBeGreaterThan(0);
+      expect(idsOf(stalePack)).toEqual(idsOf(plainPack));
     } finally {
       await mcp.close();
     }

@@ -28,6 +28,10 @@ plugins/zero-memory-cursor/
     (`user_message`) when the server is unreachable.
   - `preToolUse` (matcher `Grep|Glob`) → `nudge` — a once-per-session
     "recall first" reminder on code search (`agent_message`).
+  - `postToolUse` (matcher `Shell`) → `landing` — right after a shell command,
+    a squash whose board card has no record of its landing gets one line with
+    the exact `card` `land` call (`additional_context`; `afterShellExecution`
+    only observes, so it cannot carry the line).
   - `stop` → `ingest` — captures the new part of the session transcript into
     memory, labeled `cursor-stop-hook` in provenance.
   - `preCompact` → `checkpoint` — captures the epoch about to be condensed
@@ -67,7 +71,9 @@ ZM_SERVER_URL=https://memory.example.com/mcp bash scripts/plugin-bundle/deploy-z
 
 Installs the binary, drops the plugin in `~/.cursor/plugins/local/zero-memory`,
 registers the MCP server, and migrates any legacy direct `~/.cursor/hooks.json`
-entries into the plugin. Then finish the two one-time OAuth authorizations the
+entries into the plugin. Both JSON files are rewritten only when they must
+change, in place, after a backup under `~/.local/state/zero-memory/backups/`.
+Then finish the two one-time OAuth authorizations the
 script prints (the Cursor MCP connection and `zero-memory-watcher login`) and
 restart Cursor.
 

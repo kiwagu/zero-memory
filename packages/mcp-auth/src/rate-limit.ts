@@ -5,8 +5,8 @@
  * Each key gets its own window anchored at its first request (no clock
  * alignment, no jitter): requests within `windowSeconds` of the anchor share
  * a counter; the first request after the window elapses starts a fresh one.
- * State is a plain Map — single-process by design (one server instance per
- * deployment); a shared store is only needed if that topology changes.
+ * State is a plain Map, so the count belongs to one process; a server spread
+ * over instances passes a shared {@link IRateLimiter} to the plugin instead.
  */
 
 const DEFAULT_MAX_REQUESTS = 30;
@@ -25,6 +25,17 @@ export interface RateLimitDecision {
   allowed: boolean;
   /** Seconds until the caller's window resets (0 when allowed). */
   retryAfterSeconds: number;
+}
+
+/**
+ * Counts requests per key and decides whether one more is allowed. The
+ * in-process limiter below serves a server that runs as one process; a server
+ * spread over instances needs one shared count, or the limit multiplies by the
+ * number of instances.
+ */
+export interface IRateLimiter {
+  /** Records one request for `key` and decides whether it is allowed. */
+  hit(key: string): RateLimitDecision | Promise<RateLimitDecision>;
 }
 
 interface WindowEntry {
@@ -52,7 +63,7 @@ export const rateLimiterOptionsFromEnv = (): Required<
   ),
 });
 
-export class FixedWindowRateLimiter {
+export class FixedWindowRateLimiter implements IRateLimiter {
   readonly #maxRequests: number;
   readonly #windowMs: number;
   readonly #now: () => number;

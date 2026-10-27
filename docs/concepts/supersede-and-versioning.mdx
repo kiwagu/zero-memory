@@ -67,6 +67,13 @@ reserved for in-band writers with ground truth. Superseding a
 incoming write is absorbed into an existing near-duplicate, the absorbing
 memory becomes the successor for any declared targets.
 
+Only a write retires anything. The `link` tool can record a `supersedes`
+relation between two memories that already exist, but that link is a graph
+edge and nothing more: the older memory stays live, and a loop it names stays
+open. To replace a memory that is already stored, remember the newer one again
+with the declaration; dedup absorbs the repeat, and the declaration still
+applies.
+
 ## Finding the predecessor, and reading the chain
 
 The workflow leans on a habit agents should already have: recall before

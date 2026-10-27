@@ -17,6 +17,7 @@
 #          capture only — Cursor's compaction event is observational)
 #        - the memory-first rule (rules/zm-memory-first.mdc, always-apply)
 #   3. a reminder to finish the interactive OAuth steps
+# Every file of the user's it changes is backed up first (zm-user-files.sh).
 #
 # The MCP server is registered in ~/.cursor/mcp.json (user scope), NOT bundled in
 # the plugin — a plugin-bundled server namespaces its tools (plugin-<slug>-…).
@@ -139,6 +140,10 @@ if [ -n "$EXPORT_DIR" ]; then
     [ -f "$cand" ] && { install -m 0755 "$cand" "$EXPORT_DIR/zm-server-url.sh"; break; }
   done
   [ -f "$EXPORT_DIR/zm-server-url.sh" ] || warn "missing zm-server-url.sh — not staged."
+  for cand in "$SCRIPT_DIR/zm-user-files.sh" "$MARKET_ROOT/scripts/zm-user-files.sh"; do
+    [ -f "$cand" ] && { install -m 0755 "$cand" "$EXPORT_DIR/zm-user-files.sh"; break; }
+  done
+  [ -f "$EXPORT_DIR/zm-user-files.sh" ] || warn "missing zm-user-files.sh — not staged."
   say "Guest bundle staged: $EXPORT_DIR"
   say "On the guest:  cd $EXPORT_DIR && bash deploy-zm-cursor.sh   (then: zero-memory-watcher login)"
   say "Summary: binary=${BINARY_SOURCE}, sha=${export_hash:0:16}…, staged=$EXPORT_DIR (NOT installed here)"
@@ -166,6 +171,16 @@ zm_resolve_server_url || exit 1
 zm_store_server_url
 BASE_URL="$ZM_BASE_URL"
 
+# The rules for touching the user's own files (back up first, write in place).
+for cand in "$SCRIPT_DIR/zm-user-files.sh" "$SCRIPT_DIR/../zm-user-files.sh"; do
+  # shellcheck source=scripts/zm-user-files.sh
+  [ -f "$cand" ] && { . "$cand"; break; }
+done
+if ! command -v zm_write_file >/dev/null 2>&1; then
+  echo "ERROR: zm-user-files.sh not found next to this script." >&2
+  exit 1
+fi
+
 # --- install the watcher binary ---------------------------------------------
 # The same self-contained binary that ingests transcripts serves the briefing
 # hook: it is the one already-authenticated OAuth client, so a single
@@ -182,19 +197,20 @@ fi
 # Cursor reads mcp.json for its MCP connections; it OAuth-authorizes the server
 # itself in the browser (the token lives in Cursor's own credential store, NOT
 # in this file). Deep-merge the `zero-memory` entry so any keys Cursor added are
-# preserved, and only rewrite when the content actually changes — an already
-# correct file is left byte-identical, so Cursor never sees a change and its
-# existing authorization stands.
+# preserved, and only rewrite when the registration actually changes — an
+# already correct file is left byte-identical, however it is formatted, so
+# Cursor never sees a change and its existing authorization stands.
 say "Registering MCP server 'zero-memory' -> $ZM_SERVER_URL ($MCP_JSON)"
 [ -f "$MCP_JSON" ] || printf '{}\n' > "$MCP_JSON"
-new_mcp="$(jq --arg url "$ZM_SERVER_URL" '
-  .mcpServers["zero-memory"] = ((.mcpServers["zero-memory"] // {}) + {url: $url})
-' "$MCP_JSON")"
-if [ "$new_mcp" != "$(cat "$MCP_JSON")" ]; then
-  printf '%s\n' "$new_mcp" > "$MCP_JSON"
-  say "mcp.json updated"
-else
+if jq -e --arg url "$ZM_SERVER_URL" '.mcpServers["zero-memory"].url == $url' "$MCP_JSON" >/dev/null; then
   say "mcp.json already registers zero-memory -> $ZM_SERVER_URL — left untouched"
+else
+  tmp="$(mktemp)"
+  jq --arg url "$ZM_SERVER_URL" '
+    .mcpServers["zero-memory"] = ((.mcpServers["zero-memory"] // {}) + {url: $url})
+  ' "$MCP_JSON" > "$tmp"
+  zm_write_file "$MCP_JSON" "$tmp"
+  say "mcp.json updated"
 fi
 
 # --- install the plugin (~/.cursor/plugins/local/zero-memory) ---------------
@@ -232,10 +248,12 @@ if [ -f "$HOOKS_JSON" ]; then
     if ((.hooks // {}) == {}) and ((keys - ["version", "hooks"]) | length == 0)
     then "yes" else "no" end')"
   if [ "$vestigial" = "yes" ]; then
-    rm -f "$HOOKS_JSON"
+    zm_remove_file "$HOOKS_JSON"
     say "Removed the now-empty legacy $HOOKS_JSON (the plugin owns the hooks)"
-  elif [ "$new_hooks" != "$(cat "$HOOKS_JSON")" ]; then
-    printf '%s\n' "$new_hooks" > "$HOOKS_JSON"
+  elif [ "$(printf '%s' "$new_hooks" | jq -S .)" != "$(jq -S . "$HOOKS_JSON")" ]; then
+    tmp="$(mktemp)"
+    printf '%s\n' "$new_hooks" > "$tmp"
+    zm_write_file "$HOOKS_JSON" "$tmp"
     say "Stripped legacy direct hooks from $HOOKS_JSON (the plugin owns them now)"
   fi
 fi

@@ -1,16 +1,20 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type { BriefTail } from '@workspace/client-core';
+import type { ContextMemory } from '@workspace/contracts';
+import { memoryIdSchema } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  briefStatePath,
+  clearBriefTail,
   loadBriefState,
   markRulesDelivered,
   markTaskBriefed,
-  MAX_TRACKED_SESSIONS,
+  readBriefTail,
   readSessionThread,
+  recordBriefTail,
   recordSessionBriefing,
   recordSessionThread,
   stampSessionStart,
@@ -28,17 +32,22 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** A realistic ContextMemory fixture — a schema-valid `mem_` id, not a stub. */
+const memoryFixture = (id: string): ContextMemory => ({
+  id: memoryIdSchema.parse(id),
+  content: 'a memory queued in the briefing tail',
+  kind: 'fact',
+  scope: 'proj.usr_test.zero_memory',
+  created_at: '2026-09-22T09:00:00Z',
+});
+
+const tailFixture = (): BriefTail => ({
+  topic: 'a project',
+  memories: [memoryFixture('mem_a1b2c3d4e5f6g7h8.01jd8x2p4q')],
+  takenAt: '2026-09-22T10:00:00Z',
+});
+
 describe('brief state file', () => {
-  it('resolves the default path under XDG_STATE_HOME', () => {
-    expect(briefStatePath({ XDG_STATE_HOME: '/tmp/state' })).toBe(
-      '/tmp/state/zero-memory/session-briefs.json'
-    );
-  });
-
-  it('loads an empty state when the file is missing or corrupt', () => {
-    expect(loadBriefState(path)).toEqual({});
-  });
-
   it('records injected ids and merges them across re-briefings', () => {
     recordSessionBriefing(path, 'sess-1', ['mem_a', 'mem_b'], 1);
     recordSessionBriefing(path, 'sess-1', ['mem_b', 'mem_c'], 2);
@@ -86,6 +95,7 @@ describe('brief state file', () => {
 
   it('keeps one epoch across startup and resume, so one-shots stay spent', () => {
     stampSessionStart(path, 'sess-1', 100, 'startup');
+    recordSessionBriefing(path, 'sess-1', ['mem_a'], 105);
     markRulesDelivered(path, 'sess-1', 110);
     markTaskBriefed(path, 'sess-1', 120);
     stampSessionStart(path, 'sess-1', 200, 'resume');
@@ -95,10 +105,12 @@ describe('brief state file', () => {
     expect(entry?.epoch).toBe(0);
     expect(entry?.rules_epoch).toBe(0);
     expect(entry?.task_briefed).toBe(true);
+    expect(entry?.injected_ids).toEqual(['mem_a']);
   });
 
-  it('opens a new epoch on compaction and re-arms both per-window deliveries', () => {
+  it('opens a new epoch on compaction and re-arms every per-window delivery', () => {
     stampSessionStart(path, 'sess-1', 100, 'startup');
+    recordSessionBriefing(path, 'sess-1', ['mem_a', 'mem_b'], 105);
     markRulesDelivered(path, 'sess-1', 110);
     markTaskBriefed(path, 'sess-1', 120);
 
@@ -111,29 +123,13 @@ describe('brief state file', () => {
     expect(entry?.epoch).toBe(1);
     expect(entry?.rules_epoch).toBeUndefined();
     expect(entry?.task_briefed).toBe(false);
-    // The session's identity survives: its start stamp and injected ids are
-    // the receipt's window, not the context window.
+    // ...and so is what the old window was given: filtering those ids would
+    // keep the next task briefing from bringing them back. This is the path
+    // a client that re-arms only at the boundary (Codex) depends on.
+    expect(entry?.injected_ids).toEqual([]);
+    // The session's start stamp is the receipt's window, not the context
+    // window, and survives.
     expect(entry?.started_at).toBe(100);
-  });
-
-  it('a cleared conversation is a boundary too', () => {
-    stampSessionStart(path, 'sess-1', 100, 'startup');
-    markRulesDelivered(path, 'sess-1', 110);
-
-    stampSessionStart(path, 'sess-1', 200, 'clear');
-
-    expect(loadBriefState(path)['sess-1']?.epoch).toBe(1);
-    expect(loadBriefState(path)['sess-1']?.rules_epoch).toBeUndefined();
-  });
-
-  it('an absent reason never re-arms — a silent client must not reset epochs', () => {
-    stampSessionStart(path, 'sess-1', 100);
-    markRulesDelivered(path, 'sess-1', 110);
-    stampSessionStart(path, 'sess-1', 200);
-
-    const entry = loadBriefState(path)['sess-1'];
-    expect(entry?.epoch).toBe(0);
-    expect(entry?.rules_epoch).toBe(0);
   });
 
   it('records the rules as delivered into the CURRENT epoch', () => {
@@ -184,19 +180,77 @@ describe('brief state file', () => {
 
     expect(readSessionThread(path, 'sess-1')).toBe('thr_one_new.01c');
   });
+});
 
-  it('prunes the oldest sessions beyond the cap', () => {
-    for (let i = 0; i < MAX_TRACKED_SESSIONS + 10; i += 1) {
-      recordSessionBriefing(path, `sess-${i}`, [], i);
-    }
+describe('the briefing tail', () => {
+  it('survives the other writers, which rebuild the whole entry', () => {
+    recordBriefTail(path, 's1', tailFixture());
+    markRulesDelivered(path, 's1');
+    recordSessionThread(path, 's1', 'thr_x');
+    expect(readBriefTail(path, 's1')?.memories).toHaveLength(1);
+  });
 
-    const state = loadBriefState(path);
-    expect(Object.keys(state)).toHaveLength(MAX_TRACKED_SESSIONS);
-    expect(state['sess-0']).toBeUndefined();
-    expect(state[`sess-${MAX_TRACKED_SESSIONS + 9}`]).toBeDefined();
-    // The file on disk is pruned too, not just the in-memory view.
-    expect(
-      Object.keys(JSON.parse(readFileSync(path, 'utf8'))) as string[]
-    ).toHaveLength(MAX_TRACKED_SESSIONS);
+  it('is dropped when a new context window starts', () => {
+    recordBriefTail(path, 's1', tailFixture());
+    stampSessionStart(path, 's1', Date.now(), 'compact');
+    expect(readBriefTail(path, 's1')).toBeNull();
+  });
+
+  it('survives a non-boundary stampSessionStart, e.g. a resume', () => {
+    recordBriefTail(path, 's1', tailFixture());
+    stampSessionStart(path, 's1', Date.now(), 'resume');
+    expect(readBriefTail(path, 's1')).not.toBeNull();
+  });
+
+  it('drops the tail once the queue has drained', () => {
+    recordBriefTail(path, 's1', tailFixture());
+
+    clearBriefTail(path, 's1');
+
+    expect(readBriefTail(path, 's1')).toBeNull();
+  });
+
+  it('does nothing when clearing a session that was never briefed', () => {
+    expect(() => clearBriefTail(path, 'absent')).not.toThrow();
+    expect(readBriefTail(path, 'absent')).toBeNull();
+  });
+
+  it('returns null for a malformed tail instead of the broken object', () => {
+    // A stale write (older watcher, truncated save) could hold a `tail`
+    // with no `memories` array — the shape the per-message drain relies on.
+    writeFileSync(
+      path,
+      JSON.stringify({
+        s1: {
+          injected_ids: [],
+          task_briefed: false,
+          epoch: 0,
+          at: 1,
+          tail: { topic: 'a project' },
+        },
+      })
+    );
+
+    expect(readBriefTail(path, 's1')).toBeNull();
+  });
+
+  it('returns null for a null tail instead of throwing', () => {
+    // Same stale-write family as the malformed-tail test above, but the
+    // literal shape `Array.isArray(tail.memories)` cannot survive
+    // unguarded: `tail` itself is null, not merely missing `memories`.
+    writeFileSync(
+      path,
+      JSON.stringify({
+        s1: {
+          injected_ids: [],
+          task_briefed: false,
+          epoch: 0,
+          at: 1,
+          tail: null,
+        },
+      })
+    );
+
+    expect(readBriefTail(path, 's1')).toBeNull();
   });
 });

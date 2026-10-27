@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { ALL_BOARDS, resolveBoardScope, type BoardScope } from './board';
+import {
+  ALL_BOARDS,
+  readableBoard,
+  resolveBoardScope,
+  type BoardScope,
+} from './board';
 
 const board = (scope: string): BoardScope => ({
   scope,
@@ -12,15 +17,12 @@ const BOARDS = [board('proj.usr_a.alpha'), board('proj.usr_a.beta')];
 
 describe('resolveBoardScope', () => {
   it('opens the board that moved last when the address says nothing', () => {
-    // The rows arrive newest-activity-first, so the first one IS the default.
+    // The rows arrive newest-activity-first, so the first one IS the default,
+    // and its empty value keeps it out of the URL: a bare link means "latest".
     expect(resolveBoardScope(undefined, BOARDS)).toEqual({
       selected: 'proj.usr_a.alpha',
       value: '',
     });
-  });
-
-  it('keeps the default out of the URL so a bare link still means "latest"', () => {
-    expect(resolveBoardScope(undefined, BOARDS).value).toBe('');
   });
 
   it('honours an explicit board', () => {
@@ -51,5 +53,21 @@ describe('resolveBoardScope', () => {
       selected: null,
       value: '',
     });
+  });
+});
+
+describe('a board as read', () => {
+  const listed = { ok: true as const, value: { cards: [] } };
+
+  it('is the listing when both the listing and the offer were read', () => {
+    expect(readableBoard(listed, { ok: true })).toEqual({ cards: [] });
+  });
+
+  it('is nothing when the offer could not be read, so no board shows without it', () => {
+    expect(readableBoard(listed, { ok: false })).toBeNull();
+  });
+
+  it('is nothing when the listing could not be read', () => {
+    expect(readableBoard({ ok: false }, { ok: true })).toBeNull();
   });
 });

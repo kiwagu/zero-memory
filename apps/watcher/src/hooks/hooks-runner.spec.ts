@@ -17,7 +17,7 @@ describe('parseHooksArgs', () => {
     expect(parseHooksArgs([]).profile).toBe('full');
   });
 
-  it('rejects an unknown profile instead of emitting an empty set', () => {
+  it('falls back to the full profile on an unknown one, never to an empty set', () => {
     // Silently printing nothing would make an installer wire nothing at all,
     // which is the failure this surface exists to catch.
     expect(parseHooksArgs(['--profile', 'nonsense']).profile).toBe('full');

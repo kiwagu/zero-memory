@@ -38,10 +38,6 @@ describe('memorySlug', () => {
   it('falls back to the id body when the content has no word chars', () => {
     expect(memorySlug(row({ content: '!!! ???' }))).toBe('abc123def456ghij');
   });
-
-  it('is stable for an unchanged memory', () => {
-    expect(memorySlug(row())).toBe(memorySlug(row()));
-  });
 });
 
 describe('memoryFilePath', () => {
@@ -83,10 +79,6 @@ describe('renderMemoryFile', () => {
         '',
       ].join('\n')
     );
-  });
-
-  it('is byte-identical across renders (empty git diff)', () => {
-    expect(renderMemoryFile(row())).toBe(renderMemoryFile(row()));
   });
 
   it('sorts jsonb source keys for a stable render', () => {

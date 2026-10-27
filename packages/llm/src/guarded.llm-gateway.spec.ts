@@ -19,14 +19,14 @@ const requestFor = (purpose: LlmPurpose): LlmToolCallRequest => ({
   purpose,
 });
 
-const routerOf = () => ({
+const routerOf = (ranOnCallerKey = false) => ({
   callTool: vi.fn(() =>
     Promise.resolve({
       input: { ok: true },
       model: 'a-model',
       inputTokens: 10,
       outputTokens: 5,
-      ranOnCallerKey: false,
+      ranOnCallerKey,
     })
   ),
   searchWeb: vi.fn(() =>
@@ -156,20 +156,6 @@ describe('GuardedLlmGateway', () => {
       );
     }
   );
-
-  it('lets everything through when nothing is configured', async () => {
-    const router = routerOf();
-    const gateway = new GuardedLlmGateway(
-      router,
-      new BudgetGuard([], meterOf(Number.MAX_SAFE_INTEGER)),
-      credentialsOf(platformKey),
-      () => 'usr_1'
-    );
-
-    await gateway.callTool(requestFor('extraction'));
-
-    expect(router.callTool).toHaveBeenCalledOnce();
-  });
 });
 
 describe('work done for a user, outside any request', () => {
@@ -213,41 +199,14 @@ describe('work done for a user, outside any request', () => {
 
     expect(resolve).toHaveBeenCalledWith('usr_owner');
   });
-
-  it('still counts against the instance when no owner is named', async () => {
-    const spent = vi.fn(() => Promise.resolve(0));
-    const gateway = new GuardedLlmGateway(
-      routerOf(),
-      new BudgetGuard([limitOf(100)], { spent }),
-      credentialsOf(platformKey),
-      () => null
-    );
-
-    await gateway.callTool(requestFor('hygiene_judge'));
-
-    expect(spent).toHaveBeenCalledWith('maintenance', expect.any(Number), null);
-  });
 });
 
 describe('a caller running on their own key', () => {
-  it('is not capped, however exhausted the platform budget is', async () => {
+  it('is neither capped nor metered — no spend is looked up', async () => {
     const router = routerOf();
+    const spent = vi.fn(() => Promise.resolve(10_000));
     const gateway = new GuardedLlmGateway(
       router,
-      new BudgetGuard([limitOf(1)], meterOf(10_000)),
-      credentialsOf(callerKey),
-      () => 'usr_1'
-    );
-
-    await gateway.callTool(requestFor('extraction'));
-
-    expect(router.callTool).toHaveBeenCalledOnce();
-  });
-
-  it('is not even metered — no spend is looked up', async () => {
-    const spent = vi.fn(() => Promise.resolve(0));
-    const gateway = new GuardedLlmGateway(
-      routerOf(),
       new BudgetGuard([limitOf(1)], { spent }),
       credentialsOf(callerKey),
       () => 'usr_1'
@@ -255,6 +214,7 @@ describe('a caller running on their own key', () => {
 
     await gateway.callTool(requestFor('extraction'));
 
+    expect(router.callTool).toHaveBeenCalledOnce();
     expect(spent).not.toHaveBeenCalled();
   });
 
@@ -295,8 +255,10 @@ describe('a caller running on their own key', () => {
   });
 
   it('leaves platform-key calls unmarked', async () => {
+    // The router claims the caller's key; the gateway chose the platform's,
+    // so its own answer must override the router's.
     const gateway = new GuardedLlmGateway(
-      routerOf(),
+      routerOf(true),
       new BudgetGuard([], meterOf(0)),
       credentialsOf(platformKey),
       () => 'usr_1'

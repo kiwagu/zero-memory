@@ -1,7 +1,6 @@
 export * from './card.schema.js';
 export * from './content-guard.schema.js';
 export * from './contract-version.js';
-export * from './delete-account.schema.js';
 export * from './entity-prefixes.js';
 export * from './error.schema.js';
 export * from './export-memories.schema.js';
@@ -10,7 +9,9 @@ export * from './instance-metrics.schema.js';
 export * from './memory.schema.js';
 export * from './project-origin.js';
 export * from './provenance.js';
+export * from './release.schema.js';
 export * from './resources.schema.js';
+export * from './rule-headline.js';
 export * from './scope-target.schema.js';
 export * from './request-id.schema.js';
 export * from './tools.schema.js';

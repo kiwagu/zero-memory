@@ -15,8 +15,9 @@ There are two levels, and the first one is complete on its own:
    `remember` and the server's standing rules. Two minutes, no download.
 2. Install the client bundle. This adds the parts that make memory automatic
    rather than remembered: a briefing at session start, a session receipt at
-   the end, a recall-first nudge on code search, and — only if you turn it on —
-   transcript capture.
+   the end, a recall-first nudge on code search, a reminder right after a
+   command that lands a board card's branch without recording it, and — only
+   if you turn it on — transcript capture.
 
 ## 1. Get an account
 
@@ -32,10 +33,17 @@ at user scope, so every project on the machine sees it:
 <HostedConnectCommand client="claude" />
 
 Then start the agent, run `/mcp`, pick `zero-memory` and authorize. The browser
-opens the instance's own login page; on success the client stores a token and
-refreshes it on its own. No API key is issued and no password is shared with
+opens the instance's dashboard: sign in there the way you always do (password,
+or GitHub or Google when the instance offers them), and allow the client on the
+consent screen, which names the client, what it may do and where the browser
+returns. On success the client stores a token and refreshes it on its own; the
+next time the same client reconnects to the same return address, a signed-in
+browser that the client opened sends it straight back without the screen. The
+screen comes back when a page elsewhere sends the browser there, or when the
+client asks to return somewhere else. No API key is issued and no password is shared with
 the client: the server is an OAuth 2.1 authorization server, and the client
-registers itself dynamically with PKCE.
+registers itself dynamically with PKCE. The agent gets a session of its own,
+so signing out of the dashboard does not disconnect it.
 
 `/mcp` should now show `zero-memory` as connected, and the memory tools appear
 as `mcp__zero-memory__*`. Cursor and Codex CLI register the same endpoint their
@@ -79,6 +87,27 @@ registration, the hooks, the ingest daemon — reads that one file, which is wha
 keeps your editor and your briefings from ending up on different servers.
 `zero-memory-watcher login <url>` does the same thing later if you move to
 another instance.
+
+The installers write into files that are yours: the client's settings, its MCP
+registry, its instruction file. They handle these files the same way:
+
+- **Only when something changes.** A re-run with nothing to change leaves every
+  file byte-identical. That includes an MCP registration that already points at
+  the right server, so your client's login survives.
+- **Backed up first.** Before a change, the file's previous content is copied to
+  `~/.local/state/zero-memory/backups/<time of the run>/`, at the file's own
+  path under your home directory. If that copy cannot be written, the change
+  is not made: the file keeps its content and the installer stops.
+- **Written in place.** A file you keep as a symlink stays one.
+- **Your own text stays yours.** Your instruction files (`CLAUDE.md`, Codex's
+  `AGENTS.md`) are only ever appended to, never cut, and only when you ask for
+  it. A block the installer manages is replaced only when both of its markers
+  are still there. Otherwise the file is left alone and the installer says so.
+
+Hermes' `config.yaml` is edited through Hermes' own `hermes plugins enable` and
+`hermes config set`, so it is written the way Hermes writes it. Hermes rewrites
+the whole file when it saves, so comments you added yourself survive only in
+the backup.
 
 Reload the client fully afterwards (Claude Code: **Developer: Reload Window**)
 and open a new session: hooks are loaded at startup.

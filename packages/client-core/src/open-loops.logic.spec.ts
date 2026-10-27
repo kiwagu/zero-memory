@@ -30,12 +30,17 @@ const payload = (loops: ReturnType<typeof loop>[], total = loops.length) => ({
 
 describe('splitOpenLoops', () => {
   it('drains the loops out of a briefing payload', () => {
-    const split = splitOpenLoops(payload([loop(1)], 3));
+    const split = splitOpenLoops({
+      ...payload([loop(1)], 3),
+      open_loops_aged: 4,
+    });
     expect(split.loops.map((l) => l.id)).toEqual([memId(1)]);
     expect(split.total).toBe(3);
+    expect(split.aged).toBe(4);
     expect(split.payload).toMatchObject({
       open_loops: [],
       open_loops_total: 0,
+      open_loops_aged: 0,
     });
   });
 
@@ -49,7 +54,7 @@ describe('splitOpenLoops', () => {
 });
 
 describe('mergeOpenLoops', () => {
-  it('unions loops of overlapping briefings by id, oldest first', () => {
+  it('unions loops of overlapping briefings by id, newest first', () => {
     const a = splitOpenLoops(
       payload([
         loop(1, '2026-07-01T00:00:00Z'),
@@ -64,9 +69,9 @@ describe('mergeOpenLoops', () => {
     );
     const merged = mergeOpenLoops([a, b]);
     expect(merged.loops.map((l) => l.id)).toEqual([
-      memId(1),
-      memId(3),
       memId(2),
+      memId(3),
+      memId(1),
     ]);
     // Totals are scope-wide counts each briefing already reported: max, not sum
     // — but never below the union actually shown.
@@ -74,7 +79,22 @@ describe('mergeOpenLoops', () => {
   });
 
   it('handles the no-splits case', () => {
-    expect(mergeOpenLoops([])).toEqual({ loops: [], total: 0 });
+    expect(mergeOpenLoops([])).toEqual({
+      loops: [],
+      total: 0,
+      aged: 0,
+      work: null,
+    });
+  });
+
+  it('drains the board summary so the JSON pack does not repeat it', () => {
+    const work = { bound_card: null, active: 1, waiting: 0, lead: [] };
+    const split = splitOpenLoops({ ...payload([loop(1)]), work });
+    expect(split.work).toEqual(work);
+    expect(split.payload).not.toHaveProperty('work');
+    expect(mergeOpenLoops([splitOpenLoops(payload([])), split]).work).toEqual(
+      work
+    );
   });
 });
 
@@ -85,13 +105,49 @@ describe('renderOpenLoopsSection', () => {
     expect(renderOpenLoopsSection([], 0, now)).toBeNull();
   });
 
+  it('says how many older loops it does not list, after the listed ones', () => {
+    const section = renderOpenLoopsSection(
+      [loop(1)],
+      1,
+      now,
+      Number.POSITIVE_INFINITY,
+      3
+    )!;
+    const lines = section.split('\n');
+    expect(lines.at(-1)).toBe(
+      '(3 older open loops, past the briefing window and on no card, not ' +
+        'listed here; recall with kinds task and open-question lists them)'
+    );
+  });
+
+  it('keeps the older-loops line when no loop is inside the window', () => {
+    // Before the line existed this case rendered nothing at all, so loops
+    // past the window disappeared from every briefing without a trace.
+    expect(
+      renderOpenLoopsSection([], 0, now, Number.POSITIVE_INFINITY, 1)
+    ).toBe(
+      '(1 older open loop, past the briefing window and on no card, not ' +
+        'listed here; recall with kinds task and open-question lists them)'
+    );
+  });
+
+  it('reserves room for the older-loops line inside the budget', () => {
+    const loops = [1, 2, 3, 4, 5, 6].map((n) => loop(n));
+    const section = renderOpenLoopsSection(loops, 6, now, 400, 2)!;
+    expect(section.length).toBeLessThanOrEqual(400);
+    expect(section).toContain('(2 older open loops,');
+  });
+
   it('renders loops with kind and staleness badge, plus the beyond-cap count', () => {
     const section = renderOpenLoopsSection(
       [loop(1, '2026-07-10T00:00:00Z'), loop(2, '2026-07-13T11:00:00Z')],
       5,
       now
     );
-    expect(section).toContain('Open loops recorded in persistent memory');
+    // Recorded data, not imperatives: the section opens by saying so.
+    expect(
+      section?.startsWith('Open loops recorded in persistent memory')
+    ).toBe(true);
     expect(section).toContain('(5 active');
     expect(section).toContain(
       `[task, open 3d] check the watcher log on machine 1 (id: ${memId(1)})`
@@ -101,8 +157,25 @@ describe('renderOpenLoopsSection', () => {
     expect(section).toContain('(+3 more active open loops)');
   });
 
-  it('renders as recorded data, not imperatives', () => {
-    const section = renderOpenLoopsSection([loop(1)], 1, now)!;
-    expect(section.startsWith('Open loops recorded')).toBe(true);
+  it('shows a loop too long to fit as a one-line stub instead of losing the section', () => {
+    const handover = contextMemorySchema.parse({
+      ...loop(7),
+      content: `migrate the ingest worker ${'and verify every stage '.repeat(150)}`,
+    });
+    const section = renderOpenLoopsSection([handover], 1, now, 600);
+    expect(section).not.toBeNull();
+    expect(section!.length).toBeLessThanOrEqual(600);
+    expect(section).toContain('migrate the ingest worker');
+    expect(section).toContain('…');
+    expect(section).toContain(`(id: ${memId(7)})`);
+  });
+
+  it('limits the list by count and names how many did not fit', () => {
+    const loops = [1, 2, 3, 4, 5, 6].map((n) => loop(n));
+    const section = renderOpenLoopsSection(loops, 6, now, 400)!;
+    expect(section.length).toBeLessThanOrEqual(400);
+    const shown = section.split('\n').filter((l) => l.startsWith('- ')).length;
+    expect(shown).toBeGreaterThan(0);
+    expect(section).toContain(`(+${6 - shown} more active open loops)`);
   });
 });

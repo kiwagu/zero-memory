@@ -2,7 +2,6 @@ export * from './auth-gateway.js';
 export * from './challenge.js';
 export * from './handlers.js';
 export * from './in-memory-oauth-store.js';
-export * from './login-page.js';
 export * from './metadata.js';
 export * from './oauth-store.js';
 export * from './oauth.schema.js';

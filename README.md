@@ -66,6 +66,14 @@ decision stays yours:
 
 ![Conflict review: two contradicting memories about rate limiting, with supersede, forget, keep-both and merge actions](./apps/docs/public/img/hygiene-review-queue.png)
 
+Work that outlives a handover gets a card. A project's board holds each piece
+of work for as long as it runs — its document, the memories and links it
+points at, and a history in which every move carries its reason. Agents move
+cards through MCP; the dashboard shows the board and deliberately cannot move
+anything:
+
+![The project board: one row of state columns, each moved card showing the reason it was moved](./apps/docs/public/img/project-board.png)
+
 ## Quick start
 
 **Using an instance someone already runs.** You need an account, the client

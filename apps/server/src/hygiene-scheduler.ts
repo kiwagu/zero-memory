@@ -15,6 +15,89 @@ import { createLogger } from '@workspace/logger';
 const logger = createLogger('hygiene-scheduler');
 
 /**
+ * One hygiene cycle: what each tick does, and what a deployment without a
+ * long-running process (AWS Lambda) invokes on its own schedule. Throws when
+ * a step fails; the caller decides whether that is fatal.
+ */
+export async function runHygieneScan(): Promise<void> {
+  const scanner = new HygieneScanner();
+  const result = await scanner.scan();
+  logger.info('scheduled hygiene scan complete', { ...result });
+  // Kind audit: demote changelog-style change notes stuck in durable
+  // kinds. The deterministic prefilter keeps the judge cost marginal.
+  const audited = await scanner.auditKinds();
+  logger.info('scheduled hygiene kind audit complete', { ...audited });
+  // Free (no-LLM) job only: dismiss pending conflicts that became moot
+  // (a side invalidated elsewhere). The paid re-judge is on-demand (manual
+  // scan / CLI after a judge upgrade), NOT every nightly tick — a stable
+  // judge would just re-confirm the same verdicts and burn tokens.
+  const healed = await scanner.readjudicatePending({ rejudge: false });
+  logger.info('scheduled hygiene stale-sweep complete', { ...healed });
+  // Rules incubator: same cycle, same wiring. The detection rollup is a
+  // free DB query; the distiller only runs on genuinely new candidates,
+  // so a quiet system costs nothing here.
+  const incubated = await new RuleCandidateDetector().detect();
+  logger.info('scheduled rule-candidate detection complete', {
+    ...incubated,
+  });
+  // Reflection: same cycle, same wiring. The cluster rollup is a free DB
+  // query; the distiller only runs on genuinely new clusters, so a quiet
+  // system costs nothing here.
+  const reflected = await new ReflectionDetector().detect();
+  logger.info('scheduled reflection detection complete', {
+    ...reflected,
+  });
+  // Loop closure: same cycle, same wiring. The evidence rollup is a free
+  // DB query and the re-judge guard keeps quiet loops costless; only
+  // loops with NEW evidence pay a judge call.
+  const loopsClosed = await new LoopClosureDetector().detect();
+  logger.info('scheduled loop-closure detection complete', {
+    ...loopsClosed,
+  });
+  // Usage reinforcement: refresh the precomputed ranking multipliers.
+  // Free (no LLM) — one rollup query plus bounded writes.
+  const reinforced = await new ReinforcementRollup().rollup();
+  logger.info('scheduled reinforcement rollup complete', {
+    ...reinforced,
+  });
+  // Portability audit: same cycle, same wiring. The rollup prefilter is
+  // a free DB query; the judge only runs on unclaimed candidates (one
+  // candidacy per memory, ever), so a quiet system costs nothing here.
+  const portability = await new PortabilityDetector().detect();
+  logger.info('scheduled portability detection complete', {
+    ...portability,
+  });
+  // Stale suspects: queue memories with repeated misled signals for
+  // review. Free (no LLM), never auto-invalidates; the SQL rollup's
+  // re-queue guard keeps already-judged suspicions quiet.
+  const staleSuspects = await new StaleSuspectDetector().detect();
+  logger.info('scheduled stale-suspect detection complete', {
+    ...staleSuspects,
+  });
+  // Entity merge: collapse exact canonical-name duplicate entities so
+  // the graph legs stop expanding through duplicates. Free (no LLM) —
+  // reads plus one atomic RPC per cluster; a clean graph costs nothing.
+  const entityMerge = await new EntityMergeService().merge();
+  logger.info('scheduled entity merge complete', { ...entityMerge });
+  // External re-verification: check due core-scope world facts against
+  // the live web (Anthropic server tool). Bounded by the rollup cap and
+  // per-kind TTLs; owners on a provider without web search are skipped
+  // and audited as skipped, never stamped as checked.
+  const reverified = await new ReverifyDetector().detect();
+  logger.info('scheduled external re-verification complete', {
+    ...reverified,
+  });
+  // Judge re-examination: high-traffic memories get a second opinion from
+  // the configured judge, at most once per model. The guard makes a stable
+  // configuration cost one rollup query per tick; a model change opens a
+  // bounded burst.
+  const judgeRescan = await new JudgeRescanDetector().detect();
+  logger.info('scheduled judge re-examination complete', {
+    ...judgeRescan,
+  });
+}
+
+/**
  * Periodic memory-hygiene scan, run in-process on the server and therefore
  * independent of the (optional, Claude-Code-bound) watcher.
  *
@@ -46,81 +129,7 @@ export function startHygieneScheduler(): (() => void) | null {
     }
     running = true;
     try {
-      const scanner = new HygieneScanner();
-      const result = await scanner.scan();
-      logger.info('scheduled hygiene scan complete', { ...result });
-      // Kind audit: demote changelog-style change notes stuck in durable
-      // kinds. The deterministic prefilter keeps the judge cost marginal.
-      const audited = await scanner.auditKinds();
-      logger.info('scheduled hygiene kind audit complete', { ...audited });
-      // Free (no-LLM) job only: dismiss pending conflicts that became moot
-      // (a side invalidated elsewhere). The paid re-judge is on-demand (manual
-      // scan / CLI after a judge upgrade), NOT every nightly tick — a stable
-      // judge would just re-confirm the same verdicts and burn tokens.
-      const healed = await scanner.readjudicatePending({ rejudge: false });
-      logger.info('scheduled hygiene stale-sweep complete', { ...healed });
-      // Rules incubator: same cycle, same wiring. The detection rollup is a
-      // free DB query; the distiller only runs on genuinely new candidates,
-      // so a quiet system costs nothing here.
-      const incubated = await new RuleCandidateDetector().detect();
-      logger.info('scheduled rule-candidate detection complete', {
-        ...incubated,
-      });
-      // Reflection: same cycle, same wiring. The cluster rollup is a free DB
-      // query; the distiller only runs on genuinely new clusters, so a quiet
-      // system costs nothing here.
-      const reflected = await new ReflectionDetector().detect();
-      logger.info('scheduled reflection detection complete', {
-        ...reflected,
-      });
-      // Loop closure: same cycle, same wiring. The evidence rollup is a free
-      // DB query and the re-judge guard keeps quiet loops costless; only
-      // loops with NEW evidence pay a judge call.
-      const loopsClosed = await new LoopClosureDetector().detect();
-      logger.info('scheduled loop-closure detection complete', {
-        ...loopsClosed,
-      });
-      // Usage reinforcement: refresh the precomputed ranking multipliers.
-      // Free (no LLM) — one rollup query plus bounded writes.
-      const reinforced = await new ReinforcementRollup().rollup();
-      logger.info('scheduled reinforcement rollup complete', {
-        ...reinforced,
-      });
-      // Portability audit: same cycle, same wiring. The rollup prefilter is
-      // a free DB query; the judge only runs on unclaimed candidates (one
-      // candidacy per memory, ever), so a quiet system costs nothing here.
-      const portability = await new PortabilityDetector().detect();
-      logger.info('scheduled portability detection complete', {
-        ...portability,
-      });
-      // Stale suspects: queue memories with repeated misled signals for
-      // review. Free (no LLM), never auto-invalidates; the SQL rollup's
-      // re-queue guard keeps already-judged suspicions quiet.
-      const staleSuspects = await new StaleSuspectDetector().detect();
-      logger.info('scheduled stale-suspect detection complete', {
-        ...staleSuspects,
-      });
-      // Entity merge: collapse exact canonical-name duplicate entities so
-      // the graph legs stop expanding through duplicates. Free (no LLM) —
-      // reads plus one atomic RPC per cluster; a clean graph costs nothing.
-      const entityMerge = await new EntityMergeService().merge();
-      logger.info('scheduled entity merge complete', { ...entityMerge });
-      // External re-verification: check due core-scope world facts against
-      // the live web (Anthropic server tool). Bounded by the rollup cap and
-      // per-kind TTLs; owners on a provider without web search are skipped
-      // and audited as skipped, never stamped as checked.
-      const reverified = await new ReverifyDetector().detect();
-      logger.info('scheduled external re-verification complete', {
-        ...reverified,
-      });
-      // Judge re-examination: high-traffic memories get a second opinion from
-      // the configured judge, at most once per model. The guard makes a stable
-      // configuration cost one rollup query per tick; a model change opens a
-      // bounded burst.
-      const judgeRescan = await new JudgeRescanDetector().detect();
-      logger.info('scheduled judge re-examination complete', {
-        ...judgeRescan,
-      });
+      await runHygieneScan();
     } catch (error) {
       logger.error('scheduled hygiene scan failed', {
         error: error instanceof Error ? error.message : String(error),

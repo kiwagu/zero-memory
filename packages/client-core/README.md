@@ -26,18 +26,63 @@ consume the same core (see the R3 client-adapters direction).
 - `open-loops.logic.ts` — presentation of the briefing's `open_loops` section
   (active `task` / `open-question` memories): `splitOpenLoops` drains the loops
   out of a payload, `mergeOpenLoops` unions overlapping briefings by id, and
-  `renderOpenLoopsSection` renders the visible block with staleness badges and
-  an "and N more" counter (phrased as recorded data, never as imperatives).
+  `renderOpenLoopsSection` renders the visible block newest first, with
+  staleness badges and an "and N more" counter, inside a character budget — a
+  loop too long to fit whole becomes a one-line stub rather than ending the
+  section (phrased as recorded data, never as imperatives).
 - `standing-rules.logic.ts` — presentation of the briefing's `rules` section
   (the owner's promoted standing rules): `splitStandingRules` drains them out
-  of a payload, `mergeStandingRules` unions overlapping briefings by text
-  (keeping the pin), and `renderStandingRulesSection` renders the visible
-  block. Unlike open loops, these are phrased as BINDING instructions — that
-  is what the owner promoted them for — and pinned rules lead the list,
-  marked, because the pin guarantees they reach the delivered set. This is the
-  uncapped full-text channel for every client; MCP `instructions` also inline
-  rules for uncapped clients, while known capped clients only receive the
-  router and inventory.
+  of a payload, `mergeStandingRules` unions overlapping briefings by rule id
+  (by text for rules sent without one), keeping the first briefing's entry
+  unless only the later one is pinned, and `renderStandingRulesSection`
+  renders the visible block. Unlike open loops, these are phrased as BINDING
+  instructions — that is what the owner promoted them for — and pinned rules
+  lead the list, marked, because the pin guarantees they reach the delivered
+  set. Given a ceiling, the block keeps pinned rules whole even past it,
+  carries the others whole while they fit and by headline (`ruleHeadline`,
+  which lives in `@workspace/contracts` and is re-exported here) after, and
+  says so. A rule the server judged arrives at the level it chose: by
+  headline with its condition (`[gate]`) while that fits the ceiling and by
+  headline (`[headline]`) otherwise, or by headline when the server
+  headlined it; the text of such a rule already is its headline and is
+  shown as sent. Only lines of rules the server levelled name the rule id
+  after the marker, and the footer then points at `zm://rules/<id>`; a rule
+  sent without a level renders as before, whether it carries an id or not.
+  This is the full-text channel for every client; MCP
+  `instructions` also inline rules for uncapped clients, while known capped
+  clients only receive the router and inventory.
+- `work-section.logic.ts` — `renderBoardSummary(work)`: the project board's
+  lines in a briefing (the card bound to this conversation with its reason
+  and the cards above it, active/waiting counts, the first few cards, each
+  with what blocks it and whether its relations were ever assessed, and,
+  when the conversation is bound to none, the card you worked on last with
+  how to pick it up), phrased as declared state, never as instructions. `splitOpenLoops` drains the server's `work` field out of the
+  pack alongside the loops, and the watcher renders both as ONE work section.
+- `brief-budget.logic.ts` — fitting a briefing into the hook channel, whose
+  client spills anything past ~10,000 characters to a file and shows only a
+  preview: `resolveHookBudgetChars` (default 9,000), `planSectionBudgets`
+  (the split decided before rendering — project line first, a floor held for
+  the work in progress whenever there is any, the rules' ceiling from the
+  rest),
+  `renderPackWithinBudget` (whole memories while they fit, then one-line
+  stubs) and `composeWithinBudget` (strict priority order, naming whatever
+  had to go).
+- `brief-tail.logic.ts` — the queue for what the first briefing of an epoch
+  could not fit: `planTailChunk(tail, budgetChars)` sends the head of the
+  queue, framed as a continuation of the same briefing with a count of what
+  is left and the moment the pack was taken, and falls back to a one-line
+  stub when even that one memory does not fit the message's budget — so a
+  single oversized memory cannot stall the rest of the queue behind it. The
+  chunk never exceeds its budget: when not even the stub fits, it sends
+  nothing and the queue waits whole. Returns null once the queue is empty.
+  The queue drains in the server's own rank, never by relevance to the
+  current message — the prompt never leaves the machine, so there is no
+  such signal to rank by. `mergeBriefTail(queued, deliveredIds, leftovers)`
+  settles the queue against a briefing that rendered a pack of its own: what
+  it delivered whole leaves, what it left over joins after what was already
+  queued, each memory once. Pure planning only; the queue lives in the
+  session state (`@workspace/client-runtime`) and the watcher's per-message
+  hook drains it.
 - `context-epoch.logic.ts` — what "the session has already been told this"
   means once a conversation outlives its context window. A briefing writes
   into the transcript, and compaction is exactly what discards the transcript,
@@ -76,10 +121,21 @@ total})`: the text a client emits just BEFORE its context is compacted, or
   stringified result using the canonical entity-id char class. The
   envelope-walking that finds those names and payloads stays in each adapter;
   only the judgement is domain.
+- `transcript.ts` — the `ParsedTranscript` shape every adapter's parser
+  produces, `formatEntries` (the `role: text` form the extractor consumes), and
+  `parseJsonLines(jsonl, schema)`, the one line reader those parsers share: a
+  slice read from a byte offset can start with a torn line and end with a
+  half-written one, and blank lines, non-JSON and records of another shape are
+  skipped rather than failing the slice. Each adapter keeps only its own line
+  schema and what it reads out of a record.
 - `offline-briefing.ts` — the `BriefCacheEntry` shape, the default TTL, and
   `renderOfflineBriefing(entry)` (the explicit OFFLINE staleness header ahead
   of a cached briefing). The file-backed cache IO that produces these entries
   lives in `@workspace/client-runtime`.
+- `release.logic.ts` — pure decisions for a project's production state:
+  comparing versions, mapping a version to its tag and back, and the lines a
+  release, a missing tag, or a rollback says in the session; the IO that
+  reads the version url and the local git tags lives elsewhere.
 
 ## Consumers
 

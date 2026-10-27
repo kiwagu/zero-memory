@@ -19,6 +19,9 @@ export function createClient() {
   return createBrowserClient<Database>(url, anonKey, {
     cookieOptions: {
       name: supabaseAuthCookieName(url),
+      // Secure where the page itself came over https; a local stand over
+      // plain http keeps a cookie the browser will send.
+      secure: window.location.protocol === 'https:',
     },
   });
 }

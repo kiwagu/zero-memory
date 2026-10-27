@@ -133,7 +133,7 @@ test.describe('portability audit (rollup + owner resolution)', () => {
     );
     seededMemories.push(...included, ...excluded);
 
-    // The SQL filter is the enforcing copy of PORTABILITY_SUBJECT_KINDS;
+    // The SQL filter is the enforcing copy of PORTABLE_SUBJECT_KINDS;
     // this assertion fails if the two ever drift apart.
     const candidates = await rollupFor(ownerId);
     for (const memoryId of included) {

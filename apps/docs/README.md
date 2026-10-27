@@ -72,6 +72,13 @@ Two ways to produce a frame:
 `source.config.ts` points Fumadocs at `../../docs`; `bun run typecheck` and
 every build regenerate the `.source/` bindings from it.
 
+`bun run typecheck` also compiles every page body (`scripts/check-mdx.ts`, a
+second or less) with the site build's own MDX preset, so `bun run check` fails
+on a page the build could not parse, such as an angle-bracket placeholder that
+ended up outside its code span and reads as an unclosed JSX tag. Without it,
+page bodies are first parsed by the image build, which runs only on a release
+tag.
+
 ## Running it
 
 ```bash

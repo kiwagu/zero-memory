@@ -13,7 +13,9 @@ questions only memory could answer.
   (deterministic variant: ground-truth id surfaced = WITH, WITHOUT = false).
 - `RoiRunner` — service-role orchestration: probe top-up/retirement, judging,
   result rows; judge tokens are metered as `llm_extraction`
-  (`purpose: roi_probe`).
+  (`purpose: roi_probe`). `casesFromIds` rebuilds the cases a recall phase
+  collected from probe ids and surfaced memory ids alone (`rebuildRoiCases`),
+  for a worker that judges them later and elsewhere.
 
 Recall itself never runs here: it happens in the caller's authenticated
 context (RLS-honest), and the surfaced facts are handed in.

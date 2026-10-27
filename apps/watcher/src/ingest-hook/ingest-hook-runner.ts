@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { readFileSync } from 'node:fs';
 
 import { formatEntries } from '@workspace/client-core';
 import {
+  loadStateRecord,
   receiptStatePath,
   recordCapturedMemories,
+  stateFilePath,
+  writeStateFile,
 } from '@workspace/client-runtime';
 import { createLogger } from '@workspace/logger';
 
@@ -18,6 +19,9 @@ import { ingestAllowed } from '@workspace/client-runtime';
 // Logs every invocation + outcome (stderr + ZM_LOG_FILE) so the rotating log
 // shows the Stop hook firing even when there is nothing new to send.
 const logger = createLogger('ingest');
+
+/** The longest refusal timestamp the ingest contract admits. */
+const GUARD_REFUSAL_AT_MAX = 64;
 
 /**
  * Hook-driven ingest: ship the NEW part of the session transcript to
@@ -36,25 +40,13 @@ const logger = createLogger('ingest');
  * makes retries idempotent. Auth is OAuth (the same token store as `login`).
  * Never throws — a down memory server must not block the session.
  */
-const offsetStatePath = (): string =>
-  join(
-    process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'),
-    'zero-memory',
-    'hook-offsets.json'
-  );
+const offsetStatePath = (): string => stateFilePath('hook-offsets.json');
 
-const loadOffsets = (path: string): Record<string, number> => {
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as Record<string, number>;
-  } catch {
-    return {};
-  }
-};
+const loadOffsets = (path: string): Record<string, number> =>
+  loadStateRecord<number>(path);
 
-const saveOffsets = (path: string, offsets: Record<string, number>): void => {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(offsets, null, 2));
-};
+const saveOffsets = (path: string, offsets: Record<string, number>): void =>
+  writeStateFile(path, offsets, 2);
 
 /**
  * The `recalled_ids` half of an ingest payload — the "shown" set the usefulness
@@ -66,7 +58,7 @@ const saveOffsets = (path: string, offsets: Record<string, number>): void => {
  * nothing. It is omitted rather than sent empty — absent means "this slice
  * surfaced no memories", which is a different claim from "none were useful".
  */
-export const recalledIdsField = (
+const recalledIdsField = (
   recalledIds: readonly string[]
 ): { recalled_ids?: string[] } =>
   recalledIds.length > 0 ? { recalled_ids: [...recalledIds] } : {};
@@ -170,6 +162,18 @@ export const flushTranscriptDelta = async (
       // Without this the judge stays dark for every hook-driven client — only
       // the file-tailing daemon (Claude) used to pass it on.
       ...recalledIdsField(parsed.recalledIds),
+      // Names and timestamps only, oldest first, within the contract's caps.
+      // A timestamp longer than the contract admits goes as unknown: refused,
+      // it would fail this send and every retry of it, since the offset only
+      // moves on once a send succeeds.
+      ...(parsed.guardRefusals.length > 0 && {
+        guard_refusals: parsed.guardRefusals
+          .slice(0, 50)
+          .map(({ guard, at }) => ({
+            guard,
+            at: at !== null && at.length <= GUARD_REFUSAL_AT_MAX ? at : null,
+          })),
+      }),
     });
 
     offsets[transcriptPath] = raw.length;

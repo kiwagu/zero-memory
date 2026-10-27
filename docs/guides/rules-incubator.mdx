@@ -85,6 +85,43 @@ layer, or copy and download its text. A promoted rule whose source memory has
 stopped being recalled usefully is flagged as a "still relevant?" hint rather
 than removed.
 
+A promoted rule is always a live one. Promoting a rule you revoked earlier,
+from the dashboard or with `promote_rule`, clears the revoke in the same
+step, so a rule can never read as promoted while no session receives it.
+
+### A rule follows its memory
+
+Memories get replaced: a writer supersedes an outdated one, a reviewer
+resolves a conflict, hygiene folds a duplicate. Whenever a memory with a
+promoted rule is superseded, on any of those paths, the rule moves to the
+memory that replaced it. It keeps everything you decided about it: the pin,
+the layer, the project it is delivered to and its place in the delivery TTL.
+
+- If the rule's text was the memory's own words, it takes the successor's
+  words. The same holds when a memory's text is rewritten in place, such as
+  its translation into English.
+- If the text was curated (distilled, or written by hand), the text is kept
+  and the rule is flagged **Text to review** on `/rules`. The writer's
+  `remember` reply says so and names the call that sets a new text:
+  `promote_rule` on the successor, with `rule_text`.
+- If the successor says exactly the rule's curated text, the rule is already
+  in sync: it moves with nothing to review. Writing a rule's text as a new
+  memory that supersedes its old one is how to re-anchor a rule without
+  promoting it again.
+- The rule stays where it is, and stays promoted, when moving it could
+  cost it anything: the successor already has a rule of its own or was
+  dismissed or revoked as one, belongs to another owner, or is itself retired.
+  A task or open question closed by its answer keeps its rule too, since an
+  answer does not replace an instruction. `/rules` flags such a rule.
+
+`remember` lists what happened to each rule under `rules`: carried, carried
+with its curated text kept, or not carried. `promote_rule` on a superseded
+memory names the successor to promote instead.
+
+Forgetting a memory does not retire its rule. The rule stays promoted, within
+the usual delivery limits, `/rules` flags that its memory is gone, and the
+`forget` reply says so. Only you revoke a rule, on `/rules`.
+
 ### Delivery
 
 Promoted rules have several delivery paths, in order of how little client
@@ -100,17 +137,24 @@ integration they require:
    the router; the capped client receives that guidance through the briefing
    and tool descriptions instead, because whole segments are dropped in
    priority order when the budget would overflow.
-2. `build_context.rules[]`. Every client can retrieve the full applicable
-   set as `{ text, pinned }` records, no hook required. The rendered tool
-   result carries a prominent `STANDING RULES` block ahead of the pack, with
-   pinned rules leading and marked.
+2. `build_context.rules[]`. Every client can retrieve the applicable set, no
+   hook required. Each record carries `text`, `pinned` and the rule's `id`,
+   and, when the call's rules were delivered by level, the `level` it arrived
+   at (see [Delivery by task relevance](#delivery-by-task-relevance)), with
+   its `applies_when` line only at level `gate`. The rendered
+   tool result carries a prominent `STANDING RULES` block ahead of the pack,
+   with pinned rules leading and marked.
 3. Client hooks. Hook-capable adapters render the same `STANDING RULES`
    section automatically in session and task briefings. This is the uncapped
    full-text channel.
 4. The `zm://rules` resource. A read of the current promoted set, pinned
    first, without a briefing call, useful for reloading the rules after
-   promoting one mid-session. It is offered only where the connection can read
-   them live, so it never advertises a capability that would then fail.
+   promoting one mid-session. Beside it, `zm://rules/{id}` returns one
+   promoted rule of either layer in full by its id, which is how a rule
+   delivered by headline is read whole. Both carry each rule's `id` and its
+   `applies_when` line when it has one. Both are offered only where the
+   connection can read them live, so neither advertises a capability that
+   would then fail.
 5. Instruction files. Copy/download and deploy-script materialization are
    the fallback for clients that ignore MCP instructions or need a
    Git-auditable rule file.
@@ -160,9 +204,107 @@ arrives through `build_context` and hooks rather than the instruction window.
 
 The `/rules` screen reports `Delivered N of M` for the General layer and turns
 amber whenever a promoted rule is not being delivered, alongside a count of
-pinned rules, so a budget overflow is visible rather than silent. The same
-arithmetic backs both the badge and the readers that build the delivered set,
-so the number and the delivery cannot drift apart.
+pinned rules, so a budget overflow is visible rather than silent. Two filters
+list the rules behind those numbers: **pinned** or not, and **delivered** or
+not, where _not delivered_ is a promoted rule the cap or the TTL keeps from
+sessions. The badges open the matching filter. One function backs the badge,
+the filter and the readers that build the delivered set, so what the page
+shows and what a session receives cannot drift apart. For project rules it
+counts each project on its own. Each promoted rule's card also carries its
+**applies when** line and its **Enforced by guard** field, both editable in
+place, and how the rule was delivered over the last 30 days; the next two
+sections explain them.
+
+### Delivery by task relevance
+
+An agent's own `build_context` call states its task in `topic`. When the
+account has turned the rule delivery judge on (Settings → **Rule delivery
+judge**) and the instance runs the gate (below), a small decision model
+answers one yes/no question per unpinned rule — does this rule bind this
+task? — and each rule is delivered at the level its probability earns:
+
+| Level      | What arrives                                      | When (default bands)      |
+| ---------- | ------------------------------------------------- | ------------------------- |
+| `full`     | the whole rule                                    | probability 0.60 or above |
+| `gate`     | the headline and the rule's **applies when** line | from 0.35 up to 0.60      |
+| `headline` | the headline only                                 | below 0.35                |
+
+The headline is the rule's opening clause, up to its first sentence break.
+Pinned rules are never judged and always arrive whole, first; the unpinned
+rules follow, the most binding first. Every rule stays named: at `gate` and
+`headline` the record's `text` is the headline, the record carries the rule's
+`id`, and the full text is one `zm://rules/{id}` read away. Only a record at
+`gate` carries `applies_when`; a rule delivered whole, or by an unjudged call,
+is sent its text without it. The `STANDING RULES` block of the tool result,
+and the block the hooks render, mark such a line `[gate]` or `[headline]`
+followed by the rule id, and close with a line saying to read
+`zm://rules/<id>` before acting on one.
+
+What a call is judged against depends on `max_tokens`. A `build_context`
+call without it is an agent's call, judged against its `topic`. A call with
+it is a hook briefing — what the hooks ask for at session start and on the
+first prompt — which carries the project, not a task, so it is judged only
+against what the server knows of the conversation: the card it is bound to,
+or the card a new session is offered to continue (its title, state, status
+reason and open branch). Without such a card it is not judged at all. The
+text you type never leaves your machine for this. On a feature branch the
+session-start hook asks for two briefings, the project's and the branch's,
+and passes `judge_rules: false` on the second, so one session start costs one
+judgment; any caller can pass it to have the rules delivered whole.
+
+Each rule carries an **applies when** line — one to three lines of observable
+task features — which is what the judge tests against the task. The distiller
+writes it when it drafts the rule, `promote_rule` takes it as `applies_when`,
+and it is editable on `/rules`. For rules promoted before the line existed,
+the server's `rules:applies-when-draft` command, an operator script that runs
+with the service role against a stand, drafts and stores one per rule, which
+the owner then reviews and edits on `/rules`. A rule without one is judged on
+its whole text. The provider receives the task statement and, per rule, its
+headline with its **applies when** line (or its whole text when it has none).
+
+The judge runs on the instance's provider key (TypeSafe Jev by default, SubQ
+Snap as the alternative) or on a key the account installs. It is off until an
+account turns it on, and the instance decides whether it runs at all:
+`ZM_RULE_GATE_MODE` is `off` by default, `shadow` judges and records what it
+would have delivered while every rule still arrives whole, and `live`
+delivers by level. `ZM_RULE_GATE_HI` and `ZM_RULE_GATE_LO` move the two
+bands. When the judge fails or does not answer in time
+(`ZM_JUDGE_TIMEOUT_MS`, 1.5 seconds by default), the rules arrive exactly as
+they would without it and the call says so: `rule_gate.judge_unavailable` is
+`true`. There is no second provider to fall back to. On the instance's key the
+judge runs only while the account's extraction allowance has room; once it is
+used up the rules arrive whole and `rule_gate.unavailable_reason` is
+`budget_exhausted`. The judge's own tokens do not count against that
+allowance, so turning it on never pauses extraction. A key the account
+installed is never held back. When the account's judge settings, its key or
+its allowance cannot be read, the call is reported the same way, with
+`unavailable_reason` naming what could not be read; a failed key lookup never
+falls back to the instance's key.
+
+A judged call carries `rule_gate` in its result: the mode, provider and
+model, the judge's latency, the bands, how many characters the rules would
+have cost whole against what was delivered, and per rule its id, probability
+and level. The `/rules` page shows, per promoted rule, over the last 30 days:
+how often the judge saw it, how often it went out whole, by gate or by
+headline, the mean probability it was given, and how often its full text was
+read back by id. A rule that is often fetched after a headline needs a better
+**applies when** line. The daily series that `export_metrics` returns carry
+the gate's totals; see [Value metering](/docs/platform/value-metering#rule-gate-metering).
+
+### Guard hooks and refusals
+
+A client-side guard hook that refuses an action can open its refusal reason
+with `[guard:<name>]` (for example `[guard:one_line_commit]`), where the
+name is a lowercase letter followed by 1 to 63 lowercase letters, digits,
+`_` or `-`. When the watcher's hook ingests a Claude Code transcript, it
+reports such refusals with the chunk: the guard's name and the time, never
+the refused command or the reason text. Only the denial itself counts, once
+per denied tool call; the tag in prose, in a tool's input or in a result that
+succeeded is talk about a guard, not a refusal by one.
+
+`/rules` lists the refusals per guard over the last 30 days, and a rule's
+**Enforced by guard** field records which guard backs it, so the guard's
+refusals can be read next to how the rule was delivered.
 
 ### Closing the loop
 

@@ -53,7 +53,9 @@ which is only safe if abandoned loops eventually stop resurfacing. Loops
 older than a configurable threshold (default 14 days, via the
 `zm.open_loop_ttl_days` database setting) drop out of the briefing's
 `open_loops` section but remain live memories: they still appear in
-`recall`, in the dashboard feed, and `close_loop` still works on them.
+`recall`, in the dashboard feed, and `close_loop` still works on them. The
+briefing still says they exist: it counts the ones that sit on no card
+(`open_loops_aged`) and names that count in one line.
 
 ### Index hygiene
 

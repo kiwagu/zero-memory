@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   decideAction,
+  protectPromotedLoop,
   queueInstead,
+  retiredBy,
   sameSessionCollapseAction,
   type JudgedPair,
   type SessionPairSide,
@@ -315,8 +317,9 @@ describe('sameSessionCollapseAction', () => {
   });
 
   it('collapses an authoritative same-session pair toward the newest side', () => {
+    // At the floor itself: the line is inclusive.
     expect(
-      sameSessionCollapseAction(side('mem_new'), side('mem_old'), 0.96, true)
+      sameSessionCollapseAction(side('mem_new'), side('mem_old'), 0.95, true)
     ).toEqual({ winner: 'mem_new', loser: 'mem_old' });
     expect(
       sameSessionCollapseAction(side('mem_a'), side('mem_b'), 0.99, false)
@@ -327,7 +330,7 @@ describe('sameSessionCollapseAction', () => {
     // Distinct same-session facts with shared phrasing reach 0.92+; only
     // near-verbatim restatements (>= 0.95) collapse deterministically.
     expect(
-      sameSessionCollapseAction(side('mem_a'), side('mem_b'), 0.94, true)
+      sameSessionCollapseAction(side('mem_a'), side('mem_b'), 0.949, true)
     ).toBeNull();
   });
 
@@ -408,5 +411,74 @@ describe('queueInstead', () => {
     } as const;
     expect(queueInstead(skip)).toBe(skip);
     expect(queueInstead(queued)).toBe(queued);
+  });
+});
+
+describe('protectPromotedLoop', () => {
+  const promoted = new Set(['mem_loop']);
+
+  it('parks a forget that would retire a promoted loop', () => {
+    expect(
+      protectPromotedLoop(
+        { kind: 'forget', winner: 'mem_new', loser: 'mem_loop' },
+        promoted
+      )
+    ).toEqual({
+      kind: 'queue',
+      verdict: 'duplicate',
+      winner: 'mem_new',
+      contradiction: false,
+    });
+  });
+
+  it('parks a supersede that would retire a promoted loop', () => {
+    expect(
+      protectPromotedLoop(
+        { kind: 'supersede', winner: 'mem_new', loser: 'mem_loop' },
+        promoted
+      )
+    ).toEqual({
+      kind: 'queue',
+      verdict: 'supersedes',
+      winner: 'mem_new',
+      contradiction: false,
+    });
+  });
+
+  it('lets an auto-resolution through when the promoted loop is the winner', () => {
+    // Retiring the OTHER side changes nothing about the handed-over work.
+    const action = {
+      kind: 'forget',
+      winner: 'mem_loop',
+      loser: 'mem_dup',
+    } as const;
+    expect(protectPromotedLoop(action, promoted)).toBe(action);
+  });
+
+  it('leaves unpromoted losers and skips alone', () => {
+    const plain = {
+      kind: 'supersede',
+      winner: 'mem_a',
+      loser: 'mem_b',
+    } as const;
+    const skip = { kind: 'skip' } as const;
+    expect(protectPromotedLoop(plain, promoted)).toBe(plain);
+    expect(protectPromotedLoop(skip, promoted)).toBe(skip);
+  });
+});
+
+describe('retiredBy', () => {
+  it('names the loser of an auto-resolution and nothing else', () => {
+    expect(retiredBy({ kind: 'forget', winner: 'a', loser: 'b' })).toBe('b');
+    expect(retiredBy({ kind: 'supersede', winner: 'a', loser: 'b' })).toBe('b');
+    expect(retiredBy({ kind: 'skip' })).toBeNull();
+    expect(
+      retiredBy({
+        kind: 'queue',
+        verdict: 'duplicate',
+        winner: 'a',
+        contradiction: false,
+      })
+    ).toBeNull();
   });
 });

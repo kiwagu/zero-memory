@@ -29,6 +29,7 @@ import {
   createUserClient,
   listPromotedUserRules,
   fetchUserEntityId,
+  readPromotedRuleById,
   SupabaseSessionManager,
 } from '@workspace/persistence';
 import { USAGE_RECORDER, type IUsageRecorder } from '@workspace/usage';
@@ -38,6 +39,7 @@ import {
   recordChallengeMisled,
   recordInBandRecallUsed,
   recordRememberResult,
+  recordResourceRead,
   recordToolError,
   recordToolInvocation,
   recordToolResult,
@@ -130,6 +132,9 @@ const main = async (): Promise<void> => {
     instructionRules,
     // Live rules read for the zm://rules resource (same credential).
     readPromotedRules: () => listPromotedUserRules(authed.accessToken),
+    // One rule in full for zm://rules/{id}, and the read's own usage row.
+    readPromotedRule: (id) => readPromotedRuleById(authed.accessToken, id),
+    onResourceRead: (metering) => recordResourceRead(usageRecorder, metering),
     runInToolContext: runAsUser,
     // Single dispatcher-level metering point for every tool call (mirrors the
     // HTTP transport). Fire-and-forget.

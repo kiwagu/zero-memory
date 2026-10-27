@@ -83,22 +83,30 @@ schema rather than a convention. The audit log is operator data and is never
 exposed through the API.
 
 An account erasure is the one thing that touches existing rows, and it does
-not remove them: the actor reference is severed (`actor_id` becomes null) and
-the entry survives. The erasure itself is recorded as a content-free entry
-carrying the counts of what was deleted.
+not remove them: the actor reference is severed (`actor_id` becomes null), the
+payload is replaced by an erasure marker, and the entry survives as the fact
+that a command ran. The erasure itself is recorded as a content-free entry
+carrying the counts of what was deleted. It is the same erasure whether the
+person deleted the account in Settings or an operator deleted the user in
+Supabase Auth.
 
 ### Payload sanitization
 
 The payload is a JSON snapshot of the command, sanitized before it is stored.
-Every string is truncated to **500 characters** at any depth: nested objects
-and arrays are walked, not just top-level fields. A clipped value keeps a
-marker of how much was dropped, so a truncated entry never looks like a short
-one. The whole payload is capped at **8 KB**. When a command exceeds it, the
-row stores `{truncated: true, command_keys: [...]}` instead, so the shape of
-the intent survives even when the body does not.
+A field someone **wrote** — a memory's content or verbatim phrase, a
+transcript chunk, a card's title, body, note or reason, an entity's name, a
+rule's text, a key — is replaced by its length (`[content, 42 chars]`), at any
+depth. Every other string, an identifier or a choice, is truncated to **500
+characters**; a clipped value keeps a marker of how much was dropped, so a
+truncated entry never looks like a short one. The whole payload is capped at
+**8 KB**. When a command exceeds it, the row stores
+`{truncated: true, command_keys: [...]}` instead, so the shape of the intent
+survives even when the body does not.
 
-No command carries a secret in the first place, but the limits are
-unconditional: the audit log records intent, not bulk content.
+The words are never in the log, by construction rather than by trust: a write
+that the content guard refused for carrying a secret is still audited as a
+failed command, and what it carried is not. The audit log records intent,
+not content.
 
 ### Failure semantics
 

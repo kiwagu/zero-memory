@@ -97,9 +97,6 @@ const hasMarkerUpward = (dir: string, marker: string): boolean => {
 export const projectIgnored = (dir: string): boolean =>
   hasMarkerUpward(dir, IGNORE_MARKER);
 
-/** The effective ingest mode (from the config), for logging/diagnostics. */
-export const ingestMode = (): IngestMode => readConfig().mode;
-
 /**
  * Whether transcript ingest is allowed for the project at `dir`. The
  * `.zero-memory-ignore` marker always wins; otherwise the config mode decides.
