@@ -28,9 +28,13 @@ promoting stage, restarting services, or touching the live database.
 3. **The review stand — only on the owner's request.** The active testing
    phase is behind the project and the stack is stable, so the review
    stand is no longer raised by default before asking for approval: the
-   gates of (2) and (5b) on the isolated test stack are the evidence. Raise
-   it only when the owner asks for it, from the branch: `bun --cwd
-   tests/e2e run test:e2e:stands`. One command stands up BOTH contours from
+   gates of (2) and (5b) on the isolated test stack are the evidence,
+   alongside any migration rehearsal the change requires. Raise it for the
+   owner's acceptance only when the owner asks for it, from the branch:
+   `bun --cwd tests/e2e run test:e2e:stands`. This does not waive the
+   rehearsal of pending migrations on the review stack that
+   `/.cursor/rules/create-migration.mdc` requires before a promote — that
+   rehearsal raises the stand without a separate request. One command stands up BOTH contours from
    the same commit — the test stack runs the suite off a `db reset`, and
    the review stack (`zero-memory-review`, server `:8789` / web `:3103`)
    comes up on a clone of live with the branch's pending migrations
