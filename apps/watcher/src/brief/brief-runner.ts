@@ -330,6 +330,9 @@ const runSessionStart = async (
           briefing: true,
           conversation_id: conversationId,
           project_hint: projectHint,
+          // The project briefing is the one judged against the conversation's
+          // card; judging this pack too would spend a second judge call.
+          judge_rules: false,
         })
           .then((briefing) => ({ topic: branch, briefing }))
           .catch(() => 'failed' as const)

@@ -137,6 +137,53 @@ describe('session-start branch topic', () => {
 });
 
 /**
+ * The server judges the standing rules once per session start: on the
+ * project briefing, against the conversation's card. The branch briefing asks
+ * for them whole, so the same rule can come back at two levels, and the level
+ * judged for the project is the one the session reads.
+ */
+describe('session-start rule levels', () => {
+  const dirs = useStateDirs('zm-levels');
+  const id = 'rlc_5555555555555555.5555555555';
+  const judged: ContextRule = {
+    id,
+    text: 'DEPLOY RULE',
+    headline: 'DEPLOY RULE',
+    pinned: false,
+    level: 'headline',
+  };
+  const whole: ContextRule = {
+    id,
+    text: 'DEPLOY RULE. Ship only from the test stand.',
+    headline: 'DEPLOY RULE',
+    pinned: false,
+  };
+
+  it('judges the rules on the project briefing only and renders its level', async () => {
+    initRepo(dirs.work, { branch: 'feature/rule-levels' });
+    vi.mocked(callBuildContext).mockImplementation((args) =>
+      Promise.resolve(
+        briefingPack({ rules: args.judge_rules === false ? [whole] : [judged] })
+      )
+    );
+    const briefing = await brief('session-start', {
+      sessionId: 'sess-levels',
+      cwd: dirs.work,
+    });
+    expect(
+      vi
+        .mocked(callBuildContext)
+        .mock.calls.map(([args]) => [args.topic, args.judge_rules])
+    ).toEqual([
+      [basename(dirs.work), undefined],
+      ['rule levels', false],
+    ]);
+    expect(briefing).toContain(`1. DEPLOY RULE [headline] ${id}`);
+    expect(briefing).not.toContain('Ship only from the test stand');
+  });
+});
+
+/**
  * The per-message assertion, driven end to end through `runBrief('task', …)`.
  *
  * An acknowledgement prompt is deliberate: the runner emits the banner and

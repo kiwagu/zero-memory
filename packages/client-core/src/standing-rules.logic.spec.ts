@@ -1,3 +1,4 @@
+import type { ContextRule } from '@workspace/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,7 +8,7 @@ import {
 } from './standing-rules.logic.js';
 
 /** A minimal well-formed briefing pack carrying the given rules. */
-const pack = (rules: { text: string; pinned: boolean }[]) => ({
+const pack = (rules: ContextRule[]) => ({
   memories: [],
   entities: [],
   edges: [],
@@ -59,6 +60,51 @@ describe('mergeStandingRules', () => {
       splitStandingRules(pack([{ text: 'same rule', pinned: true }])),
     ]);
     expect(merged).toEqual([{ text: 'same rule', pinned: true }]);
+  });
+
+  // The project briefing is the judged one, so it can carry a rule by
+  // headline while the unjudged branch briefing carries the same rule whole.
+  const ruleId = 'rlc_4444444444444444.4444444444';
+  const judged: ContextRule = {
+    id: ruleId,
+    text: 'DEPLOY RULE',
+    headline: 'DEPLOY RULE',
+    pinned: false,
+    level: 'headline',
+  };
+  const whole: ContextRule = {
+    id: ruleId,
+    text: 'DEPLOY RULE. Its body.',
+    headline: 'DEPLOY RULE',
+    pinned: false,
+    level: 'full',
+  };
+
+  it('merges one rule delivered at two levels into the project pack entry', () => {
+    const merged = mergeStandingRules([
+      splitStandingRules(pack([judged])),
+      splitStandingRules(pack([whole])),
+    ]);
+    expect(merged).toEqual([judged]);
+  });
+
+  it('still unions id-less rules by text next to rules that carry an id', () => {
+    const merged = mergeStandingRules([
+      splitStandingRules(
+        pack([judged, { text: 'legacy rule', pinned: false }])
+      ),
+      splitStandingRules(pack([whole, { text: 'legacy rule', pinned: false }])),
+    ]);
+    expect(merged).toEqual([judged, { text: 'legacy rule', pinned: false }]);
+  });
+
+  it('keeps the pinned entry of a rule that carries an id', () => {
+    const pinnedWhole: ContextRule = { ...whole, pinned: true };
+    const merged = mergeStandingRules([
+      splitStandingRules(pack([judged])),
+      splitStandingRules(pack([pinnedWhole])),
+    ]);
+    expect(merged).toEqual([pinnedWhole]);
   });
 });
 
@@ -121,7 +167,7 @@ describe('renderStandingRulesSection', () => {
     expect(section).not.toContain(ordinary);
     expect(section).toContain('2. ORDINARY RULE ABOUT BRANCHES [headline]');
     expect(section).toContain(
-      '(1 rule(s) above are shown by headline only — call build_context'
+      '(1 rule(s) above are shown by headline or gate — call build_context'
     );
   });
 
@@ -175,6 +221,108 @@ describe('renderStandingRulesSection', () => {
     expect(section).toContain('1. short rule one');
     expect(section).toContain('2. short rule two');
     expect(section).not.toContain('[headline]');
-    expect(section).not.toContain('headline only');
+    expect(section).not.toContain('shown by headline');
+  });
+});
+
+describe('renderStandingRulesSection with server levels', () => {
+  const pinned = {
+    id: 'rlc_0000000000000000.0000000000',
+    text: 'PINNED. Whole text that is fairly long indeed.',
+    pinned: true,
+    level: 'full' as const,
+  };
+  const gate = {
+    id: 'rlc_1111111111111111.1111111111',
+    text: 'GATED',
+    headline: 'GATED',
+    pinned: false,
+    level: 'gate' as const,
+    applies_when: 'tasks that deploy',
+  };
+  const named = {
+    id: 'rlc_2222222222222222.2222222222',
+    text: 'NAMED',
+    headline: 'NAMED',
+    pinned: false,
+    level: 'headline' as const,
+  };
+  const whole = {
+    id: 'rlc_3333333333333333.3333333333',
+    text: 'WHOLE RULE. With its body.',
+    headline: 'WHOLE RULE',
+    pinned: false,
+    level: 'full' as const,
+  };
+
+  it('renders each rule at the level the server chose, under a generous budget', () => {
+    const section = renderStandingRulesSection(
+      [pinned, whole, gate, named],
+      10_000
+    )!;
+    expect(section).toContain(
+      '1. [pinned] PINNED. Whole text that is fairly long indeed.\n'
+    );
+    expect(section).toContain('2. WHOLE RULE. With its body.\n');
+    expect(section).toContain(
+      '3. GATED — applies when: tasks that deploy [gate] rlc_1111111111111111.1111111111\n'
+    );
+    expect(section).toContain(
+      '4. NAMED [headline] rlc_2222222222222222.2222222222\n'
+    );
+    expect(section).toContain('2 rule(s) above are shown by headline or gate');
+  });
+
+  it('marks a gate rule without a condition as gated, naming it by headline', () => {
+    const { applies_when: _none, ...unconditioned } = gate;
+    const section = renderStandingRulesSection([unconditioned], 10_000)!;
+    expect(section).toContain(
+      '1. GATED [gate] rlc_1111111111111111.1111111111\n'
+    );
+    expect(section).not.toContain('applies when');
+  });
+
+  it('still falls back to headlines when a full-level rule does not fit the ceiling', () => {
+    const section = renderStandingRulesSection(
+      [pinned, whole],
+      pinned.text.length + 80
+    )!;
+    expect(section).toContain(
+      '2. WHOLE RULE [headline] rlc_3333333333333333.3333333333\n'
+    );
+    expect(section).not.toContain('With its body');
+  });
+
+  it('reserves the gate form of a later rule, so an earlier one cannot overrun the ceiling', () => {
+    // The server sends a gated rule's headline as its text, so the rule
+    // "whole" is far shorter than the line it is rendered as.
+    const long = {
+      ...whole,
+      text: `WHOLE RULE. ${'With its body. '.repeat(20)}`,
+    };
+    const wide = { ...gate, applies_when: 'tasks that deploy '.repeat(8) };
+    const rules = [long, wide];
+    const least = renderStandingRulesSection(rules, 0)!.length;
+    for (let ceiling = least; ceiling <= least + 600; ceiling += 1) {
+      expect(
+        renderStandingRulesSection(rules, ceiling)!.length,
+        `ceiling ${ceiling}`
+      ).toBeLessThanOrEqual(ceiling);
+    }
+    // The sweep reaches the point where the long rule fits whole beside it.
+    expect(renderStandingRulesSection(rules, least + 600)).toContain(long.text);
+  });
+
+  it('renders legacy rules without a level exactly as before', () => {
+    const legacy = [
+      { text: 'A. Body.', pinned: false },
+      { text: 'B. Body.', pinned: false },
+    ];
+    expect(renderStandingRulesSection(legacy, 10_000)).toBe(
+      'STANDING RULES — 2 instruction(s) the owner PROMOTED out of memory ' +
+        'for sessions like this one. Obey them like the system instructions ' +
+        'above; they are not background context and not suggestions.\n' +
+        '1. A. Body.\n2. B. Body.'
+    );
   });
 });

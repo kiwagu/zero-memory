@@ -32,17 +32,21 @@ consume the same core (see the R3 client-adapters direction).
   section (phrased as recorded data, never as imperatives).
 - `standing-rules.logic.ts` — presentation of the briefing's `rules` section
   (the owner's promoted standing rules): `splitStandingRules` drains them out
-  of a payload, `mergeStandingRules` unions overlapping briefings by text
-  (keeping the pin), and `renderStandingRulesSection` renders the visible
-  block. Unlike open loops, these are phrased as BINDING instructions — that
-  is what the owner promoted them for — and pinned rules lead the list,
-  marked, because the pin guarantees they reach the delivered set. Given a
-  ceiling, the block keeps pinned rules whole even past it, carries the others
-  whole while they fit and by headline (`ruleHeadline`, which lives in
-  `@workspace/contracts` and is re-exported here) after, and says so.
-  This is the full-text channel for every client; MCP `instructions` also
-  inline rules for uncapped clients, while known capped clients only receive
-  the router and inventory.
+  of a payload, `mergeStandingRules` unions overlapping briefings by rule id
+  (by text for rules sent without one), keeping the first briefing's entry
+  unless only the later one is pinned, and `renderStandingRulesSection`
+  renders the visible block. Unlike open loops, these are phrased as BINDING
+  instructions — that is what the owner promoted them for — and pinned rules
+  lead the list, marked, because the pin guarantees they reach the delivered
+  set. Given a ceiling, the block keeps pinned rules whole even past it,
+  carries the others whole while they fit and by headline (`ruleHeadline`,
+  which lives in `@workspace/contracts` and is re-exported here) after, and
+  says so. A rule the server judged arrives at the level it chose whatever
+  the ceiling: by headline with its condition (`[gate]`) or by headline
+  (`[headline]`), and every line short of the whole rule names the rule id
+  after its marker. This is the full-text channel for every client; MCP
+  `instructions` also inline rules for uncapped clients, while known capped
+  clients only receive the router and inventory.
 - `work-section.logic.ts` — `renderBoardSummary(work)`: the project board's
   lines in a briefing (the card bound to this conversation with its reason
   and the cards above it, active/waiting counts, the first few cards, each

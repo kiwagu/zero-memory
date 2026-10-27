@@ -134,6 +134,13 @@ The `brief` and `ingest` subcommands are the plugin's hook entrypoints: they
 read the Claude Code hook JSON on stdin and (for `brief`) print a
 `hookSpecificOutput` frame on stdout, keeping all logging on stderr.
 
+`brief session-start` asks for two briefings, the project's and, on a feature
+branch, the branch's. The server may judge the standing rules of the project
+briefing against the conversation's card and deliver some by headline or
+gate; the branch briefing sets `judge_rules: false`, so one session start
+costs one judgment, and the rules block shows each rule at the level the
+project briefing carried it (`[gate]` or `[headline]`, with the rule id).
+
 `brief task` runs on every prompt, but builds a task briefing — one server call —
 at most once per context window, and only for a substantive prompt. Every other
 prompt still carries something: the next memory of the briefing's remainder,
