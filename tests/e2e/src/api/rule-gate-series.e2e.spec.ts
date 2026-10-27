@@ -198,14 +198,16 @@ const seedRuleGateUsage = async (ownerId: string): Promise<void> => {
         {
           user_id: ownerId,
           event_type: 'llm_extraction',
-          quantity: 750,
+          // Input plus output, as on every model call; the series counts the
+          // input alone.
+          quantity: 790,
           unit: 'tokens',
           metadata: {
             purpose: 'rule_gate',
             provider: 'typesafe',
             model: 'e2e-judge',
             input_tokens: 750,
-            output_tokens: 0,
+            output_tokens: 40,
           },
         },
         {
