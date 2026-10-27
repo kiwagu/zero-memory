@@ -53,10 +53,24 @@ when it turned the judge on (`IJudgeSettingsReader`) and a credential
 resolves for it; the settings are read first, so an account with the judge
 off costs no key lookup. Pinned rules are never judged.
 
-The gate fails open. A timeout, a `JudgeUnavailableError` or any other judge
-error delivers the call's rules exactly as without the gate, with
-`rule_gate.judge_unavailable: true`; a rule the answer leaves out is
-delivered whole. No other provider is tried.
+The gate fails open. Once a call is set to be judged, anything that keeps
+the answer from coming back delivers the call's rules exactly as without the
+gate, with `rule_gate.judge_unavailable: true` and, when the reason is known,
+`rule_gate.unavailable_reason`:
+
+- `settings_unavailable` — the account's judge settings could not be read
+  (`JudgeSettingsUnavailableError`); a read that finds no row is "off", not a
+  failure;
+- `credential_unavailable` — whether the account holds its own key could not
+  be established (`JudgeCredentialUnavailableError`). Only a lookup that
+  succeeded and found no key falls back to the instance's key;
+- `budget_unavailable` / `budget_exhausted` — the account's extraction
+  allowance on the instance's key could not be read, or is used up;
+- `judge_error` — the judge call failed other than by not answering
+  (`JudgeRequestError`, a malformed response).
+
+A timeout, a `429` or a `5xx` (`JudgeUnavailableError`) carries no reason. A
+rule the answer leaves out is delivered whole. No other provider is tried.
 
 Switching it on, shadow first:
 

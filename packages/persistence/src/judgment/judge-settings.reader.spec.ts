@@ -1,5 +1,8 @@
 import type { IContext } from '@workspace/context';
-import { JUDGE_SETTINGS_OFF } from '@workspace/judgment';
+import {
+  JudgeSettingsUnavailableError,
+  JUDGE_SETTINGS_OFF,
+} from '@workspace/judgment';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createUserClient, type Client } from '../supabase.client.js';
@@ -56,7 +59,7 @@ describe('SupabaseJudgeSettingsReader', () => {
     expect(warned).not.toHaveBeenCalled();
   });
 
-  it('is off when the read fails, and logs the message without the row', async () => {
+  it('throws when the read fails, so a failed read is not taken for off, and logs the message without the row', async () => {
     vi.mocked(createUserClient).mockReturnValue(
       clientAnswering({
         data: { enabled: true, provider: 'subq' },
@@ -68,7 +71,7 @@ describe('SupabaseJudgeSettingsReader', () => {
       .mockImplementation(() => undefined);
     await expect(
       new SupabaseJudgeSettingsReader(signedIn).read('usr_a')
-    ).resolves.toEqual(JUDGE_SETTINGS_OFF);
+    ).rejects.toBeInstanceOf(JudgeSettingsUnavailableError);
     expect(warned).toHaveBeenCalledTimes(1);
     const line = String(warned.mock.calls[0]?.[0]);
     expect(line).toContain('boom');

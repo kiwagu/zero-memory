@@ -1534,6 +1534,8 @@ export class MemoryService {
                 : topicText,
         });
       } catch (error) {
+        // The last resort: the gate reports its own failures in rule_gate,
+        // so only something unexpected lands here.
         this.#logger.warn('rule gate failed; rules delivered whole', {
           error: error instanceof Error ? error.message : String(error),
         });

@@ -551,11 +551,23 @@ export const ruleGateBlockSchema = z.object({
   latency_ms: nonNegativeInt,
   judge_unavailable: z.boolean(),
   /**
-   * Why the judge gave no answer when the gate did not ask it:
-   * `budget_exhausted` — the account's extraction allowance on the
-   * instance's key is used up. Absent when the judge was asked.
+   * Why a call set to be judged got no answer, when the reason is known:
+   * `settings_unavailable`, `credential_unavailable` or `budget_unavailable`
+   * when the account's judge settings, its key or its extraction allowance
+   * could not be read; `budget_exhausted` when the allowance on the
+   * instance's key is used up; `judge_error` when the judge call failed other
+   * than by not answering in time or refusing for now. Absent when the judge
+   * answered, and when it simply did not answer.
    */
-  unavailable_reason: z.enum(['budget_exhausted']).optional(),
+  unavailable_reason: z
+    .enum([
+      'budget_exhausted',
+      'settings_unavailable',
+      'credential_unavailable',
+      'budget_unavailable',
+      'judge_error',
+    ])
+    .optional(),
   bands: z.object({
     hi: z.number().min(0).max(1),
     lo: z.number().min(0).max(1),

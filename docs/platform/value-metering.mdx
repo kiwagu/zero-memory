@@ -137,9 +137,12 @@ When a call's standing rules go through the gate of the
 [rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance),
 that call's `build_context` row carries the outcome as `rule_gate`, whether
 or not the judge answered: the mode, the provider and model, the
-judge's latency, whether it was unavailable (and `unavailable_reason:
-budget_exhausted` when it was not asked because the account's extraction
-allowance was used up), the bands, `chars_baseline` (the sum of the rules'
+judge's latency, whether it was unavailable and, when the reason is known,
+`unavailable_reason` (`settings_unavailable`, `credential_unavailable` or
+`budget_unavailable` when the account's judge settings, its key or its
+extraction allowance could not be read; `budget_exhausted` when that
+allowance is used up; `judge_error` when the judge call failed other than by
+not answering in time), the bands, `chars_baseline` (the sum of the rules'
 whole texts, what an unjudged call sends) against `chars_delivered` (the
 characters the session receives: each delivered text, plus the **applies
 when** line of a rule delivered by gate), the count per level, and per rule

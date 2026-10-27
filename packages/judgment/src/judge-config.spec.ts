@@ -55,6 +55,8 @@ describe('readRuleGateConfig', () => {
       hi: 0.6,
       lo: 0.35,
       timeoutMs: 1500,
+      defaultProvider: 'typesafe',
+      defaultModels: { typesafe: 'jev-1.14.0', subq: 'subq-snap-1.1' },
     });
   });
 

@@ -1,3 +1,4 @@
+import { JudgeCredentialUnavailableError } from '@workspace/judgment';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SupabaseJudgeCredentialResolver } from './judge-credential-resolver.js';
@@ -62,7 +63,7 @@ describe('SupabaseJudgeCredentialResolver', () => {
     });
   });
 
-  it('uses the platform key when the lookup fails, and logs no key', async () => {
+  it('throws when the lookup fails instead of falling back to the platform key, and logs no key', async () => {
     const client = {
       rpc: vi
         .fn()
@@ -76,10 +77,49 @@ describe('SupabaseJudgeCredentialResolver', () => {
         subq: 'subq-snap-1.1',
       }
     );
-    await expect(resolver.resolve('usr_a')).resolves.toMatchObject({
-      provider: 'typesafe',
-      ownedByCaller: false,
-    });
+    const warned = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    platform.resolve.mockClear();
+    try {
+      await expect(resolver.resolve('usr_a')).rejects.toBeInstanceOf(
+        JudgeCredentialUnavailableError
+      );
+      expect(platform.resolve).not.toHaveBeenCalled();
+      expect(String(warned.mock.calls[0]?.[0])).toContain('boom');
+    } finally {
+      warned.mockRestore();
+    }
+  });
+
+  it('throws on a row that is not a credential, and never shows the row', async () => {
+    const client = rpcReturning([
+      { provider: 'elsewhere', model: null, api_key: 'own-key-value' },
+    ]);
+    const resolver = new SupabaseJudgeCredentialResolver(
+      platform,
+      () => client as never,
+      {
+        typesafe: 'jev-1.14.0',
+        subq: 'subq-snap-1.1',
+      }
+    );
+    const warned = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    platform.resolve.mockClear();
+    try {
+      const error = await resolver.resolve('usr_a').then(
+        () => null,
+        (rejection: unknown) => rejection
+      );
+      expect(error).toBeInstanceOf(JudgeCredentialUnavailableError);
+      expect(String((error as Error).message)).not.toContain('own-key-value');
+      expect(platform.resolve).not.toHaveBeenCalled();
+      expect(warned.mock.calls.join('\n')).not.toContain('own-key-value');
+    } finally {
+      warned.mockRestore();
+    }
   });
 
   it.each(['gpt', 'constructor'])(

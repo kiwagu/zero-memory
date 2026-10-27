@@ -1,4 +1,5 @@
 import {
+  JudgeCredentialUnavailableError,
   JUDGE_PROVIDER_NAMES,
   type IJudgeCredentialResolver,
   type JudgeProviderName,
@@ -28,7 +29,9 @@ const isRow = (value: unknown): value is JudgeCredentialRow =>
 /**
  * Whose decision-model key a call runs on: the account's own (Vault, via the
  * server-only RPC) when installed, else the platform key of the provider the
- * caller prefers. Mirrors SupabaseCredentialResolver for the LLM key.
+ * caller prefers. Only a lookup that succeeded and found no key falls back to
+ * the platform key; a failed lookup or an unreadable row throws
+ * `JudgeCredentialUnavailableError`.
  *
  * A preferred provider outside the closed set counts as no preference, so a
  * stray value reaches the platform default instead of a lookup by an
@@ -58,14 +61,28 @@ export class SupabaseJudgeCredentialResolver implements IJudgeCredentialResolver
       if (result.error) throw new Error(result.error.message);
       data = result.data;
     } catch (error: unknown) {
-      logger.warn(
-        'could not read a stored judge credential; using the platform key',
-        { error: error instanceof Error ? error.message : String(error) }
+      // Not knowing is not having none: falling back here could judge on the
+      // instance's key, and with another provider, for an account that holds
+      // its own. The message only, never the row.
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn('could not read a stored judge credential', {
+        error: message,
+      });
+      throw new JudgeCredentialUnavailableError(
+        `judge credential lookup failed: ${message}`
       );
-      return this.platform.resolve(subjectId, choice);
     }
     const row: unknown = Array.isArray(data) ? data[0] : data;
-    if (!isRow(row)) return this.platform.resolve(subjectId, choice);
+    // Only an established absence reaches the platform key.
+    if (row === undefined || row === null) {
+      return this.platform.resolve(subjectId, choice);
+    }
+    if (!isRow(row)) {
+      logger.warn('a stored judge credential has an unexpected shape');
+      throw new JudgeCredentialUnavailableError(
+        'judge credential lookup returned an unexpected row'
+      );
+    }
     return {
       provider: row.provider,
       apiKey: row.api_key,

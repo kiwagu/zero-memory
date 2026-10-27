@@ -138,7 +138,10 @@ a gate failure costs the levelling, never the briefing. On the instance's key
 the gate first asks the budget guard (`@workspace/policy`) whether the
 account's `extraction` allowance has room, and delivers the rules whole with
 `unavailable_reason: 'budget_exhausted'` when it has none; an account's own
-key is never held back. Every way out of the
+key is never held back. A settings, credential or allowance read that fails,
+and a judge call that fails other than by not answering, are reported the same
+way, with `settings_unavailable`, `credential_unavailable`,
+`budget_unavailable` or `judge_error`. Every way out of the
 briefing sends a rule as the agent reads it: its text, pin, id and level, and
 its `applies_when` only at `gate` (`deliverAtLevel`; `deliverUnjudged` when
 nothing judged it). `chars_baseline` sums the rules' whole texts and

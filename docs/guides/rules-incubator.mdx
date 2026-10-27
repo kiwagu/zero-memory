@@ -276,7 +276,10 @@ judge runs only while the account's extraction allowance has room; once it is
 used up the rules arrive whole and `rule_gate.unavailable_reason` is
 `budget_exhausted`. The judge's own tokens do not count against that
 allowance, so turning it on never pauses extraction. A key the account
-installed is never held back.
+installed is never held back. When the account's judge settings, its key or
+its allowance cannot be read, the call is reported the same way, with
+`unavailable_reason` naming what could not be read; a failed key lookup never
+falls back to the instance's key.
 
 A judged call carries `rule_gate` in its result: the mode, provider and
 model, the judge's latency, the bands, how many characters the rules would

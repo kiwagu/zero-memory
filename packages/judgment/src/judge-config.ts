@@ -22,6 +22,12 @@ export interface RuleGateConfig {
   readonly lo: number;
   /** Per-request judge timeout; the same `ZM_JUDGE_TIMEOUT_MS` knob as the judge's. */
   readonly timeoutMs: number;
+  /**
+   * The platform default provider and the model per provider, the same values
+   * as the judge's: what a call's record names when no credential resolved.
+   */
+  readonly defaultProvider: JudgeProviderName;
+  readonly defaultModels: Record<JudgeProviderName, string>;
 }
 
 const DEFAULT_MODELS: Record<JudgeProviderName, string> = {
@@ -105,5 +111,13 @@ export const readRuleGateConfig = (env: NodeJS.ProcessEnv): RuleGateConfig => {
       `ZM_RULE_GATE_HI (${hi}) must be greater than ZM_RULE_GATE_LO (${lo})`
     );
   }
-  return { mode: rawMode, hi, lo, timeoutMs: readTimeoutMs(env) };
+  const judge = readJudgeConfig(env);
+  return {
+    mode: rawMode,
+    hi,
+    lo,
+    timeoutMs: judge.timeoutMs,
+    defaultProvider: judge.provider,
+    defaultModels: judge.models,
+  };
 };

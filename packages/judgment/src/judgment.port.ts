@@ -82,5 +82,30 @@ export class JudgeRequestError extends Error {
   }
 }
 
+/**
+ * The account's judge settings could not be read. Not the same as an account
+ * that never turned the judge on: the gate reports the call as unavailable
+ * instead of treating it as off.
+ */
+export class JudgeSettingsUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'JudgeSettingsUnavailableError';
+  }
+}
+
+/**
+ * Whether the account holds its own judge key could not be established: the
+ * lookup failed, or what it returned is not a credential. Only an established
+ * absence may fall back to the instance's key; anything else could judge an
+ * account's rules on a key, and with a provider, it never chose.
+ */
+export class JudgeCredentialUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'JudgeCredentialUnavailableError';
+  }
+}
+
 export const JUDGMENT = Symbol.for('zero-memory:judgment');
 export const injectJudgment = () => inject(JUDGMENT);

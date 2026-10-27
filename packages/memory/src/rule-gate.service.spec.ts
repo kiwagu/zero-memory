@@ -48,6 +48,16 @@ const rules: ContextRule[] = [
 /** The rules as a call that nothing judged delivers them. */
 const unjudged = rules.map(deliverUnjudged);
 
+/** The gate's configuration: live, the default bands and the judge defaults. */
+const CONFIG = {
+  mode: 'live' as const,
+  hi: 0.6,
+  lo: 0.35,
+  timeoutMs: 1500,
+  defaultProvider: 'typesafe' as const,
+  defaultModels: { typesafe: 'jev-1.14.0', subq: 'subq-snap-1.1' },
+};
+
 const service = (
   overrides: {
     mode?: 'off' | 'shadow' | 'live';
@@ -56,37 +66,52 @@ const service = (
     credential?: unknown;
     /** Whether the account's extraction allowance has room. */
     budgetLeft?: boolean;
+    /** A prerequisite read that fails instead of answering. */
+    fails?: 'settings' | 'credential' | 'budget';
+    /** The provider the account's settings choose. */
+    provider?: 'typesafe' | 'subq' | null;
   } = {}
 ) => {
   const judge = overrides.judge ?? new FakeJudgment({ defaultP: 0.5 });
   const recorder = { record: vi.fn() };
+  const down = (what: string) => Promise.reject(new Error(`${what} down`));
   const guard = {
-    status: vi
-      .fn()
-      .mockResolvedValue({ allowed: overrides.budgetLeft ?? true }),
+    status: vi.fn(() =>
+      overrides.fails === 'budget'
+        ? down('budget')
+        : Promise.resolve({ allowed: overrides.budgetLeft ?? true } as never)
+    ),
   };
-  const resolve = vi.fn().mockResolvedValue(
-    overrides.credential === undefined
-      ? {
-          provider: 'typesafe',
-          apiKey: 'k',
-          model: 'jev-1.14.0',
-          ownedByCaller: false,
-        }
-      : overrides.credential
+  const resolve = vi.fn(() =>
+    overrides.fails === 'credential'
+      ? down('credential')
+      : Promise.resolve(
+          overrides.credential === undefined
+            ? {
+                provider: 'typesafe' as const,
+                apiKey: 'k',
+                model: 'jev-1.14.0',
+                ownedByCaller: false,
+              }
+            : (overrides.credential as never)
+        )
   );
   const svc = new RuleGateService(
     {
-      read: vi.fn().mockResolvedValue({
-        enabled: overrides.enabled ?? true,
-        provider: null,
-      }),
+      read: vi.fn(() =>
+        overrides.fails === 'settings'
+          ? down('settings')
+          : Promise.resolve({
+              enabled: overrides.enabled ?? true,
+              provider: overrides.provider ?? null,
+            })
+      ),
     },
     { resolve },
     () => judge,
     recorder,
     guard,
-    { mode: overrides.mode ?? 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
+    { ...CONFIG, mode: overrides.mode ?? 'live' }
   );
   return { svc, judge, recorder, guard, resolve };
 };
@@ -218,7 +243,7 @@ describe('the request on the wire', () => {
       () => judgment,
       { record: vi.fn() },
       { status: vi.fn().mockResolvedValue({ allowed: true }) },
-      { mode: 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
+      CONFIG
     );
 
     const out = await svc.apply({
@@ -461,7 +486,7 @@ describe('RuleGateService.apply', () => {
       () => new FakeJudgment(),
       { record: vi.fn() },
       { status: vi.fn().mockResolvedValue({ allowed: true }) },
-      { mode: 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
+      CONFIG
     );
     const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
     expect(resolve).toHaveBeenCalledWith('usr_a', 'subq');
@@ -489,6 +514,89 @@ describe('RuleGateService.apply', () => {
     } finally {
       warned.mockRestore();
     }
+  });
+
+  describe('a call set to be judged whose prerequisite fails', () => {
+    const quiet = () =>
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    it.each([
+      // An unreadable settings row names the instance's default judge.
+      ['settings', {}, 'settings_unavailable', 'typesafe', 'jev-1.14.0'],
+      // An unreadable credential names the provider the account chose.
+      [
+        'credential',
+        { provider: 'subq' },
+        'credential_unavailable',
+        'subq',
+        'subq-snap-1.1',
+      ],
+      // An unreadable allowance names the credential that resolved.
+      ['budget', {}, 'budget_unavailable', 'typesafe', 'jev-1.14.0'],
+    ] as const)(
+      '%s: rules whole, reported unavailable with the reason',
+      async (fails, extra, reason, provider, model) => {
+        const warned = quiet();
+        try {
+          const { svc, judge, recorder } = service({ fails, ...extra });
+          const out = await svc.apply({
+            rules,
+            task: 't',
+            subjectId: 'usr_a',
+          });
+          expect(judge.calls).toHaveLength(0);
+          expect(recorder.record).not.toHaveBeenCalled();
+          expect(out.rules).toStrictEqual(unjudged);
+          expect(out.block).toMatchObject({
+            mode: 'live',
+            provider,
+            model,
+            latency_ms: 0,
+            judge_unavailable: true,
+            unavailable_reason: reason,
+            levels: { full: 5, gate: 0, headline: 0 },
+            chars_baseline: 376,
+            chars_delivered: 376,
+          });
+          expect(out.block!.rules).toHaveLength(5);
+          expect(out.block!.rules.every((r) => r.p === null)).toBe(true);
+        } finally {
+          warned.mockRestore();
+        }
+      }
+    );
+
+    it('a judge that fails other than by not answering is a judge error', async () => {
+      const judge = new FakeJudgment();
+      judge.judge = async () => {
+        throw new Error('typesafe: malformed response: not JSON');
+      };
+      const warned = quiet();
+      try {
+        const { svc } = service({ judge });
+        const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+        expect(out.block).toMatchObject({
+          judge_unavailable: true,
+          unavailable_reason: 'judge_error',
+        });
+      } finally {
+        warned.mockRestore();
+      }
+    });
+
+    it('a judge that did not answer in time carries no reason', async () => {
+      const { svc } = service({
+        judge: new FakeJudgment({ mode: 'unavailable' }),
+      });
+      const warned = quiet();
+      try {
+        const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+        expect(out.block).toMatchObject({ judge_unavailable: true });
+        expect(out.block).not.toHaveProperty('unavailable_reason');
+      } finally {
+        warned.mockRestore();
+      }
+    });
   });
 
   it('a rule the judge did not answer stays full', async () => {

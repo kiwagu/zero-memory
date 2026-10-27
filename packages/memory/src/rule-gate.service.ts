@@ -14,10 +14,13 @@ import {
   JudgeUnavailableError,
   type IJudgeCredentialResolver,
   type IJudgeSettingsReader,
+  type JudgeProviderName,
+  type JudgeSettings,
   type JudgmentFactory,
   type JudgmentRequest,
   type JudgmentResult,
   type NoulQuestion,
+  type ResolvedJudgeCredential,
   type RuleGateConfig,
 } from '@workspace/judgment';
 import { createLogger } from '@workspace/logger';
@@ -179,14 +182,34 @@ export const ruleGateRequest = (
 
 const logger = createLogger('rule-gate');
 
+/** Why a call the gate set out to judge got no answer. */
+type UnavailableReason = NonNullable<RuleGateBlock['unavailable_reason']>;
+
+/** What one attempt to judge a call came to, answered or not. */
+interface JudgeAttempt {
+  readonly provider: JudgeProviderName;
+  readonly model: string;
+  /** Null when no answer came back. */
+  readonly result: JudgmentResult | null;
+  /** Question name → rule id, when the question was asked. */
+  readonly ids: Readonly<Record<string, string>>;
+  /** Absent for an answer, and for a judge that simply did not answer. */
+  readonly reason?: UnavailableReason;
+}
+
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 /**
  * Decides, per call, how much of each unpinned standing rule the agent gets:
  * one yes/no question per rule to a decision model, answered as a probability,
  * mapped to full / gate / headline by two bands. Pinned rules are never judged.
  * `shadow` records what it would have done and delivers everything whole;
- * `live` delivers by level. Any judge failure delivers exactly as before and
- * says so — there is no second provider to fall back to — and so does an
- * account whose extraction allowance on the instance's key is used up.
+ * `live` delivers by level. Once a call is set to be judged, anything that
+ * keeps the answer from coming back — its settings, its credential or its
+ * allowance could not be read, the allowance is used up, the judge failed —
+ * delivers exactly as before and says so in `rule_gate`, with the reason.
+ * There is no second provider to fall back to.
  */
 @singleton()
 export class RuleGateService implements IRuleGate {
@@ -214,17 +237,69 @@ export class RuleGateService implements IRuleGate {
       (rule): rule is JudgedRule => !rule.pinned && Boolean(rule.id)
     );
     if (unpinned.length === 0) return unchanged;
+    const attempt = await this.#attempt(input.subjectId, input.task, unpinned);
+    // The account has the judge off, or no judge is configured for it: not
+    // judged, and nothing to record.
+    if (attempt === null) return unchanged;
+    return this.#outcome(input.rules, unjudged, mode, attempt);
+  }
+
+  /**
+   * One attempt to judge the call. Null only for an intentional skip: the
+   * account has not turned the judge on, or no judge is configured for it.
+   * Every failure on the way is an attempt without an answer, named.
+   */
+  async #attempt(
+    subjectId: string,
+    task: string,
+    unpinned: readonly JudgedRule[]
+  ): Promise<JudgeAttempt | null> {
+    const unanswered = (
+      provider: JudgeProviderName,
+      model: string,
+      reason: UnavailableReason | undefined
+    ): JudgeAttempt => ({
+      provider,
+      model,
+      result: null,
+      ids: {},
+      ...(reason ? { reason } : {}),
+    });
+    const defaults = (provider: JudgeProviderName) =>
+      [provider, this.config.defaultModels[provider]] as const;
+
     // The settings first: the key lookup decrypts a stored key, and an
     // account that has not turned the judge on must not pay for it.
-    const settings = await this.settings.read(input.subjectId);
-    if (!settings.enabled) return unchanged;
-    const credential = await this.credentials.resolve(
-      input.subjectId,
-      settings.provider ?? undefined
-    );
-    if (!credential) return unchanged;
+    let settings: JudgeSettings;
+    try {
+      settings = await this.settings.read(subjectId);
+    } catch (error) {
+      logger.warn('judge settings unreadable; rules delivered whole', {
+        error: messageOf(error),
+      });
+      return unanswered(
+        ...defaults(this.config.defaultProvider),
+        'settings_unavailable'
+      );
+    }
+    if (!settings.enabled) return null;
 
-    const { state, questions, ids } = ruleGateRequest(input.task, unpinned);
+    let credential: ResolvedJudgeCredential | null;
+    try {
+      credential = await this.credentials.resolve(
+        subjectId,
+        settings.provider ?? undefined
+      );
+    } catch (error) {
+      logger.warn('judge credential unreadable; rules delivered whole', {
+        error: messageOf(error),
+      });
+      return unanswered(
+        ...defaults(settings.provider ?? this.config.defaultProvider),
+        'credential_unavailable'
+      );
+    }
+    if (!credential) return null;
 
     // On the instance's key the judge runs only while the account's
     // extraction allowance has room: an account that may not spend the
@@ -234,69 +309,98 @@ export class RuleGateService implements IRuleGate {
     // account's own key is its own spend and is never held back. Read with
     // `status`, not `check`: the gate refuses nothing, it only delivers the
     // rules whole, so there is no decision to put on the audit record.
-    const budgetLeft =
-      credential.ownedByCaller ||
-      (await this.budget.status('extraction', { subjectId: input.subjectId }))
-        .allowed;
-
-    let result: JudgmentResult | null = null;
-    if (budgetLeft) {
+    if (!credential.ownedByCaller) {
+      let allowed: boolean;
       try {
-        result = await this.judgmentFor(credential).judge(
-          {
-            state,
-            questions,
-            purpose: 'rule_gate',
-            subjectId: input.subjectId,
-          },
-          { timeoutMs: this.config.timeoutMs }
-        );
+        allowed = (await this.budget.status('extraction', { subjectId }))
+          .allowed;
       } catch (error) {
-        // A refused request names its status only: the provider's body can
-        // quote what it was sent, and that is the owner's rules and task.
-        if (error instanceof JudgeRequestError) {
-          logger.warn('judge refused the request; rules delivered whole', {
-            status: error.status,
-          });
-        } else {
-          logger.warn(
-            error instanceof JudgeUnavailableError
-              ? 'judge unavailable; rules delivered whole'
-              : 'judge failed; rules delivered whole',
-            { error: error instanceof Error ? error.message : String(error) }
-          );
-        }
+        logger.warn('extraction allowance unreadable; rules delivered whole', {
+          error: messageOf(error),
+        });
+        return unanswered(
+          credential.provider,
+          credential.model,
+          'budget_unavailable'
+        );
       }
+      if (!allowed) {
+        return unanswered(
+          credential.provider,
+          credential.model,
+          'budget_exhausted'
+        );
+      }
+    }
+
+    const { state, questions, ids } = ruleGateRequest(task, unpinned);
+    let result: JudgmentResult;
+    try {
+      result = await this.judgmentFor(credential).judge(
+        { state, questions, purpose: 'rule_gate', subjectId },
+        { timeoutMs: this.config.timeoutMs }
+      );
+    } catch (error) {
+      // A refused request names its status only: the provider's body can
+      // quote what it was sent, and that is the owner's rules and task.
+      if (error instanceof JudgeRequestError) {
+        logger.warn('judge refused the request; rules delivered whole', {
+          status: error.status,
+        });
+      } else {
+        logger.warn(
+          error instanceof JudgeUnavailableError
+            ? 'judge unavailable; rules delivered whole'
+            : 'judge failed; rules delivered whole',
+          { error: messageOf(error) }
+        );
+      }
+      // No answer in time, or a refusal to answer now, is the judge being
+      // unavailable; anything else is an error on the way.
+      return unanswered(
+        credential.provider,
+        credential.model,
+        error instanceof JudgeUnavailableError ? undefined : 'judge_error'
+      );
     }
     // Metered only once a judgment came back: a failed call spent nothing
     // the provider reported. The row has the shape of every other model
     // call's, so the rollups read it the same way.
-    if (result) {
-      recordUsage(this.usage, {
-        eventType: 'llm_extraction',
-        quantity: result.usage.inputTokens + result.usage.outputTokens,
-        unit: 'tokens',
-        subjectId: input.subjectId,
-        metadata: {
-          input_tokens: result.usage.inputTokens,
-          output_tokens: result.usage.outputTokens,
-          // Spend the instance never paid for: the rollups leave it out.
-          ...(credential.ownedByCaller ? { own_key: true } : {}),
-          model: result.model,
-          provider: result.provider,
-          purpose: 'rule_gate',
-        },
-      });
-    }
+    recordUsage(this.usage, {
+      eventType: 'llm_extraction',
+      quantity: result.usage.inputTokens + result.usage.outputTokens,
+      unit: 'tokens',
+      subjectId,
+      metadata: {
+        input_tokens: result.usage.inputTokens,
+        output_tokens: result.usage.outputTokens,
+        // Spend the instance never paid for: the rollups leave it out.
+        ...(credential.ownedByCaller ? { own_key: true } : {}),
+        model: result.model,
+        provider: result.provider,
+        purpose: 'rule_gate',
+      },
+    });
+    return { provider: credential.provider, model: result.model, result, ids };
+  }
+
+  /** The call's delivery and its record, from what the attempt came to. */
+  #outcome(
+    rules: readonly ContextRule[],
+    unjudged: ContextRule[],
+    mode: 'shadow' | 'live',
+    attempt: JudgeAttempt
+  ): RuleGateOutcome {
+    const { result } = attempt;
     const judgeUnavailable = result === null;
     // Each answer back to the rule its question named.
     const answered = new Map<string, number>();
-    for (const [name, ruleId] of Object.entries(ids)) {
+    for (const [name, ruleId] of Object.entries(attempt.ids)) {
       const answer = result?.answers[name];
       if (answer) answered.set(ruleId, answer.noul);
     }
 
-    const levelled = input.rules.map((rule) => {
+    const levelled = rules.map((rule) => {
       if (rule.pinned || !rule.id) {
         return { rule: deliverAtLevel(rule, 'full'), p: null as number | null };
       }
@@ -314,18 +418,15 @@ export class RuleGateService implements IRuleGate {
       (a, b) =>
         Number(b.rule.pinned) - Number(a.rule.pinned) || (b.p ?? 1) - (a.p ?? 1)
     );
-    // Shadow mode and a failed judge both hand the session the rules as an
-    // unjudged call gets them; the block still says what happened.
+    // Shadow mode and a call without an answer both hand the session the
+    // rules as an unjudged call gets them; the block still says what happened.
     const asBefore = mode === 'shadow' || judgeUnavailable;
     const deliveredRules = asBefore
       ? unjudged
       : ordered.map((entry) => entry.rule);
     // Over the same rules: what the session would have received whole, and
     // what it does receive.
-    const baseline = input.rules.reduce(
-      (sum, rule) => sum + rule.text.length,
-      0
-    );
+    const baseline = rules.reduce((sum, rule) => sum + rule.text.length, 0);
     const delivered = deliveredRules.reduce(
       (sum, rule) => sum + ruleChars(rule),
       0
@@ -335,13 +436,11 @@ export class RuleGateService implements IRuleGate {
 
     const block: RuleGateBlock = {
       mode,
-      provider: credential.provider,
-      model: result?.model ?? credential.model,
+      provider: attempt.provider,
+      model: attempt.model,
       latency_ms: result?.latencyMs ?? 0,
       judge_unavailable: judgeUnavailable,
-      ...(budgetLeft
-        ? {}
-        : { unavailable_reason: 'budget_exhausted' as const }),
+      ...(attempt.reason ? { unavailable_reason: attempt.reason } : {}),
       bands: { hi: this.config.hi, lo: this.config.lo },
       chars_baseline: baseline,
       chars_delivered: delivered,
