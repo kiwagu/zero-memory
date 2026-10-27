@@ -219,9 +219,9 @@ sections explain them.
 
 An agent's own `build_context` call states its task in `topic`. When the
 account has turned the rule delivery judge on (Settings → **Rule delivery
-judge**), a small decision model answers one yes/no question per unpinned
-rule — does this rule bind this task? — and each rule is delivered at the
-level its probability earns:
+judge**) and the instance runs the gate (below), a small decision model
+answers one yes/no question per unpinned rule — does this rule bind this
+task? — and each rule is delivered at the level its probability earns:
 
 | Level      | What arrives                                      | When (default bands)      |
 | ---------- | ------------------------------------------------- | ------------------------- |
@@ -235,17 +235,19 @@ rules follow, the most binding first. Every rule stays named: at `gate` and
 `headline` the record's `text` is the headline, the record carries the rule's
 `id`, and the full text is one `zm://rules/{id}` read away. Only a record at
 `gate` carries `applies_when`; a rule delivered whole, or by an unjudged call,
-is sent its text without it. The
-`STANDING RULES` block of the tool result, and the block the hooks render,
-mark such a line `[gate]` or `[headline]` followed by the rule id, and close
-with a line saying to read `zm://rules/<id>` before acting on one.
+is sent its text without it. The `STANDING RULES` block of the tool result,
+and the block the hooks render, mark such a line `[gate]` or `[headline]`
+followed by the rule id, and close with a line saying to read
+`zm://rules/<id>` before acting on one.
 
-A budgeted briefing — what the hooks ask for at session start and on the
-first prompt — carries the project, not a task, so it is judged only against
-what the server knows of the conversation: the card it is bound to, or the
-card a new session is offered to continue (its title, state, status reason
-and open branch). Without such a card it is not judged at all. The text you
-type never leaves your machine for this. On a feature branch the
+What a call is judged against depends on `max_tokens`. A `build_context`
+call without it is an agent's call, judged against its `topic`. A call with
+it is a hook briefing — what the hooks ask for at session start and on the
+first prompt — which carries the project, not a task, so it is judged only
+against what the server knows of the conversation: the card it is bound to,
+or the card a new session is offered to continue (its title, state, status
+reason and open branch). Without such a card it is not judged at all. The
+text you type never leaves your machine for this. On a feature branch the
 session-start hook asks for two briefings, the project's and the branch's,
 and passes `judge_rules: false` on the second, so one session start costs one
 judgment; any caller can pass it to have the rules delivered whole.
@@ -253,11 +255,12 @@ judgment; any caller can pass it to have the rules delivered whole.
 Each rule carries an **applies when** line — one to three lines of observable
 task features — which is what the judge tests against the task. The distiller
 writes it when it drafts the rule, `promote_rule` takes it as `applies_when`,
-and it is editable on `/rules`; for rules promoted before the line existed,
-the server's `rules:applies-when-draft` command drafts one for the owner to
-review. A rule without one is judged on its whole text. The provider receives
-the task statement and, per rule, its headline with its **applies when** line
-(or its whole text when it has none).
+and it is editable on `/rules`. For rules promoted before the line existed,
+the server's `rules:applies-when-draft` command, an operator script that runs
+with the service role against a stand, drafts and stores one per rule, which
+the owner then reviews and edits on `/rules`. A rule without one is judged on
+its whole text. The provider receives the task statement and, per rule, its
+headline with its **applies when** line (or its whole text when it has none).
 
 The judge runs on the instance's provider key (TypeSafe Jev by default, SubQ
 Snap as the alternative) or on a key the account installs. It is off until an
@@ -289,12 +292,12 @@ the gate's totals; see [Value metering](/docs/platform/value-metering#rule-gate-
 
 A client-side guard hook that refuses an action can open its refusal reason
 with `[guard:<name>]` (for example `[guard:one_line_commit]`), where the
-name is lowercase letters, digits, `_` and `-`, starting with a letter. When
-the watcher's hook ingests a Claude Code transcript, it reports such refusals
-with the chunk: the guard's name and the time, never the refused command or
-the reason text. Only the denial itself counts, once per denied tool call;
-the tag in prose, in a tool's input or in a result that succeeded is talk
-about a guard, not a refusal by one.
+name is a lowercase letter followed by 1 to 63 lowercase letters, digits,
+`_` or `-`. When the watcher's hook ingests a Claude Code transcript, it
+reports such refusals with the chunk: the guard's name and the time, never
+the refused command or the reason text. Only the denial itself counts, once
+per denied tool call; the tag in prose, in a tool's input or in a result that
+succeeded is talk about a guard, not a refusal by one.
 
 `/rules` lists the refusals per guard over the last 30 days, and a rule's
 **Enforced by guard** field records which guard backs it, so the guard's

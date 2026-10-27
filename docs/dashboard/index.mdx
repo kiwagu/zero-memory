@@ -103,19 +103,21 @@ not light it.
   deletion. **Rule delivery judge** turns per-call judging of your standing
   rules on or off, picks the provider (the instance default, TypeSafe Jev or
   SubQ Snap), and optionally installs your own key the same way as the
-  model-provider key: stored encrypted, named afterwards only by its provider
-  and last four characters. It is off by default; see
+  model-provider key — stored encrypted, named afterwards only by its
+  provider and last four characters — with an optional model name beside it
+  (left empty, the provider's default model runs). It is off by default, and
+  switching it on has an effect only on an instance that runs the gate:
+  `ZM_RULE_GATE_MODE` is `off` by default, `live` delivers by the judgment,
+  and `shadow` judges and records but still delivers every rule whole. See
   [Delivery by task relevance](/docs/guides/rules-incubator#delivery-by-task-relevance).
-  Two-factor authentication
-  adds a code from an authenticator app after every sign-in — six cells in the
-  middle of the step that take a
-  typed, pasted or autofilled code and send it as soon as the last digit is
-  in, with no button to press (Enter sends a complete code too), dimmed while
-  the code is checked — and until the code is
-  given a sign-in reaches nothing:
-  not the dashboard, not the memory server, not a single memory or card
-  through the database. The code also stands before the consent screen for
-  agents and a password reset; removing the app asks for a code from it.
+  Two-factor authentication adds a code from an authenticator app after
+  every sign-in — six cells in the middle of the step that take a typed,
+  pasted or autofilled code and send it as soon as the last digit is in, with
+  no button to press (Enter sends a complete code too), dimmed while the code
+  is checked — and until the code is given a sign-in reaches nothing: not the
+  dashboard, not the memory server, not a single memory or card through the
+  database. The code also stands before the consent screen for agents and a
+  password reset; removing the app asks for a code from it.
   Agents you have allowed keep working without a code: the session each one
   received from the consent screen is on record as an agent's. Turning
   two-factor on, or changing your password, signs out the agents connected

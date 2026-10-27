@@ -50,7 +50,8 @@ server instead of failing every briefing.
 Both bands lie strictly between 0 and 1, and `LO` must be below `HI`. The
 gate's per-call timeout is `ZM_JUDGE_TIMEOUT_MS`. An account is judged only
 when it turned the judge on (`IJudgeSettingsReader`) and a credential
-resolves for it; pinned rules are never judged.
+resolves for it; the settings are read first, so an account with the judge
+off costs no key lookup. Pinned rules are never judged.
 
 The gate fails open. A timeout, a `JudgeUnavailableError` or any other judge
 error delivers the call's rules exactly as without the gate, with
@@ -69,8 +70,12 @@ Switching it on, shadow first:
    (`bun run rules:gate-agreement` in `apps/server`, on a stand holding a
    clone of the serving data).
 3. Rewrite the `applies_when` lines of rules that are often fetched after a
-   headline (on `/rules`; `rules:applies-when-draft` drafts missing ones), and
-   move the bands only if the probes (`scripts/rule-gate-eval.ts`) say so.
+   headline, on `/rules`. For rules that have none, `rules:applies-when-draft`
+   in `apps/server` (a service-role script, run against a stand) drafts and
+   stores one each, which the owner reviews and edits on `/rules`. Move the
+   bands only if the probes say so: draft them with
+   `scripts/rule-probes-draft.ts`, confirm them by hand and import them, then
+   replay them with `scripts/rule-gate-eval.ts`.
 4. Set `ZM_RULE_GATE_MODE=live` and restart. Going back is the same switch:
    `shadow` or `off` delivers every rule whole again.
 

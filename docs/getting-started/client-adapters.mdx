@@ -19,10 +19,12 @@ MCP rule delivery is adaptive. Clients without a documented instructions cap
 receive the full applicable rules on `initialize`. Claude Code, whose MCP
 instructions are silently capped at 2 KB, receives a compact router and rule
 inventory instead; the full texts arrive through `build_context.rules[]` and
-its hooks (with the rule delivery judge on, an unpinned rule that does not
-bind the task may arrive there by headline, readable in full at
-`zm://rules/{id}`). MCP instructions do not update in place, so reconnect after a rule
-catalog change if that is the delivery path you rely on.
+its hooks. With the rule delivery judge on for the account and the instance
+running the gate (`ZM_RULE_GATE_MODE=live`; `off` by default, while `shadow`
+judges and records but delivers every rule whole), an unpinned rule that
+does not bind the task may arrive there by headline, readable in full at
+`zm://rules/{id}`. MCP instructions do not update in place, so reconnect
+after a rule catalog change if that is the delivery path you rely on.
 
 ## The adapter model
 
