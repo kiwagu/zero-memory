@@ -16,10 +16,12 @@ promoting stage, restarting services, or touching the live database.
 
 ## The Rule
 
-1. **One epic — one branch — one landing.** All work of an epic, including
-   every review fix that surfaces while it awaits approval, lands as
-   commits on the SAME feature branch. Never spawn micro fix-branches for
-   review feedback; they bloat history and dilute the epic.
+1. **One area — one branch — one landing per round.** All work of an epic,
+   including every review fix that surfaces while it awaits approval, lands
+   as commits on the SAME branch. Never spawn micro fix-branches for review
+   feedback; they bloat history and dilute the epic. A later round of the
+   same area resumes that branch and lands as its own squash
+   (`/.cursor/rules/branch-reuse-first.mdc`).
 2. **Validate on the isolated test stack** (units + integration + e2e).
    Real data only via a live clone restored into a non-live stack — never
    by touching live.
@@ -62,12 +64,21 @@ promoting stage, restarting services, or touching the live database.
    same combination twice is waste, and skipping the step where a NEW
    combination first exists is the actual risk.
 
-   a. **Cut the branch from `main`.** It is stable by definition.
+   a. **Put the work on its area's branch.** Resume the branch an earlier
+      round of the area used; only an area no branch carried gets a new
+      branch, cut from `main`, which is stable by definition
+      (`/.cursor/rules/branch-reuse-first.mdc`).
 
-   b. **On the feature branch — the gates, on a COMMITTED tip:** `check`
-      (format, lint, typecheck, env templates), units, and the FULL e2e.
-      A run against an uncommitted working tree proves a tree no commit
-      points at; name the HEAD a run was made on, or it is not evidence.
+   b. **On the branch — the gates, on a COMMITTED tip:** `check` (format,
+      lint, typecheck, env templates), units, and the FULL e2e. A run
+      against an uncommitted working tree proves a tree no commit points at;
+      name the HEAD a run was made on, or it is not evidence.
+
+      `main` must be an ancestor of that tip. If it moved since the branch
+      was last brought up to date (`git merge-base --is-ancestor main
+      <branch>` fails), merge the latest `main` into the branch first and run
+      the gates on the merged, committed tip: the tree that lands is the tree
+      that was gated.
 
    c. **Merge into `dev` — only while OTHER work is in flight.** `dev` is
       the compatibility contour: it exists to be the one place where this
@@ -84,10 +95,15 @@ promoting stage, restarting services, or touching the live database.
       the subject stays one line:
 
       ```
+      git switch main
       git -c merge.ff=true merge --squash <branch>
+      test "$(git write-tree)" = "$(git rev-parse <branch>^{tree})"
       git commit -m "<type(scope): subject>" \
                  -m "Squashed-from: <branch> (<short-sha>) ZM-<N>"
       ```
+
+      The `test` line stops the landing unless the staged tree is exactly
+      the gated one; with `main` an ancestor of the branch it always is.
 
       `ZM-<N>` names the board card(s) the epic carries — several side by
       side, `ZM-17 ZM-16` — and is omitted only when the work has no card. A
@@ -102,15 +118,28 @@ promoting stage, restarting services, or touching the live database.
       stores `merge.ff=false`, which git reads as `--no-ff`, and a plain
       `git merge --squash` refuses to combine the two.
 
-      The feature branch SURVIVES its landing: it is the only remaining
-      carrier of how the work got there, step by step. Deleting a landed
-      branch is the owner's decision, never routine cleanup. No test run is
-      owed at this step — `main` gains exactly the tree that (b), and (c)
-      where it applied, already proved.
+      The branch SURVIVES its landing: it is the only remaining carrier of
+      how the work got there, step by step. Deleting a landed branch is the
+      owner's decision, never routine cleanup. No test run is owed at this
+      step — `main` gains exactly the tree that (b), and (c) where it
+      applied, already proved.
 
-   e. **Release** — `run.sh sync` re-runs check, units and the full e2e
+   e. **Merge the landing back into the branch**, in the same step:
+
+      ```
+      git switch <branch>
+      git merge --no-ff -m "chore: merge its landing back" <squash>
+      git switch main
+      ```
+
+      It changes no file — both sides carry the same tree — and makes `main`
+      an ancestor of the branch again, so the area's next round starts with
+      a clean merge.
+
+   f. **Release** — `run.sh sync` re-runs check, units and the full e2e
       before it cuts the tag, so the published tree is proved once more at
-      the moment of publication.
+      the moment of publication. Nothing is pushed or released without the
+      owner's command.
 
    When `dev` is in use it carries merge commits while `main` carries one
    squash per epic, so the two drift apart permanently. That is the model

@@ -8,6 +8,7 @@ All rules live in `.cursor/rules/` (single source of truth for Cursor and Codex)
 @.cursor/rules/execute-dont-delegate.mdc
 @.cursor/rules/reset-mode-default.mdc
 @.cursor/rules/release-approval-flow.mdc
+@.cursor/rules/branch-reuse-first.mdc
 @.cursor/rules/poc-no-fallbacks.mdc
 @.cursor/rules/ai-artifacts-generic-wording.mdc
 @.cursor/rules/entity-first-module-naming.mdc
