@@ -11,14 +11,21 @@
  * opens with the run tag, which puts its first period past the twenty
  * characters a headline always keeps, so each rule's headline is the clause
  * before that period.
+ *
+ * The spec runs on accounts of its own: the settings page spec turns the
+ * judge on and off for the seeded accounts, and a run with two workers would
+ * let the two specs change the same account's switch under each other.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test } from '@playwright/test';
 
 import { e2eEnv } from '../helpers/env.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
-import { readSeedState } from '../helpers/runtime-state.js';
-import { entityIdOf, passwordGrantToken } from '../helpers/users.js';
+import {
+  entityIdOf,
+  passwordGrantToken,
+  provisionE2EUser,
+} from '../helpers/users.js';
 
 interface GatedRule {
   id?: string;
@@ -68,10 +75,15 @@ const adminClient = (): SupabaseClient =>
 const TAG = `gate-${Date.now()}`;
 const REPO = 'acme/memory-service';
 
+/** The account that turns the gate on. */
+const GATED_EMAIL = 'rule-gate@zm.e2e';
+/** The account that never turns it on, and the stranger to the first. */
+const UNGATED_EMAIL = 'rule-gate-off@zm.e2e';
+
 const PINNED_TEXT = `${TAG} PINNED RULE. Always whole.`;
-const FULL_TEXT = `${TAG} COMMIT RULE. One line commits, always.`;
-const GATE_TEXT = `${TAG} STAND RULE. Review on the preview stand.`;
-const HEADLINE_TEXT = `${TAG} NORTH STAR. Keep the infinite session in mind.`;
+const FULL_TEXT = `${TAG} COMMIT RULE. Sign every commit before a push.`;
+const GATE_TEXT = `${TAG} CACHE RULE. Warm the cache before a load test.`;
+const HEADLINE_TEXT = `${TAG} REPORT RULE. Keep each weekly report to one page.`;
 
 /**
  * A promoted General rule for the session's user; returns its rlc_ id. The
@@ -155,6 +167,23 @@ async function brief(
   return firstJson<Pack>(result);
 }
 
+/**
+ * Runs every cleanup step, in order, even when an earlier one fails. A failed
+ * step is a soft failure: the test fails, but the error that stopped its body
+ * stays the one reported first.
+ */
+async function restoreAll(
+  steps: Array<[label: string, step: () => Promise<unknown>]>
+): Promise<void> {
+  for (const [label, step] of steps) {
+    try {
+      await step();
+    } catch (error) {
+      expect.soft(error, `cleanup: ${label}`).toBeUndefined();
+    }
+  }
+}
+
 /** The `mcp_tool_call` metadata the server wrote for a user since `since`. */
 async function toolCallRows(
   userId: string,
@@ -174,13 +203,13 @@ async function toolCallRows(
 
 test.describe('Rule gate over MCP @smoke', () => {
   test('levels follow the judge, pinned stay whole, hook calls are judged only with a card, one rule is readable by id', async () => {
-    const seed = await readSeedState();
-    const subjectA = await entityIdOf(seed.userA.id);
-    const tokenA = await passwordGrantToken(seed.userA);
+    const gated = await provisionE2EUser(GATED_EMAIL);
+    const subject = await entityIdOf(gated.id);
     const since = new Date().toISOString();
     const seeded: string[] = [];
+    let cardId: string | undefined;
 
-    const mcp = await McpTestClient.connect(tokenA);
+    const mcp = await McpTestClient.connect(await passwordGrantToken(gated));
     try {
       const pinnedId = await seedRule(mcp, {
         anchor: 'the importer batches uploads in groups of fifty',
@@ -206,7 +235,7 @@ test.describe('Rule gate over MCP @smoke', () => {
         appliesWhen: 'planning work [p=0.1]',
       });
       seeded.push(headlineId);
-      await setGate(subjectA, true);
+      await setGate(subject, true);
 
       // Agent call: a real topic, no budget.
       const pack = await brief(mcp, {
@@ -226,12 +255,12 @@ test.describe('Rule gate over MCP @smoke', () => {
       expect(byId.get(fullId)).not.toHaveProperty('applies_when');
       expect(byId.get(gateId)).toMatchObject({
         level: 'gate',
-        text: `${TAG} STAND RULE`,
+        text: `${TAG} CACHE RULE`,
         applies_when: 'any task that touches a stack [p=0.5]',
       });
       expect(byId.get(headlineId)).toMatchObject({
         level: 'headline',
-        text: `${TAG} NORTH STAR`,
+        text: `${TAG} REPORT RULE`,
       });
       expect(byId.get(headlineId)).not.toHaveProperty('applies_when');
       // Every rule stays named.
@@ -299,6 +328,7 @@ test.describe('Rule gate over MCP @smoke', () => {
       const card = firstJson<{ card: { id: string; number: number } }>(
         created
       ).card;
+      cardId = card.id;
       const attached = await mcp.callTool('card_log', {
         action: 'attach',
         card_id: card.id,
@@ -322,7 +352,7 @@ test.describe('Rule gate over MCP @smoke', () => {
       });
       expect(bound.rules.find((rule) => rule.id === headlineId)).toMatchObject({
         level: 'headline',
-        text: `${TAG} NORTH STAR`,
+        text: `${TAG} REPORT RULE`,
       });
       expect(bound.rules.find((rule) => rule.id === gateId)).toMatchObject({
         level: 'gate',
@@ -356,7 +386,7 @@ test.describe('Rule gate over MCP @smoke', () => {
       // Another account cannot read it by id: absent and not-yours are the
       // same answer.
       const stranger = await McpTestClient.connect(
-        await passwordGrantToken(seed.userB)
+        await passwordGrantToken(await provisionE2EUser(UNGATED_EMAIL))
       );
       try {
         await expect(
@@ -369,49 +399,60 @@ test.describe('Rule gate over MCP @smoke', () => {
       // The delivery and the fetch were metered, content-free.
       await expect
         .poll(async () =>
-          (await toolCallRows(subjectA, 'build_context', since))
+          (await toolCallRows(subject, 'build_context', since))
             .flatMap((row) => row.rule_gate?.rules ?? [])
             .find((rule) => rule.id === headlineId)
         )
         .toMatchObject({ level: 'headline' });
-      const gated = (await toolCallRows(subjectA, 'build_context', since))
+      const judged = (await toolCallRows(subject, 'build_context', since))
         .filter((row) => row.rule_gate !== undefined)
         .map((row) => JSON.stringify(row));
-      expect(gated.length).toBeGreaterThan(0);
-      for (const row of gated) {
+      expect(judged.length).toBeGreaterThan(0);
+      for (const row of judged) {
         expect(row).not.toContain(TAG);
       }
       await expect
         .poll(
           async () =>
-            (await toolCallRows(subjectA, 'resource:rule', since)).filter(
+            (await toolCallRows(subject, 'resource:rule', since)).filter(
               (row) => row.rule_id === headlineId && row.found === true
             ).length
         )
         .toBeGreaterThan(0);
     } finally {
-      await mcp.close();
-      await setGate(subjectA, false);
-      await revokeRules(seeded);
+      await restoreAll([
+        ['turn the gate off', () => setGate(subject, false)],
+        ['revoke the fixture rules', () => revokeRules(seeded)],
+        [
+          'archive the bound card',
+          async () => {
+            if (cardId === undefined) return;
+            const archived = await mcp.callTool('card', {
+              action: 'archive',
+              card_id: cardId,
+              reason: 'e2e fixture cleanup',
+            });
+            expect(archived.isError ?? false).toBe(false);
+          },
+        ],
+        ['close the MCP client', () => mcp.close()],
+      ]);
     }
   });
 
   test('an account that never enabled the gate gets every rule whole', async () => {
-    const seed = await readSeedState();
-    const subjectB = await entityIdOf(seed.userB.id);
+    const ungated = await provisionE2EUser(UNGATED_EMAIL);
     const { data: settings, error } = await adminClient()
       .from('judge_settings')
       .select('enabled')
-      .eq('subject_id', subjectB)
+      .eq('subject_id', await entityIdOf(ungated.id))
       .maybeSingle();
     expect(error).toBeNull();
     expect((settings as { enabled: boolean } | null)?.enabled ?? false).toBe(
       false
     );
 
-    const mcp = await McpTestClient.connect(
-      await passwordGrantToken(seed.userB)
-    );
+    const mcp = await McpTestClient.connect(await passwordGrantToken(ungated));
     const seeded: string[] = [];
     try {
       const id = await seedRule(mcp, {
@@ -429,8 +470,10 @@ test.describe('Rule gate over MCP @smoke', () => {
         pinned: false,
       });
     } finally {
-      await mcp.close();
-      await revokeRules(seeded);
+      await restoreAll([
+        ['revoke the fixture rule', () => revokeRules(seeded)],
+        ['close the MCP client', () => mcp.close()],
+      ]);
     }
   });
 });
