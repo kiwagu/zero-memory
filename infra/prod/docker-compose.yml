@@ -57,6 +57,18 @@ services:
       # services take no env_file: without this line the opt-out an operator
       # writes in .env would be documented, accepted, and silently ignored.
       ZM_POLICY_DENY_PRIVATE_ENDPOINTS: ${ZM_POLICY_DENY_PRIVATE_ENDPOINTS:-}
+      # The rule delivery judge: off until ZM_RULE_GATE_MODE says shadow or
+      # live, and then only for accounts that turn it on. Empty values keep
+      # the server's defaults; passed explicitly for the same reason as above.
+      ZM_RULE_GATE_MODE: ${ZM_RULE_GATE_MODE:-}
+      ZM_RULE_GATE_HI: ${ZM_RULE_GATE_HI:-}
+      ZM_RULE_GATE_LO: ${ZM_RULE_GATE_LO:-}
+      ZM_JUDGE_PROVIDER: ${ZM_JUDGE_PROVIDER:-}
+      ZM_JUDGE_MODEL_TYPESAFE: ${ZM_JUDGE_MODEL_TYPESAFE:-}
+      ZM_JUDGE_MODEL_SUBQ: ${ZM_JUDGE_MODEL_SUBQ:-}
+      ZM_JUDGE_TIMEOUT_MS: ${ZM_JUDGE_TIMEOUT_MS:-}
+      ZM_TYPESAFE_API_KEY: ${ZM_TYPESAFE_API_KEY:-}
+      SNAPQ_API_KEY: ${SNAPQ_API_KEY:-}
     volumes:
       # Embedding model cache (ZM_MODEL_CACHE_DIR=/models is baked into the
       # image); survives container recreation, downloaded once.
@@ -95,6 +107,8 @@ services:
       ZM_TERMS_URL: ${ZM_TERMS_URL:-}
       ZM_PRIVACY_URL: ${ZM_PRIVACY_URL:-}
       ZM_TERMS_VERSION: ${ZM_TERMS_VERSION:-}
+      # The settings page names the judge provider the instance defaults to.
+      ZM_JUDGE_PROVIDER: ${ZM_JUDGE_PROVIDER:-}
     extra_hosts:
       - 'host.docker.internal:host-gateway'
 
