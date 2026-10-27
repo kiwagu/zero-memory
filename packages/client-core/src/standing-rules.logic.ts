@@ -31,14 +31,16 @@ export interface StandingRulesSplit {
 
 /**
  * The briefing as the split reads it: the contract, except that a rule level
- * or a `rule_gate` block this build does not know — a newer server's — reads
- * as absent instead of failing the whole pack, which would put every rule
- * back into the JSON dump. Such a rule renders as an unjudged one; the block
- * is the server's own record, and nothing on this side reads it.
+ * or a `rule_gate` block this build does not know — a newer server's — does
+ * not fail the whole pack, which would put every rule back into the JSON
+ * dump. An unknown level reads as `headline`: the rule is still marked as
+ * not delivered whole and named by its id, so its full text stays one read
+ * away. An unknown block reads as absent; it is the server's own record, and
+ * nothing on this side reads it.
  */
 const briefingPackSchema = buildContextOutputSchema.extend({
   rules: contextRuleSchema
-    .extend({ level: ruleDeliveryLevelSchema.optional().catch(undefined) })
+    .extend({ level: ruleDeliveryLevelSchema.optional().catch('headline') })
     .array()
     .default([]),
   rule_gate: ruleGateBlockSchema.optional().catch(undefined),

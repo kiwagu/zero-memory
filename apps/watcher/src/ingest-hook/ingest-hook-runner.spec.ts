@@ -162,6 +162,17 @@ describe('flushTranscriptDelta', () => {
     expect(refusals.at(-1)?.guard).toBe('guard_49');
   });
 
+  it('sends a timestamp longer than the contract admits as unknown, so the chunk still goes', async () => {
+    const [prompt, refusal] = claudeRefusalLines(1);
+    const overlong = JSON.stringify({
+      ...(JSON.parse(refusal!) as Record<string, unknown>),
+      timestamp: `2026-10-24T10:00:00.${'0'.repeat(60)}Z`,
+    });
+    expect(await flush([prompt!, overlong], 'claude')).toMatch(/^sent:/);
+
+    expect(sent[0]?.guard_refusals).toEqual([{ guard: 'guard_0', at: null }]);
+  });
+
   it('omits guard_refusals entirely when no guard refused anything', async () => {
     expect(await flush(claudeRefusalLines(0), 'claude')).toMatch(/^sent:/);
 

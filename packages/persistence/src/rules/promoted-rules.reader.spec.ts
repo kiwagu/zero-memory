@@ -83,6 +83,19 @@ describe('listPromotedUserRules', () => {
   });
 });
 
+describe('listPromotedUserRules — a row with a malformed id', () => {
+  it('still delivers its rule, without an id, next to the others', async () => {
+    serve([RULE_A, { ...RULE_B, id: 'rlc_not-a-rule-id' }]);
+    const rules = await listPromotedUserRules(TOKEN);
+    expect(rules).toHaveLength(2);
+    expect(rules[0]).toMatchObject({ id: RULE_A.id });
+    expect(rules[1]).toStrictEqual({
+      text: 'NEVER PUSH TO MAIN DIRECTLY.',
+      pinned: false,
+    });
+  });
+});
+
 describe('readPromotedRuleById', () => {
   it('reads one live rule in full, from either layer', async () => {
     serve([RULE_A, RULE_B, RULE_P]);

@@ -200,7 +200,7 @@ export class RuleGateService implements IRuleGate {
     @injectUsageRecorder()
     private readonly usage: IUsageRecorder,
     @injectBudgetGuard()
-    private readonly budget: Pick<BudgetGuard, 'check'>,
+    private readonly budget: Pick<BudgetGuard, 'status'>,
     @injectRuleGateConfig()
     private readonly config: RuleGateConfig
   ) {}
@@ -231,10 +231,12 @@ export class RuleGateService implements IRuleGate {
     // instance's money on extraction gets none spent on judging either. Its
     // tokens are not counted against that allowance (a decision-model token
     // is not a generation token), so judging can never pause extraction. An
-    // account's own key is its own spend and is never held back.
+    // account's own key is its own spend and is never held back. Read with
+    // `status`, not `check`: the gate refuses nothing, it only delivers the
+    // rules whole, so there is no decision to put on the audit record.
     const budgetLeft =
       credential.ownedByCaller ||
-      (await this.budget.check('extraction', { subjectId: input.subjectId }))
+      (await this.budget.status('extraction', { subjectId: input.subjectId }))
         .allowed;
 
     let result: JudgmentResult | null = null;

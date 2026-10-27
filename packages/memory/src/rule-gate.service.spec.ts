@@ -61,7 +61,9 @@ const service = (
   const judge = overrides.judge ?? new FakeJudgment({ defaultP: 0.5 });
   const recorder = { record: vi.fn() };
   const guard = {
-    check: vi.fn().mockResolvedValue({ allowed: overrides.budgetLeft ?? true }),
+    status: vi
+      .fn()
+      .mockResolvedValue({ allowed: overrides.budgetLeft ?? true }),
   };
   const resolve = vi.fn().mockResolvedValue(
     overrides.credential === undefined
@@ -215,7 +217,7 @@ describe('the request on the wire', () => {
       },
       () => judgment,
       { record: vi.fn() },
-      { check: vi.fn().mockResolvedValue({ allowed: true }) },
+      { status: vi.fn().mockResolvedValue({ allowed: true }) },
       { mode: 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
     );
 
@@ -458,7 +460,7 @@ describe('RuleGateService.apply', () => {
       { resolve },
       () => new FakeJudgment(),
       { record: vi.fn() },
-      { check: vi.fn().mockResolvedValue({ allowed: true }) },
+      { status: vi.fn().mockResolvedValue({ allowed: true }) },
       { mode: 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
     );
     const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
@@ -541,7 +543,7 @@ describe('RuleGateService.apply', () => {
       },
     });
     const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
-    expect(guard.check).not.toHaveBeenCalled();
+    expect(guard.status).not.toHaveBeenCalled();
     expect(judge.calls).toHaveLength(1);
     expect(out.block).toMatchObject({ judge_unavailable: false });
     expect(out.block).not.toHaveProperty('unavailable_reason');
@@ -555,7 +557,7 @@ describe('RuleGateService.apply', () => {
   it("asks nothing on the instance's key once the extraction allowance is used up", async () => {
     const { svc, recorder, guard, judge } = service({ budgetLeft: false });
     const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
-    expect(guard.check).toHaveBeenCalledWith('extraction', {
+    expect(guard.status).toHaveBeenCalledWith('extraction', {
       subjectId: 'usr_a',
     });
     expect(judge.calls).toHaveLength(0);
@@ -572,7 +574,7 @@ describe('RuleGateService.apply', () => {
   it("judges on the instance's key while the allowance has room", async () => {
     const { svc, guard, judge } = service();
     const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
-    expect(guard.check).toHaveBeenCalledTimes(1);
+    expect(guard.status).toHaveBeenCalledTimes(1);
     expect(judge.calls).toHaveLength(1);
     expect(out.block).not.toHaveProperty('unavailable_reason');
   });

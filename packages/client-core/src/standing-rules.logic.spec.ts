@@ -52,8 +52,13 @@ describe('splitStandingRules', () => {
       id,
       text: 'SUMMARY RULE FROM LATER',
     });
-    expect(split.rules[0]!.level).toBeUndefined();
+    // An unknown level reads as a headline: marked and named, never as a
+    // whole rule.
+    expect(split.rules[0]!.level).toBe('headline');
     expect(split.rules[1]!.level).toBe('full');
+    expect(renderStandingRulesSection(split.rules, 10_000)).toContain(
+      `1. SUMMARY RULE FROM LATER [headline] ${id}\n`
+    );
     // The drained payload is a pack the rest of the briefing still reads.
     expect(buildContextOutputSchema.safeParse(split.payload).success).toBe(
       true
