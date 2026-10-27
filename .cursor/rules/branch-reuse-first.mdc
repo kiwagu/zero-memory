@@ -48,10 +48,11 @@ alwaysApply: true
    branch exists, and the owner is told.
 
 4. **A branch whose landing was never merged back** shares only its old fork
-   point with `main`, so `git merge main` conflicts on every file the branch
-   touched that `main` changed again after the squash. When its tip carries
-   nothing unlanded — its tree equals the tree of its squash on `main`, the
-   commit its `Squashed-from:` trailer names — sync it exactly:
+   point with `main`, so `git merge main` merges against that stale point and
+   can conflict wherever `main` changed again what the branch had changed.
+   When its tip carries nothing unlanded — its tree equals the tree of its
+   squash on `main`, found through that squash's `Squashed-from:` trailer —
+   sync it exactly:
 
    ```
    B=<branch>; S=<its squash on main>; OLD=$(git rev-parse "$B")
