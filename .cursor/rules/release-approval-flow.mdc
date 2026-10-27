@@ -78,7 +78,8 @@ promoting stage, restarting services, or touching the live database.
       was last brought up to date (`git merge-base --is-ancestor main
       <branch>` fails), merge the latest `main` into the branch first and run
       the gates on the merged, committed tip: the tree that lands is the tree
-      that was gated.
+      that was gated. Note that tip's full sha — the GATED COMMIT the landing
+      in (d) is bound to.
 
    c. **Merge into `dev` — only while OTHER work is in flight.** `dev` is
       the compatibility contour: it exists to be the one place where this
@@ -95,15 +96,28 @@ promoting stage, restarting services, or touching the live database.
       the subject stays one line:
 
       ```
-      git switch main
-      git -c merge.ff=true merge --squash <branch>
-      test "$(git write-tree)" = "$(git rev-parse <branch>^{tree})"
-      git commit -m "<type(scope): subject>" \
-                 -m "Squashed-from: <branch> (<short-sha>) ZM-<N>"
+      B=<branch>; G=<gated commit, full sha>; T=$(git rev-parse "$G^{tree}")
+      test -z "$(git status --porcelain)" \
+        && test "$(git rev-parse "$B")" = "$G" \
+        && git merge-base --is-ancestor main "$G" \
+        && git switch main \
+        && git -c merge.ff=true merge --squash "$G" \
+        && test "$(git write-tree)" = "$T" \
+        && git commit -m "<type(scope): subject>" \
+                      -m "Squashed-from: $B ($(git rev-parse --short "$G")) ZM-<N>" \
+        && test "$(git rev-parse HEAD^{tree})" = "$T" \
+        && echo "landed $(git rev-parse --short HEAD) with the gated tree"
       ```
 
-      The `test` line stops the landing unless the staged tree is exactly
-      the gated one; with `main` an ancestor of the branch it always is.
+      Run it as ONE chain: every link must hold or nothing after it runs.
+      The landing is bound to the gated commit, not to whatever the branch
+      points at now — a commit added after the gates, or a `main` that moved
+      since, stops it before anything is written. The tree is checked twice
+      because the pre-commit hook can change what is committed (it
+      regenerates `database.types.ts` when a migration is staged and
+      re-stages formatter output). If the last check fails, the commit is on
+      `main` with a tree nobody gated: stop, record nothing, merge nothing
+      back, and bring the owner `git diff --stat "$G" HEAD`.
 
       `ZM-<N>` names the board card(s) the epic carries — several side by
       side, `ZM-17 ZM-16` — and is omitted only when the work has no card. A
@@ -124,17 +138,20 @@ promoting stage, restarting services, or touching the live database.
       step — `main` gains exactly the tree that (b), and (c) where it
       applied, already proved.
 
-   e. **Merge the landing back into the branch**, in the same step:
+   e. **Merge the landing back into the branch**, right after (d), while the
+      branch still points at the gated commit:
 
       ```
-      git switch <branch>
-      git merge --no-ff -m "chore: merge its landing back" <squash>
-      git switch main
+      S=$(git rev-parse main)
+      git switch "$B" \
+        && git merge --no-ff -m "chore: merge its landing back" "$S" \
+        && test "$(git rev-parse HEAD^{tree})" = "$T" \
+        && git switch main
       ```
 
-      It changes no file — both sides carry the same tree — and makes `main`
-      an ancestor of the branch again, so the area's next round starts with
-      a clean merge.
+      It changes no file — both sides carry the gated tree — and makes
+      `main` an ancestor of the branch again, so the area's next round
+      starts from `main`'s history instead of from a stale fork point.
 
    f. **Release** — `run.sh sync` re-runs check, units and the full e2e
       before it cuts the tag, so the published tree is proved once more at
@@ -143,8 +160,10 @@ promoting stage, restarting services, or touching the live database.
 
    When `dev` is in use it carries merge commits while `main` carries one
    squash per epic, so the two drift apart permanently. That is the model
-   working, not a defect: do not try to make one an ancestor of the
-   other, and do not "repair" the divergence.
+   working, not a defect: never merge `dev` into `main` or a branch, and do
+   not "repair" the divergence. Ancestry the prescribed merges produce on
+   their own (a resumed branch that already holds `main`, merged into
+   `dev`) is fine.
 
    On `main` an epic is ONE commit, so `git revert <squash>` takes it back
    out whole, and `git log --grep='Squashed-from: <branch>'` finds where a
@@ -160,7 +179,8 @@ promoting stage, restarting services, or touching the live database.
    rehearse a migration before proposing it rather than overriding a
    refusal.
 6. **Post-approval follow-ups** go through the same cycle as a new
-   deliberate branch (batched, not one branch per tweak). Applied
+   deliberate round on the area's branch (batched, not one round per
+   tweak). Applied
    migrations are never edited — forward migrations only; never roll the
    database back for code-level fixes.
 

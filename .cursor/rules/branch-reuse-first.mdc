@@ -23,7 +23,8 @@ alwaysApply: true
 
 1. **An area keeps its branch.** An area is the responsibility a branch was
    opened for; its name and its card decide what that is. The path history of
-   `main` only proposes candidates — `git log --format='%h %(trailers:key=Squashed-from,valueonly)' -- <path>`
+   `main` only proposes candidates —
+   `git log main --format='%h %(trailers:key=Squashed-from,valueonly)' -- <path>`
    names the branches that landed there. When it is unclear which branch an
    area belongs to, ask.
 
@@ -46,22 +47,32 @@ alwaysApply: true
    land it again. A new fix branch is cut from `main` only when no source
    branch exists, and the owner is told.
 
-4. **A branch whose landing was never merged back** shares no history with
-   `main` after its squash, so `git merge main` conflicts on every file `main`
-   changed since. When its tip carries nothing unlanded — its tree equals the
-   tree of its squash on `main` — sync it exactly, without touching the
-   working tree:
+4. **A branch whose landing was never merged back** shares only its old fork
+   point with `main`, so `git merge main` conflicts on every file the branch
+   touched that `main` changed again after the squash. When its tip carries
+   nothing unlanded — its tree equals the tree of its squash on `main`, the
+   commit its `Squashed-from:` trailer names — sync it exactly:
 
    ```
-   B=<branch>; OLD=$(git rev-parse "$B")
-   M=$(git commit-tree "main^{tree}" -p "$OLD" -p main -m "chore: sync $B with main")
-   git update-ref "refs/heads/$B" "$M" "$OLD"
+   B=<branch>; S=<its squash on main>; OLD=$(git rev-parse "$B")
+   test -z "$(git status --porcelain)" \
+     && test "$(git rev-parse --abbrev-ref HEAD)" != "$B" \
+     && test "$(git rev-parse "$OLD^{tree}")" = "$(git rev-parse "$S^{tree}")" \
+     && git merge-base --is-ancestor "$S" main \
+     && M=$(git commit-tree "main^{tree}" -p "$OLD" -p main -m "chore: sync $B with main") \
+     && git update-ref "refs/heads/$B" "$M" "$OLD" \
+     && git switch "$B"
    ```
 
-   The result is exact by construction and keeps both parents. When its tip
-   does carry unlanded work, stop and ask. A branch whose landing was merged
-   back needs none of this: `main` is already its ancestor and a plain merge
-   is clean.
+   Run it as one chain, from a clean checkout that is NOT on the branch:
+   `update-ref` moves the ref only, so moving a checked-out branch would
+   leave its index and files at the old tree, and the next commit would
+   quietly undo what `main` brought. Switching to it afterwards lets git
+   materialise the new tree. The result is exact by construction and keeps
+   both parents. When its tip does carry unlanded work, stop and ask. A
+   branch whose landing was merged back needs none of this: `main` is
+   already its ancestor, so `main` merges in the ordinary way, with the
+   ordinary conflicts where both sides changed the same lines.
 
 5. **Work that builds on another branch's unlanded work waits** for that
    branch to land, then merges `main` in.
@@ -93,4 +104,4 @@ A squash collapses a branch's history into one commit on `main`, so the branch
 is the only carrier of how the work got there. Resuming the area's branch keeps
 that history in one place instead of scattering it over micro-branches, and
 merging each landing back keeps `main` an ancestor of the branch, so the next
-round starts with a clean merge instead of a conflict on every file.
+round merges against `main`'s history instead of against a stale fork point.
