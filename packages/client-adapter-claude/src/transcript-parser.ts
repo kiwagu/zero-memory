@@ -122,7 +122,7 @@ type ContentItem = z.infer<typeof contentItemSchema>;
 /**
  * A denied call as Claude Code records it: an error tool_result reading
  * `PreToolUse:<Tool> hook error: <reason>`, where a guard opens its reason with
- * its tag, e.g. `[guard:commit_message_guard] …`. Anchored to the start of the
+ * its tag, e.g. `[guard:one_line_commit] …`. Anchored to the start of the
  * reason, so a guard named later in it is not the one refusing. The name
  * pattern is the contract's guard name, so whatever this matches the server
  * accepts.

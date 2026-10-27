@@ -296,7 +296,7 @@ describe('IngestService — usage metering', () => {
 
     await service.ingest(
       baseInput({
-        guard_refusals: [{ guard: 'commit_message_guard', at: null }],
+        guard_refusals: [{ guard: 'one_line_commit', at: null }],
       })
     );
 
@@ -304,7 +304,7 @@ describe('IngestService — usage metering', () => {
       .mocked(usage.record)
       .mock.calls.map(([recorded]) => recorded)
       .filter((recorded) => recorded.eventType === 'ingest_chunk');
-    expect(event?.metadata?.guard_refusals).toEqual(['commit_message_guard']);
+    expect(event?.metadata?.guard_refusals).toEqual(['one_line_commit']);
   });
 
   it.each([

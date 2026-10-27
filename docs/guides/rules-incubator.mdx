@@ -288,7 +288,7 @@ the gate's totals; see [Value metering](/docs/platform/value-metering#rule-gate-
 ### Guard hooks and refusals
 
 A client-side guard hook that refuses an action can open its refusal reason
-with `[guard:<name>]` (for example `[guard:commit_message_guard]`), where the
+with `[guard:<name>]` (for example `[guard:one_line_commit]`), where the
 name is lowercase letters, digits, `_` and `-`, starting with a letter. When
 the watcher's hook ingests a Claude Code transcript, it reports such refusals
 with the chunk: the guard's name and the time, never the refused command or

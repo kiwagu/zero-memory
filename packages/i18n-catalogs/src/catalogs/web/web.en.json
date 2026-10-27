@@ -212,7 +212,7 @@
   "rules.appliesWhen.placeholder": "Observable task features, e.g. any task that changes files under git",
   "rules.appliesWhen.missing": "No applicability yet — the judge reads the whole text",
   "rules.enforcedBy.label": "Enforced by guard",
-  "rules.enforcedBy.placeholder": "guard name, e.g. commit_message_guard",
+  "rules.enforcedBy.placeholder": "guard name, e.g. one_line_commit",
   "rules.stats.title": "Delivery over the last 30 days",
   "rules.stats.line": "{calls} calls · full {full} · gate {gate} · headline {headline} · mean p {meanP} · fetched after headline {fetches}",
   "rules.stats.refusals": "Guard refusals: {list}",

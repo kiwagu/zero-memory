@@ -148,18 +148,18 @@ test.describe('rules incubator surface', () => {
       await appliesWhen.fill('  any task that writes a git commit  ');
       await appliesWhen.press('Enter');
       await expect(missing).toHaveCount(0);
-      await enforcedBy.fill('commit_message_guard');
+      await enforcedBy.fill('one_line_commit');
       await enforcedBy.press('Enter');
       await expect.poll(stored).toEqual({
         applies_when: 'any task that writes a git commit',
-        enforced_by: 'commit_message_guard',
+        enforced_by: 'one_line_commit',
       });
 
       await page.reload();
       await expect(appliesWhen).toHaveValue(
         'any task that writes a git commit'
       );
-      await expect(enforcedBy).toHaveValue('commit_message_guard');
+      await expect(enforcedBy).toHaveValue('one_line_commit');
 
       // Emptying a field clears it.
       await appliesWhen.fill('');
@@ -167,7 +167,7 @@ test.describe('rules incubator surface', () => {
       await expect(missing).toBeVisible();
       await expect.poll(stored).toEqual({
         applies_when: null,
-        enforced_by: 'commit_message_guard',
+        enforced_by: 'one_line_commit',
       });
     } finally {
       await clearFields();

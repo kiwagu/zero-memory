@@ -270,8 +270,8 @@ describe('tool contracts', () => {
     const parsed = ingestConversationInputSchema.parse({
       ...chunk,
       guard_refusals: [
-        { guard: 'commit_message_guard', at: '2026-10-24T10:00:01Z' },
-        { guard: 'dev-docs-guard', at: null },
+        { guard: 'one_line_commit', at: '2026-10-24T10:00:01Z' },
+        { guard: 'docs-build', at: null },
       ],
     });
     expect(parsed.guard_refusals).toHaveLength(2);
@@ -288,7 +288,7 @@ describe('tool contracts', () => {
       ingestConversationInputSchema.parse({
         ...chunk,
         guard_refusals: Array.from({ length: 51 }, () => ({
-          guard: 'commit_message_guard',
+          guard: 'one_line_commit',
           at: null,
         })),
       })

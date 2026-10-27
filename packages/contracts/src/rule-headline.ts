@@ -3,8 +3,8 @@ const HEADLINE_MAX_CHARS = 160;
 
 /**
  * A rule's headline: its opening clause, up to the first sentence break. The
- * owner writes rules headline-first ("NO PRIVATE REFERENCES IN COMMITTED
- * ARTIFACTS (every project) — …"), so the opening names the rule even when
+ * owner writes rules headline-first ("ONE-LINE COMMITS (every project) — the
+ * subject names the goal…"), so the opening names the rule even when
  * its body cannot be carried. A break inside an open parenthesis does not
  * count — it would leave the headline with an unclosed aside.
  */

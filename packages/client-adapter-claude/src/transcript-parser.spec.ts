@@ -197,12 +197,12 @@ describe('parseTranscript', () => {
       message: {
         role: 'assistant',
         content: [
-          { type: 'text', text: 'Testing [guard:dev_docs_guard] next.' },
+          { type: 'text', text: 'Testing [guard:docs_build] next.' },
           {
             type: 'tool_use',
             id: 'toolu_1',
             name: 'Bash',
-            input: { command: 'echo "[guard:commit_message_guard] refused"' },
+            input: { command: 'echo "[guard:one_line_commit] refused"' },
           },
         ],
       },
@@ -215,7 +215,7 @@ describe('parseTranscript', () => {
         content: [
           toolResult(
             'toolu_1',
-            'PreToolUse:Bash hook error: [guard:commit_message_guard] a commit message is one line',
+            'PreToolUse:Bash hook error: [guard:one_line_commit] a commit message is one line',
             true
           ),
         ],
@@ -226,7 +226,7 @@ describe('parseTranscript', () => {
       timestamp: '2026-10-24T10:00:02Z',
       message: {
         role: 'user',
-        content: 'plain text mentioning [guard:dev_docs_guard] in prose',
+        content: 'plain text mentioning [guard:docs_build] in prose',
       },
     });
     const recap = JSON.stringify({
@@ -235,13 +235,13 @@ describe('parseTranscript', () => {
       timestamp: '2026-10-24T10:00:03Z',
       message: {
         role: 'user',
-        content: 'Earlier, [guard:commit_message_guard] refused a commit.',
+        content: 'Earlier, [guard:one_line_commit] refused a commit.',
       },
     });
 
     expect(
       parseTranscript([toolUse, refusal, prose, recap].join('\n')).guardRefusals
-    ).toEqual([{ guard: 'commit_message_guard', at: '2026-10-24T10:00:01Z' }]);
+    ).toEqual([{ guard: 'one_line_commit', at: '2026-10-24T10:00:01Z' }]);
     expect(
       parseTranscript([toolUse, prose, recap].join('\n')).guardRefusals
     ).toEqual([]);
@@ -253,7 +253,7 @@ describe('parseTranscript', () => {
   // is not that guard refusing.
   it('ignores the tag in a successful result or later in the reason', () => {
     const denial =
-      'PreToolUse:Bash hook error: [guard:commit_message_guard] a commit message is one line';
+      'PreToolUse:Bash hook error: [guard:one_line_commit] a commit message is one line';
     const jsonl = JSON.stringify({
       type: 'user',
       timestamp: '2026-10-24T10:00:04Z',
@@ -263,12 +263,12 @@ describe('parseTranscript', () => {
           toolResult('toolu_2', denial),
           toolResult(
             'toolu_3',
-            'PreToolUse:Bash hook error: see [guard:dev_docs_guard]',
+            'PreToolUse:Bash hook error: see [guard:docs_build]',
             true
           ),
           toolResult(
             'toolu_4',
-            'PreToolUse:Bash hook error: [guard:dev_docs_guard] and [guard:commit_message_guard] too',
+            'PreToolUse:Bash hook error: [guard:docs_build] and [guard:one_line_commit] too',
             true
           ),
         ],
@@ -276,7 +276,7 @@ describe('parseTranscript', () => {
     });
 
     expect(parseTranscript(jsonl).guardRefusals).toEqual([
-      { guard: 'dev_docs_guard', at: '2026-10-24T10:00:04Z' },
+      { guard: 'docs_build', at: '2026-10-24T10:00:04Z' },
     ]);
   });
 });

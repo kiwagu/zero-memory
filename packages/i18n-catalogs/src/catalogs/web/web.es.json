@@ -212,7 +212,7 @@
   "rules.appliesWhen.placeholder": "Rasgos observables de la tarea, p. ej. cualquier tarea que cambie archivos bajo git",
   "rules.appliesWhen.missing": "Sin aplicabilidad todavía: el juez lee el texto completo",
   "rules.enforcedBy.label": "Aplicada por el guard",
-  "rules.enforcedBy.placeholder": "nombre del guard, p. ej. commit_message_guard",
+  "rules.enforcedBy.placeholder": "nombre del guard, p. ej. one_line_commit",
   "rules.stats.title": "Entrega en los últimos 30 días",
   "rules.stats.line": "{calls} llamadas · completa {full} · puerta {gate} · titular {headline} · p media {meanP} · leída tras el titular {fetches}",
   "rules.stats.refusals": "Rechazos de guards: {list}",
