@@ -118,9 +118,11 @@ export const renderStandingRulesSection = (
   // id on every rule, also when the gate is off, and printing it on a rule
   // with no level would change that briefing and the budget behind it.
   const levelled = (rule: ContextRule): boolean => rule.level !== undefined;
+  // At gate and headline the server already sent the headline as the text;
+  // cutting it again would mark a capped headline twice.
   const headlineOf = (rule: ContextRule): string =>
-    levelled(rule)
-      ? (rule.headline ?? ruleHeadline(rule.text))
+    rule.level === 'gate' || rule.level === 'headline'
+      ? rule.text
       : ruleHeadline(rule.text);
   const idOf = (rule: ContextRule): string =>
     levelled(rule) && rule.id ? ` ${rule.id}` : '';

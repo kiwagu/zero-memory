@@ -14,7 +14,6 @@ describe('renderRulesFooter', () => {
       {
         id: 'rlc_1111111111111111.1111111111',
         text: 'GATED',
-        headline: 'GATED',
         pinned: false,
         level: 'gate',
         applies_when: 'tasks that deploy',
@@ -22,7 +21,6 @@ describe('renderRulesFooter', () => {
       {
         id: 'rlc_2222222222222222.2222222222',
         text: 'NAMED ONLY',
-        headline: 'NAMED ONLY',
         pinned: false,
         level: 'headline',
       },
@@ -44,7 +42,6 @@ describe('renderRulesFooter', () => {
       {
         id: 'rlc_1111111111111111.1111111111',
         text: 'GATED',
-        headline: 'GATED',
         pinned: false,
         level: 'gate',
       },

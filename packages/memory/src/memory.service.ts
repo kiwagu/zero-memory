@@ -113,6 +113,7 @@ import { injectRuleFateReader } from './rule-fate.reader.provider.js';
 import type { IRuleFateReader } from './rule-fate.reader.js';
 import { injectRuleGate } from './rule-gate.provider.js';
 import {
+  deliverUnjudged,
   hookTaskStatement,
   type IRuleGate,
   type RuleGateOutcome,
@@ -1512,8 +1513,12 @@ export class MemoryService {
     // so it is judged only against what the server knows of the conversation
     // — its bound or continuation card — and not at all without one. The
     // prompt never reaches the server, so it is never part of this.
-    // Fail-open like the lookups above.
-    let gated: RuleGateOutcome = { rules, block: null };
+    // Fail-open like the lookups above. Whatever happens, the session gets
+    // only what it reads: a rule's condition of application is for the judge.
+    let gated: RuleGateOutcome = {
+      rules: rules.map(deliverUnjudged),
+      block: null,
+    };
     if (input.briefing === true && rules.length > 0) {
       try {
         gated = await this.ruleGate.apply({

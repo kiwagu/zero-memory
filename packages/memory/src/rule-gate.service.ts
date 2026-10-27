@@ -78,19 +78,36 @@ export const levelFor = (
 ): RuleDeliveryLevel =>
   p >= bands.hi ? 'full' : p >= bands.lo ? 'gate' : 'headline';
 
-/** The rule as a session receives it at that level. The name always survives. */
+/**
+ * A rule as a session receives it when nothing judged it: its whole text, its
+ * pin and its id. Its condition of application is for the judge, so the
+ * agent is not sent it.
+ */
+export const deliverUnjudged = (rule: ContextRule): ContextRule => ({
+  text: rule.text,
+  pinned: rule.pinned,
+  ...(rule.id ? { id: rule.id } : {}),
+});
+
+/**
+ * The rule as a session receives it at that level: the whole text at `full`,
+ * the headline otherwise, and the condition of application only at `gate`,
+ * the one level whose line shows it. The name always survives.
+ */
 export const deliverAtLevel = (
   rule: ContextRule,
   level: RuleDeliveryLevel
 ): ContextRule => {
-  const headline = rule.headline ?? ruleHeadline(rule.text);
-  if (level === 'full') return { ...rule, headline, level };
-  if (level === 'gate') return { ...rule, headline, text: headline, level };
-  const { applies_when: _dropped, ...named } = rule;
-  return { ...named, headline, text: headline, level };
+  const named = deliverUnjudged(rule);
+  if (level === 'full') return { ...named, level };
+  const text = ruleHeadline(rule.text);
+  if (level === 'gate' && rule.applies_when) {
+    return { ...named, text, applies_when: rule.applies_when, level };
+  }
+  return { ...named, text, level };
 };
 
-/** What a rule costs the session as delivered: its text and its condition. */
+/** What a delivered rule costs the session: its text and, if sent, its condition. */
 export const ruleChars = (rule: ContextRule): number =>
   rule.text.length + (rule.applies_when?.length ?? 0);
 
@@ -128,11 +145,11 @@ export const ruleGateRequest = (
         rule.id,
         rule.applies_when
           ? {
-              headline: rule.headline ?? ruleHeadline(rule.text),
+              headline: ruleHeadline(rule.text),
               applies_when: rule.applies_when,
             }
           : {
-              headline: rule.headline ?? ruleHeadline(rule.text),
+              headline: ruleHeadline(rule.text),
               text: rule.text,
             },
       ])
@@ -169,7 +186,8 @@ export class RuleGateService implements IRuleGate {
   ) {}
 
   async apply(input: RuleGateInput): Promise<RuleGateOutcome> {
-    const unchanged: RuleGateOutcome = { rules: input.rules, block: null };
+    const unjudged = input.rules.map(deliverUnjudged);
+    const unchanged: RuleGateOutcome = { rules: unjudged, block: null };
     const mode = this.config.mode;
     if (mode === 'off' || input.task === null) return unchanged;
     const unpinned = input.rules.filter(
@@ -240,15 +258,20 @@ export class RuleGateService implements IRuleGate {
       (a, b) =>
         Number(b.rule.pinned) - Number(a.rule.pinned) || (b.p ?? 1) - (a.p ?? 1)
     );
-    // Shadow mode and a failed judge both hand the session the rules exactly
-    // as they arrived; the block still says what happened.
+    // Shadow mode and a failed judge both hand the session the rules as an
+    // unjudged call gets them; the block still says what happened.
     const asBefore = mode === 'shadow' || judgeUnavailable;
+    const deliveredRules = asBefore
+      ? unjudged
+      : ordered.map((entry) => entry.rule);
+    // Over the same rules: what the session would have received whole, and
+    // what it does receive.
     const baseline = input.rules.reduce(
-      (sum, rule) => sum + ruleChars(rule),
+      (sum, rule) => sum + rule.text.length,
       0
     );
-    const delivered = ordered.reduce(
-      (sum, entry) => sum + ruleChars(entry.rule),
+    const delivered = deliveredRules.reduce(
+      (sum, rule) => sum + ruleChars(rule),
       0
     );
     const counts = { full: 0, gate: 0, headline: 0 };
@@ -262,7 +285,7 @@ export class RuleGateService implements IRuleGate {
       judge_unavailable: judgeUnavailable,
       bands: { hi: this.config.hi, lo: this.config.lo },
       chars_baseline: baseline,
-      chars_delivered: asBefore ? baseline : delivered,
+      chars_delivered: delivered,
       levels: counts,
       // A rule without an id cannot be named here; it is counted above and
       // delivered whole.
@@ -280,7 +303,6 @@ export class RuleGateService implements IRuleGate {
           : []
       ),
     };
-    if (asBefore) return { rules: input.rules, block };
-    return { rules: ordered.map((entry) => entry.rule), block };
+    return { rules: deliveredRules, block };
   }
 }

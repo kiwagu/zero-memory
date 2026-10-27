@@ -22,8 +22,9 @@ interfaces.
   `edgeTypeSchema`, `entityMentionSchema`, plus the context/graph result
   shapes (`entityHitSchema`, `contextEntitySchema`, `contextEdgeSchema`,
   `contextMemorySchema`) and the standing rule a briefing delivers
-  (`contextRuleSchema`, with its `ruleCandidateIdSchema` id and the
-  `ruleDeliveryLevelSchema` level it was delivered at).
+  (`contextRuleSchema`: its `text`, `pinned`, its `ruleCandidateIdSchema`
+  id, the `ruleDeliveryLevelSchema` level it was delivered at, and its
+  `applies_when` line at level `gate` and on a `zm://rules` read).
 - `rule-headline.ts` — `ruleHeadline`, a rule's opening clause: the one cut
   the server and every client use when a rule travels by headline.
 - `contract-version.ts` — `CONTRACT_VERSION`, the semver of the tool/response

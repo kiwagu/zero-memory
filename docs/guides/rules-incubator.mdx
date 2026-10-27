@@ -138,10 +138,10 @@ integration they require:
    and tool descriptions instead, because whole segments are dropped in
    priority order when the budget would overflow.
 2. `build_context.rules[]`. Every client can retrieve the applicable set, no
-   hook required. Each record carries `text` and `pinned`, the rule's `id`
-   and `headline`, its `applies_when` line when it has one, and, when the
-   call's rules were delivered by level, the `level` it arrived at (see
-   [Delivery by task relevance](#delivery-by-task-relevance)). The rendered
+   hook required. Each record carries `text`, `pinned` and the rule's `id`,
+   and, when the call's rules were delivered by level, the `level` it arrived
+   at (see [Delivery by task relevance](#delivery-by-task-relevance)), with
+   its `applies_when` line only at level `gate`. The rendered
    tool result carries a prominent `STANDING RULES` block ahead of the pack,
    with pinned rules leading and marked.
 3. Client hooks. Hook-capable adapters render the same `STANDING RULES`
@@ -151,7 +151,8 @@ integration they require:
    first, without a briefing call, useful for reloading the rules after
    promoting one mid-session. Beside it, `zm://rules/{id}` returns one
    promoted rule of either layer in full by its id, which is how a rule
-   delivered by headline is read whole. Both are offered only where the
+   delivered by headline is read whole. Both carry each rule's `id` and its
+   `applies_when` line when it has one. Both are offered only where the
    connection can read them live, so neither advertises a capability that
    would then fail.
 5. Instruction files. Copy/download and deploy-script materialization are
@@ -232,7 +233,9 @@ The headline is the rule's opening clause, up to its first sentence break.
 Pinned rules are never judged and always arrive whole, first; the unpinned
 rules follow, the most binding first. Every rule stays named: at `gate` and
 `headline` the record's `text` is the headline, the record carries the rule's
-`id`, and the full text is one `zm://rules/{id}` read away. The
+`id`, and the full text is one `zm://rules/{id}` read away. Only a record at
+`gate` carries `applies_when`; a rule delivered whole, or by an unjudged call,
+is sent its text without it. The
 `STANDING RULES` block of the tool result, and the block the hooks render,
 mark such a line `[gate]` or `[headline]` followed by the rule id, and close
 with a line saying to read `zm://rules/<id>` before acting on one.

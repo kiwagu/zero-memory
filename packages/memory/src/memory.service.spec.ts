@@ -2633,14 +2633,12 @@ describe('MemoryService.buildContext — the rule gate', () => {
   const rule: ContextRule = {
     id: 'rlc_0000000000000001.0000000000',
     text: 'IMPORTER FIRST. Run the importer before touching the parser.',
-    headline: 'IMPORTER FIRST',
     applies_when: 'tasks that touch the importer',
     pinned: false,
   };
   const levelledRule: ContextRule = {
     id: rule.id,
     text: 'IMPORTER FIRST',
-    headline: 'IMPORTER FIRST',
     level: 'headline',
     pinned: false,
   };
@@ -2651,7 +2649,7 @@ describe('MemoryService.buildContext — the rule gate', () => {
     latency_ms: 120,
     judge_unavailable: false,
     bands: { hi: 0.6, lo: 0.35 },
-    chars_baseline: rule.text.length + rule.applies_when!.length,
+    chars_baseline: rule.text.length,
     chars_delivered: levelledRule.text.length,
     levels: { full: 0, gate: 0, headline: 1 },
     rules: [
@@ -2780,7 +2778,7 @@ describe('MemoryService.buildContext — the rule gate', () => {
     expect(tasks).toEqual([null, null]);
   });
 
-  it('delivers the rules whole when the gate itself throws', async () => {
+  it('delivers the rules whole, without their conditions, when the gate itself throws', async () => {
     const ruleGate: IRuleGate = {
       apply: vi.fn().mockRejectedValue(new Error('gate down')),
     };
@@ -2790,7 +2788,9 @@ describe('MemoryService.buildContext — the rule gate', () => {
       await service.buildContext({ topic: 'anything', briefing: true })
     ).unwrap();
 
-    expect(out.rules).toEqual([rule]);
+    expect(out.rules).toStrictEqual([
+      { text: rule.text, pinned: false, id: rule.id },
+    ]);
     expect(out).not.toHaveProperty('rule_gate');
   });
 });

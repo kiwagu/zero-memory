@@ -134,7 +134,11 @@ hook's secondary briefing, so one session start judges once). The gate runs only
 on and has a judge credential; `shadow` records the levels in `rule_gate`
 without changing what is delivered. A judge failure delivers the rules as
 before, flagged `judge_unavailable`, and never falls back to another provider;
-a gate failure costs the levelling, never the briefing.
+a gate failure costs the levelling, never the briefing. Every way out of the
+briefing sends a rule as the agent reads it: its text, pin, id and level, and
+its `applies_when` only at `gate` (`deliverAtLevel`; `deliverUnjudged` when
+nothing judged it). `chars_baseline` sums the rules' whole texts and
+`chars_delivered` what was sent, over the same rules.
 
 A write carries `PassageVectors` — a named `{ primary, overflow }` shape
 rather than a bare array, because the embedding model truncates its input to a

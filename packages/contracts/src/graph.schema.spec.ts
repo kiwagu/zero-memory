@@ -12,16 +12,21 @@ describe('contextRuleSchema', () => {
     ).toEqual({ text: 'Always X.', pinned: false });
   });
 
-  it('accepts id, headline, applies_when and level', () => {
+  it('accepts id, applies_when and level', () => {
     const rule = contextRuleSchema.parse({
       text: 'ALWAYS X',
       pinned: false,
       id: `rlc_${ID_BODY}`,
-      headline: 'ALWAYS X',
       applies_when: 'tasks that commit',
-      level: 'headline',
+      level: 'gate',
     });
-    expect(rule.level).toBe('headline');
+    expect(rule).toEqual({
+      text: 'ALWAYS X',
+      pinned: false,
+      id: `rlc_${ID_BODY}`,
+      applies_when: 'tasks that commit',
+      level: 'gate',
+    });
   });
 
   it('refuses an unknown level and a non-rule id', () => {

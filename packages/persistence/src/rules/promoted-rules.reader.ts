@@ -28,8 +28,8 @@ import { toContextRule } from './promoted-rule.utils.js';
  * PostgREST's max-rows cap and silently drop an arbitrary subset — pinned
  * rules included.
  *
- * Each rule carries its id (the handle a client reads it back by), its
- * headline and, when stored, its condition of application.
+ * Each rule carries its id (the handle a client reads it back by) and, when
+ * stored, its condition of application.
  */
 export async function listPromotedUserRules(
   accessToken: string

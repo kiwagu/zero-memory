@@ -68,14 +68,12 @@ describe('mergeStandingRules', () => {
   const judged: ContextRule = {
     id: ruleId,
     text: 'DEPLOY RULE',
-    headline: 'DEPLOY RULE',
     pinned: false,
     level: 'headline',
   };
   const whole: ContextRule = {
     id: ruleId,
     text: 'DEPLOY RULE. Its body.',
-    headline: 'DEPLOY RULE',
     pinned: false,
     level: 'full',
   };
@@ -261,7 +259,6 @@ describe('renderStandingRulesSection with server levels', () => {
   const gate = {
     id: 'rlc_1111111111111111.1111111111',
     text: 'GATED',
-    headline: 'GATED',
     pinned: false,
     level: 'gate' as const,
     applies_when: 'tasks that deploy',
@@ -269,14 +266,12 @@ describe('renderStandingRulesSection with server levels', () => {
   const named = {
     id: 'rlc_2222222222222222.2222222222',
     text: 'NAMED',
-    headline: 'NAMED',
     pinned: false,
     level: 'headline' as const,
   };
   const whole = {
     id: 'rlc_3333333333333333.3333333333',
-    text: 'WHOLE RULE. With its body.',
-    headline: 'WHOLE RULE',
+    text: 'WHOLE RULE WITH A NAME. With its body.',
     pinned: false,
     level: 'full' as const,
   };
@@ -289,7 +284,7 @@ describe('renderStandingRulesSection with server levels', () => {
     expect(section).toContain(
       '1. [pinned] PINNED. Whole text that is fairly long indeed.\n'
     );
-    expect(section).toContain('2. WHOLE RULE. With its body.\n');
+    expect(section).toContain('2. WHOLE RULE WITH A NAME. With its body.\n');
     expect(section).toContain(
       '3. GATED — applies when: tasks that deploy [gate] rlc_1111111111111111.1111111111\n'
     );
@@ -318,22 +313,25 @@ describe('renderStandingRulesSection with server levels', () => {
       pinned.text.length + 80
     )!;
     expect(section).toContain(
-      '2. WHOLE RULE [headline] rlc_3333333333333333.3333333333\n'
+      '2. WHOLE RULE WITH A NAME [headline] rlc_3333333333333333.3333333333\n'
     );
     expect(section).not.toContain('With its body');
   });
 
-  it('names a levelled rule without a headline field by the headline cut', () => {
-    const { headline: _none, ...bare } = {
-      ...whole,
-      text: 'DEPLOY FROM THE STAND ONLY. Never from a laptop, whatever the hurry.',
-    };
+  it('takes the text of a gated or headlined rule as the headline it already is', () => {
+    // The server caps a headline at 160 characters and marks the cut; cutting
+    // that text again would cap it a second time.
+    const capped = `${'LONG HEADLINE '.repeat(12).slice(0, 160).trimEnd()}…`;
     const section = renderStandingRulesSection(
-      [pinned, bare],
-      pinned.text.length + 80
+      [
+        { ...named, text: capped },
+        { ...gate, text: capped, applies_when: 'tasks that deploy' },
+      ],
+      10_000
     )!;
+    expect(section).toContain(`1. ${capped} [headline] ${named.id}\n`);
     expect(section).toContain(
-      '2. DEPLOY FROM THE STAND ONLY [headline] rlc_3333333333333333.3333333333\n'
+      `2. ${capped} — applies when: tasks that deploy [gate] ${gate.id}\n`
     );
   });
 
@@ -362,7 +360,7 @@ describe('renderStandingRulesSection with server levels', () => {
     // "whole" is far shorter than the line it is rendered as.
     const long = {
       ...whole,
-      text: `WHOLE RULE. ${'With its body. '.repeat(20)}`,
+      text: `WHOLE RULE WITH A NAME. ${'With its body. '.repeat(20)}`,
     };
     const wide = { ...gate, applies_when: 'tasks that deploy '.repeat(8) };
     const rules = [long, wide];

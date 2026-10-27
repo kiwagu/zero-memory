@@ -221,8 +221,9 @@ test.describe('Rule gate over MCP @smoke', () => {
       expect(byId.get(fullId)).toMatchObject({
         level: 'full',
         text: FULL_TEXT,
-        applies_when: 'any task that commits [p=0.9]',
       });
+      // The condition travels only on a gate line.
+      expect(byId.get(fullId)).not.toHaveProperty('applies_when');
       expect(byId.get(gateId)).toMatchObject({
         level: 'gate',
         text: `${TAG} STAND RULE`,
@@ -270,9 +271,10 @@ test.describe('Rule gate over MCP @smoke', () => {
       expect(hook.work?.bound_card ?? null).toBeNull();
       expect(hook.work?.continuation ?? null).toBeNull();
       expect(hook.rule_gate).toBeUndefined();
-      expect(hook.rules.find((rule) => rule.id === headlineId)).toMatchObject({
+      expect(hook.rules.find((rule) => rule.id === headlineId)).toStrictEqual({
+        id: headlineId,
         text: HEADLINE_TEXT,
-        applies_when: 'planning work [p=0.1]',
+        pinned: false,
       });
       expect(
         hook.rules.every(
@@ -421,11 +423,11 @@ test.describe('Rule gate over MCP @smoke', () => {
       const pack = await brief(mcp, { topic: 'anything at all' });
       expect(pack.rule_gate).toBeUndefined();
       const rule = pack.rules.find((entry) => entry.id === id);
-      expect(rule).toMatchObject({
+      expect(rule).toStrictEqual({
+        id,
         text: `${TAG} B RULE. Whole for B.`,
-        applies_when: 'anything [p=0.1]',
+        pinned: false,
       });
-      expect(rule).not.toHaveProperty('level');
     } finally {
       await mcp.close();
       await revokeRules(seeded);

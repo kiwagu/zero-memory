@@ -30,7 +30,10 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { E5SmallEmbeddingService } from '../packages/embedding/src/index.js';
-import { ruleChars } from '../packages/memory/src/rule-gate.service.js';
+import {
+  deliverUnjudged,
+  ruleChars,
+} from '../packages/memory/src/rule-gate.service.js';
 import { readAllPages } from '../packages/persistence/src/paged-read.js';
 
 import {
@@ -120,7 +123,8 @@ const withinBudget = (ranking: readonly OwnerRule[]): Set<string> => {
   const whole = new Set<string>();
   let used = 0;
   for (const rule of ranking) {
-    const cost = ruleChars(rule);
+    // A whole rule costs what an unjudged call sends: its text.
+    const cost = ruleChars(deliverUnjudged(rule));
     if (used + cost > BUDGET_CHARS) break;
     used += cost;
     whole.add(rule.id);

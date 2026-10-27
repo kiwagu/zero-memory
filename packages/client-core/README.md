@@ -44,7 +44,8 @@ consume the same core (see the R3 client-adapters direction).
   says so. A rule the server judged arrives at the level it chose: by
   headline with its condition (`[gate]`) while that fits the ceiling and by
   headline (`[headline]`) otherwise, or by headline when the server
-  headlined it. Only lines of rules the server levelled name the rule id
+  headlined it; the text of such a rule already is its headline and is
+  shown as sent. Only lines of rules the server levelled name the rule id
   after the marker, and the footer then points at `zm://rules/<id>`; a rule
   sent without a level renders as before, whether it carries an id or not.
   This is the full-text channel for every client; MCP

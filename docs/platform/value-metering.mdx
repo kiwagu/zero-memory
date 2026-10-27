@@ -137,8 +137,10 @@ When the
 [rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance)
 judges a call's standing rules, that call's `build_context` row carries the
 judgment as `rule_gate`: the mode, the provider and model, the judge's
-latency, whether it was unavailable, the bands, `chars_baseline` (what the
-rules would have cost whole) against `chars_delivered`, the count per level,
+latency, whether it was unavailable, the bands, `chars_baseline` (the sum
+of the rules' whole texts, what an unjudged call sends) against
+`chars_delivered` (the characters the session receives: each delivered text,
+plus the **applies when** line of a rule delivered by gate), the count per level,
 and per rule its id, probability, level, size and pin. Ids and numbers only,
 never a rule's text. Three more rows complete the picture:
 

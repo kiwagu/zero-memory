@@ -1,4 +1,4 @@
-import { type ContextRule, ruleHeadline } from '@workspace/contracts';
+import type { ContextRule } from '@workspace/contracts';
 
 /** What the readers keep of a live promoted rule row, text already trimmed. */
 export interface StoredRule {
@@ -9,10 +9,11 @@ export interface StoredRule {
 }
 
 /**
- * A promoted rule as it is delivered: its id, its whole text, its pin, the
- * headline every client renders, and the condition of application only when
- * one is stored — never as an `applies_when: undefined` key, so a pack
- * serialises the same whether or not a rule has one.
+ * A promoted rule as the readers hand it on: its id, its whole text, its pin
+ * and the condition of application only when one is stored — never as an
+ * `applies_when: undefined` key, so a pack serialises the same whether or not
+ * a rule has one. The condition is for the judge and for a full read of the
+ * rule; a briefing decides whether the agent is sent it.
  */
 export const toContextRule = ({
   id,
@@ -23,6 +24,5 @@ export const toContextRule = ({
   id,
   text,
   pinned,
-  headline: ruleHeadline(text),
   ...(appliesWhen ? { applies_when: appliesWhen } : {}),
 });

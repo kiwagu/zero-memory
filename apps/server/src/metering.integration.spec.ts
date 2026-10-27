@@ -203,7 +203,6 @@ describe('metering seam — MCP client → usage events', () => {
         {
           id: RULE_ID,
           text: 'The whole text',
-          headline: 'The whole text',
           pinned: false,
           level: 'headline',
         },

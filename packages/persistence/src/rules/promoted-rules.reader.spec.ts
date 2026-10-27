@@ -65,21 +65,19 @@ beforeEach(() => {
 });
 
 describe('listPromotedUserRules', () => {
-  it('delivers each rule with its id and headline, and applies_when only when stored', async () => {
+  it('delivers each rule with its id, and applies_when only when stored', async () => {
     serve([RULE_A, RULE_B]);
     expect(await listPromotedUserRules(TOKEN)).toStrictEqual([
       {
         id: RULE_A.id,
         text: 'ALWAYS RUN THE GATES BEFORE COMMITTING. A red hook…',
         pinned: true,
-        headline: 'ALWAYS RUN THE GATES BEFORE COMMITTING',
         applies_when: 'tasks that commit',
       },
       {
         id: RULE_B.id,
         text: 'NEVER PUSH TO MAIN DIRECTLY.',
         pinned: false,
-        headline: 'NEVER PUSH TO MAIN DIRECTLY',
       },
     ]);
   });
@@ -92,7 +90,6 @@ describe('readPromotedRuleById', () => {
       id: RULE_A.id,
       text: 'ALWAYS RUN THE GATES BEFORE COMMITTING. A red hook…',
       pinned: true,
-      headline: 'ALWAYS RUN THE GATES BEFORE COMMITTING',
       level: 'full',
       applies_when: 'tasks that commit',
     });
@@ -100,7 +97,6 @@ describe('readPromotedRuleById', () => {
       id: RULE_P.id,
       text: 'KEEP MIGRATIONS FORWARD-ONLY. Never edit an applied one.',
       pinned: false,
-      headline: 'KEEP MIGRATIONS FORWARD-ONLY',
       level: 'full',
     });
   });

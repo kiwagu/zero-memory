@@ -148,14 +148,12 @@ describe('session-start rule levels', () => {
   const judged: ContextRule = {
     id,
     text: 'DEPLOY RULE',
-    headline: 'DEPLOY RULE',
     pinned: false,
     level: 'headline',
   };
   const whole: ContextRule = {
     id,
     text: 'DEPLOY RULE. Ship only from the test stand.',
-    headline: 'DEPLOY RULE',
     pinned: false,
   };
 

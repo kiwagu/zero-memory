@@ -124,10 +124,10 @@ The pack has several legs:
 
 - Standing rules: promoted General rules plus rules addressed to the
   briefed project. `rules[]` carries one object per rule, pinned first:
-  `text`, `pinned`, the rule's `id` and `headline`, its `applies_when` line
-  when it has one, and its `level` when the
+  `text`, `pinned` and the rule's `id`, plus its `level` when the
   [rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance)
-  delivered the call's rules by level. Pinned rules are exempt from the
+  delivered the call's rules by level, and its `applies_when` line only on a
+  rule delivered at level `gate`. Pinned rules are exempt from the
   12-rule unpinned cap and the 90-day delivery TTL. Hook-capable clients
   render them above the JSON pack as an imperative **STANDING RULES**
   section. Within the hook's channel budget that section has its own

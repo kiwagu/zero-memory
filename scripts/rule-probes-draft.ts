@@ -28,7 +28,10 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { entityIdSchemas } from '../packages/contracts/src/index.js';
+import {
+  entityIdSchemas,
+  ruleHeadline,
+} from '../packages/contracts/src/index.js';
 import { readAllPages } from '../packages/persistence/src/paged-read.js';
 
 import {
@@ -141,7 +144,7 @@ const draft = async (): Promise<void> => {
       rows.push([
         topic,
         rule.id,
-        rule.headline ?? '',
+        ruleHeadline(rule.text),
         p.toFixed(3),
         proposed,
         '',

@@ -55,14 +55,12 @@ describe('SupabaseProjectRulesReader.listForScopes', () => {
         id: 'rlc_0123456789abcdfa.0123456789',
         text: 'KEEP MIGRATIONS FORWARD-ONLY. Never edit an applied one.',
         pinned: true,
-        headline: 'KEEP MIGRATIONS FORWARD-ONLY',
         applies_when: 'tasks that change the schema',
       },
       {
         id: 'rlc_0123456789abcdfb.0123456789',
         text: 'RUN THE E2E SUITE ON THE TEST STACK ONLY.',
         pinned: false,
-        headline: 'RUN THE E2E SUITE ON THE TEST STACK ONLY',
       },
     ]);
   });

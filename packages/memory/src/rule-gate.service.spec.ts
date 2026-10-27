@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   deliverAtLevel,
+  deliverUnjudged,
   hookTaskStatement,
   levelFor,
   RuleGateService,
@@ -14,38 +15,35 @@ const id = (n: string) => `rlc_${n.padEnd(16, '0')}.0123456789`;
 const rules: ContextRule[] = [
   {
     id: id('pin'),
-    text: 'PINNED RULE. Always.',
-    headline: 'PINNED RULE',
+    text: 'PINNED RULE FOR EVERY SESSION. Read the pinned rule before anything else.',
     pinned: true,
   },
   {
     id: id('commit'),
-    text: 'ONE LINE COMMITS. Body text.',
-    headline: 'ONE LINE COMMITS',
+    text: 'ONE-LINE COMMITS (every project). The subject names the goal of the change.',
     pinned: false,
     applies_when: 'tasks that commit [p=0.9]',
   },
   {
-    id: id('stand'),
-    text: 'STAND ROLES. Body.',
-    headline: 'STAND ROLES',
+    id: id('stack'),
+    text: 'STACK ROLES ARE FIXED PER STACK. The test stack is disposable; the dev stack is not.',
     pinned: false,
     applies_when: 'tasks that touch a stack [p=0.5]',
   },
   {
-    id: id('north'),
-    text: 'NORTH STAR. Body.',
-    headline: 'NORTH STAR',
+    id: id('plan'),
+    text: 'PLANNING NOTES COME FIRST. Write the plan down before the first edit.',
     pinned: false,
     applies_when: 'planning [p=0.1]',
   },
   {
     id: id('bare'),
-    text: 'NO APPLIES WHEN. Body.',
-    headline: 'NO APPLIES WHEN',
+    text: 'NO APPLIES WHEN ON THIS RULE. Without a condition it is judged on its text.',
     pinned: false,
   },
 ];
+/** The rules as a call that nothing judged delivers them. */
+const unjudged = rules.map(deliverUnjudged);
 
 const service = (
   overrides: {
@@ -91,20 +89,45 @@ describe('levelFor / deliverAtLevel', () => {
     expect(levelFor(0.1, { hi: 0.6, lo: 0.35 })).toBe('headline');
   });
   it('shapes a rule for its level without losing its name', () => {
-    expect(deliverAtLevel(rules[1]!, 'headline')).toEqual({
-      ...rules[1],
-      text: 'ONE LINE COMMITS',
+    expect(deliverAtLevel(rules[1]!, 'headline')).toStrictEqual({
+      id: id('commit'),
+      text: 'ONE-LINE COMMITS (every project)',
+      pinned: false,
       level: 'headline',
-      applies_when: undefined,
     });
-    expect(deliverAtLevel(rules[1]!, 'gate')).toMatchObject({
-      text: 'ONE LINE COMMITS',
-      level: 'gate',
+    expect(deliverAtLevel(rules[1]!, 'gate')).toStrictEqual({
+      id: id('commit'),
+      text: 'ONE-LINE COMMITS (every project)',
+      pinned: false,
       applies_when: 'tasks that commit [p=0.9]',
+      level: 'gate',
     });
-    expect(deliverAtLevel(rules[1]!, 'full')).toMatchObject({
+    // The condition is shown only on a gate line; a whole rule needs none.
+    expect(deliverAtLevel(rules[1]!, 'full')).toStrictEqual({
+      id: id('commit'),
       text: rules[1]!.text,
+      pinned: false,
       level: 'full',
+    });
+    expect(deliverAtLevel(rules[4]!, 'gate')).toStrictEqual({
+      id: id('bare'),
+      text: 'NO APPLIES WHEN ON THIS RULE',
+      pinned: false,
+      level: 'gate',
+    });
+  });
+
+  it('delivers an unjudged rule as its text, pin and id only', () => {
+    expect(unjudged[1]).toStrictEqual({
+      id: id('commit'),
+      text: rules[1]!.text,
+      pinned: false,
+    });
+    expect(
+      deliverUnjudged({ text: 'ID-LESS RULE.', pinned: false })
+    ).toStrictEqual({
+      text: 'ID-LESS RULE.',
+      pinned: false,
     });
   });
 });
@@ -127,7 +150,7 @@ describe('ruleGateRequest', () => {
       task: 'ship the release',
       rules: {
         [conditioned.id]: {
-          headline: 'ONE LINE COMMITS',
+          headline: 'ONE-LINE COMMITS (every project)',
           applies_when: 'tasks that commit [p=0.9]',
         },
         [unheaded.id]: {
@@ -164,19 +187,27 @@ describe('RuleGateService.apply', () => {
     expect(judge.callOptions[0]).toEqual({ timeoutMs: 1500 });
     expect(Object.keys(judge.calls[0]!.questions)).toEqual([
       `rule_${id('commit')}`,
-      `rule_${id('stand')}`,
-      `rule_${id('north')}`,
+      `rule_${id('stack')}`,
+      `rule_${id('plan')}`,
       `rule_${id('bare')}`,
     ]);
     expect(out.rules.map((r) => [r.id, r.level])).toEqual([
       [id('pin'), 'full'],
       [id('commit'), 'full'],
-      [id('stand'), 'gate'],
+      [id('stack'), 'gate'],
       [id('bare'), 'gate'],
-      [id('north'), 'headline'],
+      [id('plan'), 'headline'],
     ]);
-    expect(out.rules[0]!.text).toBe('PINNED RULE. Always.');
-    expect(out.rules[4]!.text).toBe('NORTH STAR');
+    expect(out.rules[0]!.text).toBe(rules[0]!.text);
+    expect(out.rules[4]!.text).toBe('PLANNING NOTES COME FIRST');
+    // Only the gated rule with a condition is sent one.
+    expect(out.rules.map((r) => r.applies_when)).toEqual([
+      undefined,
+      undefined,
+      'tasks that touch a stack [p=0.5]',
+      undefined,
+      undefined,
+    ]);
     expect(out.block).toMatchObject({
       mode: 'live',
       provider: 'typesafe',
@@ -184,34 +215,37 @@ describe('RuleGateService.apply', () => {
       judge_unavailable: false,
       levels: { full: 2, gate: 2, headline: 1 },
     });
-    expect(out.block!.chars_baseline).toBeGreaterThan(
-      out.block!.chars_delivered
-    );
+    // Whole texts 73 + 75 + 84 + 69 + 75; delivered 73 + 75 whole, the
+    // stack gate 31 + 32, the bare gate 28, the planning headline 25.
+    expect(out.block).toMatchObject({
+      chars_baseline: 376,
+      chars_delivered: 264,
+    });
     expect(out.block!.rules.find((r) => r.id === id('pin'))!.p).toBeNull();
   });
 
-  it("counts a rule's condition on both sides, so a headline is credited for dropping it", async () => {
+  it('counts the whole texts against what the session receives, a condition only where sent', async () => {
     const { svc } = service();
-    // stand → gate: 11 + 32 of 18 + 32; north → headline: 10 of 17 + 16.
+    // stack → gate: 31 + 32 of 84; plan → headline: 25 of 69.
     const out = await svc.apply({
       rules: [rules[2]!, rules[3]!],
       task: 't',
       subjectId: 'usr_a',
     });
     expect(out.block).toMatchObject({
-      chars_baseline: 83,
-      chars_delivered: 53,
+      chars_baseline: 153,
+      chars_delivered: 88,
     });
     expect(out.block!.rules.map((r) => [r.level, r.chars])).toEqual([
-      ['gate', 43],
-      ['headline', 10],
+      ['gate', 63],
+      ['headline', 25],
     ]);
   });
 
-  it('shadow: delivery unchanged, levels recorded in the block only', async () => {
+  it('shadow: delivery as an unjudged call, levels recorded in the block only', async () => {
     const { svc } = service({ mode: 'shadow' });
     const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
-    expect(out.rules).toEqual(rules);
+    expect(out.rules).toStrictEqual(unjudged);
     expect(out.block).toMatchObject({
       mode: 'shadow',
       levels: { full: 2, gate: 2, headline: 1 },
@@ -223,7 +257,7 @@ describe('RuleGateService.apply', () => {
     const { svc, judge } = service();
     const out = await svc.apply({ rules, task: null, subjectId: 'usr_a' });
     expect(judge.calls).toHaveLength(0);
-    expect(out).toEqual({ rules, block: null });
+    expect(out).toStrictEqual({ rules: unjudged, block: null });
   });
 
   it('a hook briefing with a bound card is judged against the card, never the project name', async () => {
@@ -312,7 +346,7 @@ describe('RuleGateService.apply', () => {
         subjectId: 'usr_a',
       });
       expect(variant.judge.calls).toHaveLength(0);
-      expect(out).toEqual({ rules, block: null });
+      expect(out).toStrictEqual({ rules: unjudged, block: null });
     }
   });
 
@@ -322,7 +356,7 @@ describe('RuleGateService.apply', () => {
     });
     const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
     expect(recorder.record).not.toHaveBeenCalled();
-    expect(out.rules).toEqual(rules);
+    expect(out.rules).toStrictEqual(unjudged);
     expect(out.block).toMatchObject({
       judge_unavailable: true,
       levels: { full: 5, gate: 0, headline: 0 },

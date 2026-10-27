@@ -160,9 +160,11 @@ export const contextRuleSchema = z.object({
   text: z.string(),
   pinned: z.boolean(),
   id: ruleCandidateIdSchema.optional(),
-  /** The rule's opening clause, the same cut every client renders. */
-  headline: z.string().optional(),
-  /** When the rule binds a task; carried at levels `gate` and `full`. */
+  /**
+   * When the rule binds a task. A briefing carries it only at level `gate`,
+   * where the line shows it; a read of `zm://rules` or `zm://rules/{id}`
+   * carries it whenever the rule has one.
+   */
   applies_when: z.string().optional(),
   level: ruleDeliveryLevelSchema.optional(),
 });
