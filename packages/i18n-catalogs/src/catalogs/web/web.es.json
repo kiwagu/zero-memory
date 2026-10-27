@@ -44,7 +44,7 @@
   "settings.judge.revoking": "Revocando…",
   "settings.judge.statusPlatform": "El juicio se ejecuta con la clave de la instancia.",
   "settings.judge.statusOff": "Desactivado: todas las reglas llegan completas.",
-  "settings.judge.hint": "Los titulares de las reglas, sus líneas de aplicabilidad y tu enunciado de la tarea se envían al proveedor elegido. Las claves guardadas se cifran y nunca se muestran.",
+  "settings.judge.hint": "Los titulares de las reglas, sus líneas de aplicabilidad y tu enunciado de la tarea se envían al proveedor elegido; una regla sin línea de aplicabilidad se envía con su texto completo. Las claves guardadas se cifran y nunca se muestran.",
   "settings.security.title": "Autenticación en dos pasos",
   "settings.security.description": "Tras cada inicio de sesión — contraseña, GitHub o Google — pide un código de una aplicación de autenticación en tu teléfono. También protege la conexión de agentes y la eliminación de la cuenta.",
   "settings.security.start": "Activar",

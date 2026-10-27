@@ -44,7 +44,7 @@
   "settings.judge.revoking": "Revoking…",
   "settings.judge.statusPlatform": "Judging runs on the instance key.",
   "settings.judge.statusOff": "Off: every rule arrives in full.",
-  "settings.judge.hint": "Rule headlines, applicability lines and your task statement are sent to the chosen provider. Stored keys are encrypted and never displayed.",
+  "settings.judge.hint": "Rule headlines, applicability lines and your task statement are sent to the chosen provider; a rule without an applicability line is sent with its full text. Stored keys are encrypted and never displayed.",
   "settings.security.title": "Two-factor authentication",
   "settings.security.description": "After every sign-in — password, GitHub or Google — ask for a code from an authenticator app on your phone. It also guards connecting agents and deleting the account.",
   "settings.security.start": "Turn on",
