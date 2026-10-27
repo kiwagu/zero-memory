@@ -9,7 +9,10 @@
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-import { entityIdSchemas } from '../packages/contracts/src/index.js';
+import {
+  entityIdSchemas,
+  ruleCandidateIdSchema,
+} from '../packages/contracts/src/index.js';
 import type { Database } from '../packages/db/src/index.js';
 import {
   JudgeUnavailableError,
@@ -123,7 +126,7 @@ export const loadJudgeableRules = async (
           pinned: false,
           appliesWhen: row.applies_when,
         }),
-        id: row.id,
+        id: ruleCandidateIdSchema.parse(row.id),
         promotedAt: row.promoted_at,
       },
     ];

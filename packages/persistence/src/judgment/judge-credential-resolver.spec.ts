@@ -1,3 +1,4 @@
+import type { JudgeProviderName } from '@workspace/judgment';
 import { describe, expect, it, vi } from 'vitest';
 
 import { SupabaseJudgeCredentialResolver } from './judge-credential-resolver.js';
@@ -9,8 +10,11 @@ const rpcReturning = (data: unknown) => ({
 describe('SupabaseJudgeCredentialResolver', () => {
   const platform = {
     resolve: vi.fn(
-      async (_s: string | null, preferred?: 'typesafe' | 'subq') =>
-        preferred === 'subq'
+      async (
+        _s: string | null,
+        preferred?: JudgeProviderName | Promise<JudgeProviderName | undefined>
+      ) =>
+        (await preferred) === 'subq'
           ? {
               provider: 'subq' as const,
               apiKey: 'platform-sq',
@@ -98,7 +102,41 @@ describe('SupabaseJudgeCredentialResolver', () => {
       await expect(
         resolver.resolve('usr_a', preferred as never)
       ).resolves.toMatchObject({ provider: 'typesafe', apiKey: 'platform-ts' });
-      expect(platform.resolve).toHaveBeenCalledWith('usr_a', undefined);
+      expect(await platform.resolve.mock.calls[0]![1]).toBeUndefined();
     }
   );
+
+  it("looks up the account's own key without waiting for a preference still being read", async () => {
+    const client = rpcReturning([
+      { provider: 'typesafe', model: 'jev-2', api_key: 'own-key' },
+    ]);
+    const resolver = new SupabaseJudgeCredentialResolver(
+      platform,
+      () => client as never,
+      {
+        typesafe: 'jev-1.14.0',
+        subq: 'subq-snap-1.1',
+      }
+    );
+    const never = new Promise<JudgeProviderName | undefined>(() => undefined);
+    await expect(resolver.resolve('usr_a', never)).resolves.toMatchObject({
+      apiKey: 'own-key',
+      ownedByCaller: true,
+    });
+  });
+
+  it('waits for a preference still being read before falling back to a platform key', async () => {
+    const client = rpcReturning([]);
+    const resolver = new SupabaseJudgeCredentialResolver(
+      platform,
+      () => client as never,
+      {
+        typesafe: 'jev-1.14.0',
+        subq: 'subq-snap-1.1',
+      }
+    );
+    await expect(
+      resolver.resolve('usr_a', Promise.resolve('subq'))
+    ).resolves.toMatchObject({ provider: 'subq', apiKey: 'platform-sq' });
+  });
 });

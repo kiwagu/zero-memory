@@ -149,8 +149,10 @@ const latencies = answered.map((call) => call.gate.latency_ms);
  * (no whitespace), not the card statement the gate judged.
  */
 const MIN_TOPIC_CHARS = 40;
-const isTaskTopic = (query: string | null): query is string =>
-  query !== null && query.trim().length >= MIN_TOPIC_CHARS && /\s/u.test(query);
+const isTaskTopic = (query: string | null): query is string => {
+  const topic = query?.trim() ?? '';
+  return topic.length >= MIN_TOPIC_CHARS && /\s/u.test(topic);
+};
 
 // Only answered calls with a task topic and at least one judged rule can be
 // re-judged; shuffle them (Fisher–Yates) and take the sample.
@@ -277,8 +279,8 @@ console.log(
       `p50 ${show(percentile(latencies, 50))} ms, p95 ${show(percentile(latencies, 95))} ms ` +
       `(${unavailable} unavailable calls log 0 and are left out).`,
     '',
-    `${excludedTopics} hook/short-topic calls excluded: the gate judged them against a card ` +
-      'statement the ledger does not store.',
+    `${excludedTopics} calls excluded: hook briefings judged against an unstored card ` +
+      `statement, or topics under ${MIN_TOPIC_CHARS} characters.`,
     `Re-judged ${sample.length} sampled calls, ${comparisons.length} rules, with ${model}` +
       (missingRules > 0 ? ` (${missingRules} rules no longer stored)` : '') +
       '.',

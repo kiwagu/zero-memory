@@ -249,9 +249,10 @@ describe('parseTranscript', () => {
 
   // A call that SUCCEEDED can still print the tag: reading a guard script,
   // grep or test output over this repository, a recall quoting a stored
-  // refusal. And a reason that merely mentions a guard after the hook error
-  // is not that guard refusing.
-  it('ignores the tag in a successful result or later in the reason', () => {
+  // refusal. A reason that merely mentions a guard after the hook error is
+  // not that guard refusing, and a denial quoted further into an error result
+  // is not a denial of that call.
+  it('ignores the tag in a successful result, later in the reason or mid-content', () => {
     const denial =
       'PreToolUse:Bash hook error: [guard:one_line_commit] a commit message is one line';
     const jsonl = JSON.stringify({
@@ -269,6 +270,12 @@ describe('parseTranscript', () => {
           toolResult(
             'toolu_4',
             'PreToolUse:Bash hook error: [guard:docs_build] and [guard:one_line_commit] too',
+            true
+          ),
+          // A failed command whose output quotes an earlier denial.
+          toolResult(
+            'toolu_5',
+            'Exit code 1\nPreToolUse:Bash hook error: [guard:one_line_commit] a commit message is one line',
             true
           ),
         ],

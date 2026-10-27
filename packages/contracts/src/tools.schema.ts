@@ -892,13 +892,15 @@ export const ingestConversationInputSchema = z.object({
    * Guard-hook refusals seen in this chunk (names and timestamps only): a
    * client-side PreToolUse guard that refused an action, recognised by the
    * `[guard:<name>]` tag it prints in its reason. The delivery-quality retro
-   * joins them to the rule each guard enforces.
+   * joins them to the rule each guard enforces. `at` is the transcript
+   * line's own timestamp, forwarded as the client wrote it, so it is bounded
+   * in length rather than checked as a date.
    */
   guard_refusals: z
     .array(
       z.object({
         guard: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/u),
-        at: z.string().nullable(),
+        at: z.string().max(64).nullable(),
       })
     )
     .max(50)

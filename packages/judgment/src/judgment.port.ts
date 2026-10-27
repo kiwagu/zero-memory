@@ -66,5 +66,21 @@ export class JudgeUnavailableError extends Error {
   }
 }
 
+/**
+ * The provider refused the request itself — a non-retryable non-2xx: the
+ * request is wrong and a retry won't help. The message carries the start of
+ * the provider's body for whoever handles the error; `status` alone is what a
+ * log line should carry.
+ */
+export class JudgeRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = 'JudgeRequestError';
+  }
+}
+
 export const JUDGMENT = Symbol.for('zero-memory:judgment');
 export const injectJudgment = () => inject(JUDGMENT);

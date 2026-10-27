@@ -19,9 +19,14 @@ export interface ResolvedJudgeCredential {
  * another one: that would be a fallback, and the project forbids fallbacks.
  */
 export interface IJudgeCredentialResolver {
+  /**
+   * `preferred` may still be on its way (the account's settings, read in
+   * parallel): a resolver looks up the account's own key meanwhile and waits
+   * for the preference only when it falls back to a platform key.
+   */
   resolve(
     subjectId: string | null,
-    preferred?: JudgeProviderName
+    preferred?: JudgeProviderName | Promise<JudgeProviderName | undefined>
   ): Promise<ResolvedJudgeCredential | null>;
 }
 
@@ -35,18 +40,18 @@ export const injectJudgeCredentialResolver = () =>
 export class EnvJudgeCredentialResolver implements IJudgeCredentialResolver {
   constructor(private readonly config: JudgeConfig) {}
 
-  resolve(
+  async resolve(
     _subjectId: string | null,
-    preferred?: JudgeProviderName
+    preferred?: JudgeProviderName | Promise<JudgeProviderName | undefined>
   ): Promise<ResolvedJudgeCredential | null> {
-    const provider = preferred ?? this.config.provider;
+    const provider = (await preferred) ?? this.config.provider;
     const apiKey = this.config.platformKeys[provider];
-    if (!apiKey) return Promise.resolve(null);
-    return Promise.resolve({
+    if (!apiKey) return null;
+    return {
       provider,
       apiKey,
       model: this.config.models[provider],
       ownedByCaller: false,
-    });
+    };
   }
 }

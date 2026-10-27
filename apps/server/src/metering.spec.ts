@@ -1,4 +1,7 @@
-import type { RuleGateBlock } from '@workspace/contracts';
+import {
+  ruleCandidateIdSchema,
+  type RuleGateBlock,
+} from '@workspace/contracts';
 import type { ToolResultMetering } from '@workspace/mcp';
 import type { IUsageRecorder, UsageEvent } from '@workspace/usage';
 import { describe, expect, it, vi } from 'vitest';
@@ -425,21 +428,21 @@ describe('recordToolResult — recall-hit attribution', () => {
       levels: { full: 1, gate: 1, headline: 1 },
       rules: [
         {
-          id: 'rlc_0000000000000000.0000000000',
+          id: ruleCandidateIdSchema.parse('rlc_0000000000000000.0000000000'),
           p: null,
           level: 'full',
           chars: 300,
           pinned: true,
         },
         {
-          id: 'rlc_1111111111111111.1111111111',
+          id: ruleCandidateIdSchema.parse('rlc_1111111111111111.1111111111'),
           p: 0.5,
           level: 'gate',
           chars: 80,
           pinned: false,
         },
         {
-          id: 'rlc_2222222222222222.2222222222',
+          id: ruleCandidateIdSchema.parse('rlc_2222222222222222.2222222222'),
           p: 0.1,
           level: 'headline',
           chars: 40,
@@ -518,7 +521,7 @@ describe('recordResourceRead — one-rule resource reads', () => {
 
     recordResourceRead(recorder, {
       resource: 'rule',
-      ruleId: 'rlc_1111111111111111.1111111111',
+      ruleId: ruleCandidateIdSchema.parse('rlc_1111111111111111.1111111111'),
       found: false,
     });
     await flush();
@@ -528,7 +531,7 @@ describe('recordResourceRead — one-rule resource reads', () => {
       eventType: 'mcp_tool_call',
       metadata: {
         tool: 'resource:rule',
-        rule_id: 'rlc_1111111111111111.1111111111',
+        rule_id: ruleCandidateIdSchema.parse('rlc_1111111111111111.1111111111'),
         found: false,
       },
     });

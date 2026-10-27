@@ -1,6 +1,9 @@
 import {
   buildContextOutputSchema,
+  contextRuleSchema,
   type ContextRule,
+  ruleDeliveryLevelSchema,
+  ruleGateBlockSchema,
   ruleHeadline,
 } from '@workspace/contracts';
 
@@ -26,9 +29,24 @@ export interface StandingRulesSplit {
   rules: ContextRule[];
 }
 
+/**
+ * The briefing as the split reads it: the contract, except that a rule level
+ * or a `rule_gate` block this build does not know — a newer server's — reads
+ * as absent instead of failing the whole pack, which would put every rule
+ * back into the JSON dump. Such a rule renders as an unjudged one; the block
+ * is the server's own record, and nothing on this side reads it.
+ */
+const briefingPackSchema = buildContextOutputSchema.extend({
+  rules: contextRuleSchema
+    .extend({ level: ruleDeliveryLevelSchema.optional().catch(undefined) })
+    .array()
+    .default([]),
+  rule_gate: ruleGateBlockSchema.optional().catch(undefined),
+});
+
 /** Splits standing rules out of an UNPARSED briefing payload — never throws. */
 export const splitStandingRules = (payload: unknown): StandingRulesSplit => {
-  const parsed = buildContextOutputSchema.safeParse(payload);
+  const parsed = briefingPackSchema.safeParse(payload);
   if (!parsed.success) return { payload, rules: [] };
   const { rules, ...rest } = parsed.data;
   return { payload: { ...rest, rules: [] }, rules };
@@ -87,10 +105,10 @@ export const mergeStandingRules = (
  * the server sent no more of it: a gated rule by headline with its
  * applicability condition (`[gate]`) while that fits the ceiling and by
  * headline (`[headline]`) otherwise, a headlined rule by headline. A rule at
- * level `full` follows the ceiling as above. A line of a rule the server levelled names the rule's id after
- * its marker, as the build_context result does, and the footer then says
- * where that id is read. A rule with no level renders exactly as it did
- * before levels existed, id or not.
+ * level `full` follows the ceiling as above. A line of a rule the server
+ * levelled names the rule's id after its marker, as the build_context result
+ * does, and the footer then says where that id is read. A rule with no level
+ * renders exactly as it did before levels existed, id or not.
  */
 export const renderStandingRulesSection = (
   rules: readonly ContextRule[],

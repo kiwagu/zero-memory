@@ -1,4 +1,8 @@
-import type { ContextRule } from '@workspace/contracts';
+import {
+  buildContextOutputSchema,
+  type ContextRule,
+  ruleCandidateIdSchema,
+} from '@workspace/contracts';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -26,6 +30,35 @@ describe('splitStandingRules', () => {
     );
     expect(split.rules).toEqual([{ text: 'always rebase', pinned: false }]);
     expect((split.payload as { rules: unknown[] }).rules).toEqual([]);
+  });
+
+  it('still splits the rules when a newer server sends a level or a gate block this build does not know', () => {
+    const id = ruleCandidateIdSchema.parse('rlc_7777777777777777.7777777777');
+    const split = splitStandingRules({
+      ...pack([]),
+      rules: [
+        {
+          id,
+          text: 'SUMMARY RULE FROM LATER',
+          pinned: false,
+          level: 'summary',
+        },
+        { text: 'always rebase', pinned: true, level: 'full' },
+      ],
+      rule_gate: { mode: 'canary', provider: 'elsewhere', rules: [] },
+    });
+    expect(split.rules).toHaveLength(2);
+    expect(split.rules[0]).toMatchObject({
+      id,
+      text: 'SUMMARY RULE FROM LATER',
+    });
+    expect(split.rules[0]!.level).toBeUndefined();
+    expect(split.rules[1]!.level).toBe('full');
+    // The drained payload is a pack the rest of the briefing still reads.
+    expect(buildContextOutputSchema.safeParse(split.payload).success).toBe(
+      true
+    );
+    expect(split.payload).not.toHaveProperty('rule_gate.mode');
   });
 
   it('passes an unparsable payload through untouched', () => {
@@ -64,7 +97,7 @@ describe('mergeStandingRules', () => {
 
   // The project briefing is the judged one, so it can carry a rule by
   // headline while the unjudged branch briefing carries the same rule whole.
-  const ruleId = 'rlc_4444444444444444.4444444444';
+  const ruleId = ruleCandidateIdSchema.parse('rlc_4444444444444444.4444444444');
   const judged: ContextRule = {
     id: ruleId,
     text: 'DEPLOY RULE',
@@ -179,7 +212,9 @@ describe('renderStandingRulesSection', () => {
     ];
     const withIds = plain.map((rule, index) => ({
       ...rule,
-      id: `rlc_${String(index).repeat(16)}.${String(index).repeat(10)}`,
+      id: ruleCandidateIdSchema.parse(
+        `rlc_${String(index).repeat(16)}.${String(index).repeat(10)}`
+      ),
     }));
     const least = renderStandingRulesSection(plain, 0)!.length;
     const most = renderStandingRulesSection(plain)!.length + 200;
@@ -251,26 +286,26 @@ describe('renderStandingRulesSection', () => {
 
 describe('renderStandingRulesSection with server levels', () => {
   const pinned = {
-    id: 'rlc_0000000000000000.0000000000',
+    id: ruleCandidateIdSchema.parse('rlc_0000000000000000.0000000000'),
     text: 'PINNED. Whole text that is fairly long indeed.',
     pinned: true,
     level: 'full' as const,
   };
   const gate = {
-    id: 'rlc_1111111111111111.1111111111',
+    id: ruleCandidateIdSchema.parse('rlc_1111111111111111.1111111111'),
     text: 'GATED',
     pinned: false,
     level: 'gate' as const,
     applies_when: 'tasks that deploy',
   };
   const named = {
-    id: 'rlc_2222222222222222.2222222222',
+    id: ruleCandidateIdSchema.parse('rlc_2222222222222222.2222222222'),
     text: 'NAMED',
     pinned: false,
     level: 'headline' as const,
   };
   const whole = {
-    id: 'rlc_3333333333333333.3333333333',
+    id: ruleCandidateIdSchema.parse('rlc_3333333333333333.3333333333'),
     text: 'WHOLE RULE WITH A NAME. With its body.',
     pinned: false,
     level: 'full' as const,

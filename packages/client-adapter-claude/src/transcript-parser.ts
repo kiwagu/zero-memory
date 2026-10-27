@@ -120,14 +120,16 @@ export const parseTranscript = (jsonl: string): ParsedTranscript => {
 type ContentItem = z.infer<typeof contentItemSchema>;
 
 /**
- * A denied call as Claude Code records it: an error tool_result reading
- * `PreToolUse:<Tool> hook error: <reason>`, where a guard opens its reason with
- * its tag, e.g. `[guard:one_line_commit] …`. Anchored to the start of the
- * reason, so a guard named later in it is not the one refusing. The name
- * pattern is the contract's guard name, so whatever this matches the server
- * accepts.
+ * A denied call as Claude Code records it: an error tool_result whose content
+ * opens with `PreToolUse:<Tool> hook error: <reason>`, where a guard opens its
+ * reason with its tag, e.g. `[guard:one_line_commit] …`. Anchored to the start
+ * of the content and of the reason: the same words further into an error
+ * result (a tool's output quoting an earlier denial) are not a denial, and a
+ * guard named later in the reason is not the one refusing. The name pattern
+ * is the contract's guard name, so whatever this matches the server accepts.
  */
-const GUARD_REFUSAL = /hook error:\s*\[guard:([a-z][a-z0-9_-]{1,63})\]/u;
+const GUARD_REFUSAL =
+  /^PreToolUse:\S+ hook error:\s*\[guard:([a-z][a-z0-9_-]{1,63})\]/u;
 
 /**
  * Appends the guard refusals one line records, oldest first: at most one per

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+  JudgeRequestError,
   JudgeUnavailableError,
   type IJudgment,
   type JudgeProviderName,
@@ -18,8 +19,9 @@ import {
  *
  * Status policy, the same for every provider:
  * - 429 and any 5xx (500–599) → `JudgeUnavailableError`: no verdict, try later;
- * - any other non-2xx → a plain `Error` `<provider>: HTTP <status>: <body>`,
- *   the body cut to 200 characters: the request is wrong, a retry won't help;
+ * - any other non-2xx → `JudgeRequestError` `<provider>: HTTP <status>: <body>`,
+ *   the body cut to 200 characters, with the `status` on its own: the request
+ *   is wrong, a retry won't help;
  * - no complete answer within the timeout, body read included →
  *   `JudgeUnavailableError`;
  * - a 2xx body that is not this shape → a plain `Error`: a bug, not
@@ -124,8 +126,9 @@ export class SystemOneExchange implements IJudgment {
       throw new JudgeUnavailableError(`${this.#provider}: ${response.status}`);
     }
     if (!response.ok) {
-      throw new Error(
-        `${this.#provider}: HTTP ${response.status}: ${text.slice(0, ERROR_BODY_LIMIT)}`
+      throw new JudgeRequestError(
+        `${this.#provider}: HTTP ${response.status}: ${text.slice(0, ERROR_BODY_LIMIT)}`,
+        response.status
       );
     }
     const body = this.#parseResponse(text);

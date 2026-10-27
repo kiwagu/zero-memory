@@ -16,10 +16,11 @@ import {
   recordSessionThread,
   stampSessionStart,
 } from '@workspace/client-runtime';
-import type {
-  BriefingWork,
-  ContextMemory,
-  ContextRule,
+import {
+  type BriefingWork,
+  type ContextMemory,
+  type ContextRule,
+  ruleCandidateIdSchema,
 } from '@workspace/contracts';
 import { cardIdSchema, memoryIdSchema } from '@workspace/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -144,7 +145,7 @@ describe('session-start branch topic', () => {
  */
 describe('session-start rule levels', () => {
   const dirs = useStateDirs('zm-levels');
-  const id = 'rlc_5555555555555555.5555555555';
+  const id = ruleCandidateIdSchema.parse('rlc_5555555555555555.5555555555');
   const judged: ContextRule = {
     id,
     text: 'DEPLOY RULE',

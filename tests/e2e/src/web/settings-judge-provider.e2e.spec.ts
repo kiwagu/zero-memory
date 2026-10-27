@@ -56,6 +56,18 @@ test.describe('the rule delivery judge', () => {
     try {
       await clearJudge(subjectId);
       await signInThroughForm(page, seed.userA);
+
+      // A change that names nothing to change is refused, and stores nothing.
+      const empty = await page.request.patch('/settings/judge-provider', {
+        headers: {
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        },
+        data: {},
+      });
+      expect(empty.status()).toBe(400);
+      expect(await storedSettings(subjectId)).toBeNull();
+
       await page.goto('/settings');
 
       const card = page.getByTestId('settings-judge-provider');

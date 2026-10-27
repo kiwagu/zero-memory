@@ -221,10 +221,10 @@ async function updatePromotedRule(
 /**
  * Toggle the delivery pin of a PROMOTED rule (either layer). A pinned rule is
  * exempt from the delivery cap and the delivery TTL and leads the briefing's
- * rules[] — the owner's guarantee that it reaches the session at all, which
- * matters once there are more rules than any channel can carry. Owner-only
- * via RLS; the status guard keeps the flag meaningful (a pending draft is not
- * delivered anywhere yet).
+ * rules[]: your pinned rules always reach the session, and always in full,
+ * which matters once there are more rules than any channel can carry. Only
+ * the rule's own account can change it (RLS); the status guard keeps the flag
+ * meaningful (a pending draft is not delivered anywhere yet).
  */
 export async function setRulePinned(
   candidateId: string,

@@ -91,6 +91,9 @@ export async function PATCH(request: NextRequest) {
     return refusedOrigin();
   }
   const { enabled, provider } = await readBody(request);
+  if (enabled === undefined && provider === undefined) {
+    return badRequest('Nothing to change: send "enabled" or "provider".');
+  }
   if (enabled !== undefined && typeof enabled !== 'boolean') {
     return badRequest('"enabled" must be true or false.');
   }

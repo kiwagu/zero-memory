@@ -1,10 +1,6 @@
-import { CROCKFORD_CLASS, RAND_LENGTH, TS_LENGTH } from 'entity-id';
 import { z } from 'zod';
 
-import {
-  entityIdSchemas,
-  RULE_CANDIDATE_ID_PREFIX,
-} from './entity-prefixes.js';
+import { entityIdSchemas } from './entity-prefixes.js';
 import {
   memoryIdSchema,
   memoryKindSchema,
@@ -127,14 +123,8 @@ export const relatedMemorySchema = z.object({
 export type RelatedMemory = z.infer<typeof relatedMemorySchema>;
 
 /** `rule_candidates.id`: `rlc_` + 16 + `.` + 10 Crockford characters. */
-export const ruleCandidateIdSchema = z
-  .string()
-  .regex(
-    new RegExp(
-      `^${RULE_CANDIDATE_ID_PREFIX}_${CROCKFORD_CLASS}{${RAND_LENGTH}}\\.${CROCKFORD_CLASS}{${TS_LENGTH}}$`,
-      'u'
-    )
-  );
+export const ruleCandidateIdSchema = entityIdSchemas.rule_candidate.schema;
+export type RuleCandidateId = z.infer<typeof ruleCandidateIdSchema>;
 
 /**
  * How much of a standing rule a delivery carries: the whole text, the

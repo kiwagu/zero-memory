@@ -2,12 +2,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { ResourceLink } from '@modelcontextprotocol/sdk/types.js';
 import {
+  type ContextRule,
+  type ExportedMemory,
+  ruleCandidateIdSchema,
   ZM_MEMORY_URI_TEMPLATE,
   ZM_RULE_URI_TEMPLATE,
   ZM_RULES_URI,
   zmMemoryUri,
-  type ContextRule,
-  type ExportedMemory,
 } from '@workspace/contracts';
 import type { ICommandBus, IQueryBus } from '@workspace/cqrs';
 import { BuildContextQuery, GetMemoryQuery } from '@workspace/queries';
@@ -48,7 +49,7 @@ const FIXTURE_RULES: ContextRule[] = [
   { text: 'Then the rest.', pinned: false },
 ];
 
-const RULE_ID = 'rlc_0123456789abcdef.0123456789';
+const RULE_ID = ruleCandidateIdSchema.parse('rlc_0123456789abcdef.0123456789');
 
 const FIXTURE_RULE: ContextRule = {
   id: RULE_ID,
@@ -248,7 +249,9 @@ describe('resources', () => {
         },
       });
 
-      const missing = 'rlc_ffffffffffffffff.0123456789';
+      const missing = ruleCandidateIdSchema.parse(
+        'rlc_ffffffffffffffff.0123456789'
+      );
       await expect(
         client.readResource({ uri: `zm://rules/${missing}` })
       ).rejects.toThrow(/not found/i);

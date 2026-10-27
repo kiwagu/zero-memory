@@ -1,10 +1,11 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import type {
-  BuildContextOutput,
-  ContextRule,
-  RecallOutput,
-  RuleGateBlock,
+import {
+  type BuildContextOutput,
+  type ContextRule,
+  type RecallOutput,
+  ruleCandidateIdSchema,
+  type RuleGateBlock,
 } from '@workspace/contracts';
 import type { ICommandBus, IQueryBus } from '@workspace/cqrs';
 import { buildMcpServer } from '@workspace/mcp';
@@ -78,7 +79,7 @@ const commandBus = {
   execute: vi.fn(),
 } as unknown as ICommandBus;
 
-const RULE_ID = 'rlc_0123456789abcdef.0123456789';
+const RULE_ID = ruleCandidateIdSchema.parse('rlc_0123456789abcdef.0123456789');
 
 const promotedRule: ContextRule = {
   id: RULE_ID,
@@ -230,7 +231,9 @@ describe('metering seam — MCP client → usage events', () => {
   it('a one-rule resource read yields one mcp_tool_call with the rule id, no double count', async () => {
     const { recorder, events } = recorderSpy();
     const { client, close } = await connectClient(recorder);
-    const missing = 'rlc_ffffffffffffffff.0123456789';
+    const missing = ruleCandidateIdSchema.parse(
+      'rlc_ffffffffffffffff.0123456789'
+    );
 
     await client.readResource({ uri: `zm://rules/${RULE_ID}` });
     await expect(

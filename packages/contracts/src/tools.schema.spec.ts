@@ -287,6 +287,12 @@ describe('tool contracts', () => {
     expect(() =>
       ingestConversationInputSchema.parse({
         ...chunk,
+        guard_refusals: [{ guard: 'one_line_commit', at: 'x'.repeat(65) }],
+      })
+    ).toThrow();
+    expect(() =>
+      ingestConversationInputSchema.parse({
+        ...chunk,
         guard_refusals: Array.from({ length: 51 }, () => ({
           guard: 'one_line_commit',
           at: null,

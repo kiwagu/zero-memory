@@ -2,13 +2,14 @@ import type { IContext } from '@workspace/context';
 import {
   briefingWorkSchema,
   CLIENT_SESSION_SOURCE_KEY,
-  CORE_SCOPE,
-  PERSONAL_SCOPE,
-  THREAD_SOURCE_KEY,
   type ContextRule,
+  CORE_SCOPE,
   type EntityId,
   type MemoryId,
+  PERSONAL_SCOPE,
+  ruleCandidateIdSchema,
   type RuleGateBlock,
+  THREAD_SOURCE_KEY,
   type UserId,
 } from '@workspace/contracts';
 import { Err, None, Some } from 'oxide.ts';
@@ -2631,7 +2632,7 @@ describe('MemoryService.buildContext — the work summary', () => {
 describe('MemoryService.buildContext — the rule gate', () => {
   const HINT = '/home/someone/repos/quokka-tool';
   const rule: ContextRule = {
-    id: 'rlc_0000000000000001.0000000000',
+    id: ruleCandidateIdSchema.parse('rlc_0000000000000001.0000000000'),
     text: 'IMPORTER FIRST. Run the importer before touching the parser.',
     applies_when: 'tasks that touch the importer',
     pinned: false,

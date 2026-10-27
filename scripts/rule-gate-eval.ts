@@ -80,7 +80,9 @@ const typeOf = (note: string | null): ProbeType => {
 // ── Probes and rules ─────────────────────────────────────────────────────────
 
 const rules = await loadJudgeableRules(client, owner);
-const ruleById = new Map(rules.map((rule) => [rule.id, rule]));
+const ruleById = new Map<string, OwnerRule>(
+  rules.map((rule) => [rule.id, rule])
+);
 const probeRows = await readAllPages(
   (from, to) =>
     client

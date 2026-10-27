@@ -1,5 +1,5 @@
-import type { ContextRule } from '@workspace/contracts';
-import { TypeSafeJudgment } from '@workspace/judgment';
+import { type ContextRule, ruleCandidateIdSchema } from '@workspace/contracts';
+import { JudgeRequestError, TypeSafeJudgment } from '@workspace/judgment';
 import { FakeJudgment } from '@workspace/judgment/testing';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -12,15 +12,17 @@ import {
   ruleGateRequest,
 } from './rule-gate.service.js';
 
-const id = (n: string) => `rlc_${n.padEnd(16, '0')}.0123456789`;
+/** A rule id from a short label of Crockford characters (no i, l, o or u). */
+const id = (label: string) =>
+  ruleCandidateIdSchema.parse(`rlc_${label.padEnd(16, '0')}.0123456789`);
 const rules: ContextRule[] = [
   {
-    id: id('pin'),
+    id: id('p1n'),
     text: 'PINNED RULE FOR EVERY SESSION. Read the pinned rule before anything else.',
     pinned: true,
   },
   {
-    id: id('commit'),
+    id: id('c0mm1t'),
     text: 'ONE-LINE COMMITS (every project). The subject names the goal of the change.',
     pinned: false,
     applies_when: 'tasks that commit [p=0.9]',
@@ -32,7 +34,7 @@ const rules: ContextRule[] = [
     applies_when: 'tasks that touch a stack [p=0.5]',
   },
   {
-    id: id('plan'),
+    id: id('p1an'),
     text: 'PLANNING NOTES COME FIRST. Write the plan down before the first edit.',
     pinned: false,
     applies_when: 'planning [p=0.1]',
@@ -93,17 +95,19 @@ describe('levelFor / deliverAtLevel', () => {
     expect(levelFor(0.9, { hi: 0.6, lo: 0.35 })).toBe('full');
     expect(levelFor(0.6, { hi: 0.6, lo: 0.35 })).toBe('full');
     expect(levelFor(0.5, { hi: 0.6, lo: 0.35 })).toBe('gate');
+    expect(levelFor(0.35, { hi: 0.6, lo: 0.35 })).toBe('gate');
+    expect(levelFor(0.3499, { hi: 0.6, lo: 0.35 })).toBe('headline');
     expect(levelFor(0.1, { hi: 0.6, lo: 0.35 })).toBe('headline');
   });
   it('shapes a rule for its level without losing its name', () => {
     expect(deliverAtLevel(rules[1]!, 'headline')).toStrictEqual({
-      id: id('commit'),
+      id: id('c0mm1t'),
       text: 'ONE-LINE COMMITS (every project)',
       pinned: false,
       level: 'headline',
     });
     expect(deliverAtLevel(rules[1]!, 'gate')).toStrictEqual({
-      id: id('commit'),
+      id: id('c0mm1t'),
       text: 'ONE-LINE COMMITS (every project)',
       pinned: false,
       applies_when: 'tasks that commit [p=0.9]',
@@ -111,7 +115,7 @@ describe('levelFor / deliverAtLevel', () => {
     });
     // The condition is shown only on a gate line; a whole rule needs none.
     expect(deliverAtLevel(rules[1]!, 'full')).toStrictEqual({
-      id: id('commit'),
+      id: id('c0mm1t'),
       text: rules[1]!.text,
       pinned: false,
       level: 'full',
@@ -126,7 +130,7 @@ describe('levelFor / deliverAtLevel', () => {
 
   it('delivers an unjudged rule as its text, pin and id only', () => {
     expect(unjudged[1]).toStrictEqual({
-      id: id('commit'),
+      id: id('c0mm1t'),
       text: rules[1]!.text,
       pinned: false,
     });
@@ -143,7 +147,7 @@ describe('ruleGateRequest', () => {
   it('asks about each rule by its condition, or by its text when it has none, named by position', () => {
     const conditioned = rules[1]! as ContextRule & { id: string };
     const unheaded = {
-      id: id('unheaded'),
+      id: id('nhd'),
       text: 'ALWAYS RUN THE GATES FIRST. Then commit.',
       pinned: false,
     };
@@ -242,7 +246,7 @@ describe('the request on the wire', () => {
       },
     });
     expect(out.block!.rules.map((r) => [r.id, r.p, r.level])).toEqual([
-      [id('commit'), 0.9, 'full'],
+      [id('c0mm1t'), 0.9, 'full'],
       [id('bare'), 0.1, 'headline'],
     ]);
   });
@@ -266,11 +270,11 @@ describe('RuleGateService.apply', () => {
       'r4',
     ]);
     expect(out.rules.map((r) => [r.id, r.level])).toEqual([
-      [id('pin'), 'full'],
-      [id('commit'), 'full'],
+      [id('p1n'), 'full'],
+      [id('c0mm1t'), 'full'],
       [id('stack'), 'gate'],
       [id('bare'), 'gate'],
-      [id('plan'), 'headline'],
+      [id('p1an'), 'headline'],
     ]);
     expect(out.rules[0]!.text).toBe(rules[0]!.text);
     expect(out.rules[4]!.text).toBe('PLANNING NOTES COME FIRST');
@@ -295,7 +299,7 @@ describe('RuleGateService.apply', () => {
       chars_baseline: 376,
       chars_delivered: 264,
     });
-    expect(out.block!.rules.find((r) => r.id === id('pin'))!.p).toBeNull();
+    expect(out.block!.rules.find((r) => r.id === id('p1n'))!.p).toBeNull();
   });
 
   it('counts the whole texts against what the session receives, a condition only where sent', async () => {
@@ -435,6 +439,63 @@ describe('RuleGateService.apply', () => {
       judge_unavailable: true,
       levels: { full: 5, gate: 0, headline: 0 },
     });
+  });
+
+  it('looks up the credential while the settings are still being read', async () => {
+    let settle: (settings: {
+      enabled: boolean;
+      provider: 'subq';
+    }) => void = () => undefined;
+    const read = vi.fn(
+      () =>
+        new Promise<{ enabled: boolean; provider: 'subq' }>((resolve) => {
+          settle = resolve;
+        })
+    );
+    const resolve = vi.fn().mockResolvedValue({
+      provider: 'subq',
+      apiKey: 'k',
+      model: 'subq-snap-1.1',
+      ownedByCaller: false,
+    });
+    const svc = new RuleGateService(
+      { read },
+      { resolve },
+      () => new FakeJudgment(),
+      { record: vi.fn() },
+      { check: vi.fn().mockResolvedValue({ allowed: true }) },
+      { mode: 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
+    );
+    const pending = svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+    expect(resolve).toHaveBeenCalledTimes(1);
+    settle({ enabled: true, provider: 'subq' });
+    const out = await pending;
+    // The preference it was handed is the one the settings chose.
+    expect(await resolve.mock.calls[0]![1]).toBe('subq');
+    expect(out.block).toMatchObject({ provider: 'subq' });
+  });
+
+  it('logs only the status of a request the provider refused', async () => {
+    const judge = new FakeJudgment();
+    judge.judge = async () => {
+      throw new JudgeRequestError(
+        'typesafe: HTTP 422: {"detail":"rules.r1 quoted back"}',
+        422
+      );
+    };
+    const warned = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    try {
+      const { svc } = service({ judge });
+      const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+      expect(out.block).toMatchObject({ judge_unavailable: true });
+      const lines = warned.mock.calls.map((call) => String(call[0]));
+      expect(lines.some((line) => line.includes('"status":422'))).toBe(true);
+      expect(lines.join('\n')).not.toContain('quoted back');
+    } finally {
+      warned.mockRestore();
+    }
   });
 
   it('a rule the judge did not answer stays full', async () => {

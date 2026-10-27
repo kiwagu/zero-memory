@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  JudgeRequestError,
   JudgeUnavailableError,
   type IJudgment,
   type JudgeProviderName,
@@ -138,7 +139,7 @@ describe.each(PROVIDERS)('$provider over System One', (p) => {
     }
   });
 
-  it('rejects any other non-2xx as a plain error with its status and at most 200 characters of the body', async () => {
+  it('rejects any other non-2xx as a request error with its status and at most 200 characters of the body', async () => {
     for (const status of [400, 401, 422, 499]) {
       const body = { detail: { message: 'x'.repeat(500) } };
       const judge = p.make({
@@ -150,8 +151,9 @@ describe.each(PROVIDERS)('$provider over System One', (p) => {
         () => null,
         (rejection: unknown) => rejection
       );
-      expect(error, `HTTP ${status}`).toBeInstanceOf(Error);
+      expect(error, `HTTP ${status}`).toBeInstanceOf(JudgeRequestError);
       expect(error, `HTTP ${status}`).not.toBeInstanceOf(JudgeUnavailableError);
+      expect((error as JudgeRequestError).status).toBe(status);
       expect((error as Error).message).toBe(
         `${p.provider}: HTTP ${status}: ${JSON.stringify(body).slice(0, 200)}`
       );

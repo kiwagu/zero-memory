@@ -88,9 +88,10 @@ One status policy for both providers:
 - `429` and any `5xx` → `JudgeUnavailableError` (no verdict; try later);
 - no complete answer within the timeout, body read included →
   `JudgeUnavailableError`;
-- any other non-2xx → a plain `Error`, `<provider>: HTTP <status>: <body>`
-  with the body cut to 200 characters (the request is wrong; a retry won't
-  help);
+- any other non-2xx → `JudgeRequestError`, `<provider>: HTTP <status>: <body>`
+  with the body cut to 200 characters and the `status` on its own (the
+  request is wrong; a retry won't help). The rule gate logs the status only,
+  never the body;
 - a 2xx body that does not match the shape (not JSON, a `noul` outside 0..1)
   → a plain `Error`, never `JudgeUnavailableError`.
 

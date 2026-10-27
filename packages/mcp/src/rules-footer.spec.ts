@@ -1,3 +1,4 @@
+import { ruleCandidateIdSchema } from '@workspace/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { renderRulesFooter } from './rules-footer.js';
@@ -6,20 +7,20 @@ describe('renderRulesFooter', () => {
   it('renders full, gate and headline levels and points at the one-rule resource', () => {
     const footer = renderRulesFooter([
       {
-        id: 'rlc_0000000000000000.0000000000',
+        id: ruleCandidateIdSchema.parse('rlc_0000000000000000.0000000000'),
         text: 'PINNED. Whole text.',
         pinned: true,
         level: 'full',
       },
       {
-        id: 'rlc_1111111111111111.1111111111',
+        id: ruleCandidateIdSchema.parse('rlc_1111111111111111.1111111111'),
         text: 'GATED',
         pinned: false,
         level: 'gate',
         applies_when: 'tasks that deploy',
       },
       {
-        id: 'rlc_2222222222222222.2222222222',
+        id: ruleCandidateIdSchema.parse('rlc_2222222222222222.2222222222'),
         text: 'NAMED ONLY',
         pinned: false,
         level: 'headline',
@@ -40,7 +41,7 @@ describe('renderRulesFooter', () => {
   it('names a gate rule with no condition without an empty one', () => {
     const footer = renderRulesFooter([
       {
-        id: 'rlc_1111111111111111.1111111111',
+        id: ruleCandidateIdSchema.parse('rlc_1111111111111111.1111111111'),
         text: 'GATED',
         pinned: false,
         level: 'gate',
