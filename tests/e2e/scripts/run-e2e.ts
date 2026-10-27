@@ -790,7 +790,16 @@ const ensureApps = async (
   // the calling shell when the epic under review needs it on.
   const extractionEnv: Record<string, string> =
     contour.key === 'test'
-      ? { ZM_INGEST_EXTRACT: 'on', ZM_EXTRACTOR: 'deterministic' }
+      ? {
+          ZM_INGEST_EXTRACT: 'on',
+          ZM_EXTRACTOR: 'deterministic',
+          // The rule gate runs live against a deterministic judge, so the e2e
+          // spec can prove the levels, the pinned exemption and the unjudged
+          // paths without a provider account. An account still has to turn
+          // the gate on, so every other spec sees its rules whole.
+          ZM_JUDGE_FAKE: '1',
+          ZM_RULE_GATE_MODE: 'live',
+        }
       : {};
 
   // The web half is `next dev` on both contours and hot-reloads source edits,
