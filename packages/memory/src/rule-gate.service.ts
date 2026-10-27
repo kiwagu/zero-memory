@@ -14,6 +14,7 @@ import {
   type IJudgeCredentialResolver,
   type IJudgeSettingsReader,
   type JudgmentFactory,
+  type JudgmentRequest,
   type JudgmentResult,
   type NoulQuestion,
   type RuleGateConfig,
@@ -90,7 +91,7 @@ export const deliverAtLevel = (
 };
 
 /** What a rule costs the session as delivered: its text and its condition. */
-const ruleChars = (rule: ContextRule): number =>
+export const ruleChars = (rule: ContextRule): number =>
   rule.text.length + (rule.applies_when?.length ?? 0);
 
 /** One rule's yes/no question. Exported so an evaluation can ask the same. */
@@ -105,6 +106,41 @@ export const questionFor = (key: string): NoulQuestion => ({
     false:
       'The task does not have those features; the rule is about other kinds of work.',
   },
+});
+
+/** A rule the gate can judge: unpinned, and with an id to key its answer by. */
+export type JudgedRule = ContextRule & { readonly id: string };
+
+/**
+ * The one judgment the gate asks per call: the task, and per rule its
+ * headline with its condition (or its whole text when it has none), plus one
+ * yes/no question keyed `rule_<id>`. Exported so an evaluation asks exactly
+ * what the gate asks.
+ */
+export const ruleGateRequest = (
+  task: string,
+  rules: readonly JudgedRule[]
+): Pick<JudgmentRequest, 'state' | 'questions'> => ({
+  state: {
+    task,
+    rules: Object.fromEntries(
+      rules.map((rule) => [
+        rule.id,
+        rule.applies_when
+          ? {
+              headline: rule.headline ?? ruleHeadline(rule.text),
+              applies_when: rule.applies_when,
+            }
+          : {
+              headline: rule.headline ?? ruleHeadline(rule.text),
+              text: rule.text,
+            },
+      ])
+    ),
+  },
+  questions: Object.fromEntries(
+    rules.map((rule) => [`rule_${rule.id}`, questionFor(rule.id)])
+  ),
 });
 
 const logger = createLogger('rule-gate');
@@ -136,7 +172,9 @@ export class RuleGateService implements IRuleGate {
     const unchanged: RuleGateOutcome = { rules: input.rules, block: null };
     const mode = this.config.mode;
     if (mode === 'off' || input.task === null) return unchanged;
-    const unpinned = input.rules.filter((rule) => !rule.pinned && rule.id);
+    const unpinned = input.rules.filter(
+      (rule): rule is JudgedRule => !rule.pinned && Boolean(rule.id)
+    );
     if (unpinned.length === 0) return unchanged;
     const settings = await this.settings.read(input.subjectId);
     if (!settings.enabled) return unchanged;
@@ -146,26 +184,7 @@ export class RuleGateService implements IRuleGate {
     );
     if (!credential) return unchanged;
 
-    const state = {
-      task: input.task,
-      rules: Object.fromEntries(
-        unpinned.map((rule) => [
-          rule.id!,
-          rule.applies_when
-            ? {
-                headline: rule.headline ?? ruleHeadline(rule.text),
-                applies_when: rule.applies_when,
-              }
-            : {
-                headline: rule.headline ?? ruleHeadline(rule.text),
-                text: rule.text,
-              },
-        ])
-      ),
-    };
-    const questions = Object.fromEntries(
-      unpinned.map((rule) => [`rule_${rule.id!}`, questionFor(rule.id!)])
-    );
+    const { state, questions } = ruleGateRequest(input.task, unpinned);
 
     let result: JudgmentResult | null = null;
     try {

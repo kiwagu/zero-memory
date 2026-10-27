@@ -60,3 +60,8 @@ __pycache__/
 # decorative for everyone who checks the project out.
 infra/dev/supabase/volumes/api/server.crt
 infra/dev/supabase/volumes/api/server.key
+
+# What the rule-gate scripts write into the directory they run from: probe
+# drafts and evaluation runs carry an owner's task statements and rule texts.
+rule-probes-draft.csv
+rule-gate-eval-*.json

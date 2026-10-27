@@ -67,6 +67,14 @@ bun run start      # HTTP server
 bun run mcp:stdio  # stdio MCP server
 ```
 
+Operator commands for the rule gate, run against a stand (never hosted
+production) with `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`:
+
+```sh
+bun run rules:applies-when-draft -- --owner usr_… --max 50   # draft missing applies_when, flag for review
+bun run rules:gate-agreement -- --days 14 --sample 40        # judge vs LLM agreement, latency, unavailable share
+```
+
 ## Environment variables
 
 Read directly by this app:

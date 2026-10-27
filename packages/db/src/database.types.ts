@@ -1945,6 +1945,54 @@ export type Database = {
           },
         ];
       };
+      rule_probes: {
+        Row: {
+          created_at: string;
+          expect: string;
+          id: string;
+          note: string | null;
+          owner_id: string;
+          retired_at: string | null;
+          rule_id: string;
+          topic: string;
+        };
+        Insert: {
+          created_at?: string;
+          expect: string;
+          id?: string;
+          note?: string | null;
+          owner_id: string;
+          retired_at?: string | null;
+          rule_id: string;
+          topic: string;
+        };
+        Update: {
+          created_at?: string;
+          expect?: string;
+          id?: string;
+          note?: string | null;
+          owner_id?: string;
+          retired_at?: string | null;
+          rule_id?: string;
+          topic?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'rule_probes_owner_id_fkey';
+            columns: ['owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'rule_probes_rule_id_fkey';
+            columns: ['rule_id'];
+            isOneToOne: false;
+            referencedRelation: 'rule_candidates';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       scope_members: {
         Row: {
           accepted_at: string | null;

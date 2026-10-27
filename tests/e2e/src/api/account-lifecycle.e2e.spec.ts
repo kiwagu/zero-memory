@@ -268,10 +268,19 @@ test.describe('account lifecycle: erasure', () => {
         ord: 0,
         embedding: JSON.stringify(Array.from({ length: 1024 }, () => 0)),
       });
-      await insertOrThrow(db, 'rule_candidates', {
-        memory_id: m1,
-        useful_sessions: 1,
-        window_days: 7,
+      const { data: rule, error: ruleError } = await db
+        .from('rule_candidates')
+        .insert({ memory_id: m1, useful_sessions: 1, window_days: 7 })
+        .select('id')
+        .single();
+      if (ruleError) {
+        throw new Error(`seed rule_candidates: ${ruleError.message}`);
+      }
+      await insertOrThrow(db, 'rule_probes', {
+        owner_id: userId,
+        topic: 'e2e erasure fixture',
+        rule_id: (rule as { id: string }).id,
+        expect: 'full',
       });
       const { data: candidate } = await db
         .from('reflection_candidates')
