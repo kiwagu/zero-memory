@@ -214,24 +214,15 @@ export class RuleGateService implements IRuleGate {
       (rule): rule is JudgedRule => !rule.pinned && Boolean(rule.id)
     );
     if (unpinned.length === 0) return unchanged;
-    // Both reads at once: the account's own key is looked up while its
-    // settings are read, and only a fall back to a platform key waits for
-    // the provider the settings choose. An account that has not turned the
-    // judge on costs that one key lookup. A failed settings read fails the
-    // call through the first entry; the preference handed on never rejects,
-    // so a resolver that does not wait for it leaves nothing unhandled.
-    const settingsRead = this.settings.read(input.subjectId);
-    const [settings, credential] = await Promise.all([
-      settingsRead,
-      this.credentials.resolve(
-        input.subjectId,
-        settingsRead.then(
-          (read) => read.provider ?? undefined,
-          () => undefined
-        )
-      ),
-    ]);
-    if (!settings.enabled || !credential) return unchanged;
+    // The settings first: the key lookup decrypts a stored key, and an
+    // account that has not turned the judge on must not pay for it.
+    const settings = await this.settings.read(input.subjectId);
+    if (!settings.enabled) return unchanged;
+    const credential = await this.credentials.resolve(
+      input.subjectId,
+      settings.provider ?? undefined
+    );
+    if (!credential) return unchanged;
 
     const { state, questions, ids } = ruleGateRequest(input.task, unpinned);
 

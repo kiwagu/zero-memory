@@ -63,6 +63,16 @@ const service = (
   const guard = {
     check: vi.fn().mockResolvedValue({ allowed: overrides.budgetLeft ?? true }),
   };
+  const resolve = vi.fn().mockResolvedValue(
+    overrides.credential === undefined
+      ? {
+          provider: 'typesafe',
+          apiKey: 'k',
+          model: 'jev-1.14.0',
+          ownedByCaller: false,
+        }
+      : overrides.credential
+  );
   const svc = new RuleGateService(
     {
       read: vi.fn().mockResolvedValue({
@@ -70,24 +80,13 @@ const service = (
         provider: null,
       }),
     },
-    {
-      resolve: vi.fn().mockResolvedValue(
-        overrides.credential === undefined
-          ? {
-              provider: 'typesafe',
-              apiKey: 'k',
-              model: 'jev-1.14.0',
-              ownedByCaller: false,
-            }
-          : overrides.credential
-      ),
-    },
+    { resolve },
     () => judge,
     recorder,
     guard,
     { mode: overrides.mode ?? 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
   );
-  return { svc, judge, recorder, guard };
+  return { svc, judge, recorder, guard, resolve };
 };
 
 describe('levelFor / deliverAtLevel', () => {
@@ -441,17 +440,13 @@ describe('RuleGateService.apply', () => {
     });
   });
 
-  it('looks up the credential while the settings are still being read', async () => {
-    let settle: (settings: {
-      enabled: boolean;
-      provider: 'subq';
-    }) => void = () => undefined;
-    const read = vi.fn(
-      () =>
-        new Promise<{ enabled: boolean; provider: 'subq' }>((resolve) => {
-          settle = resolve;
-        })
-    );
+  it('looks up no key for an account with the judge off', async () => {
+    const { svc, resolve } = service({ enabled: false });
+    await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it('hands the resolver the provider the settings chose', async () => {
     const resolve = vi.fn().mockResolvedValue({
       provider: 'subq',
       apiKey: 'k',
@@ -459,19 +454,15 @@ describe('RuleGateService.apply', () => {
       ownedByCaller: false,
     });
     const svc = new RuleGateService(
-      { read },
+      { read: vi.fn().mockResolvedValue({ enabled: true, provider: 'subq' }) },
       { resolve },
       () => new FakeJudgment(),
       { record: vi.fn() },
       { check: vi.fn().mockResolvedValue({ allowed: true }) },
       { mode: 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
     );
-    const pending = svc.apply({ rules, task: 't', subjectId: 'usr_a' });
-    expect(resolve).toHaveBeenCalledTimes(1);
-    settle({ enabled: true, provider: 'subq' });
-    const out = await pending;
-    // The preference it was handed is the one the settings chose.
-    expect(await resolve.mock.calls[0]![1]).toBe('subq');
+    const out = await svc.apply({ rules, task: 't', subjectId: 'usr_a' });
+    expect(resolve).toHaveBeenCalledWith('usr_a', 'subq');
     expect(out.block).toMatchObject({ provider: 'subq' });
   });
 

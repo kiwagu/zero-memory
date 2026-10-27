@@ -46,15 +46,10 @@ export class SupabaseJudgeCredentialResolver implements IJudgeCredentialResolver
 
   async resolve(
     subjectId: string | null,
-    preferred?: JudgeProviderName | Promise<JudgeProviderName | undefined>
+    preferred?: JudgeProviderName
   ): Promise<ResolvedJudgeCredential | null> {
-    // Awaited only on the way to a platform key, so a preference still being
-    // read never holds up the lookup of the account's own key.
-    const choice = async (): Promise<JudgeProviderName | undefined> => {
-      const value = await preferred;
-      return isProvider(value) ? value : undefined;
-    };
-    if (subjectId === null) return this.platform.resolve(null, choice());
+    const choice = isProvider(preferred) ? preferred : undefined;
+    if (subjectId === null) return this.platform.resolve(null, choice);
     let data: unknown;
     try {
       const result = await this.#serviceClient().rpc('judge_credential_for', {
@@ -67,10 +62,10 @@ export class SupabaseJudgeCredentialResolver implements IJudgeCredentialResolver
         'could not read a stored judge credential; using the platform key',
         { error: error instanceof Error ? error.message : String(error) }
       );
-      return this.platform.resolve(subjectId, choice());
+      return this.platform.resolve(subjectId, choice);
     }
     const row: unknown = Array.isArray(data) ? data[0] : data;
-    if (!isRow(row)) return this.platform.resolve(subjectId, choice());
+    if (!isRow(row)) return this.platform.resolve(subjectId, choice);
     return {
       provider: row.provider,
       apiKey: row.api_key,
