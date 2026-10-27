@@ -45,6 +45,10 @@ Components live under `src/components`, global styles under
     row per client with the return address it was approved for, when, and
     when it was last active; Revoke asks once and hands the work to the
     caller.
+  - `settings/judge-provider-panel` — the rule-delivery judge of an account:
+    a switch and a provider choice that save as they change, and a
+    write-only key form; an installed key is named by its provider and last
+    four characters only.
   - `panels/panel-strip` — the controlled strip of panels a dialog opens:
     equal-width panels in one snapping row, paged by arrows at the screen
     edges, each with its source and its ×.

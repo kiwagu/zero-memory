@@ -126,7 +126,7 @@ export const parseCodexTranscript = (jsonl: string): ParsedTranscript => {
     entries.push({ role, text });
   }
 
-  return { entries, cwd, recalledIds: [...recalledIds] };
+  return { entries, cwd, recalledIds: [...recalledIds], guardRefusals: [] };
 };
 
 type CodexPayload = NonNullable<z.infer<typeof codexLineSchema>['payload']>;

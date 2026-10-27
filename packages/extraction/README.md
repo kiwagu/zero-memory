@@ -21,7 +21,9 @@ gateway (`@workspace/llm`, vendor-agnostic). `@workspace/command-handlers` dispa
 - `IngestService` — the pipeline: idempotency check (chunk hash), extraction
   gate, extraction, confidence gate (`CONFIDENCE_GATE` = 0.7), per-chunk quota,
   scope routing, dedup via the memory service, entity resolution and relation
-  edges.
+  edges. The chunk's metered `ingest_chunk` event also lists, in
+  `metadata.guard_refusals`, the guard hooks the client reported refusing an
+  action in that chunk, by name only.
 - `extraction-gate.ts` — the auto-ingest policy.
   - **Metrics-only** (`ZM_INGEST_EXTRACT`, **default `off`** =
     `resolveExtractionEnabled`): the chunk still travels the transport —

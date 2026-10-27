@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { notFromDashboard, refusedOrigin } from '@/lib/dashboard-origin';
 import { secondFactorRefusal } from '@/lib/mfa';
 import { currentSubjectId } from '@/lib/subject';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -38,30 +39,6 @@ const looksLikeKey = (key: string): boolean =>
 /** An endpoint override is only ever an http(s) URL, and only for its provider. */
 const looksLikeBaseUrl = (url: string): boolean =>
   /^https?:\/\/\S+$/.test(url) && url.length <= 400;
-
-/**
- * Only the dashboard's own page may ask, and a change arrives as JSON. Every
- * current browser marks where a request comes from, and a missing mark is
- * refused as well: a same-site sibling origin would otherwise carry the
- * session cookie here, and a plain form post can carry a JSON-shaped body as
- * text. The same check guards account deletion.
- */
-const notFromDashboard = (request: NextRequest, withBody: boolean): boolean => {
-  if (request.headers.get('sec-fetch-site') !== 'same-origin') {
-    return true;
-  }
-  if (!withBody) {
-    return false;
-  }
-  const type = request.headers.get('content-type') ?? '';
-  return !type.toLowerCase().startsWith('application/json');
-};
-
-const refusedOrigin = () =>
-  NextResponse.json(
-    { error: 'Refused: not sent from the dashboard.' },
-    { status: 403 }
-  );
 
 export async function POST(request: NextRequest) {
   if (notFromDashboard(request, true)) {

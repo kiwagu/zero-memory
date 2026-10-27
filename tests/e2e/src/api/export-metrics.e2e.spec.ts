@@ -10,7 +10,10 @@
  */
 import { expect, test } from '@playwright/test';
 
-import { seedInsightsUsage } from '../helpers/insights.js';
+import {
+  RULE_GATE_SERIES_KEYS,
+  seedInsightsUsage,
+} from '../helpers/insights.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import {
   passwordGrantToken,
@@ -94,6 +97,35 @@ test.describe('export_metrics over MCP @smoke', () => {
         0
       );
       expect(seriesRecalls).toBe(out.metrics.recall_calls);
+
+      // The rule gate's daily measures are on every point, zero or not.
+      for (const point of out.series) {
+        expect(Number.isInteger(point.rule_gate_calls)).toBe(true);
+        expect(point.rule_gate_calls).toBeGreaterThanOrEqual(0);
+      }
+      // …and the SQL emits them itself: the raw series RPC carries every key
+      // on every day, so the contract's defaults are not what fills them.
+      const rest = userRestClient(token);
+      const { data: rawSeries, error: rawError } = await rest.rpc(
+        'dashboard_metrics_series',
+        { p_days: 30 }
+      );
+      expect(rawError).toBeNull();
+      for (const point of rawSeries as Array<Record<string, unknown>>) {
+        for (const key of RULE_GATE_SERIES_KEYS) {
+          expect(point).toHaveProperty(key);
+        }
+      }
+
+      // The per-rule breakdown is the caller's own and open to them.
+      const { data: stats, error: statsError } = await rest.rpc(
+        'rule_gate_stats',
+        { p_days: 30 }
+      );
+      expect(statsError).toBeNull();
+      const breakdown = stats as { rules: unknown[]; refusals: unknown[] };
+      expect(Array.isArray(breakdown.rules)).toBe(true);
+      expect(Array.isArray(breakdown.refusals)).toBe(true);
     } finally {
       await mcp.close();
     }

@@ -10,12 +10,13 @@ import { recordUsage, type IUsageRecorder } from '@workspace/usage';
  * Value-metering emit helpers shared by both MCP transports (HTTP + stdio).
  *
  * Every tool call emits exactly one `mcp_tool_call` volume row. For most tools
- * that is the pre-execution seam ({@link recordToolInvocation}). Read tools in
+ * that is the pre-execution seam ({@link recordToolInvocation}). Tools in
  * RESULT_ATTRIBUTED_TOOLS instead emit it result-aware
- * ({@link recordToolResult}), carrying the surfaced `mem_` ids — so the
- * pre-execution seam skips them to avoid a double count. These helpers also own
- * the session-briefing signal. Every emit is fire-and-forget (via
- * recordUsage): metering must never break or slow the operation it measures.
+ * ({@link recordToolResult} and its siblings), carrying what the call
+ * surfaced (`mem_` ids, a rule id) — so the pre-execution seam skips them to
+ * avoid a double count. These helpers also own the session-briefing signal.
+ * Every emit is fire-and-forget (via recordUsage): metering must never break
+ * or slow the operation it measures.
  * Content-free by construction: only counts and ids flow here.
  */
 
@@ -23,9 +24,10 @@ const isResultAttributed = (tool: string): boolean =>
   (RESULT_ATTRIBUTED_TOOLS as readonly string[]).includes(tool);
 
 /**
- * Pre-execution volume emit for a tool call. No-op for result-attributed read
- * tools (recall / build_context) — their row is emitted post-result by
- * {@link recordToolResult} so it can carry the surfaced ids.
+ * Pre-execution volume emit for a tool call. No-op for the result-attributed
+ * tools (recall / build_context / remember / resource:rule) — their row is
+ * emitted post-result ({@link recordToolResult}, {@link recordRememberResult},
+ * {@link recordResourceRead}) so it can carry what the call surfaced.
  */
 export const recordToolInvocation = (
   recorder: IUsageRecorder,
@@ -76,9 +78,29 @@ export const recordToolResult = (
       ...(truncatedQuery(metering.query) !== undefined && {
         query: truncatedQuery(metering.query),
       }),
+      ...(metering.ruleGate && { rule_gate: metering.ruleGate }),
     },
   });
   recordBriefing(recorder, metering);
+};
+
+/**
+ * A read of one standing rule by id: the agent went for the full text of a
+ * rule that arrived by headline or gate. Recorded as its own mcp_tool_call row
+ * so an analysis can join it to the call that headlined the rule.
+ */
+export const recordResourceRead = (
+  recorder: IUsageRecorder,
+  metering: { resource: 'rule'; ruleId: string; found: boolean }
+): void => {
+  recordUsage(recorder, {
+    eventType: 'mcp_tool_call',
+    metadata: {
+      tool: 'resource:rule',
+      rule_id: metering.ruleId,
+      found: metering.found,
+    },
+  });
 };
 
 /**

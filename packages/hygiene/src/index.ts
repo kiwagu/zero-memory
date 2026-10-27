@@ -6,6 +6,7 @@ export * from './hygiene-resolver.js';
 export * from './kind-audit.js';
 export * from './rule-candidate.js';
 export * from './rule-distiller.js';
+export * from './applies-when.drafter.js';
 export * from './rule-candidate-detector.js';
 export * from './loop-closure.js';
 export * from './loop-closure-judge.js';

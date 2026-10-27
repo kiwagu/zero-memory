@@ -4,6 +4,7 @@ import {
   DEFAULT_INCUBATOR_CONFIG,
   MAX_SCOPE_SUGGESTIONS,
   mergeScopeSuggestions,
+  readAppliesWhen,
   ruleDistillationSchema,
   targetLayerForScope,
 } from './rule-candidate.js';
@@ -68,16 +69,25 @@ describe('clearsDistillGate', () => {
 });
 
 describe('ruleDistillationSchema', () => {
-  it('validates a distillation and rejects out-of-range confidence', () => {
-    expect(
+  it('parses a distillation without applies_when and rejects out-of-range values', () => {
+    // A model may omit applies_when; the answer still parses and reads as null.
+    const parsed = ruleDistillationSchema.parse({
+      rule: true,
+      rule_text: 'Always pin `set search_path` in security definer functions.',
+      confidence: 0.8,
+      rationale: 'standing convention',
+    });
+    expect(parsed.rule).toBe(true);
+    expect(readAppliesWhen(parsed.applies_when)).toBeNull();
+    expect(() =>
       ruleDistillationSchema.parse({
         rule: true,
-        rule_text:
-          'Always pin `set search_path` in security definer functions.',
+        rule_text: 'x',
+        applies_when: 'x'.repeat(401),
         confidence: 0.8,
-        rationale: 'standing convention',
-      }).rule
-    ).toBe(true);
+        rationale: 'x',
+      })
+    ).toThrow();
     expect(() =>
       ruleDistillationSchema.parse({
         rule: true,

@@ -11,6 +11,8 @@ import {
   entityHitSchema,
   relatedMemorySchema,
   entityMentionSchema,
+  ruleCandidateIdSchema,
+  ruleDeliveryLevelSchema,
 } from './graph.schema.js';
 import {
   instanceMetricsSchema,
@@ -522,6 +524,12 @@ export const buildContextInputSchema = z.object({
    */
   briefing_kind: z.enum(['session', 'task']).optional(),
   /**
+   * False: deliver the standing rules whole, skipping the rule gate. The
+   * session-start hook sets it on its secondary (branch) briefing so one
+   * session start judges once. Default true.
+   */
+  judge_rules: z.boolean().optional(),
+  /**
    * The client's conversation/session id (e.g. Claude Code's `session_id`),
    * passed by the briefing hook. Only meaningful with `briefing: true`: it
    * lands in the `session_briefing` event's metadata as `conversation_id`, so
@@ -533,6 +541,56 @@ export const buildContextInputSchema = z.object({
   conversation_id: z.string().min(1).optional(),
 });
 export type BuildContextInput = z.infer<typeof buildContextInputSchema>;
+
+const nonNegativeInt = z.number().int().nonnegative();
+
+export const ruleGateBlockSchema = z.object({
+  mode: z.enum(['shadow', 'live']),
+  provider: z.enum(['typesafe', 'subq']),
+  model: z.string(),
+  latency_ms: nonNegativeInt,
+  judge_unavailable: z.boolean(),
+  /**
+   * Why a call set to be judged got no answer, when the reason is known:
+   * `settings_unavailable`, `credential_unavailable` or `budget_unavailable`
+   * when the account's judge settings, its key or its extraction allowance
+   * could not be read; `budget_exhausted` when the allowance on the
+   * instance's key is used up; `judge_error` when the judge call failed other
+   * than by not answering in time or refusing for now. Absent when the judge
+   * answered, and when it simply did not answer.
+   */
+  unavailable_reason: z
+    .enum([
+      'budget_exhausted',
+      'settings_unavailable',
+      'credential_unavailable',
+      'budget_unavailable',
+      'judge_error',
+    ])
+    .optional(),
+  bands: z.object({
+    hi: z.number().min(0).max(1),
+    lo: z.number().min(0).max(1),
+  }),
+  chars_baseline: nonNegativeInt,
+  chars_delivered: nonNegativeInt,
+  levels: z.object({
+    full: nonNegativeInt,
+    gate: nonNegativeInt,
+    headline: nonNegativeInt,
+  }),
+  rules: z.array(
+    z.object({
+      id: ruleCandidateIdSchema,
+      /** Null for a rule the judge did not answer (pinned, or missing answer). */
+      p: z.number().min(0).max(1).nullable(),
+      level: ruleDeliveryLevelSchema,
+      chars: nonNegativeInt,
+      pinned: z.boolean(),
+    })
+  ),
+});
+export type RuleGateBlock = z.infer<typeof ruleGateBlockSchema>;
 
 export const buildContextOutputSchema = z.object({
   memories: z.array(contextMemorySchema),
@@ -568,6 +626,19 @@ export const buildContextOutputSchema = z.object({
    * never drop it. Defaulted so packs from older servers still parse.
    */
   rules: z.array(contextRuleSchema).default([]),
+  /**
+   * How this call's standing rules were delivered when the rule gate judged
+   * them: the judge's provider and model, its latency, the bands, how many
+   * characters the rules would have cost whole versus what was delivered,
+   * and one probability + level per judged rule (ids and numbers only). In
+   * `shadow` mode the levels are what WOULD have been delivered; delivery
+   * itself was unchanged. A budgeted hook briefing is judged, and carries
+   * this block, only when the conversation has a bound or continuation card
+   * to judge against. Absent when the gate is off or not enabled for this
+   * account, when a hook briefing has no such card, or when the call asked
+   * for `judge_rules: false`.
+   */
+  rule_gate: ruleGateBlockSchema.optional(),
   /**
    * Active open loops (kind task/open-question) of the briefed scopes,
    * oldest first, capped — surfaced on every briefing regardless of topic
@@ -733,6 +804,8 @@ export const promoteRuleInputSchema = z.object({
   applies_scope: z.string().min(1).optional(),
   /** Override the distilled imperative text (else distilled from the memory). */
   rule_text: z.string().min(1).max(2000).optional(),
+  /** When the rule binds a task: one to three lines of observable task features. */
+  applies_when: z.string().min(1).max(400).optional(),
   /** Re-promote a memory you earlier DISMISSED as a rule (overrides the guard). */
   force: z.boolean().optional(),
 });
@@ -744,6 +817,8 @@ export const promoteRuleOutputSchema = z.object({
   target_layer: z.enum(['user', 'project']),
   applies_scope: z.string().nullable(),
   status: z.literal('promoted'),
+  /** When the rule binds a task, as stored after this promotion; null when unset. */
+  applies_when: z.string().nullable(),
   /**
    * Human-readable note on WHEN the rule actually reaches sessions: MCP
    * instructions are captured at connect and frozen, so a rule promoted
@@ -825,6 +900,23 @@ export const ingestConversationInputSchema = z.object({
    * a malformed id never fails ingest of the (critical) transcript chunk — the
    * judge validates each id individually. */
   recalled_ids: z.array(z.string().min(1)).max(200).optional(),
+  /**
+   * Guard-hook refusals seen in this chunk (names and timestamps only): a
+   * client-side PreToolUse guard that refused an action, recognised by the
+   * `[guard:<name>]` tag it prints in its reason. The delivery-quality retro
+   * joins them to the rule each guard enforces. `at` is the transcript
+   * line's own timestamp, forwarded as the client wrote it, so it is bounded
+   * in length rather than checked as a date.
+   */
+  guard_refusals: z
+    .array(
+      z.object({
+        guard: z.string().regex(/^[a-z][a-z0-9_-]{1,63}$/u),
+        at: z.string().max(64).nullable(),
+      })
+    )
+    .max(50)
+    .optional(),
   /**
    * Ledger LOOKUP only: answers whether this chunk_hash was already ingested
    * and returns immediately — no claim, no extraction, no tokens, no writes.

@@ -86,6 +86,18 @@ export const instanceMetricsSeriesPointSchema = z.object({
   judged: z.number().int().nonnegative(),
   relevant: z.number().int().nonnegative(),
   used: z.number().int().nonnegative(),
+  // The rule gate's per-day measures. Defaulted so a point written before
+  // they existed still parses.
+  rule_gate_calls: z.number().int().nonnegative().default(0),
+  rules_chars_baseline: z.number().int().nonnegative().default(0),
+  rules_chars_delivered: z.number().int().nonnegative().default(0),
+  rules_full: z.number().int().nonnegative().default(0),
+  rules_judged: z.number().int().nonnegative().default(0),
+  rule_fetches: z.number().int().nonnegative().default(0),
+  guard_refusals: z.number().int().nonnegative().default(0),
+  judge_latency_ms_sum: z.number().int().nonnegative().default(0),
+  judge_unavailable: z.number().int().nonnegative().default(0),
+  judge_input_tokens: z.number().int().nonnegative().default(0),
   users_active: z.number().int().nonnegative(),
 });
 

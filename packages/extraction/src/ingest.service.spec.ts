@@ -288,6 +288,43 @@ describe('IngestService — usage metering', () => {
       .mock.calls.filter(([event]) => event.eventType === 'ingest_chunk');
     expect(ingestCalls).toHaveLength(1);
   });
+
+  // Content-free metering: the event carries the guard NAMES only — never the
+  // timestamp-bearing records, let alone the refused command or its reason.
+  it('records the guard names a chunk reports on its ingest_chunk event', async () => {
+    const { service, usage } = makeService();
+
+    await service.ingest(
+      baseInput({
+        guard_refusals: [{ guard: 'one_line_commit', at: null }],
+      })
+    );
+
+    const [event] = vi
+      .mocked(usage.record)
+      .mock.calls.map(([recorded]) => recorded)
+      .filter((recorded) => recorded.eventType === 'ingest_chunk');
+    expect(event?.metadata?.guard_refusals).toEqual(['one_line_commit']);
+  });
+
+  it.each([
+    ['omits the field', {}],
+    ['sends it empty', { guard_refusals: [] }],
+  ])(
+    'adds no guard_refusals key when the chunk %s',
+    async (_label, overrides) => {
+      const { service, usage } = makeService();
+
+      await service.ingest(baseInput(overrides));
+
+      const [event] = vi
+        .mocked(usage.record)
+        .mock.calls.map(([recorded]) => recorded)
+        .filter((recorded) => recorded.eventType === 'ingest_chunk');
+      expect(event?.metadata).toBeDefined();
+      expect(event?.metadata).not.toHaveProperty('guard_refusals');
+    }
+  );
 });
 
 describe('IngestService — confidence gate and quota', () => {

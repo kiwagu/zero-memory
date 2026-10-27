@@ -4,6 +4,14 @@ import { parseTranscript } from './transcript-parser.js';
 
 const line = (value: unknown): string => JSON.stringify(value);
 
+/** A tool_result content item; `isError` marks a call that did not run. */
+const toolResult = (toolUseId: string, content: string, isError?: boolean) => ({
+  type: 'tool_result',
+  tool_use_id: toolUseId,
+  content,
+  ...(isError !== undefined && { is_error: isError }),
+});
+
 describe('parseTranscript', () => {
   it('keeps user and assistant text and skips tool traffic', () => {
     const jsonl = [
@@ -175,6 +183,107 @@ describe('parseTranscript', () => {
     expect(parsed.entries).toEqual([
       { role: 'user', text: 'why did we pick postgres?' },
       { role: 'assistant', text: 'Picking up where we left off.' },
+    ]);
+  });
+
+  // A PreToolUse denial lands as an error tool_result whose text opens with
+  // the hook's reason, so that is the only place a tag counts. The same tag in
+  // the call's own input, in prose, or in a compaction recap is talk about a
+  // guard, not a refusal.
+  it('counts a guard refusal only from a denied tool call', () => {
+    const toolUse = JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-10-24T10:00:00Z',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Testing [guard:docs_build] next.' },
+          {
+            type: 'tool_use',
+            id: 'toolu_1',
+            name: 'Bash',
+            input: { command: 'echo "[guard:one_line_commit] refused"' },
+          },
+        ],
+      },
+    });
+    const refusal = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-10-24T10:00:01Z',
+      message: {
+        role: 'user',
+        content: [
+          toolResult(
+            'toolu_1',
+            'PreToolUse:Bash hook error: [guard:one_line_commit] a commit message is one line',
+            true
+          ),
+        ],
+      },
+    });
+    const prose = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-10-24T10:00:02Z',
+      message: {
+        role: 'user',
+        content: 'plain text mentioning [guard:docs_build] in prose',
+      },
+    });
+    const recap = JSON.stringify({
+      type: 'user',
+      isCompactSummary: true,
+      timestamp: '2026-10-24T10:00:03Z',
+      message: {
+        role: 'user',
+        content: 'Earlier, [guard:one_line_commit] refused a commit.',
+      },
+    });
+
+    expect(
+      parseTranscript([toolUse, refusal, prose, recap].join('\n')).guardRefusals
+    ).toEqual([{ guard: 'one_line_commit', at: '2026-10-24T10:00:01Z' }]);
+    expect(
+      parseTranscript([toolUse, prose, recap].join('\n')).guardRefusals
+    ).toEqual([]);
+  });
+
+  // A call that SUCCEEDED can still print the tag: reading a guard script,
+  // grep or test output over this repository, a recall quoting a stored
+  // refusal. A reason that merely mentions a guard after the hook error is
+  // not that guard refusing, and a denial quoted further into an error result
+  // is not a denial of that call.
+  it('ignores the tag in a successful result, later in the reason or mid-content', () => {
+    const denial =
+      'PreToolUse:Bash hook error: [guard:one_line_commit] a commit message is one line';
+    const jsonl = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-10-24T10:00:04Z',
+      message: {
+        role: 'user',
+        content: [
+          toolResult('toolu_2', denial),
+          toolResult(
+            'toolu_3',
+            'PreToolUse:Bash hook error: see [guard:docs_build]',
+            true
+          ),
+          toolResult(
+            'toolu_4',
+            'PreToolUse:Bash hook error: [guard:docs_build] and [guard:one_line_commit] too',
+            true
+          ),
+          // A failed command whose output quotes an earlier denial.
+          toolResult(
+            'toolu_5',
+            'Exit code 1\nPreToolUse:Bash hook error: [guard:one_line_commit] a commit message is one line',
+            true
+          ),
+        ],
+      },
+    });
+
+    expect(parseTranscript(jsonl).guardRefusals).toEqual([
+      { guard: 'docs_build', at: '2026-10-24T10:00:04Z' },
     ]);
   });
 });

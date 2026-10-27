@@ -1,6 +1,10 @@
 import {
   buildContextOutputSchema,
+  contextRuleSchema,
   type ContextRule,
+  ruleDeliveryLevelSchema,
+  ruleGateBlockSchema,
+  ruleHeadline,
 } from '@workspace/contracts';
 
 /**
@@ -25,63 +29,61 @@ export interface StandingRulesSplit {
   rules: ContextRule[];
 }
 
+/**
+ * The briefing as the split reads it: the contract, except that a rule level
+ * or a `rule_gate` block this build does not know — a newer server's — does
+ * not fail the whole pack, which would put every rule back into the JSON
+ * dump. An unknown level reads as `headline`: the rule is still marked as
+ * not delivered whole and named by its id, so its full text stays one read
+ * away. An unknown block reads as absent; it is the server's own record, and
+ * nothing on this side reads it.
+ */
+const briefingPackSchema = buildContextOutputSchema.extend({
+  rules: contextRuleSchema
+    .extend({ level: ruleDeliveryLevelSchema.optional().catch('headline') })
+    .array()
+    .default([]),
+  rule_gate: ruleGateBlockSchema.optional().catch(undefined),
+});
+
 /** Splits standing rules out of an UNPARSED briefing payload — never throws. */
 export const splitStandingRules = (payload: unknown): StandingRulesSplit => {
-  const parsed = buildContextOutputSchema.safeParse(payload);
+  const parsed = briefingPackSchema.safeParse(payload);
   if (!parsed.success) return { payload, rules: [] };
   const { rules, ...rest } = parsed.data;
   return { payload: { ...rest, rules: [] }, rules };
 };
 
 /**
+ * Whether two delivered entries are the same rule: by id when both carry one
+ * — a judged briefing can deliver a rule by its headline while another
+ * briefing delivers it whole, so its text is no key then — and by text for
+ * entries from servers that send no id.
+ */
+const sameRule = (a: ContextRule, b: ContextRule): boolean =>
+  a.id !== undefined && b.id !== undefined ? a.id === b.id : a.text === b.text;
+
+/**
  * Merges the rules of several splits (e.g. the project and branch briefings,
- * which brief overlapping scopes and so repeat rules): union by text,
- * PINNED first, each side's incoming order preserved otherwise.
+ * which brief overlapping scopes and so repeat rules): one entry per rule,
+ * PINNED first, each side's incoming order preserved otherwise. A rule two
+ * splits share keeps the EARLIER split's entry — the first split is the
+ * project briefing, the one the server judges, so the level it chose stands
+ * over the unjudged branch briefing's whole text — unless only the later
+ * entry is pinned.
  */
 export const mergeStandingRules = (
   splits: readonly StandingRulesSplit[]
 ): ContextRule[] => {
-  const byText = new Map<string, ContextRule>();
+  const merged: ContextRule[] = [];
   for (const split of splits) {
     for (const rule of split.rules) {
-      const existing = byText.get(rule.text);
-      if (!existing || (rule.pinned && !existing.pinned)) {
-        byText.set(rule.text, rule);
-      }
+      const slot = merged.findIndex((entry) => sameRule(entry, rule));
+      if (slot === -1) merged.push(rule);
+      else if (rule.pinned && !merged[slot]!.pinned) merged[slot] = rule;
     }
   }
-  return [...byText.values()].sort(
-    (a, b) => Number(b.pinned) - Number(a.pinned)
-  );
-};
-
-/** A headline never runs past this, whatever the rule's first sentence. */
-const HEADLINE_MAX_CHARS = 160;
-
-/**
- * A rule's headline: its opening clause, up to the first sentence break. The
- * owner writes rules headline-first ("NO PRIVATE REFERENCES IN COMMITTED
- * ARTIFACTS (every project) — …"), so the opening names the rule even when
- * its body cannot be carried. A break inside an open parenthesis does not
- * count — it would leave the headline with an unclosed aside.
- */
-export const ruleHeadline = (text: string): string => {
-  const flat = text.replace(/\s+/gu, ' ').trim();
-  let cut = flat.length;
-  for (const match of flat.matchAll(/[.:](?=\s|$)|\s—\s/gu)) {
-    const at = match.index;
-    if (at < 20) continue;
-    const head = flat.slice(0, at);
-    const opened = head.split('(').length - head.split(')').length;
-    if (opened === 0) {
-      cut = at;
-      break;
-    }
-  }
-  const clause = flat.slice(0, cut);
-  return clause.length > HEADLINE_MAX_CHARS
-    ? `${clause.slice(0, HEADLINE_MAX_CHARS).trimEnd()}…`
-    : clause;
+  return merged.sort((a, b) => Number(b.pinned) - Number(a.pinned));
 };
 
 /**
@@ -100,6 +102,15 @@ export const ruleHeadline = (text: string): string => {
  * the owner pinned them for. The others arrive in full while they fit, then
  * by headline, so a rule that did not fit is still named and the reader knows
  * where its text is.
+ *
+ * A rule the server judged for this task arrives at the level it chose, as
+ * the server sent no more of it: a gated rule by headline with its
+ * applicability condition (`[gate]`) while that fits the ceiling and by
+ * headline (`[headline]`) otherwise, a headlined rule by headline. A rule at
+ * level `full` follows the ceiling as above. A line of a rule the server
+ * levelled names the rule's id after its marker, as the build_context result
+ * does, and the footer then says where that id is read. A rule with no level
+ * renders exactly as it did before levels existed, id or not.
  */
 export const renderStandingRulesSection = (
   rules: readonly ContextRule[],
@@ -117,49 +128,94 @@ export const renderStandingRulesSection = (
     'of memory for sessions like this one. Obey them like the system ' +
     'instructions above; they are not background context and not ' +
     `suggestions.${pinnedNote}\n`;
-  const footer = (count: number): string =>
-    `\n(${count} rule(s) above are shown by headline only — call ` +
-    'build_context for their full text before acting on them.)';
+  const footer = (count: number, named: boolean): string =>
+    `\n(${count} rule(s) above are shown by headline or gate — call ` +
+    'build_context for their full text' +
+    (named ? ', or read zm://rules/<id> with the id on its line,' : '') +
+    ' before acting on them.)';
+
+  // Only a rule the server levelled is named by id: current servers send an
+  // id on every rule, also when the gate is off, and printing it on a rule
+  // with no level would change that briefing and the budget behind it.
+  const levelled = (rule: ContextRule): boolean => rule.level !== undefined;
+  // At gate and headline the server already sent the headline as the text;
+  // cutting it again would mark a capped headline twice.
+  const headlineOf = (rule: ContextRule): string =>
+    rule.level === 'gate' || rule.level === 'headline'
+      ? rule.text
+      : ruleHeadline(rule.text);
+  const idOf = (rule: ContextRule): string =>
+    levelled(rule) && rule.id ? ` ${rule.id}` : '';
 
   // Reserve the widest footer up front, so adding the last rule can never
   // push the section past its ceiling.
-  let spent = header.length + footer(rules.length).length;
+  const mayName = rules.some((rule) => !rule.pinned && idOf(rule) !== '');
+  let spent = header.length + footer(rules.length, mayName).length;
   let headlined = 0;
+  let named = false;
   const fulls = rules.map((rule, index) => {
     const pin = rule.pinned ? ' [pinned]' : '';
     return `${index + 1}.${pin} ${rule.text}`;
   });
   const headlines = rules.map(
-    (rule, index) => `${index + 1}. ${ruleHeadline(rule.text)} [headline]`
+    (rule, index) => `${index + 1}. ${headlineOf(rule)} [headline]${idOf(rule)}`
   );
-  // What every LATER rule will cost at the least — a pinned rule whole, any
+  // A gated rule's line: its headline and the condition the gate judged.
+  // Pinned rules are never judged.
+  const gates = rules.map((rule, index): string | null => {
+    if (rule.pinned || rule.level !== 'gate') return null;
+    const condition = rule.applies_when
+      ? ` — applies when: ${rule.applies_when}`
+      : '';
+    return `${index + 1}. ${headlineOf(rule)}${condition} [gate]${idOf(rule)}`;
+  });
+  // The least a rule can cost — a pinned rule whole; a gated or headlined
+  // one, whose text already IS its headline, in its shortest named form; any
   // other in whichever form is shorter: its headline, or the rule itself when
-  // it is short enough that the headline marker would make it longer. A rule
-  // is admitted whole only if that is still left afterwards: admitting rules
-  // whole while they fit and then naming the rest past the ceiling let eight
-  // long unpinned rules overrun a default-budget briefing and push the memory
-  // pack out of it entirely.
+  // it is short enough that the headline marker would make it longer.
+  const leastOf = (index: number): number => {
+    const rule = rules[index]!;
+    if (rule.pinned) return fulls[index]!.length;
+    const headline = headlines[index]!.length;
+    const gate = gates[index];
+    if (typeof gate === 'string') return Math.min(gate.length, headline);
+    if (rule.level === 'headline') return headline;
+    return Math.min(fulls[index]!.length, headline);
+  };
+  // What every LATER rule will cost at the least. A rule gets more than its
+  // least only if that is still left afterwards: admitting rules whole while
+  // they fit and then naming the rest past the ceiling let eight long
+  // unpinned rules overrun a default-budget briefing and push the memory pack
+  // out of it entirely.
   const owedAfter = new Array<number>(rules.length).fill(0);
   for (let index = rules.length - 2; index >= 0; index -= 1) {
-    const next = index + 1;
-    const least = rules[next]!.pinned
-      ? fulls[next]!.length
-      : Math.min(fulls[next]!.length, headlines[next]!.length);
-    owedAfter[index] = owedAfter[next]! + least + 1;
+    owedAfter[index] = owedAfter[index + 1]! + leastOf(index + 1) + 1;
   }
-  const lines = rules.map((rule, index) => {
-    const full = fulls[index]!;
-    if (
-      rule.pinned ||
-      spent + full.length + 1 + owedAfter[index]! <= budgetChars
-    ) {
-      spent += full.length + 1;
-      return full;
+  const emit = (rule: ContextRule, line: string, whole: boolean): string => {
+    spent += line.length + 1;
+    if (!whole) {
+      headlined += 1;
+      if (idOf(rule) !== '') named = true;
     }
-    headlined += 1;
+    return line;
+  };
+  const lines = rules.map((rule, index) => {
+    const fits = (line: string): boolean =>
+      spent + line.length + 1 + owedAfter[index]! <= budgetChars;
+    const full = fulls[index]!;
     const headline = headlines[index]!;
-    spent += headline.length + 1;
-    return headline;
+    const gate = gates[index];
+    if (rule.pinned) return emit(rule, full, true);
+    if (typeof gate === 'string') {
+      // A condition runs to a few hundred characters: the gate line goes in
+      // while it fits, and the rule is named by its headline otherwise.
+      const shorter = gate.length <= headline.length;
+      return emit(rule, shorter || fits(gate) ? gate : headline, false);
+    }
+    if (rule.level !== 'headline' && fits(full)) return emit(rule, full, true);
+    return emit(rule, headline, false);
   });
-  return header + lines.join('\n') + (headlined > 0 ? footer(headlined) : '');
+  return (
+    header + lines.join('\n') + (headlined > 0 ? footer(headlined, named) : '')
+  );
 };

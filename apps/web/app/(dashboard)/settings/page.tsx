@@ -1,5 +1,6 @@
 import { SettingsConnectedAgents } from '@/components/settings-connected-agents';
 import { SettingsDeleteAccount } from '@/components/settings-delete-account';
+import { SettingsJudgeProvider } from '@/components/settings-judge-provider';
 import { SettingsMemoryPanel } from '@/components/settings-memory-panel';
 import { SettingsProfile } from '@/components/settings-profile';
 import { SettingsProviderKey } from '@/components/settings-provider-key';
@@ -8,6 +9,7 @@ import { currentAccount } from '@/lib/account';
 import { readConnectedAgents } from '@/lib/connected-agents';
 import { readCredentialStatus } from '@/lib/credential-status';
 import { getRequestMessages } from '@/lib/i18n';
+import { readJudgeStatus } from '@/lib/judge-status';
 import { formatTimestamp } from '@/lib/memory';
 import { readAssurance } from '@/lib/mfa';
 import { currentSubjectId } from '@/lib/subject';
@@ -15,7 +17,10 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export default async function SettingsPage() {
   const { t } = await getRequestMessages();
-  const credential = await readCredentialStatus();
+  const [credential, judge] = await Promise.all([
+    readCredentialStatus(),
+    readJudgeStatus(),
+  ]);
   const supabase = await createServerSupabaseClient();
   const account = await currentAccount(supabase);
   // Deleting the account is confirmed with the second factor; an account
@@ -146,6 +151,29 @@ export default async function SettingsPage() {
           revoke: t('settings.providerKey.revoke'),
           revoking: t('settings.providerKey.revoking'),
           hint: t('settings.providerKey.hint'),
+        }}
+      />
+
+      <SettingsJudgeProvider
+        current={judge}
+        labels={{
+          title: t('settings.judge.title'),
+          description: t('settings.judge.description'),
+          enable: t('settings.judge.enable'),
+          provider: t('settings.judge.provider'),
+          providerDefault: t('settings.judge.providerDefault'),
+          key: t('settings.judge.key'),
+          keyPlaceholder: t('settings.judge.keyPlaceholder'),
+          model: t('settings.judge.model'),
+          modelPlaceholder: t('settings.judge.modelPlaceholder'),
+          save: t('settings.judge.save'),
+          saving: t('settings.judge.saving'),
+          installed: t('settings.judge.installed'),
+          revoke: t('settings.judge.revoke'),
+          revoking: t('settings.judge.revoking'),
+          statusPlatform: t('settings.judge.statusPlatform'),
+          statusOff: t('settings.judge.statusOff'),
+          hint: t('settings.judge.hint'),
         }}
       />
 

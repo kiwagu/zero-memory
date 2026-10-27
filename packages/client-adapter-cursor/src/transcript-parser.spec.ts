@@ -93,6 +93,7 @@ describe('parseCursorTranscript', () => {
       ],
       cwd: undefined,
       recalledIds: [],
+      guardRefusals: [],
     });
   });
 

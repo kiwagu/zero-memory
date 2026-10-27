@@ -36,6 +36,18 @@ export const ruleDistillationSchema = z.object({
   rule: z.boolean(),
   /** Imperative, self-contained rule text (markdown), empty when rule=false. */
   rule_text: z.string(),
+  /**
+   * When the rule binds a task: one to three lines of observable task
+   * features. Null when the rule binds every task of this owner; a model may
+   * also omit it, so read it through {@link readAppliesWhen}.
+   */
+  applies_when: z
+    .string()
+    .max(400)
+    .nullish()
+    .describe(
+      'Observable task features for which the rule binds; null when it binds every task'
+    ),
   confidence: z.number().min(0).max(1),
   rationale: z.string(),
   /**
@@ -54,6 +66,15 @@ export const ruleDistillationSchema = z.object({
     .optional(),
 });
 export type RuleDistillation = z.infer<typeof ruleDistillationSchema>;
+
+/**
+ * The stored form of a rule's applies_when: trimmed, and null when absent or
+ * blank — a blank condition would read as "binds no task" rather than
+ * "binds every task". Pure — exported for tests.
+ */
+export const readAppliesWhen = (
+  value: string | null | undefined
+): string | null => value?.trim() || null;
 
 /**
  * One entry of the ranked "where this rule applies" recommendation.

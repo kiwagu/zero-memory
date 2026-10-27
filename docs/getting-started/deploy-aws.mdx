@@ -76,7 +76,13 @@ Write each app's environment into its secret from a file of `KEY=value`
 lines. The server needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
 `SUPABASE_SERVICE_ROLE_KEY`, and a model key if you use model-backed
 features; the dashboard needs `NEXT_PUBLIC_SUPABASE_URL`,
-`NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`:
+`NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`. To run the
+[rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance),
+add `ZM_RULE_GATE_MODE` and a provider key (`ZM_TYPESAFE_API_KEY` or
+`ZM_SNAPQ_API_KEY`) to the server's file, with the optional
+`ZM_RULE_GATE_HI`, `ZM_RULE_GATE_LO`, `ZM_JUDGE_PROVIDER`,
+`ZM_JUDGE_MODEL_TYPESAFE`, `ZM_JUDGE_MODEL_SUBQ` and `ZM_JUDGE_TIMEOUT_MS`,
+and `ZM_JUDGE_PROVIDER` to the dashboard's:
 
 ```sh
 AWS_PROFILE=<profile> bun scripts/server-env.put.ts zero-memory/prod/server-env server.env

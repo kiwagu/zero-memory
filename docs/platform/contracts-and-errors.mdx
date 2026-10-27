@@ -74,10 +74,11 @@ selector, not a credential (see
 [Scopes and isolation](/docs/concepts/scopes-and-isolation)).
 
 Read results append `resource_link` blocks. Every surfaced memory is
-dereferenceable at `zm://memory/{id}` for its full, untruncated row, and the
-caller's standing rules are served at `zm://rules`. Which rows a URI resolves
-to is decided by the caller's authenticated context, never by the URI itself,
-so a pasted URI can leak nothing but an opaque id.
+dereferenceable at `zm://memory/{id}` for its full, untruncated row.
+`zm://rules` lists the caller's General standing rules, and `zm://rules/{id}`
+serves one promoted rule in full, General or project. Which rows a URI
+resolves to is decided by the caller's authenticated context, never by the
+URI itself, so a pasted URI can leak nothing but an opaque id.
 
 Every tool declares MCP `ToolAnnotations` — read-only, destructive,
 idempotent, and open-world hints — verified against its actual handler by an

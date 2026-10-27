@@ -24,6 +24,7 @@ import type { IProjectBindingRepository } from '../project-binding.repository.js
 import type { ProjectCandidate } from '../project-name.utils.js';
 import type { IProjectRulesReader } from '../project-rules.reader.js';
 import type { IRuleFateReader } from '../rule-fate.reader.js';
+import type { IRuleGate } from '../rule-gate.service.js';
 import type { IScopeAccessService } from '../scope-access.service.js';
 import { ScopeRoutingService } from '../scope-routing.service.js';
 import { Scope } from '../scope.vo.js';
@@ -189,6 +190,11 @@ export const makeRuleFates = (): IRuleFateReader => ({
   hasPromotedRule: vi.fn().mockResolvedValue(false),
 });
 
+/** A gate that changes nothing. */
+export const makeRuleGate = (): IRuleGate => ({
+  apply: vi.fn(async ({ rules }) => ({ rules, block: null })),
+});
+
 /** The ports a spec may replace; every other one gets its inert fake. */
 export interface MemoryServicePorts {
   repository: IMemoryRepository;
@@ -205,6 +211,7 @@ export interface MemoryServicePorts {
   threads: ISessionThreadRepository;
   briefingWork: IBriefingWorkReader;
   ruleFates: IRuleFateReader;
+  ruleGate: IRuleGate;
 }
 
 /**
@@ -232,6 +239,7 @@ export const makeMemoryService = (
     threads: makeThreads(),
     briefingWork: makeBriefingWork(),
     ruleFates: makeRuleFates(),
+    ruleGate: makeRuleGate(),
     ...overrides,
   };
   const embeddingService = new DeterministicHashEmbeddingService();
@@ -260,7 +268,8 @@ export const makeMemoryService = (
     ports.portabilityJudge,
     ports.threads,
     ports.briefingWork,
-    ports.ruleFates
+    ports.ruleFates,
+    ports.ruleGate
   );
   return {
     service,

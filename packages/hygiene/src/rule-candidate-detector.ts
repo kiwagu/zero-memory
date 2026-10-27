@@ -14,6 +14,7 @@ import {
 import {
   DEFAULT_INCUBATOR_CONFIG,
   mergeScopeSuggestions,
+  readAppliesWhen,
   targetLayerForScope,
   type IncubatorConfig,
   type RuleDistillation,
@@ -192,20 +193,26 @@ export class RuleCandidateDetector {
     ownerId: string;
     appliesScope?: string;
     ruleText?: string;
+    appliesWhen?: string;
     force?: boolean;
   }): Promise<{
     memory_id: string;
     rule_text: string;
     target_layer: RuleTargetLayer;
     applies_scope: string | null;
+    applies_when: string | null;
     status: 'promoted';
   }> {
-    const { memoryId, ownerId, appliesScope, ruleText, force } = params;
+    const { memoryId, ownerId, appliesScope, ruleText, appliesWhen, force } =
+      params;
 
     // A rule's text is delivered into every session of its layer, so a text
     // the caller supplies is held to the same rule as memory content. A text
     // distilled from the memory needs no check: the memory passed it.
-    const secret = guardTextFields([{ path: 'rule_text', text: ruleText }]);
+    const secret = guardTextFields([
+      { path: 'rule_text', text: ruleText },
+      { path: 'applies_when', text: appliesWhen },
+    ]);
     if (secret) {
       throw new FailureError(
         failure('validation_failed', secretContentRejectedMessage(secret))
@@ -240,7 +247,7 @@ export class RuleCandidateDetector {
 
     const { data: existing } = await this.client
       .from('rule_candidates')
-      .select('status, target_layer, applies_scope')
+      .select('status, target_layer, applies_scope, applies_when')
       .eq('memory_id', memoryId)
       .maybeSingle();
     // Guard the upsert: reviving a DELIBERATELY dismissed candidacy needs an
@@ -269,6 +276,13 @@ export class RuleCandidateDetector {
     // Distill for clean imperative text + scope suggestions unless the caller
     // supplied the text. The verdict never gates the promotion here.
     let text = ruleText?.trim() ?? '';
+    // When the rule binds a task: the caller's condition wins, a fresh
+    // distillation replaces the stored one, and a text-only re-promote keeps
+    // the condition the row already has.
+    let condition =
+      appliesWhen === undefined
+        ? (existing?.applies_when ?? null)
+        : readAppliesWhen(appliesWhen);
     let suggestions: RuleDistillation['scope_suggestions'] = [];
     let confidence: number | null = null;
     let rationale: string | null = null;
@@ -289,6 +303,9 @@ export class RuleCandidateDetector {
       // spends tokens on the owner's behalf, so it must land on their ledger.
       await this.#meterDistill(judgement, ownerId);
       text = judgement.verdict.rule_text.trim();
+      if (appliesWhen === undefined) {
+        condition = readAppliesWhen(judgement.verdict.applies_when);
+      }
       suggestions = judgement.verdict.scope_suggestions ?? [];
       confidence = judgement.verdict.confidence;
       rationale = judgement.verdict.rationale;
@@ -314,6 +331,7 @@ export class RuleCandidateDetector {
         useful_sessions: 0,
         window_days: 0,
         rule_text: text,
+        applies_when: condition,
         target_layer: targetLayer,
         applies_scope: address,
         suggested_scopes: suggestedScopes,
@@ -353,6 +371,7 @@ export class RuleCandidateDetector {
       rule_text: text,
       target_layer: targetLayer,
       applies_scope: address,
+      applies_when: condition,
       status: 'promoted',
     };
   }
@@ -518,6 +537,7 @@ export class RuleCandidateDetector {
       .from('rule_candidates')
       .update({
         rule_text: judgement.verdict.rule_text,
+        applies_when: readAppliesWhen(judgement.verdict.applies_when),
         target_layer: targetLayerForScope(row.scope),
         judge_confidence: judgement.verdict.confidence,
         judge_rationale: judgement.verdict.rationale,

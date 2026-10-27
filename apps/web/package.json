@@ -21,6 +21,8 @@
     "@workspace/db": "workspace:*",
     "@workspace/email": "workspace:*",
     "@workspace/i18n-catalogs": "workspace:*",
+    "@workspace/judgment": "workspace:*",
+    "@workspace/memory": "workspace:*",
     "@workspace/ui": "workspace:*",
     "lucide-react": "catalog:",
     "next": "catalog:",

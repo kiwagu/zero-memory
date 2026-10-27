@@ -67,23 +67,33 @@ bun run start      # HTTP server
 bun run mcp:stdio  # stdio MCP server
 ```
 
+Operator commands for the rule gate, run against a stand (never hosted
+production) with `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`:
+
+```sh
+bun run rules:applies-when-draft -- --owner usr_… --max 50   # draft missing applies_when; review them on /rules
+bun run rules:gate-agreement -- --days 14 --sample 40        # judge vs LLM agreement, latency, unavailable share
+```
+
 ## Environment variables
 
 Read directly by this app:
 
-| Variable               | Purpose                                                            |
-| ---------------------- | ------------------------------------------------------------------ |
-| `PORT`                 | HTTP port (default `8787`)                                         |
-| `ZM_PUBLIC_URL`        | Public base URL / OAuth issuer (default `http://localhost:<port>`) |
-| `ZM_EXTRACTOR`         | `deterministic` swaps in the test extractor (no API key needed)    |
-| `ZM_MCP_SESSION_TABLE` | DynamoDB table for MCP sessions; unset keeps them in memory        |
-| `ZM_RATE_LIMIT_TABLE`  | DynamoDB table for rate-limit counts (Lambda only, required there) |
-| `ZM_MCP_JSON_RESPONSE` | `on` answers MCP POSTs with one JSON body instead of SSE           |
+| Variable               | Purpose                                                                                               |
+| ---------------------- | ----------------------------------------------------------------------------------------------------- |
+| `PORT`                 | HTTP port (default `8787`)                                                                            |
+| `ZM_PUBLIC_URL`        | Public base URL / OAuth issuer (default `http://localhost:<port>`)                                    |
+| `ZM_EXTRACTOR`         | `deterministic` swaps in the test extractor (no API key needed)                                       |
+| `ZM_JUDGE_FAKE`        | tests only: `1` binds a deterministic judge and a dummy platform credential; never on a serving stack |
+| `ZM_MCP_SESSION_TABLE` | DynamoDB table for MCP sessions; unset keeps them in memory                                           |
+| `ZM_RATE_LIMIT_TABLE`  | DynamoDB table for rate-limit counts (Lambda only, required there)                                    |
+| `ZM_MCP_JSON_RESPONSE` | `on` answers MCP POSTs with one JSON body instead of SSE                                              |
 
 The wired adapters read their own variables — `SUPABASE_URL`,
-`SUPABASE_ANON_KEY`, `ZM_EMAIL`, `ZM_PASSWORD`, `ANTHROPIC_API_KEY`, … — see
-the READMEs of `@workspace/persistence`, `@workspace/extraction`,
-`@workspace/embedding`, `@workspace/mcp-auth`, and `@workspace/logger`.
+`SUPABASE_ANON_KEY`, `ZM_EMAIL`, `ZM_PASSWORD`, `ANTHROPIC_API_KEY`,
+`ZM_TYPESAFE_API_KEY`, `ZM_RULE_GATE_MODE`, … — see the READMEs of
+`@workspace/persistence`, `@workspace/extraction`, `@workspace/embedding`,
+`@workspace/judgment`, `@workspace/mcp-auth`, and `@workspace/logger`.
 
 ## Testing
 

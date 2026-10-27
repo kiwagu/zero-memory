@@ -122,6 +122,18 @@ export const relatedMemorySchema = z.object({
 });
 export type RelatedMemory = z.infer<typeof relatedMemorySchema>;
 
+/** `rule_candidates.id`: `rlc_` + 16 + `.` + 10 Crockford characters. */
+export const ruleCandidateIdSchema = entityIdSchemas.rule_candidate.schema;
+export type RuleCandidateId = z.infer<typeof ruleCandidateIdSchema>;
+
+/**
+ * How much of a standing rule a delivery carries: the whole text, the
+ * headline plus the applicability gate, or the headline alone. Absent on
+ * packs from servers that deliver every rule whole.
+ */
+export const ruleDeliveryLevelSchema = z.enum(['full', 'gate', 'headline']);
+export type RuleDeliveryLevel = z.infer<typeof ruleDeliveryLevelSchema>;
+
 /**
  * Standing rule as it appears inside a context briefing: the promoted rule's
  * imperative text plus whether the owner PINNED it. A pinned rule leads the
@@ -130,7 +142,20 @@ export type RelatedMemory = z.infer<typeof relatedMemorySchema>;
  * from one that merely fit.
  */
 export const contextRuleSchema = z.object({
+  /**
+   * The delivered text: the whole rule at level `full` (and whenever `level`
+   * is absent), otherwise the headline. Always present, so a client that
+   * knows nothing of levels still reads a true statement of the rule's name.
+   */
   text: z.string(),
   pinned: z.boolean(),
+  id: ruleCandidateIdSchema.optional(),
+  /**
+   * When the rule binds a task. A briefing carries it only at level `gate`,
+   * where the line shows it; a read of `zm://rules` or `zm://rules/{id}`
+   * carries it whenever the rule has one.
+   */
+  applies_when: z.string().optional(),
+  level: ruleDeliveryLevelSchema.optional(),
 });
 export type ContextRule = z.infer<typeof contextRuleSchema>;

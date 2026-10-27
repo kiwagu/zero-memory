@@ -88,6 +88,9 @@ export const ENTITY_PREFIXES = {
   // brief-holdout probe: a topic plus the memory a briefing is expected to
   // carry (or, for an anti-probe, expected NOT to carry).
   brief_probe: 'bpr',
+  // rule-gate probe: a task statement plus one rule the gate must deliver
+  // whole for it ('full') or must not ('headline').
+  rule_probe: 'rpb',
   // session thread: the durable identity of one conversation, carrying the
   // project it works in. It outlives the transport session (a reconnect or a
   // session-cap eviction used to reset the project silently), and its id IS

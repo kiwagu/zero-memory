@@ -26,7 +26,10 @@ import {
   deleteRuleCandidate,
   resolveRuleCandidate,
   revokeRuleCandidate,
+  setRuleAppliesWhen,
+  setRuleEnforcedBy,
   setRulePinned,
+  type ActionResult,
 } from '@/lib/rule-candidate.actions';
 
 export interface RevokeDialogLabels {
@@ -83,11 +86,15 @@ export function RuleCandidateList({
     });
   }
 
-  function handleTogglePin(item: RuleCandidateItem, pinned: boolean) {
+  /** Run one change to a rule, then re-read the page or show why it failed. */
+  function changeRule(
+    item: RuleCandidateItem,
+    change: (id: string) => Promise<ActionResult>
+  ) {
     setError(null);
     setPendingId(item.id);
     startTransition(async () => {
-      const result = await setRulePinned(item.id, pinned);
+      const result = await change(item.id);
       setPendingId(null);
       if (!result.ok) {
         setError(result.error);
@@ -95,6 +102,18 @@ export function RuleCandidateList({
       }
       router.refresh();
     });
+  }
+
+  function handleTogglePin(item: RuleCandidateItem, pinned: boolean) {
+    changeRule(item, (id) => setRulePinned(id, pinned));
+  }
+
+  function handleAppliesWhen(item: RuleCandidateItem, value: string) {
+    changeRule(item, (id) => setRuleAppliesWhen(id, value || null));
+  }
+
+  function handleEnforcedBy(item: RuleCandidateItem, value: string) {
+    changeRule(item, (id) => setRuleEnforcedBy(id, value || null));
   }
 
   function openRevoke(item: RuleCandidateItem) {
@@ -149,6 +168,8 @@ export function RuleCandidateList({
         onResolve={handleResolve}
         onRevoke={openRevoke}
         onTogglePin={handleTogglePin}
+        onAppliesWhen={handleAppliesWhen}
+        onEnforcedBy={handleEnforcedBy}
         onDelete={(item) => {
           setError(null);
           setDeleteItem(item);

@@ -21,6 +21,7 @@ export class BuildContextQuery extends Query implements BuildContextInput {
   public readonly conversation_id?: string;
   public readonly thread?: string;
   public readonly briefing_kind?: 'session' | 'task';
+  public readonly judge_rules?: boolean;
 
   constructor(props: QueryProps<BuildContextInput>) {
     super();
@@ -32,5 +33,6 @@ export class BuildContextQuery extends Query implements BuildContextInput {
     this.conversation_id = props.conversation_id;
     this.thread = props.thread;
     this.briefing_kind = props.briefing_kind;
+    this.judge_rules = props.judge_rules;
   }
 }

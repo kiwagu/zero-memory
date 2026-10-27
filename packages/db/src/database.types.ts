@@ -780,6 +780,57 @@ export type Database = {
           },
         ];
       };
+      judge_credentials: {
+        Row: {
+          created_at: string;
+          hint: string;
+          model: string | null;
+          provider: string;
+          secret_id: string;
+          subject_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          hint: string;
+          model?: string | null;
+          provider: string;
+          secret_id: string;
+          subject_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          hint?: string;
+          model?: string | null;
+          provider?: string;
+          secret_id?: string;
+          subject_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      judge_settings: {
+        Row: {
+          enabled: boolean;
+          provider: string | null;
+          subject_id: string;
+          updated_at: string;
+        };
+        Insert: {
+          enabled?: boolean;
+          provider?: string | null;
+          subject_id: string;
+          updated_at?: string;
+        };
+        Update: {
+          enabled?: boolean;
+          provider?: string | null;
+          subject_id?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       loop_closure_checks: {
         Row: {
           checked_at: string;
@@ -1786,9 +1837,11 @@ export type Database = {
       rule_candidates: {
         Row: {
           applies_scope: unknown;
+          applies_when: string | null;
           carried_at: string | null;
           carried_from: string | null;
           created_at: string;
+          enforced_by: string | null;
           first_used_at: string | null;
           id: string;
           judge_confidence: number | null;
@@ -1815,9 +1868,11 @@ export type Database = {
         };
         Insert: {
           applies_scope?: unknown;
+          applies_when?: string | null;
           carried_at?: string | null;
           carried_from?: string | null;
           created_at?: string;
+          enforced_by?: string | null;
           first_used_at?: string | null;
           id?: string;
           judge_confidence?: number | null;
@@ -1844,9 +1899,11 @@ export type Database = {
         };
         Update: {
           applies_scope?: unknown;
+          applies_when?: string | null;
           carried_at?: string | null;
           carried_from?: string | null;
           created_at?: string;
+          enforced_by?: string | null;
           first_used_at?: string | null;
           id?: string;
           judge_confidence?: number | null;
@@ -1884,6 +1941,54 @@ export type Database = {
             columns: ['resolved_by'];
             isOneToOne: false;
             referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      rule_probes: {
+        Row: {
+          created_at: string;
+          expect: string;
+          id: string;
+          note: string | null;
+          owner_id: string;
+          retired_at: string | null;
+          rule_id: string;
+          topic: string;
+        };
+        Insert: {
+          created_at?: string;
+          expect: string;
+          id?: string;
+          note?: string | null;
+          owner_id: string;
+          retired_at?: string | null;
+          rule_id: string;
+          topic: string;
+        };
+        Update: {
+          created_at?: string;
+          expect?: string;
+          id?: string;
+          note?: string | null;
+          owner_id?: string;
+          retired_at?: string | null;
+          rule_id?: string;
+          topic?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'rule_probes_owner_id_fkey';
+            columns: ['owner_id'];
+            isOneToOne: false;
+            referencedRelation: 'profiles';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'rule_probes_rule_id_fkey';
+            columns: ['rule_id'];
+            isOneToOne: false;
+            referencedRelation: 'rule_candidates';
             referencedColumns: ['id'];
           },
         ];
@@ -2097,10 +2202,20 @@ export type Database = {
           briefing_total: number;
           captured: number;
           day: string;
+          guard_refusals: number;
+          judge_input_tokens: number;
+          judge_latency_ms_sum: number;
+          judge_unavailable: number;
           judged: number;
           recall_calls: number;
           relevant: number;
           rolled_up_at: string;
+          rule_fetches: number;
+          rule_gate_calls: number;
+          rules_chars_baseline: number;
+          rules_chars_delivered: number;
+          rules_full: number;
+          rules_judged: number;
           saved_tokens: number;
           used: number;
           user_id: string;
@@ -2111,10 +2226,20 @@ export type Database = {
           briefing_total?: number;
           captured?: number;
           day: string;
+          guard_refusals?: number;
+          judge_input_tokens?: number;
+          judge_latency_ms_sum?: number;
+          judge_unavailable?: number;
           judged?: number;
           recall_calls?: number;
           relevant?: number;
           rolled_up_at?: string;
+          rule_fetches?: number;
+          rule_gate_calls?: number;
+          rules_chars_baseline?: number;
+          rules_chars_delivered?: number;
+          rules_full?: number;
+          rules_judged?: number;
           saved_tokens?: number;
           used?: number;
           user_id: string;
@@ -2125,10 +2250,20 @@ export type Database = {
           briefing_total?: number;
           captured?: number;
           day?: string;
+          guard_refusals?: number;
+          judge_input_tokens?: number;
+          judge_latency_ms_sum?: number;
+          judge_unavailable?: number;
           judged?: number;
           recall_calls?: number;
           relevant?: number;
           rolled_up_at?: string;
+          rule_fetches?: number;
+          rule_gate_calls?: number;
+          rules_chars_baseline?: number;
+          rules_chars_delivered?: number;
+          rules_full?: number;
+          rules_judged?: number;
           saved_tokens?: number;
           used?: number;
           user_id?: string;
@@ -2661,6 +2796,14 @@ export type Database = {
         Args: { prefix: string; value: string };
         Returns: boolean;
       };
+      judge_credential_for: {
+        Args: { p_subject_id: string };
+        Returns: {
+          api_key: string;
+          model: string;
+          provider: string;
+        }[];
+      };
       list_memory_scopes: {
         Args: never;
         Returns: {
@@ -2786,6 +2929,10 @@ export type Database = {
         Args: { p_client_id: string; p_user_id: string };
         Returns: Json;
       };
+      revoke_judge_credential: {
+        Args: { p_subject_id: string };
+        Returns: undefined;
+      };
       revoke_provider_credential: {
         Args: { p_subject_id: string };
         Returns: undefined;
@@ -2797,6 +2944,7 @@ export type Database = {
           scope: string;
         }[];
       };
+      rule_gate_stats: { Args: { p_days?: number }; Returns: Json };
       scope_member_identities: {
         Args: never;
         Returns: {
@@ -2830,6 +2978,15 @@ export type Database = {
       };
       session_assurance: { Args: never; Returns: Json };
       session_receipt: { Args: { p_since: string }; Returns: Json };
+      set_judge_credential: {
+        Args: {
+          p_api_key: string;
+          p_model?: string;
+          p_provider: string;
+          p_subject_id: string;
+        };
+        Returns: undefined;
+      };
       set_provider_credential: {
         Args: {
           p_api_key: string;

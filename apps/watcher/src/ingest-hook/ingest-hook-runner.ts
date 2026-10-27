@@ -20,6 +20,9 @@ import { ingestAllowed } from '@workspace/client-runtime';
 // shows the Stop hook firing even when there is nothing new to send.
 const logger = createLogger('ingest');
 
+/** The longest refusal timestamp the ingest contract admits. */
+const GUARD_REFUSAL_AT_MAX = 64;
+
 /**
  * Hook-driven ingest: ship the NEW part of the session transcript to
  * ingest_conversation so durable facts are captured automatically. This is the
@@ -159,6 +162,18 @@ export const flushTranscriptDelta = async (
       // Without this the judge stays dark for every hook-driven client — only
       // the file-tailing daemon (Claude) used to pass it on.
       ...recalledIdsField(parsed.recalledIds),
+      // Names and timestamps only, oldest first, within the contract's caps.
+      // A timestamp longer than the contract admits goes as unknown: refused,
+      // it would fail this send and every retry of it, since the offset only
+      // moves on once a send succeeds.
+      ...(parsed.guardRefusals.length > 0 && {
+        guard_refusals: parsed.guardRefusals
+          .slice(0, 50)
+          .map(({ guard, at }) => ({
+            guard,
+            at: at !== null && at.length <= GUARD_REFUSAL_AT_MAX ? at : null,
+          })),
+      }),
     });
 
     offsets[transcriptPath] = raw.length;

@@ -29,6 +29,7 @@ describe('parseHermesTranscript', () => {
       ],
       cwd: '/home/dev/project',
       recalledIds: [],
+      guardRefusals: [],
     });
   });
 
@@ -78,6 +79,7 @@ describe('parseHermesTranscript', () => {
       entries: [{ role: 'assistant', text: 'still parsed' }],
       cwd: undefined,
       recalledIds: [],
+      guardRefusals: [],
     });
   });
 

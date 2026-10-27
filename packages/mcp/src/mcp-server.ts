@@ -68,6 +68,7 @@ import {
   restoreMemoryInputSchema,
   restoreMemoryOutputSchema,
   memoryIdSchema,
+  ruleCandidateIdSchema,
   sessionReceiptInputSchema,
   sessionReceiptOutputSchema,
   moveMemoriesInputSchema,
@@ -75,9 +76,11 @@ import {
   shareInputSchema,
   shareOutputSchema,
   ZM_MEMORY_URI_TEMPLATE,
+  ZM_RULE_URI_TEMPLATE,
   ZM_RULES_URI,
   zmMemoryUri,
   type ExportedMemory,
+  type PromotedRuleResource,
   type PromotedRulesResource,
   type BuildContextOutput,
   type BoardOutput,
@@ -97,6 +100,7 @@ import {
   type RecallOutput,
   type ReleaseOutput,
   type RememberOutput,
+  type RuleGateBlock,
   type SessionReceiptOutput,
   type MoveMemoriesOutput,
   type ShareOutput,
@@ -131,6 +135,7 @@ import {
 import { createRoiRunner, type RoiProbeCase } from '@workspace/roi';
 import { z } from 'zod';
 
+import { renderRulesFooter } from './rules-footer.js';
 import { toolError, toolErrorFromThrown } from './tool-error.js';
 import {
   InProcessWorkClaims,
@@ -311,6 +316,18 @@ export interface McpServerDeps {
    * absent the rules resource is not registered at all (honest capability).
    */
   readPromotedRules?: () => Promise<ContextRule[]>;
+  /** One promoted rule by id, under the caller's credential; null when absent or not theirs. */
+  readPromotedRule?: (id: string) => Promise<ContextRule | null>;
+  /**
+   * A one-rule resource read happened (the fetch-after-headline signal).
+   * Fires inside the authenticated context so the event attributes the
+   * caller; fire-and-forget, never awaited.
+   */
+  onResourceRead?: (metering: {
+    resource: 'rule';
+    ruleId: string;
+    found: boolean;
+  }) => void;
   /**
    * The caller's PROMOTED user-layer rules, pinned first, read by the
    * transport at session creation under the caller's JWT. How much of them
@@ -509,12 +526,14 @@ export const composeInstructions = (
  * `build_context` carry the `mem_` ids they surfaced (via
  * {@link McpServerDeps.onToolResult}); `remember` carries the supersede-
  * candidate ids it surfaced (via {@link McpServerDeps.onRememberResult}) so the
- * rediscovery metric is computable post-hoc.
+ * rediscovery metric is computable post-hoc; a `resource:rule` read carries the
+ * rule id and whether it was found (via {@link McpServerDeps.onResourceRead}).
  */
 export const RESULT_ATTRIBUTED_TOOLS = [
   'recall',
   'build_context',
   'remember',
+  'resource:rule',
 ] as const;
 
 /**
@@ -581,6 +600,8 @@ export interface ToolResultMetering {
    * counts only — never content.
    */
   scopes: ReadScopeMetering;
+  /** The rule gate's content-free summary for this call, when it ran (ids, levels, numbers). */
+  ruleGate?: RuleGateBlock | null;
 }
 
 /** How a read's search set was decided — the audit key of read metering. */
@@ -1893,6 +1914,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
               ...(result.recent ?? []),
             ]),
           },
+          ruleGate: result.rule_gate ?? null,
         });
         // A hint-pinned call resolved the project — attach it to the session
         // (mirrored from the thread, see mirrorProjectOntoSession) so the
@@ -1909,21 +1931,14 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         // of the remember-reminder footer, so they read as rules, not data.
         // This is the channel that carries their TEXT — the MCP instructions
         // only announce that they exist — so an agent calling build_context
-        // directly (no hook) still receives them in full. Pinned rules lead
-        // and are marked: the owner guaranteed those reach the session.
+        // directly (no hook) still receives each rule at the level the gate
+        // chose: in full, by headline with its condition, or by headline.
+        // Pinned rules lead and are marked: the owner guaranteed those reach
+        // the session.
         const briefedRules = result.rules ?? [];
         const rulesFooter =
           briefedRules.length > 0
-            ? 'STANDING RULES — instructions the owner PROMOTED out of ' +
-              'memory for sessions like this one. Follow them like system ' +
-              'rules; they are not background context:\n' +
-              briefedRules
-                .map(
-                  (rule, index) =>
-                    `${index + 1}.${rule.pinned ? ' [pinned]' : ''} ${rule.text}`
-                )
-                .join('\n') +
-              `\n\n${REMEMBER_REMINDER}`
+            ? `${renderRulesFooter(briefedRules)}\n\n${REMEMBER_REMINDER}`
             : REMEMBER_REMINDER;
         const session = sessionState(deps.sessionScope, result.session?.thread);
         return asToolResult(
@@ -2337,8 +2352,12 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'waiting for it to earn candidacy across sessions. Use when you ' +
         'already know a decision/preference/convention is a standing rule. ' +
         'The imperative text is distilled from the memory (pass rule_text to ' +
-        'override). By default it becomes a GENERAL (user-layer) rule when ' +
-        'the memory sits in a personal scope, delivered to every session via ' +
+        'override), and so is applies_when: the observable task features ' +
+        'under which the rule binds (pass it to set your own). With ' +
+        'rule_text nothing is distilled, so pass applies_when too or the ' +
+        'stored one is kept. By default it ' +
+        'becomes a GENERAL (user-layer) rule when the memory sits in a ' +
+        'personal scope, delivered to every session via ' +
         'the MCP instructions; pass applies_scope to make it a PROJECT rule ' +
         "delivered only in that project's briefings. Owner-only (your " +
         'memory). Reversible via the /rules revoke.',
@@ -2356,6 +2375,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           ownerId,
           appliesScope: input.applies_scope,
           ruleText: input.rule_text,
+          appliesWhen: input.applies_when,
           force: input.force,
         });
         // Instructions are frozen at connect, so a freshly promoted rule does
@@ -2577,6 +2597,58 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           return readPromotedRules();
         });
         const payload: PromotedRulesResource = { rules };
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: 'application/json',
+              text: JSON.stringify(payload),
+            },
+          ],
+        };
+      }
+    );
+  }
+
+  // One rule in full, by id: the way out of a rule that a briefing delivered
+  // by headline or gate. Same honest-capability rule as zm://rules — absent
+  // without the transport's read.
+  const readPromotedRule = deps.readPromotedRule;
+  if (readPromotedRule) {
+    server.registerResource(
+      'rule',
+      new ResourceTemplate(ZM_RULE_URI_TEMPLATE, { list: undefined }),
+      {
+        title: 'One standing rule, in full',
+        description:
+          'The whole text of one promoted standing rule by its rlc_ id — the way to read a rule ' +
+          'that a briefing delivered by headline or gate before acting on it.',
+        mimeType: 'application/json',
+        annotations: { audience: ['assistant'], priority: 1 },
+      },
+      async (uri, variables) => {
+        const raw = Array.isArray(variables.id)
+          ? variables.id[0]
+          : variables.id;
+        const parsed = ruleCandidateIdSchema.safeParse(raw);
+        if (!parsed.success) throw new Error(`Not a rule id: ${String(raw)}`);
+        const rule = await deps.runInToolContext<ContextRule | null>(
+          async () => {
+            deps.onToolInvocation?.('resource:rule');
+            const read = await readPromotedRule(parsed.data);
+            // Inside the context, so the usage row attributes the caller on
+            // a transport whose context wraps only this callback (stdio).
+            deps.onResourceRead?.({
+              resource: 'rule',
+              ruleId: parsed.data,
+              found: read !== null,
+            });
+            return read;
+          }
+        );
+        // One answer for "absent", "revoked" and "not yours", as for memories.
+        if (!rule) throw new Error(`Rule ${parsed.data} not found.`);
+        const payload: PromotedRuleResource = { rule };
         return {
           contents: [
             {

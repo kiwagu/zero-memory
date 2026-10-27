@@ -8,9 +8,11 @@ that operate on them.
 
 Domain + application layer. Depends on the shared kernel
 (`@workspace/domain`, `@workspace/contracts`, `@workspace/context`,
-`@workspace/di`, `@workspace/logger`) and the embedding port
-(`@workspace/embedding`). It defines the persistence ports; the Supabase
-adapters live in `@workspace/persistence` and are bound in the app host.
+`@workspace/di`, `@workspace/logger`), the embedding port
+(`@workspace/embedding`), the typed-judgment port (`@workspace/judgment`) and
+the usage meter (`@workspace/usage`). It defines the persistence ports; the
+Supabase adapters live in `@workspace/persistence` and are bound in the app
+host.
 
 ## Model
 
@@ -117,6 +119,33 @@ one; the service only reads the result back, so `remember` can list it under
 `rules` (carried, carried with a curated text kept for review, or not carried)
 and `forget` can say the rule stays live. A read failure costs the report,
 never the write.
+
+`IRuleGate` / `RULE_GATE` (`RuleGateService`, configured through
+`RULE_GATE_CONFIG`, which the host reads from `ZM_RULE_GATE_*` and
+`ZM_JUDGE_TIMEOUT_MS` once at startup) decides how much of each standing rule
+a briefing delivers. It asks a decision model one yes/no question per unpinned
+rule — does it bind this task? — and maps the answer to `full`, `gate`
+(headline plus `applies_when`) or `headline` by two probability bands. Pinned
+rules are never judged and every rule keeps its name. An agent call is judged
+against its `topic`; a budgeted hook briefing only against the statement
+`hookTaskStatement` builds from the conversation's bound or continuation card,
+and not at all without one, nor when the call passes `judge_rules: false` (the
+hook's secondary briefing, so one session start judges once). The gate runs only for an account that turned it
+on and has a judge credential; `shadow` records the levels in `rule_gate`
+without changing what is delivered. A judge failure delivers the rules as
+before, flagged `judge_unavailable`, and never falls back to another provider;
+a gate failure costs the levelling, never the briefing. On the instance's key
+the gate first asks the budget guard (`@workspace/policy`) whether the
+account's `extraction` allowance has room, and delivers the rules whole with
+`unavailable_reason: 'budget_exhausted'` when it has none; an account's own
+key is never held back. A settings, credential or allowance read that fails,
+and a judge call that fails other than by not answering, are reported the same
+way, with `settings_unavailable`, `credential_unavailable`,
+`budget_unavailable` or `judge_error`. Every way out of the
+briefing sends a rule as the agent reads it: its text, pin, id and level, and
+its `applies_when` only at `gate` (`deliverAtLevel`; `deliverUnjudged` when
+nothing judged it). `chars_baseline` sums the rules' whole texts and
+`chars_delivered` what was sent, over the same rules.
 
 A write carries `PassageVectors` — a named `{ primary, overflow }` shape
 rather than a bare array, because the embedding model truncates its input to a

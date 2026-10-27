@@ -32,6 +32,7 @@ import {
   type UserDataDisposition,
 } from '@workspace/db';
 
+import { psql } from '../helpers/board-store.js';
 import { e2eEnv } from '../helpers/env.js';
 import { firstJson, McpTestClient } from '../helpers/mcp.js';
 import { readSeedState } from '../helpers/runtime-state.js';
@@ -267,10 +268,19 @@ test.describe('account lifecycle: erasure', () => {
         ord: 0,
         embedding: JSON.stringify(Array.from({ length: 1024 }, () => 0)),
       });
-      await insertOrThrow(db, 'rule_candidates', {
-        memory_id: m1,
-        useful_sessions: 1,
-        window_days: 7,
+      const { data: rule, error: ruleError } = await db
+        .from('rule_candidates')
+        .insert({ memory_id: m1, useful_sessions: 1, window_days: 7 })
+        .select('id')
+        .single();
+      if (ruleError) {
+        throw new Error(`seed rule_candidates: ${ruleError.message}`);
+      }
+      await insertOrThrow(db, 'rule_probes', {
+        owner_id: userId,
+        topic: 'e2e erasure fixture',
+        rule_id: (rule as { id: string }).id,
+        expect: 'full',
       });
       const { data: candidate } = await db
         .from('reflection_candidates')
@@ -411,6 +421,21 @@ test.describe('account lifecycle: erasure', () => {
         subject_id: userId,
         budget_id: 'e2e-erase',
       });
+      await insertOrThrow(db, 'judge_settings', {
+        subject_id: userId,
+        enabled: true,
+        provider: 'subq',
+      });
+      // Stored the way the server stores one, so a Vault secret stands behind
+      // the row and erasure has to revoke it rather than drop a bare row.
+      const { error: judgeKeyError } = await db.rpc('set_judge_credential', {
+        p_subject_id: userId,
+        p_provider: 'typesafe',
+        p_api_key: 'e2e-erase-judge-key',
+      });
+      if (judgeKeyError) {
+        throw new Error(`seed judge_credentials: ${judgeKeyError.message}`);
+      }
       await insertOrThrow(db, 'ingest_log', {
         chunk_hash: 'e2e-erase-hash',
         client: 'e2e',
@@ -854,6 +879,16 @@ test.describe('account lifecycle: erasure', () => {
         ).toBeGreaterThan(0);
       }
 
+      // The judge key is a Vault secret behind its row. The table sweep below
+      // cannot see the vault, so the secret is counted by hand on both sides:
+      // dropping only the row would orphan the key and still pass the sweep.
+      const judgeSecrets = (): string =>
+        psql(
+          `select count(*) from vault.secrets ` +
+            `where name = 'judge_credential:${userId}'`
+        );
+      expect(judgeSecrets()).toBe('1');
+
       // Erase.
       await way.erase(db, { userId, authId: departing.user.id });
 
@@ -869,6 +904,10 @@ test.describe('account lifecycle: erasure', () => {
         );
         expect(remaining, `expected zero user rows left in ${table}`).toBe(0);
       }
+      expect(
+        judgeSecrets(),
+        "the erased account's judge key remains in the vault"
+      ).toBe('0');
       // The agent sessions went with the Auth user (foreign-key cascade): the
       // map excludes the table, so this is asserted here by hand.
       const { count: agentRows, error: agentError } = await db

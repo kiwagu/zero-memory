@@ -330,6 +330,9 @@ const runSessionStart = async (
           briefing: true,
           conversation_id: conversationId,
           project_hint: projectHint,
+          // The project briefing is the one judged against the conversation's
+          // card; judging this pack too would spend a second judge call.
+          judge_rules: false,
         })
           .then((briefing) => ({ topic: branch, briefing }))
           .catch(() => 'failed' as const)
@@ -509,8 +512,9 @@ const runSessionStart = async (
     // budget has no ceiling of its own, so an abundant loop supply fills
     // it completely — eating the floor the pack was promised before the
     // pack ever gets a budget to render against. Pinned rules still
-    // outrank both floors (they are exempt from the ceiling above), same
-    // as today.
+    // outrank both floors: they are the only lines exempt from the ceiling
+    // above, where a line the server gated or headlined is budgeted like a
+    // headline.
     Math.max(
       0,
       budget -
