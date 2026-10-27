@@ -1,4 +1,5 @@
 import type { ContextRule } from '@workspace/contracts';
+import { TypeSafeJudgment } from '@workspace/judgment';
 import { FakeJudgment } from '@workspace/judgment/testing';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -139,7 +140,7 @@ describe('levelFor / deliverAtLevel', () => {
 });
 
 describe('ruleGateRequest', () => {
-  it('asks about each rule by its condition, or by its text when it has none, keyed by id', () => {
+  it('asks about each rule by its condition, or by its text when it has none, named by position', () => {
     const conditioned = rules[1]! as ContextRule & { id: string };
     const unheaded = {
       id: id('unheaded'),
@@ -147,7 +148,7 @@ describe('ruleGateRequest', () => {
       pinned: false,
     };
 
-    const { state, questions } = ruleGateRequest('ship the release', [
+    const { state, questions, ids } = ruleGateRequest('ship the release', [
       conditioned,
       unheaded,
     ]);
@@ -155,28 +156,95 @@ describe('ruleGateRequest', () => {
     expect(state).toEqual({
       task: 'ship the release',
       rules: {
-        [conditioned.id]: {
+        r1: {
           headline: 'ONE-LINE COMMITS (every project)',
           applies_when: 'tasks that commit [p=0.9]',
         },
-        [unheaded.id]: {
+        r2: {
           headline: 'ALWAYS RUN THE GATES FIRST',
           text: 'ALWAYS RUN THE GATES FIRST. Then commit.',
         },
       },
     });
-    expect(Object.keys(state.rules as object)).toEqual([
-      conditioned.id,
-      unheaded.id,
-    ]);
-    expect(Object.keys(questions)).toEqual([
-      `rule_${conditioned.id}`,
-      `rule_${unheaded.id}`,
-    ]);
-    expect(questions[`rule_${unheaded.id}`]).toMatchObject({ kind: 'noul' });
-    expect(questions[`rule_${unheaded.id}`]!.instructions).toContain(
-      `\`rules.${unheaded.id}\``
+    expect(Object.keys(state.rules as object)).toEqual(['r1', 'r2']);
+    expect(Object.keys(questions)).toEqual(['r1', 'r2']);
+    expect(ids).toEqual({ r1: conditioned.id, r2: unheaded.id });
+    expect(questions.r2).toMatchObject({ kind: 'noul' });
+    expect(questions.r2!.instructions).toContain('`rules.r2`');
+  });
+});
+
+describe('the request on the wire', () => {
+  it('sends names a state path resolves and maps the answers back to rule ids', async () => {
+    const bodies: Array<{
+      model: string;
+      state: { task: string; rules: Record<string, Record<string, string>> };
+      questions: Record<string, { type: string; instructions: string }>;
+    }> = [];
+    const stubbed: typeof fetch = async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(
+        JSON.stringify({
+          model: 'jev-1.14.0',
+          answers: {
+            r1: { type: 'noul', noul: 0.9 },
+            r2: { type: 'noul', noul: 0.1 },
+          },
+          usage: { input_tokens: 180, output_tokens: 0 },
+        }),
+        { status: 200 }
+      );
+    };
+    const judgment = new TypeSafeJudgment({
+      apiKey: 'k',
+      model: 'jev-1.14.0',
+      fetch: stubbed,
+    });
+    const svc = new RuleGateService(
+      { read: vi.fn().mockResolvedValue({ enabled: true, provider: null }) },
+      {
+        resolve: vi.fn().mockResolvedValue({
+          provider: 'typesafe',
+          apiKey: 'k',
+          model: 'jev-1.14.0',
+          ownedByCaller: false,
+        }),
+      },
+      () => judgment,
+      { record: vi.fn() },
+      { check: vi.fn().mockResolvedValue({ allowed: true }) },
+      { mode: 'live', hi: 0.6, lo: 0.35, timeoutMs: 1500 }
     );
+
+    const out = await svc.apply({
+      rules: [rules[1]!, rules[4]!],
+      task: 'commit the fix',
+      subjectId: 'usr_a',
+    });
+
+    const body = bodies[0]!;
+    expect(bodies).toHaveLength(1);
+    expect(body.model).toBe('jev-1.14.0');
+    expect(Object.keys(body.questions)).toEqual(['r1', 'r2']);
+    expect(body.questions.r1!.type).toBe('noul');
+    expect(body.questions.r1!.instructions).toContain('`rules.r1`');
+    expect(body.state).toEqual({
+      task: 'commit the fix',
+      rules: {
+        r1: {
+          headline: 'ONE-LINE COMMITS (every project)',
+          applies_when: 'tasks that commit [p=0.9]',
+        },
+        r2: {
+          headline: 'NO APPLIES WHEN ON THIS RULE',
+          text: rules[4]!.text,
+        },
+      },
+    });
+    expect(out.block!.rules.map((r) => [r.id, r.p, r.level])).toEqual([
+      [id('commit'), 0.9, 'full'],
+      [id('bare'), 0.1, 'headline'],
+    ]);
   });
 });
 
@@ -192,10 +260,10 @@ describe('RuleGateService.apply', () => {
     // The judge is held to the configured timeout.
     expect(judge.callOptions[0]).toEqual({ timeoutMs: 1500 });
     expect(Object.keys(judge.calls[0]!.questions)).toEqual([
-      `rule_${id('commit')}`,
-      `rule_${id('stack')}`,
-      `rule_${id('plan')}`,
-      `rule_${id('bare')}`,
+      'r1',
+      'r2',
+      'r3',
+      'r4',
     ]);
     expect(out.rules.map((r) => [r.id, r.level])).toEqual([
       [id('pin'), 'full'],

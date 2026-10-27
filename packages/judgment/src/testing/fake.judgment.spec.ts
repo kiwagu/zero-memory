@@ -7,19 +7,19 @@ const request = {
   state: {
     task: 'anything',
     rules: {
-      rlc_a: { headline: 'A', applies_when: 'tasks that commit [p=0.9]' },
-      rlc_b: { headline: 'B', applies_when: 'tasks that deploy' },
+      r1: { headline: 'A', applies_when: 'tasks that commit [p=0.9]' },
+      r2: { headline: 'B', applies_when: 'tasks that deploy' },
       // Not asked about: its marker must not produce an answer.
-      rlc_c: { headline: 'C', applies_when: 'tasks that plan [p=0.1]' },
+      r3: { headline: 'C', applies_when: 'tasks that plan [p=0.1]' },
     },
   },
   questions: {
-    rule_rlc_a: {
+    r1: {
       kind: 'noul' as const,
       instructions: 'binds?',
       criteria: { true: 'y', false: 'n' },
     },
-    rule_rlc_b: {
+    r2: {
       kind: 'noul' as const,
       instructions: 'binds?',
       criteria: { true: 'y', false: 'n' },
@@ -30,14 +30,11 @@ const request = {
 };
 
 describe('FakeJudgment', () => {
-  it('reads [p=…] markers from the rule the question names and defaults otherwise', async () => {
+  it("reads [p=…] markers from the rule of the question's name and defaults otherwise", async () => {
     const result = await new FakeJudgment({ defaultP: 0.5 }).judge(request);
-    expect(result.answers.rule_rlc_a?.noul).toBeCloseTo(0.9);
-    expect(result.answers.rule_rlc_b?.noul).toBeCloseTo(0.5);
-    expect(Object.keys(result.answers).sort()).toEqual([
-      'rule_rlc_a',
-      'rule_rlc_b',
-    ]);
+    expect(result.answers.r1?.noul).toBeCloseTo(0.9);
+    expect(result.answers.r2?.noul).toBeCloseTo(0.5);
+    expect(Object.keys(result.answers).sort()).toEqual(['r1', 'r2']);
     expect(result.provider).toBe('typesafe');
     expect(result.model).toBe('fake');
   });

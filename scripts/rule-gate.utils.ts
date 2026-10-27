@@ -187,7 +187,7 @@ export const judgeTopic = async (
   rules: readonly JudgedRule[],
   owner: string
 ): Promise<TopicJudgment | null> => {
-  const { state, questions } = ruleGateRequest(task, rules);
+  const { state, questions, ids } = ruleGateRequest(task, rules);
   const started = performance.now();
   try {
     const result = await judge.judgment.judge(
@@ -196,9 +196,9 @@ export const judgeTopic = async (
     );
     const latencyMs = Math.round(performance.now() - started);
     const p = new Map<string, number>();
-    for (const rule of rules) {
-      const answer = result.answers[`rule_${rule.id}`];
-      if (answer) p.set(rule.id, answer.noul);
+    for (const [name, ruleId] of Object.entries(ids)) {
+      const answer = result.answers[name];
+      if (answer) p.set(ruleId, answer.noul);
     }
     return { p, latencyMs, inputTokens: result.usage.inputTokens };
   } catch (error) {

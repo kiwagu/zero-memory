@@ -101,7 +101,11 @@ One status policy for both providers:
   name a different `model` than the alias sent, and the adapter reports the
   one the response names.
 - Request: `{ model, state, questions: { <name>: { type: 'noul', instructions, criteria } } }`,
-  where `criteria` is `{ true, false }`.
+  where `criteria` is `{ true, false }`. Instructions point into `state` by
+  a dotted path in backticks, so a key that holds a dot does not resolve:
+  the rule gate names each rule by position (`r1`, `r2`, …) as its question
+  and as its key under `state.rules`, and maps the answers back to rule ids
+  itself.
 - Response: `{ model, answers: { <name>: { type: 'noul', noul } }, usage: { input_tokens, output_tokens } }`.
 - Statuses: TypeSafe documents `429` and `529` as retryable; both fall under
   the shared policy above.

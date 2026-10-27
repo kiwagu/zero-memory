@@ -8,9 +8,10 @@ import {
 const MARKER = /\[p=(0(?:\.\d+)?|1(?:\.0+)?)\]/u;
 
 /**
- * Deterministic judge for tests: a question named `rule_<id>` is answered
- * with the `[p=0.xx]` marker found in `state.rules[<id>]` (its applies_when or
- * text), else `defaultP`. Only the questions asked get answers.
+ * Deterministic judge for tests: a question is answered with the `[p=0.xx]`
+ * marker found in the rule of the same name under `state.rules` (its
+ * applies_when or text), else `defaultP` — the gate names each rule `r1`,
+ * `r2`, … in both places. Only the questions asked get answers.
  * `mode: 'unavailable'` throws JudgeUnavailableError; `mode: 'slow'` waits
  * past any timeout the caller passes.
  */
@@ -47,8 +48,7 @@ export class FakeJudgment implements IJudgment {
     >;
     const answers: Record<string, { noul: number }> = {};
     for (const name of Object.keys(request.questions)) {
-      const id = name.replace(/^rule_/u, '');
-      const rule = rules[id];
+      const rule = rules[name];
       const marker = `${rule?.applies_when ?? ''} ${rule?.text ?? ''}`.match(
         MARKER
       );

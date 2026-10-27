@@ -126,40 +126,55 @@ export const questionFor = (key: string): NoulQuestion => ({
   },
 });
 
-/** A rule the gate can judge: unpinned, and with an id to key its answer by. */
+/** A rule the gate can judge: unpinned, and with an id to map its answer to. */
 export type JudgedRule = ContextRule & { readonly id: string };
+
+/** One judgment's request, and which rule each of its questions is about. */
+export interface RuleGateRequest extends Pick<
+  JudgmentRequest,
+  'state' | 'questions'
+> {
+  /** Question name (`r1`, `r2`, …) → the id of the rule it asks about. */
+  readonly ids: Readonly<Record<string, string>>;
+}
 
 /**
  * The one judgment the gate asks per call: the task, and per rule its
  * headline with its condition (or its whole text when it has none), plus one
- * yes/no question keyed `rule_<id>`. Exported so an evaluation asks exactly
- * what the gate asks.
+ * yes/no question. A rule is named by its position — `r1`, `r2`, … in the
+ * order given — both as its question and as its key under `state.rules`: an
+ * instruction points at the rule by a state path, and a rule id has a dot in
+ * it, which a path would read as one more step. `ids` maps each name back.
+ * At most 24 questions: the delivery caps admit 12 unpinned rules per layer,
+ * and pinned rules are never asked about. Exported so an evaluation asks
+ * exactly what the gate asks.
  */
 export const ruleGateRequest = (
   task: string,
   rules: readonly JudgedRule[]
-): Pick<JudgmentRequest, 'state' | 'questions'> => ({
-  state: {
-    task,
-    rules: Object.fromEntries(
-      rules.map((rule) => [
-        rule.id,
-        rule.applies_when
-          ? {
-              headline: ruleHeadline(rule.text),
-              applies_when: rule.applies_when,
-            }
-          : {
-              headline: ruleHeadline(rule.text),
-              text: rule.text,
-            },
-      ])
+): RuleGateRequest => {
+  const named = rules.map((rule, index) => ({ name: `r${index + 1}`, rule }));
+  return {
+    state: {
+      task,
+      rules: Object.fromEntries(
+        named.map(({ name, rule }) => [
+          name,
+          rule.applies_when
+            ? {
+                headline: ruleHeadline(rule.text),
+                applies_when: rule.applies_when,
+              }
+            : { headline: ruleHeadline(rule.text), text: rule.text },
+        ])
+      ),
+    },
+    questions: Object.fromEntries(
+      named.map(({ name }) => [name, questionFor(name)])
     ),
-  },
-  questions: Object.fromEntries(
-    rules.map((rule) => [`rule_${rule.id}`, questionFor(rule.id)])
-  ),
-});
+    ids: Object.fromEntries(named.map(({ name, rule }) => [name, rule.id])),
+  };
+};
 
 const logger = createLogger('rule-gate');
 
@@ -206,7 +221,7 @@ export class RuleGateService implements IRuleGate {
     );
     if (!credential) return unchanged;
 
-    const { state, questions } = ruleGateRequest(input.task, unpinned);
+    const { state, questions, ids } = ruleGateRequest(input.task, unpinned);
 
     // On the instance's key the judge runs only while the account's
     // extraction allowance has room: an account that may not spend the
@@ -261,15 +276,18 @@ export class RuleGateService implements IRuleGate {
       });
     }
     const judgeUnavailable = result === null;
-    const answers = result?.answers ?? {};
+    // Each answer back to the rule its question named.
+    const answered = new Map<string, number>();
+    for (const [name, ruleId] of Object.entries(ids)) {
+      const answer = result?.answers[name];
+      if (answer) answered.set(ruleId, answer.noul);
+    }
 
     const levelled = input.rules.map((rule) => {
       if (rule.pinned || !rule.id) {
         return { rule: deliverAtLevel(rule, 'full'), p: null as number | null };
       }
-      const p = judgeUnavailable
-        ? null
-        : (answers[`rule_${rule.id}`]?.noul ?? null);
+      const p = answered.get(rule.id) ?? null;
       return {
         rule: deliverAtLevel(
           rule,
