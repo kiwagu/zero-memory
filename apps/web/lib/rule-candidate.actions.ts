@@ -2,6 +2,9 @@
 
 import { revalidatePath } from 'next/cache';
 
+// The decorator-free subpath: the package root would load the DI container.
+import { guardTextFields } from '@workspace/memory/content-guard';
+
 import { createServerSupabaseClient } from './supabase/server';
 import { currentUserEntityId } from './user';
 
@@ -236,7 +239,9 @@ export async function setRulePinned(
 /**
  * Say when a promoted rule applies: one to three lines of observable task
  * features the delivery judge tests the task against. Empty clears it, and
- * the judge then reads the whole rule text.
+ * the judge then reads the whole rule text. The line is delivered into
+ * sessions and sent to the judge's provider, so it is held to the same secret
+ * guard as `promote_rule`'s `applies_when`.
  */
 export async function setRuleAppliesWhen(
   candidateId: string,
@@ -247,6 +252,19 @@ export async function setRuleAppliesWhen(
     return {
       ok: false,
       error: `Keep it to ${APPLIES_WHEN_MAX} characters.`,
+    };
+  }
+  const secret = guardTextFields([{ path: 'applies_when', text: value }]);
+  if (secret) {
+    // The server's refusal, word for word: the contracts package that holds
+    // it does not bundle into the dashboard.
+    return {
+      ok: false,
+      error:
+        `secret_content_rejected: ${secret.field} contains what looks like a ` +
+        `secret (${secret.detector}, "${secret.sample}"). Nothing written to the ` +
+        'memory server may hold a secret or credential — rephrase it without the ' +
+        'secret value.',
     };
   }
   return updatePromotedRule(candidateId, { applies_when: value });

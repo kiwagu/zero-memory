@@ -169,6 +169,22 @@ test.describe('rules incubator surface', () => {
         applies_when: null,
         enforced_by: 'one_line_commit',
       });
+
+      // A line holding a key is refused, as promote_rule refuses it, and
+      // nothing is stored.
+      await appliesWhen.fill(
+        'tasks that call the API with sk-ant-e2e-rule-line-key-DO-NOT-STORE-4242'
+      );
+      await appliesWhen.press('Enter');
+      await expect(
+        page.getByTestId('rules-queue').getByRole('alert')
+      ).toContainText(
+        'secret_content_rejected: applies_when contains what looks like a secret'
+      );
+      expect(await stored()).toEqual({
+        applies_when: null,
+        enforced_by: 'one_line_commit',
+      });
     } finally {
       await clearFields();
     }

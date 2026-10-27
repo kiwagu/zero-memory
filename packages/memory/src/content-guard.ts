@@ -1,3 +1,6 @@
+// Types only: the dashboard loads this module on its own through the
+// `@workspace/memory/content-guard` subpath, which must stay free of runtime
+// imports (the package root loads the DI container).
 import type { SecretDetectorId, SecretFinding } from '@workspace/contracts';
 
 /**

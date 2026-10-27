@@ -43,6 +43,11 @@
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
+    },
+    "./content-guard": {
+      "types": "./src/content-guard.ts",
+      "import": "./src/content-guard.ts",
+      "default": "./src/content-guard.ts"
     }
   }
 }

@@ -101,7 +101,7 @@
     },
     "apps/watcher": {
       "name": "watcher",
-      "version": "0.35.0",
+      "version": "0.35.1",
       "bin": {
         "zero-memory-watcher": "./src/index.ts",
       },
@@ -138,6 +138,7 @@
         "@workspace/email": "workspace:*",
         "@workspace/i18n-catalogs": "workspace:*",
         "@workspace/judgment": "workspace:*",
+        "@workspace/memory": "workspace:*",
         "@workspace/ui": "workspace:*",
         "lucide-react": "catalog:",
         "next": "catalog:",
