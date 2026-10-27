@@ -196,6 +196,12 @@ The full rule texts arrive through two uncapped paths:
   are delivered into it again, so a rule never silently misses the context
   the agent is actually working in.
 
+When the account has turned the rule delivery judge on, both paths may carry
+an unpinned rule that does not bind the task by its headline, marked
+`[gate]` or `[headline]` with the rule id; its full text is at
+`zm://rules/{id}`. See
+[Delivery by task relevance](/docs/guides/rules-incubator#delivery-by-task-relevance).
+
 Other MCP clients receive the full rules inline unless they have a documented
 cap. Pinned rules are first and are exempt from the delivery count and
 90-day TTL, but a pin cannot override Claude Code's client-side 2 KB window.

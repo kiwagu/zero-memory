@@ -33,6 +33,47 @@ workflow; the model supplies one number per question and generates no text.
 A provider with no key is simply not configured: callers see "judge not
 configured" and work as before. There is no fallback to another provider.
 
+## Rule gate
+
+The rule gate (`RuleGateService` in `@workspace/memory`) is this package's
+first caller: per briefing, one yes/no question per unpinned standing rule,
+mapped to a delivery level by two bands. `readRuleGateConfig(env)` reads its
+knobs; the server calls it once at startup, so a malformed value stops the
+server instead of failing every briefing.
+
+| Variable            | Default | Meaning                                                                                                                             |
+| ------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `ZM_RULE_GATE_MODE` | `off`   | `off` judges nothing; `shadow` judges and records the levels in `rule_gate` but delivers every rule whole; `live` delivers by level |
+| `ZM_RULE_GATE_HI`   | `0.60`  | `p >= HI` → `full`                                                                                                                  |
+| `ZM_RULE_GATE_LO`   | `0.35`  | `LO <= p < HI` → `gate` (headline + `applies_when`); `p < LO` → `headline`                                                          |
+
+Both bands lie strictly between 0 and 1, and `LO` must be below `HI`. The
+gate's per-call timeout is `ZM_JUDGE_TIMEOUT_MS`. An account is judged only
+when it turned the judge on (`IJudgeSettingsReader`) and a credential
+resolves for it; pinned rules are never judged.
+
+The gate fails open. A timeout, a `JudgeUnavailableError` or any other judge
+error delivers the call's rules exactly as without the gate, with
+`rule_gate.judge_unavailable: true`; a rule the answer leaves out is
+delivered whole. No other provider is tried.
+
+Switching it on, shadow first:
+
+1. Set `ZM_RULE_GATE_MODE=shadow` in the serving environment and restart.
+   Delivery does not change; each judged call records what it would have
+   delivered in its `mcp_tool_call` row, and the daily series fill.
+2. Leave it for two to three weeks of normal use. Read the series
+   (`rule_gate_calls`, `rules_chars_baseline` against `rules_chars_delivered`,
+   `judge_unavailable`, `judge_latency_ms_sum`), the per-rule numbers on
+   `/rules`, and the judge's agreement with an LLM
+   (`bun run rules:gate-agreement` in `apps/server`, on a stand holding a
+   clone of the serving data).
+3. Rewrite the `applies_when` lines of rules that are often fetched after a
+   headline (on `/rules`; `rules:applies-when-draft` drafts missing ones), and
+   move the bands only if the probes (`scripts/rule-gate-eval.ts`) say so.
+4. Set `ZM_RULE_GATE_MODE=live` and restart. Going back is the same switch:
+   `shadow` or `off` delivers every rule whole again.
+
 ## Providers
 
 Both providers speak the same System One wire shape, so both adapters are thin

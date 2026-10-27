@@ -54,6 +54,8 @@ not the VS Code extension host — so this adapter maps that lifecycle onto the
   `export_memories` output — ids the agent was never shown — so an empty
   `recalledIds` reports the gap instead of faking coverage. Closing it needs a
   different channel (capturing the response at call time), not a better parser.
+- `guardRefusals` is always empty: guard-hook refusals are read only from
+  Claude Code transcripts.
 
 ## Testing
 

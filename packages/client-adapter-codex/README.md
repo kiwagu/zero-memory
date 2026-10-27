@@ -47,6 +47,9 @@ script migrates a machine off it.
   segment and so covers bare and prefixed forms alike; the namespace is
   deliberately not matched on, since it varies per client and per install.
 
+  `guardRefusals` is always empty: guard-hook refusals are read only from
+  Claude Code transcripts.
+
 ## Testing
 
 `bun run test` from the repo root (vitest via turbo), or `vitest run` in this

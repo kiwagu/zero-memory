@@ -25,11 +25,18 @@ app host connects the returned server to a transport.
     There is deliberately no account-deletion tool: an agent acts as the
     person, so erasing the account is left to the person in the dashboard.
     Read-tool results carry a reinforcement footer; `build_context` additionally
-    renders applicable standing rules and active open loops.
+    renders applicable standing rules and active open loops. Each rule is
+    rendered at the level the rule gate chose (`rules-footer.ts`): whole, or
+    by headline marked `[gate]` (with its `applies_when`) or `[headline]` and
+    followed by its rule id, with a closing line pointing at `zm://rules/<id>`.
 - `McpServerDeps` — `commandBus`, `queryBus`, `runInToolContext` (wraps every
   tool call in an authenticated execution context), optional `sessionScope`
   and metering hooks (including `onWriteRefused`, fired with the stable reason
-  code when a write named no usable target), and optional `workClaims`.
+  code when a write named no usable target), and optional `workClaims`. The
+  optional resource reads register only when supplied: `readPromotedRules`
+  serves `zm://rules`, and `readPromotedRule` serves one rule in full at
+  `zm://rules/{id}`, each such read metered through `onResourceRead` as a
+  `resource:rule` row with the rule id and whether it was found.
 - `IWorkClaims` / `InProcessWorkClaims` / `workClaimKey` — one queued or
   running background scan or benchmark per owner. The default holds the
   claims in this process; a deployment whose background work runs on a worker

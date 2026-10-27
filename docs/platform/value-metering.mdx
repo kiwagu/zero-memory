@@ -63,9 +63,10 @@ nothing breaks; degradation is soft.
 
 ### Recall-hit attribution
 
-`recall`, `build_context` and `remember` are **result-attributed**: instead of
-being counted before they run, their single `mcp_tool_call` event is emitted
-once the result is known, so it can carry that result. The pre-execution
+`recall`, `build_context`, `remember` and the one-rule read `zm://rules/{id}`
+(tool `resource:rule`) are **result-attributed**: instead of being counted
+before they run, their single `mcp_tool_call` event is emitted once the
+result is known, so it can carry that result. The pre-execution
 counter deliberately skips them, which is what keeps the count at one row per
 call.
 
@@ -129,6 +130,50 @@ The judge channel is a background pass that reads the conversation and rules
 on the memories the session recalled, filling in the coverage the first two
 cannot reach. These rows carry the verdict and a confidence; see
 [Recall quality](/docs/guides/recall-quality).
+
+### Rule gate metering
+
+When the
+[rule delivery judge](/docs/guides/rules-incubator#delivery-by-task-relevance)
+judges a call's standing rules, that call's `build_context` row carries the
+judgment as `rule_gate`: the mode, the provider and model, the judge's
+latency, whether it was unavailable, the bands, `chars_baseline` (what the
+rules would have cost whole) against `chars_delivered`, the count per level,
+and per rule its id, probability, level, size and pin. Ids and numbers only,
+never a rule's text. Three more rows complete the picture:
+
+- a read of one rule at `zm://rules/{id}` is its own `mcp_tool_call` row,
+  tool `resource:rule`, with the `rule_id` and whether it was `found`: the
+  fetch after a headline;
+- the judge's spend is an `llm_extraction` row with `purpose: rule_gate`, its
+  input tokens as the quantity, written only when the judge answered;
+- an `ingest_chunk` row carries `guard_refusals`, the names of the guard hooks
+  that refused an action in that chunk.
+
+The per-day series that `export_metrics` returns roll these up under ten
+keys:
+
+| Key                     | Per day                                                |
+| ----------------------- | ------------------------------------------------------ |
+| `rule_gate_calls`       | calls whose standing rules the judge judged            |
+| `rules_chars_baseline`  | characters those rules would have taken whole          |
+| `rules_chars_delivered` | characters actually delivered                          |
+| `rules_judged`          | unpinned rules judged, summed over those calls         |
+| `rules_full`            | of those, the ones delivered whole                     |
+| `rule_fetches`          | reads of one rule by id that found it                  |
+| `guard_refusals`        | guard-hook refusals reported with ingested transcripts |
+| `judge_latency_ms_sum`  | the judge's latency, summed over those calls           |
+| `judge_unavailable`     | those calls whose judge did not answer                 |
+| `judge_input_tokens`    | input tokens the judge consumed                        |
+
+A call whose judge did not answer records no latency, so the mean is
+`judge_latency_ms_sum / (rule_gate_calls - judge_unavailable)`. Percentiles
+do not add across days and come from the raw rows instead. In `shadow` mode
+the levels are what the judge would have delivered, and the characters
+delivered equal the baseline. The `/rules` page reads the per-rule breakdown
+from `rule_gate_stats(p_days)`, the signed-in user's own numbers only: per
+rule the calls, the count per level, the mean probability and the reads that
+found it, plus the refusals per guard.
 
 ### Attribution
 

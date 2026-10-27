@@ -90,9 +90,10 @@ Read directly by this app:
 | `ZM_MCP_JSON_RESPONSE` | `on` answers MCP POSTs with one JSON body instead of SSE                                              |
 
 The wired adapters read their own variables — `SUPABASE_URL`,
-`SUPABASE_ANON_KEY`, `ZM_EMAIL`, `ZM_PASSWORD`, `ANTHROPIC_API_KEY`, … — see
-the READMEs of `@workspace/persistence`, `@workspace/extraction`,
-`@workspace/embedding`, `@workspace/mcp-auth`, and `@workspace/logger`.
+`SUPABASE_ANON_KEY`, `ZM_EMAIL`, `ZM_PASSWORD`, `ANTHROPIC_API_KEY`,
+`ZM_TYPESAFE_API_KEY`, `ZM_RULE_GATE_MODE`, … — see the READMEs of
+`@workspace/persistence`, `@workspace/extraction`, `@workspace/embedding`,
+`@workspace/judgment`, `@workspace/mcp-auth`, and `@workspace/logger`.
 
 ## Testing
 
