@@ -270,7 +270,7 @@ const judgeReports = judgeRuns.map((run) => {
     calls: run.byTopic.size,
     unavailable_calls: run.byTopic.size - answered.length,
     probes_without_p: unanswered,
-    latency_ms: {
+    wall_clock_latency_ms: {
       p50: percentile(
         answered.map((judged) => judged.latencyMs),
         50
@@ -305,6 +305,10 @@ const show = (value: number | null): string =>
 const lines: string[] = [
   `## Rule gate evaluation — ${owner}`,
   '',
+  "> Probe topics are the ledger's stored queries, cut to 200 characters; the gate judged the full text.",
+  '> Each replay judges every live unpinned rule of the owner in one request — more than the merged ' +
+    'general + project set a session receives — so latency and input tokens per call are an upper bound.',
+  '',
   `${probes.length} probes over ${topics.length} topics, ${rules.length} unpinned rules; ` +
     `budget ${BUDGET_CHARS} characters (newest, cosine), bands ${bands.lo}/${bands.hi} (judge)` +
     (skippedDead > 0 ? `; ${skippedDead} probes skipped (rule not live)` : ''),
@@ -323,7 +327,8 @@ for (const report of judgeReports) {
     `### ${report.provider} ${report.model}`,
     '',
     `${report.calls} calls, ${report.unavailable_calls} unavailable; ` +
-      `latency p50 ${show(report.latency_ms.p50)} ms, p95 ${show(report.latency_ms.p95)} ms; ` +
+      `wall-clock latency around judge() p50 ${show(report.wall_clock_latency_ms.p50)} ms, ` +
+      `p95 ${show(report.wall_clock_latency_ms.p95)} ms; ` +
       `input tokens per call ${
         report.input_tokens_per_call === null
           ? 'n/a (the provider reported no usage)'

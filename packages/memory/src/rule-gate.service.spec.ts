@@ -7,6 +7,7 @@ import {
   hookTaskStatement,
   levelFor,
   RuleGateService,
+  ruleGateRequest,
 } from './rule-gate.service.js';
 
 const id = (n: string) => `rlc_${n.padEnd(16, '0')}.0123456789`;
@@ -105,6 +106,48 @@ describe('levelFor / deliverAtLevel', () => {
       text: rules[1]!.text,
       level: 'full',
     });
+  });
+});
+
+describe('ruleGateRequest', () => {
+  it('asks about each rule by its condition, or by its text when it has none, keyed by id', () => {
+    const conditioned = rules[1]! as ContextRule & { id: string };
+    const unheaded = {
+      id: id('unheaded'),
+      text: 'ALWAYS RUN THE GATES FIRST. Then commit.',
+      pinned: false,
+    };
+
+    const { state, questions } = ruleGateRequest('ship the release', [
+      conditioned,
+      unheaded,
+    ]);
+
+    expect(state).toEqual({
+      task: 'ship the release',
+      rules: {
+        [conditioned.id]: {
+          headline: 'ONE LINE COMMITS',
+          applies_when: 'tasks that commit [p=0.9]',
+        },
+        [unheaded.id]: {
+          headline: 'ALWAYS RUN THE GATES FIRST',
+          text: 'ALWAYS RUN THE GATES FIRST. Then commit.',
+        },
+      },
+    });
+    expect(Object.keys(state.rules as object)).toEqual([
+      conditioned.id,
+      unheaded.id,
+    ]);
+    expect(Object.keys(questions)).toEqual([
+      `rule_${conditioned.id}`,
+      `rule_${unheaded.id}`,
+    ]);
+    expect(questions[`rule_${unheaded.id}`]).toMatchObject({ kind: 'noul' });
+    expect(questions[`rule_${unheaded.id}`]!.instructions).toContain(
+      `\`rules.${unheaded.id}\``
+    );
   });
 });
 

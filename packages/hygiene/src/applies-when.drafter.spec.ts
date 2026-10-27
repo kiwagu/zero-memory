@@ -1,4 +1,4 @@
-import { setLlmGateway } from '@workspace/llm';
+import { setLlmGateway, type LlmToolCallRequest } from '@workspace/llm';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AppliesWhenDrafter } from './applies-when.drafter.js';
@@ -15,7 +15,10 @@ const answering = (input: unknown) => {
     ranOnCallerKey: false,
   });
   setLlmGateway({ callTool, searchWeb: vi.fn() });
+  return callTool;
 };
+
+const OWNER = 'usr_000000000000000a.0000000000';
 
 describe('AppliesWhenDrafter', () => {
   it('returns the drafted condition and the model that wrote it', async () => {
@@ -27,6 +30,23 @@ describe('AppliesWhenDrafter', () => {
       applies_when: 'any task that changes migrations',
       model: 'a-model',
     });
+  });
+
+  it("meters the call as rule distillation on the owner's account when one is named", async () => {
+    const callTool = answering({ applies_when: null });
+
+    await new AppliesWhenDrafter().draft(RULE, OWNER);
+    await new AppliesWhenDrafter().draft(RULE);
+
+    const [owned, unowned] = callTool.mock.calls.map(
+      (call) => call[0] as LlmToolCallRequest
+    );
+    expect(owned).toMatchObject({
+      purpose: 'rule_distiller',
+      subjectId: OWNER,
+    });
+    expect(unowned).toMatchObject({ purpose: 'rule_distiller' });
+    expect(unowned).not.toHaveProperty('subjectId');
   });
 
   it('returns null when the rule binds every task', async () => {

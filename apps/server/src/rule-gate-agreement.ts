@@ -3,20 +3,31 @@
  * gate costs in time, over the build_context calls it actually judged.
  *
  * Every call in the window that carries a `rule_gate` block counts toward the
- * judge-unavailable share and the latency percentiles (no sampling; latency
- * over the calls the judge answered). A random `--sample` of the answered
- * calls is then re-judged rule by rule by the LLM gateway's model — the
- * stored topic plus what the judge saw of the rule (its headline with its
- * condition, or its text when it has none) — and its yes/no is compared with
- * the gate's verdict: a rule the gate did not cut to its headline counts as
- * binding. Agreement is reported overall and per level.
+ * judge-unavailable share (no sampling). The latency percentiles are the
+ * adapter-reported `rule_gate.latency_ms` of the calls the judge answered; an
+ * unavailable call logs 0 and is left out of them.
+ *
+ * A random `--sample` of the answered calls is then re-judged rule by rule by
+ * the LLM gateway's model — the stored topic plus what the judge saw of the
+ * rule (its headline with its condition, or its text when it has none) — and
+ * its yes/no is compared with the gate's verdict: a rule the gate did not cut
+ * to its headline counts as binding. Agreement is reported overall and per
+ * level.
+ *
+ * Only calls whose stored topic reads as an agent's task statement (at least
+ * 40 characters, with whitespace — the same test the probe draft applies) are
+ * re-judged. A hook briefing is judged against its card's statement, which the
+ * ledger does not store: its row holds the topic the hook passed, a project
+ * folder name, so re-judging it would compare the gate with a different task.
+ * Those calls, and agent calls with a short topic, are counted and excluded.
+ * For the rest, the stored topic is the first 200 characters of what the
+ * judge saw.
  *
  *   SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… ANTHROPIC_API_KEY=… \
  *     bun run rules:gate-agreement -- --days 14 --sample 40 [--owner usr_…]   # from apps/server
  *
  * Point it at a stand (the e2e stack, or a production clone restored into the
- * preview stand), never at hosted production. The stored topic is the first
- * 200 characters of what the judge saw.
+ * preview stand), never at hosted production.
  */
 import {
   entityIdSchemas,
@@ -132,13 +143,24 @@ if (calls.length === 0) {
 const answered = calls.filter((call) => !call.gate.judge_unavailable);
 const latencies = answered.map((call) => call.gate.latency_ms);
 
-// Only answered calls with a topic and at least one judged rule can be
+/**
+ * A stored topic that reads as an agent's task statement — the probe draft's
+ * test. A hook briefing's row holds the project folder name the hook passed
+ * (no whitespace), not the card statement the gate judged.
+ */
+const MIN_TOPIC_CHARS = 40;
+const isTaskTopic = (query: string | null): query is string =>
+  query !== null && query.trim().length >= MIN_TOPIC_CHARS && /\s/u.test(query);
+
+// Only answered calls with a task topic and at least one judged rule can be
 // re-judged; shuffle them (Fisher–Yates) and take the sample.
-const candidates = answered.filter(
-  (call) =>
-    call.query !== null &&
-    call.gate.rules.some((rule) => !rule.pinned && rule.p !== null)
+const judgedSome = answered.filter((call) =>
+  call.gate.rules.some((rule) => !rule.pinned && rule.p !== null)
 );
+const candidates = judgedSome.flatMap((call) =>
+  isTaskTopic(call.query) ? [{ ...call, query: call.query }] : []
+);
+const excludedTopics = judgedSome.length - candidates.length;
 for (let at = candidates.length - 1; at > 0; at -= 1) {
   const pick = Math.floor(Math.random() * (at + 1));
   [candidates[at], candidates[pick]] = [candidates[pick]!, candidates[at]!];
@@ -206,7 +228,7 @@ const runJob = async ({ call, rule }: (typeof jobs)[number]): Promise<void> => {
     model,
     maxOutputTokens: 300,
     system: POLICY,
-    prompt: `Task:\n${call.query ?? ''}\n\nRule:\n${ruleBlock}`,
+    prompt: `Task:\n${call.query}\n\nRule:\n${ruleBlock}`,
     tool: {
       name: TOOL,
       description: 'Record whether the rule binds the task.',
@@ -250,10 +272,13 @@ console.log(
     '',
     `${calls.length} judged calls` +
       (malformed > 0 ? ` (${malformed} unreadable blocks skipped)` : '') +
-      `; judge unavailable on ${unavailable} (${ratio(unavailable, calls.length)}); ` +
-      `latency p50 ${show(percentile(latencies, 50))} ms, p95 ${show(percentile(latencies, 95))} ms ` +
-      `over ${answered.length} answered calls.`,
+      `; judge unavailable on ${unavailable} (${ratio(unavailable, calls.length)}).`,
+    `Adapter-reported latency (rule_gate.latency_ms) over ${answered.length} answered calls: ` +
+      `p50 ${show(percentile(latencies, 50))} ms, p95 ${show(percentile(latencies, 95))} ms ` +
+      `(${unavailable} unavailable calls log 0 and are left out).`,
     '',
+    `${excludedTopics} hook/short-topic calls excluded: the gate judged them against a card ` +
+      'statement the ledger does not store.',
     `Re-judged ${sample.length} sampled calls, ${comparisons.length} rules, with ${model}` +
       (missingRules > 0 ? ` (${missingRules} rules no longer stored)` : '') +
       '.',

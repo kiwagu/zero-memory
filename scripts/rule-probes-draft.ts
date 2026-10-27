@@ -37,6 +37,7 @@ import {
   flag,
   gateConfig,
   judgeTopic,
+  levelOf,
   loadJudgeableRules,
   ownerFlag,
   parseCsv,
@@ -133,9 +134,10 @@ const draft = async (): Promise<void> => {
     for (const rule of rules) {
       const p = judged.p.get(rule.id);
       if (p === undefined) continue;
-      const proposed =
-        p >= bands.hi ? 'full' : p < bands.lo ? 'headline' : null;
-      if (!proposed) continue;
+      // The gate's own levels: `full` and `headline` are confident; `gate`
+      // is the uncertain middle and is left out.
+      const proposed = levelOf(p);
+      if (proposed === 'gate') continue;
       rows.push([
         topic,
         rule.id,

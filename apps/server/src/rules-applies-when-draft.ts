@@ -2,8 +2,9 @@
  * Backfill of `applies_when` for promoted rules that have none: the rule gate
  * judges a task against a rule's condition, and rules promoted before the
  * distiller wrote one carry only their text. Each drafted condition is stored
- * and the rule is flagged for the owner's review on /rules; a rule the model
- * says binds every task is left without one.
+ * on the rule and printed; the owner reviews and edits it on /rules, where the
+ * condition is editable in place. A rule the model says binds every task is
+ * left without one.
  *
  *   SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… ANTHROPIC_API_KEY=… \
  *     bun run rules:applies-when-draft -- --owner usr_… --max 50   # from apps/server
@@ -60,10 +61,7 @@ for (const row of rows ?? []) {
   if (!draft.applies_when) continue;
   const { error: upErr } = await client
     .from('rule_candidates')
-    .update({
-      applies_when: draft.applies_when,
-      text_review_since: new Date().toISOString(),
-    })
+    .update({ applies_when: draft.applies_when })
     .eq('id', row.id);
   if (upErr) throw new Error(upErr.message);
   drafted += 1;

@@ -86,7 +86,7 @@ Tuning: `DEFAULT_INCUBATOR_CONFIG` (`rule-candidate.ts`).
 one: the condition the rule gate judges a task against. It reads only the
 rule text and answers `null` for a rule that binds every task. The server's
 `rules:applies-when-draft` command runs it over an owner's promoted rules and
-flags each drafted rule for review on `/rules`.
+stores each drafted line, which the owner reviews and edits on `/rules`.
 
 ## Usage valence: reinforcement and stale suspects
 
