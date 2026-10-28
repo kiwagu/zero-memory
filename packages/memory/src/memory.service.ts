@@ -114,6 +114,8 @@ import type { IRuleFateReader } from './rule-fate.reader.js';
 import { injectRuleGate } from './rule-gate.provider.js';
 import {
   deliverUnjudged,
+  hookTaskCard,
+  hookTaskDetail,
   hookTaskStatement,
   type IRuleGate,
   type RuleGateOutcome,
@@ -1520,6 +1522,12 @@ export class MemoryService {
       block: null,
     };
     if (input.briefing === true && rules.length > 0) {
+      // A budgeted briefing is the hook's: judged against its card, whose
+      // body and latest steps the gate reads only once it will judge.
+      const hookCard =
+        input.judge_rules !== false && budgets.maxMemories !== undefined
+          ? hookTaskCard(work?.work)
+          : null;
       try {
         gated = await this.ruleGate.apply({
           rules,
@@ -1532,6 +1540,16 @@ export class MemoryService {
               : budgets.maxMemories !== undefined
                 ? hookTaskStatement(work?.work)
                 : topicText,
+          ...(hookCard
+            ? {
+                taskDetail: async () => {
+                  const detail = await this.briefingWork.taskDetail(
+                    hookCard.id
+                  );
+                  return detail ? hookTaskDetail(detail) : null;
+                },
+              }
+            : {}),
         });
       } catch (error) {
         // The last resort: the gate reports its own failures in rule_gate,

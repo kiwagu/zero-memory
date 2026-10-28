@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   deliverAtLevel,
   deliverUnjudged,
+  hookTaskDetail,
   hookTaskStatement,
   levelFor,
   RuleGateService,
@@ -166,6 +167,30 @@ describe('levelFor / deliverAtLevel', () => {
       text: 'ID-LESS RULE.',
       pinned: false,
     });
+  });
+});
+
+describe('hookTaskDetail', () => {
+  it('gives the body whole and the two latest steps newest first, each on one clipped line', () => {
+    expect(
+      hookTaskDetail({
+        body: 'Goal.\n\nRead the CSV header row first.',
+        last: ['Moved to active:\n   started   the parser', 'x'.repeat(450)],
+      })
+    ).toBe(
+      'Card: Goal.\n\nRead the CSV header row first. Latest steps: (1) Moved to active: started the parser (2) ' +
+        `${'x'.repeat(399)}…`
+    );
+  });
+
+  it('names only what the card has', () => {
+    expect(hookTaskDetail({ body: '', last: ['started the parser'] })).toBe(
+      'Latest steps: (1) started the parser'
+    );
+    expect(
+      hookTaskDetail({ body: 'Read the header row first.', last: [] })
+    ).toBe('Card: Read the header row first.');
+    expect(hookTaskDetail({ body: '  ', last: [] })).toBeNull();
   });
 });
 
@@ -436,6 +461,50 @@ describe('RuleGateService.apply', () => {
       } as never)
     ).toBeNull();
     expect(hookTaskStatement(null)).toBeNull();
+  });
+
+  it("joins a hook briefing's card detail to its statement once the judge is on", async () => {
+    const { svc, judge } = service();
+    const taskDetail = vi.fn(() =>
+      Promise.resolve('Card: Read the header row first.')
+    );
+    await svc.apply({
+      rules,
+      task: 'Continue card #7 (story, active): Teach the importer to read CSV.',
+      taskDetail,
+      subjectId: 'usr_a',
+    });
+    expect(judge.calls[0]!.state.task).toBe(
+      'Continue card #7 (story, active): Teach the importer to read CSV. Card: Read the header row first.'
+    );
+  });
+
+  it('reads no card detail for an account with the judge off', async () => {
+    const { svc, judge } = service({ enabled: false });
+    const taskDetail = vi.fn(() => Promise.resolve('Card: anything.'));
+    await svc.apply({
+      rules,
+      task: 'Continue card #7 (story, active): Teach the importer to read CSV.',
+      taskDetail,
+      subjectId: 'usr_a',
+    });
+    expect(taskDetail).not.toHaveBeenCalled();
+    expect(judge.calls).toHaveLength(0);
+  });
+
+  it('judges the statement alone when the card detail cannot be read', async () => {
+    const { svc, judge } = service();
+    const taskDetail = vi.fn(() => Promise.reject(new Error('board down')));
+    const out = await svc.apply({
+      rules,
+      task: 'Continue card #7 (story, active): Teach the importer to read CSV.',
+      taskDetail,
+      subjectId: 'usr_a',
+    });
+    expect(judge.calls[0]!.state.task).toBe(
+      'Continue card #7 (story, active): Teach the importer to read CSV.'
+    );
+    expect(out.block?.judge_unavailable).toBe(false);
   });
 
   it('off, disabled account, or no credential → unchanged, no judge call', async () => {

@@ -11,6 +11,14 @@ export interface BriefingWorkRead {
   attachedLoopIds: string[];
 }
 
+/** What a card says beyond its title, for judging a hook briefing's rules. */
+export interface CardTaskDetail {
+  /** The card's body as written; empty when it has none. */
+  body: string;
+  /** What its latest steps said, newest first, at most two. */
+  last: string[];
+}
+
 /**
  * Port: the project board's work in progress for a briefing — the card bound
  * to the calling conversation, active/waiting counts, the first few cards.
@@ -22,4 +30,9 @@ export interface IBriefingWorkReader {
     projectScope: string,
     thread: string | undefined
   ): Promise<BriefingWorkRead | null>;
+  /**
+   * One card's body and latest steps, which the briefing itself never
+   * carries. Null when the caller cannot read the card.
+   */
+  taskDetail(cardId: string): Promise<CardTaskDetail | null>;
 }

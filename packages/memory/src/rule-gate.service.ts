@@ -31,6 +31,7 @@ import {
   type IUsageRecorder,
 } from '@workspace/usage';
 
+import type { CardTaskDetail } from './briefing-work.reader.js';
 import { injectRuleGateConfig } from './rule-gate.provider.js';
 
 export interface RuleGateInput {
@@ -44,7 +45,20 @@ export interface RuleGateInput {
    * are delivered as before.
    */
   readonly task: string | null;
+  /**
+   * More of a hook briefing's task, read only once the account's judge is
+   * on: the card's body and its latest steps (`hookTaskDetail`), joined to
+   * `task`. A detail that cannot be read leaves `task` as it is.
+   */
+  readonly taskDetail?: () => Promise<string | null>;
 }
+
+/**
+ * The card a hook briefing is judged against: the one bound to the
+ * conversation, else the continuation card offered to a new session.
+ */
+export const hookTaskCard = (work: BriefingWork | null | undefined) =>
+  work?.bound_card ?? work?.continuation?.card ?? null;
 
 /**
  * The task statement of a hook briefing, from what the server already knows
@@ -54,7 +68,7 @@ export interface RuleGateInput {
 export const hookTaskStatement = (
   work: BriefingWork | null | undefined
 ): string | null => {
-  const card = work?.bound_card ?? work?.continuation?.card ?? null;
+  const card = hookTaskCard(work);
   if (!card) return null;
   const branch = work?.open_branches?.find(
     (entry) => entry.card_id === card.id
@@ -66,6 +80,32 @@ export const hookTaskStatement = (
   ]
     .filter((part): part is string => part !== null)
     .join(' ');
+};
+
+/** How much of one step the judge reads: its opening carries what was done. */
+const STEP_CHARS = 400;
+
+const clipStep = (said: string): string => {
+  const line = said.replace(/\s+/gu, ' ').trim();
+  return line.length > STEP_CHARS ? `${line.slice(0, STEP_CHARS - 1)}…` : line;
+};
+
+/**
+ * The rest of a hook briefing's task: the card's body as written, then its
+ * latest steps newest first, each on one clipped line. The body goes whole:
+ * it is what the card is about, and its length costs the judge no time. Null
+ * when the card has neither, so the statement is judged as it is.
+ */
+export const hookTaskDetail = (card: CardTaskDetail): string | null => {
+  const body = card.body.trim();
+  const steps = card.last.map(clipStep).filter((step) => step.length > 0);
+  const parts = [
+    body ? `Card: ${body}` : null,
+    steps.length > 0
+      ? `Latest steps: ${steps.map((step, index) => `(${index + 1}) ${step}`).join(' ')}`
+      : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? parts.join(' ') : null;
 };
 
 export interface RuleGateOutcome {
@@ -237,7 +277,12 @@ export class RuleGateService implements IRuleGate {
       (rule): rule is JudgedRule => !rule.pinned && Boolean(rule.id)
     );
     if (unpinned.length === 0) return unchanged;
-    const attempt = await this.#attempt(input.subjectId, input.task, unpinned);
+    const attempt = await this.#attempt(
+      input.subjectId,
+      input.task,
+      unpinned,
+      input.taskDetail
+    );
     // The account has the judge off, or no judge is configured for it: not
     // judged, and nothing to record.
     if (attempt === null) return unchanged;
@@ -252,7 +297,8 @@ export class RuleGateService implements IRuleGate {
   async #attempt(
     subjectId: string,
     task: string,
-    unpinned: readonly JudgedRule[]
+    unpinned: readonly JudgedRule[],
+    taskDetail: RuleGateInput['taskDetail']
   ): Promise<JudgeAttempt | null> {
     const unanswered = (
       provider: JudgeProviderName,
@@ -333,7 +379,13 @@ export class RuleGateService implements IRuleGate {
       }
     }
 
-    const { state, questions, ids } = ruleGateRequest(task, unpinned);
+    // Read only now that the judge will be asked: an account that does not
+    // judge never pays for the card read.
+    const detail = await this.#detailOf(taskDetail);
+    const { state, questions, ids } = ruleGateRequest(
+      detail ? `${task} ${detail}` : task,
+      unpinned
+    );
     let result: JudgmentResult;
     try {
       result = await this.judgmentFor(credential).judge(
@@ -382,6 +434,24 @@ export class RuleGateService implements IRuleGate {
       },
     });
     return { provider: credential.provider, model: result.model, result, ids };
+  }
+
+  /**
+   * The rest of the task when there is one to read. A card that cannot be
+   * read costs the judge only that detail: the statement is still judged.
+   */
+  async #detailOf(
+    taskDetail: RuleGateInput['taskDetail']
+  ): Promise<string | null> {
+    if (!taskDetail) return null;
+    try {
+      return await taskDetail();
+    } catch (error) {
+      logger.warn('card detail unreadable; judged on the statement alone', {
+        error: messageOf(error),
+      });
+      return null;
+    }
   }
 
   /** The call's delivery and its record, from what the attempt came to. */

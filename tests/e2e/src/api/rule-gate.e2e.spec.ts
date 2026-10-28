@@ -201,6 +201,25 @@ async function toolCallRows(
   return (data ?? []).map((row) => row.metadata as ToolCallMetadata);
 }
 
+/** The input tokens of each judgment metered for a user since `since`, oldest first. */
+async function judgeInputTokens(
+  userId: string,
+  since: string
+): Promise<number[]> {
+  const { data, error } = await adminClient()
+    .from('usage_events')
+    .select('metadata, occurred_at')
+    .eq('event_type', 'llm_extraction')
+    .eq('user_id', userId)
+    .contains('metadata', { purpose: 'rule_gate' })
+    .gte('occurred_at', since)
+    .order('occurred_at', { ascending: true });
+  expect(error).toBeNull();
+  return (data ?? []).map(
+    (row) => (row.metadata as { input_tokens: number }).input_tokens
+  );
+}
+
 test.describe('Rule gate over MCP @smoke', () => {
   test('levels follow the judge, pinned stay whole, hook calls are judged only with a card, one rule is readable by id', async () => {
     const gated = await provisionE2EUser(GATED_EMAIL);
@@ -361,6 +380,55 @@ test.describe('Rule gate over MCP @smoke', () => {
         level: 'full',
         text: PINNED_TEXT,
       });
+
+      // The judge also reads the card's body and latest steps, which the
+      // briefing itself never carries: each one the card gains, it is asked
+      // about. The e2e judge counts a request's size as its tokens. Metering
+      // lands after the answer and is stamped when it lands, so judgments are
+      // counted from the start of this test: every earlier one is awaited
+      // first, and the newest row is then the briefing just asked.
+      let judgments = [pack, bound].filter(
+        (out) => out.rule_gate?.judge_unavailable === false
+      ).length;
+      const meteredJudgments = async (): Promise<number[]> => {
+        let tokens: number[] = [];
+        await expect
+          .poll(
+            async () => (tokens = await judgeInputTokens(subject, since)).length
+          )
+          .toBe(judgments);
+        return tokens;
+      };
+      await meteredJudgments();
+      const judgedTokens = async (): Promise<number> => {
+        const out = await brief(mcp, hookArgs);
+        expect(out.rule_gate?.judge_unavailable).toBe(false);
+        judgments += 1;
+        return (await meteredJudgments()).at(-1)!;
+      };
+      const plain = await judgedTokens();
+      const body = 'Read the header row before any data row. '.repeat(50);
+      const edited = await mcp.callTool('card', {
+        action: 'edit',
+        card_id: card.id,
+        body,
+      });
+      expect(edited.isError ?? false).toBe(false);
+      const withBody = await judgedTokens();
+      expect(withBody - plain).toBeGreaterThanOrEqual(
+        Math.floor(body.length / 4)
+      );
+      const step = `Started the parser on the header row: ${'quoted fields, then escapes. '.repeat(20)}`;
+      const noted = await mcp.callTool('card_log', {
+        action: 'note',
+        card_id: card.id,
+        text: step,
+      });
+      expect(noted.isError ?? false).toBe(false);
+      const withStep = await judgedTokens();
+      // A step is read as its first 400 characters, not as a whole note.
+      expect(withStep - withBody).toBeGreaterThanOrEqual(400 / 4);
+      expect(withStep - withBody).toBeLessThan(Math.floor(step.length / 4));
 
       // The hook's secondary briefing leaves the judging to the primary one.
       const secondary = await brief(mcp, { ...hookArgs, judge_rules: false });
