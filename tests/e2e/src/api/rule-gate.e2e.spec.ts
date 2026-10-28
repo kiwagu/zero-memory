@@ -383,20 +383,28 @@ test.describe('Rule gate over MCP @smoke', () => {
 
       // The judge also reads the card's body and latest steps, which the
       // briefing itself never carries: each one the card gains, it is asked
-      // about. The e2e judge counts a request's size as its tokens, and
-      // metering lands after the answer, so each judgment is awaited by when
-      // it was asked.
-      const judgedTokens = async (): Promise<number> => {
-        const askedAt = new Date().toISOString();
-        await brief(mcp, hookArgs);
+      // about. The e2e judge counts a request's size as its tokens. Metering
+      // lands after the answer and is stamped when it lands, so judgments are
+      // counted from the start of this test: every earlier one is awaited
+      // first, and the newest row is then the briefing just asked.
+      let judgments = [pack, bound].filter(
+        (out) => out.rule_gate?.judge_unavailable === false
+      ).length;
+      const meteredJudgments = async (): Promise<number[]> => {
         let tokens: number[] = [];
         await expect
           .poll(
-            async () =>
-              (tokens = await judgeInputTokens(subject, askedAt)).length
+            async () => (tokens = await judgeInputTokens(subject, since)).length
           )
-          .toBe(1);
-        return tokens[0]!;
+          .toBe(judgments);
+        return tokens;
+      };
+      await meteredJudgments();
+      const judgedTokens = async (): Promise<number> => {
+        const out = await brief(mcp, hookArgs);
+        expect(out.rule_gate?.judge_unavailable).toBe(false);
+        judgments += 1;
+        return (await meteredJudgments()).at(-1)!;
       };
       const plain = await judgedTokens();
       const body = 'Read the header row before any data row. '.repeat(50);
