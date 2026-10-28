@@ -1,7 +1,11 @@
 import { briefingWorkSchema } from '@workspace/contracts';
 import { injectContext, type IContext } from '@workspace/context';
 import { singleton } from '@workspace/di';
-import type { BriefingWorkRead, IBriefingWorkReader } from '@workspace/memory';
+import type {
+  BriefingWorkRead,
+  CardTaskDetail,
+  IBriefingWorkReader,
+} from '@workspace/memory';
 import { z } from 'zod';
 
 import { createUserClient } from '../supabase.client.js';
@@ -10,6 +14,13 @@ import { createUserClient } from '../supabase.client.js';
 const briefingWorkRowSchema = briefingWorkSchema
   .extend({ attached_loop_ids: z.array(z.string()).default([]) })
   .nullable();
+
+const cardBodyRowSchema = z.object({ body: z.string() }).nullable();
+
+/** A step of the card's history that says something: a reason or a note. */
+const cardStepRowsSchema = z.array(
+  z.object({ reason: z.string().nullable(), note_text: z.string().nullable() })
+);
 
 /**
  * Supabase adapter for the briefing-work port: the board's work in progress
@@ -48,5 +59,40 @@ export class SupabaseBriefingWorkReader implements IBriefingWorkReader {
     }
     const { attached_loop_ids: attachedLoopIds, ...work } = row;
     return { work, attachedLoopIds };
+  }
+
+  async taskDetail(cardId: string): Promise<CardTaskDetail | null> {
+    const accessToken = this.context.getAccessToken();
+    if (!accessToken) {
+      return null;
+    }
+    const client = createUserClient(accessToken);
+    const [card, steps] = await Promise.all([
+      client.from('cards').select('body').eq('id', cardId).maybeSingle(),
+      client
+        .from('card_events')
+        .select('reason, note_text')
+        .eq('card_id', cardId)
+        .or('reason.not.is.null,note_text.not.is.null')
+        .order('created_at', { ascending: false })
+        .order('seq', { ascending: false })
+        .limit(2),
+    ]);
+    if (card.error) {
+      throw new Error(`card body read failed: ${card.error.message}`);
+    }
+    if (steps.error) {
+      throw new Error(`card steps read failed: ${steps.error.message}`);
+    }
+    const row = cardBodyRowSchema.parse(card.data ?? null);
+    if (!row) {
+      return null;
+    }
+    return {
+      body: row.body,
+      last: cardStepRowsSchema
+        .parse(steps.data ?? [])
+        .map((step) => step.reason ?? step.note_text ?? ''),
+    };
   }
 }

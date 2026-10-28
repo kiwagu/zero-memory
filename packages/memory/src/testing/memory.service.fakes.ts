@@ -182,6 +182,7 @@ export const makeUserRules = (): IUserRulesReader => ({
 /** An empty board: no work summary for any briefing. */
 export const makeBriefingWork = (): IBriefingWorkReader => ({
   forBriefing: vi.fn().mockResolvedValue(null),
+  taskDetail: vi.fn().mockResolvedValue(null),
 });
 
 /** No memory carries a promoted rule. */

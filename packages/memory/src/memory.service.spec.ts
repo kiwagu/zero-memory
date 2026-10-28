@@ -2499,6 +2499,7 @@ describe('MemoryService.buildContext — the work summary', () => {
     read: Awaited<ReturnType<IBriefingWorkReader['forBriefing']>>
   ): IBriefingWorkReader => ({
     forBriefing: vi.fn().mockResolvedValue(read),
+    taskDetail: vi.fn().mockResolvedValue(null),
   });
 
   it('carries the summary and gives up one ranked row for it under a token budget', async () => {
@@ -2593,6 +2594,7 @@ describe('MemoryService.buildContext — the work summary', () => {
   it('still briefs, without a summary, when the board cannot be read', async () => {
     const briefingWork: IBriefingWorkReader = {
       forBriefing: vi.fn().mockRejectedValue(new Error('board down')),
+      taskDetail: vi.fn().mockResolvedValue(null),
     };
     const { service, graphService } = makeService({ briefingWork });
 
@@ -2693,7 +2695,10 @@ describe('MemoryService.buildContext — the rule gate', () => {
   ) =>
     makeService({
       userRules: { listPromoted: vi.fn().mockResolvedValue([rule]) },
-      briefingWork: { forBriefing: vi.fn().mockResolvedValue(read) },
+      briefingWork: {
+        forBriefing: vi.fn().mockResolvedValue(read),
+        taskDetail: vi.fn().mockResolvedValue(null),
+      },
       ruleGate: gate,
     });
   const gateReturning = (rules: ContextRule[], out: RuleGateBlock | null) => ({
@@ -2737,6 +2742,51 @@ describe('MemoryService.buildContext — the rule gate', () => {
     expect(input.task).toBe(hookTaskStatement(work));
     expect(input.task).toContain('Teach the importer to read CSV');
     expect(out).not.toHaveProperty('rule_gate');
+  });
+
+  it("hands a hook briefing a lazy reader of its card's body and latest steps", async () => {
+    const ruleGate = gateReturning([rule], null);
+    const taskDetail = vi.fn().mockResolvedValue({
+      body: 'Read the header row first.',
+      last: ['started the parser'],
+    });
+    const { service } = makeService({
+      userRules: { listPromoted: vi.fn().mockResolvedValue([rule]) },
+      briefingWork: {
+        forBriefing: vi.fn().mockResolvedValue({ work, attachedLoopIds: [] }),
+        taskDetail,
+      },
+      ruleGate,
+    });
+
+    await service.buildContext({
+      topic: 'quokka-tool',
+      project_hint: HINT,
+      briefing: true,
+      max_tokens: 1200,
+    });
+
+    const [input] = vi.mocked(ruleGate.apply).mock.calls[0]!;
+    expect(taskDetail).not.toHaveBeenCalled();
+    await expect(input.taskDetail?.()).resolves.toBe(
+      'Card: Read the header row first. Latest steps: (1) started the parser'
+    );
+    expect(taskDetail).toHaveBeenCalledWith('crd_0000000000000001.0000000000');
+  });
+
+  it('hands an agent call no card detail: its own topic is the task', async () => {
+    const ruleGate = gateReturning([rule], null);
+    const { service } = ruled(ruleGate, { work, attachedLoopIds: [] });
+
+    await service.buildContext({
+      topic: 'release the importer',
+      project_hint: HINT,
+      briefing: true,
+    });
+
+    const [input] = vi.mocked(ruleGate.apply).mock.calls[0]!;
+    expect(input.task).toBe('release the importer');
+    expect(input.taskDetail).toBeUndefined();
   });
 
   it('hands a hook briefing without a card no task, so it is not judged', async () => {

@@ -201,6 +201,25 @@ async function toolCallRows(
   return (data ?? []).map((row) => row.metadata as ToolCallMetadata);
 }
 
+/** The input tokens of each judgment metered for a user since `since`, oldest first. */
+async function judgeInputTokens(
+  userId: string,
+  since: string
+): Promise<number[]> {
+  const { data, error } = await adminClient()
+    .from('usage_events')
+    .select('metadata, occurred_at')
+    .eq('event_type', 'llm_extraction')
+    .eq('user_id', userId)
+    .contains('metadata', { purpose: 'rule_gate' })
+    .gte('occurred_at', since)
+    .order('occurred_at', { ascending: true });
+  expect(error).toBeNull();
+  return (data ?? []).map(
+    (row) => (row.metadata as { input_tokens: number }).input_tokens
+  );
+}
+
 test.describe('Rule gate over MCP @smoke', () => {
   test('levels follow the judge, pinned stay whole, hook calls are judged only with a card, one rule is readable by id', async () => {
     const gated = await provisionE2EUser(GATED_EMAIL);
@@ -361,6 +380,30 @@ test.describe('Rule gate over MCP @smoke', () => {
         level: 'full',
         text: PINNED_TEXT,
       });
+
+      // The judge also reads the card's body and latest step, which the
+      // briefing itself never carries: once the card has them, it is asked
+      // about more. The e2e judge counts a request's size as its tokens.
+      const askedBefore = await judgeInputTokens(gated.id, since);
+      const body = 'Read the header row before any data row. '.repeat(50);
+      const edited = await mcp.callTool('card', {
+        action: 'edit',
+        card_id: card.id,
+        body,
+      });
+      expect(edited.isError ?? false).toBe(false);
+      const noted = await mcp.callTool('card_log', {
+        action: 'note',
+        card_id: card.id,
+        text: 'Started the parser on the header row.',
+      });
+      expect(noted.isError ?? false).toBe(false);
+      await brief(mcp, hookArgs);
+      const askedAfter = await judgeInputTokens(gated.id, since);
+      expect(askedAfter).toHaveLength(askedBefore.length + 1);
+      expect(askedAfter.at(-1)! - askedBefore.at(-1)!).toBeGreaterThanOrEqual(
+        Math.floor(body.length / 4)
+      );
 
       // The hook's secondary briefing leaves the judging to the primary one.
       const secondary = await brief(mcp, { ...hookArgs, judge_rules: false });
