@@ -381,10 +381,24 @@ test.describe('Rule gate over MCP @smoke', () => {
         text: PINNED_TEXT,
       });
 
-      // The judge also reads the card's body and latest step, which the
-      // briefing itself never carries: once the card has them, it is asked
-      // about more. The e2e judge counts a request's size as its tokens.
-      const askedBefore = await judgeInputTokens(gated.id, since);
+      // The judge also reads the card's body and latest steps, which the
+      // briefing itself never carries: each one the card gains, it is asked
+      // about. The e2e judge counts a request's size as its tokens, and
+      // metering lands after the answer, so each judgment is awaited by when
+      // it was asked.
+      const judgedTokens = async (): Promise<number> => {
+        const askedAt = new Date().toISOString();
+        await brief(mcp, hookArgs);
+        let tokens: number[] = [];
+        await expect
+          .poll(
+            async () =>
+              (tokens = await judgeInputTokens(subject, askedAt)).length
+          )
+          .toBe(1);
+        return tokens[0]!;
+      };
+      const plain = await judgedTokens();
       const body = 'Read the header row before any data row. '.repeat(50);
       const edited = await mcp.callTool('card', {
         action: 'edit',
@@ -392,18 +406,21 @@ test.describe('Rule gate over MCP @smoke', () => {
         body,
       });
       expect(edited.isError ?? false).toBe(false);
+      const withBody = await judgedTokens();
+      expect(withBody - plain).toBeGreaterThanOrEqual(
+        Math.floor(body.length / 4)
+      );
+      const step = `Started the parser on the header row: ${'quoted fields, then escapes. '.repeat(20)}`;
       const noted = await mcp.callTool('card_log', {
         action: 'note',
         card_id: card.id,
-        text: 'Started the parser on the header row.',
+        text: step,
       });
       expect(noted.isError ?? false).toBe(false);
-      await brief(mcp, hookArgs);
-      const askedAfter = await judgeInputTokens(gated.id, since);
-      expect(askedAfter).toHaveLength(askedBefore.length + 1);
-      expect(askedAfter.at(-1)! - askedBefore.at(-1)!).toBeGreaterThanOrEqual(
-        Math.floor(body.length / 4)
-      );
+      const withStep = await judgedTokens();
+      // A step is read as its first 400 characters, not as a whole note.
+      expect(withStep - withBody).toBeGreaterThanOrEqual(400 / 4);
+      expect(withStep - withBody).toBeLessThan(Math.floor(step.length / 4));
 
       // The hook's secondary briefing leaves the judging to the primary one.
       const secondary = await brief(mcp, { ...hookArgs, judge_rules: false });
