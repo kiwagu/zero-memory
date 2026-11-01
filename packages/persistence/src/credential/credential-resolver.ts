@@ -2,6 +2,7 @@ import { singleton } from '@workspace/di';
 import {
   EnvCredentialResolver,
   type ICredentialResolver,
+  NoModelKeyError,
   PROVIDER_NAMES,
   type ProviderName,
   type ResolvedCredential,
@@ -53,13 +54,25 @@ export class SupabaseCredentialResolver implements ICredentialResolver {
       // cannot complete must not stop generation for someone who may not even
       // have stored a key. The message is logged without the row, so nothing
       // about the credential can reach the log.
+      const reason = error instanceof Error ? error.message : String(error);
       logger.warn(
         'could not read a stored credential; using the platform key',
-        {
-          error: error instanceof Error ? error.message : String(error),
-        }
+        { error: reason }
       );
-      return this.#platform.resolve();
+      try {
+        return await this.#platform.resolve();
+      } catch (platformError: unknown) {
+        // With no platform key either, the failed lookup is why there is no
+        // key. Reporting a missing key would claim the owner stored none, and
+        // a caller that does without a model on a keyless instance would then
+        // skip one the owner may well have.
+        if (platformError instanceof NoModelKeyError) {
+          throw new Error(`could not read a stored credential: ${reason}`, {
+            cause: platformError,
+          });
+        }
+        throw platformError;
+      }
     }
 
     const row = Array.isArray(data) ? data[0] : data;
