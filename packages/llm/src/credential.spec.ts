@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { EnvCredentialResolver } from './credential.js';
+import { EnvCredentialResolver, NoModelKeyError } from './credential.js';
 import { effectiveModel } from './provider.js';
 
 describe('EnvCredentialResolver', () => {
@@ -30,6 +30,6 @@ describe('EnvCredentialResolver', () => {
     // resolve() raises synchronously before constructing its promise.
     expect(() =>
       new EnvCredentialResolver({} as NodeJS.ProcessEnv).resolve()
-    ).toThrow(/ANTHROPIC_API_KEY/);
+    ).toThrow(NoModelKeyError);
   });
 });

@@ -161,10 +161,14 @@ test.describe('rules incubator surface', () => {
       );
       await expect(enforcedBy).toHaveValue('one_line_commit');
 
-      // Emptying a field clears it.
-      await appliesWhen.fill('');
-      await appliesWhen.press('Enter');
-      await expect(missing).toBeVisible();
+      // Emptying a field clears it. Right after the reload the server's HTML
+      // already shows the field, so a key press can land before React attaches
+      // its handler and save nothing: the edit is repeated until it takes.
+      await expect(async () => {
+        await appliesWhen.fill('');
+        await appliesWhen.press('Enter');
+        await expect(missing).toBeVisible({ timeout: 2_000 });
+      }).toPass();
       await expect.poll(stored).toEqual({
         applies_when: null,
         enforced_by: 'one_line_commit',

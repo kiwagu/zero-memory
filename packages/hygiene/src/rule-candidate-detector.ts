@@ -3,6 +3,7 @@ import {
   failure,
   secretContentRejectedMessage,
 } from '@workspace/contracts';
+import { NoModelKeyError } from '@workspace/llm';
 import { createLogger } from '@workspace/logger';
 import { guardTextFields } from '@workspace/memory';
 import {
@@ -20,6 +21,10 @@ import {
   type RuleDistillation,
   type RuleTargetLayer,
 } from './rule-candidate.js';
+import {
+  AppliesWhenDrafter,
+  type AppliesWhenDraft,
+} from './applies-when.drafter.js';
 import {
   RuleDistiller,
   type NeighborSnapshot,
@@ -87,7 +92,8 @@ export class RuleCandidateDetector {
   constructor(
     private readonly client: Client = createServiceRoleClient(),
     private readonly distiller: RuleDistiller = new RuleDistiller(),
-    private readonly config: IncubatorConfig = DEFAULT_INCUBATOR_CONFIG
+    private readonly config: IncubatorConfig = DEFAULT_INCUBATOR_CONFIG,
+    private readonly drafter: AppliesWhenDrafter = new AppliesWhenDrafter()
   ) {}
 
   /**
@@ -315,6 +321,11 @@ export class RuleCandidateDetector {
     if (!text) {
       text = memory.content.trim();
     }
+    // Every promoted rule carries its condition, pinned or not: a pin is
+    // lifted at will, and the condition is what the rule gate judges the rule
+    // by once it is. Missing here, it is drafted now, while its source is
+    // at hand.
+    condition = await this.#conditionFor(condition, text, ownerId);
 
     const targetLayer: RuleTargetLayer =
       keptAddress?.targetLayer ??
@@ -537,7 +548,11 @@ export class RuleCandidateDetector {
       .from('rule_candidates')
       .update({
         rule_text: judgement.verdict.rule_text,
-        applies_when: readAppliesWhen(judgement.verdict.applies_when),
+        applies_when: await this.#conditionFor(
+          readAppliesWhen(judgement.verdict.applies_when),
+          judgement.verdict.rule_text,
+          row.owner_id
+        ),
         target_layer: targetLayerForScope(row.scope),
         judge_confidence: judgement.verdict.confidence,
         judge_rationale: judgement.verdict.rationale,
@@ -593,6 +608,34 @@ export class RuleCandidateDetector {
     });
   }
 
+  /**
+   * A rule's condition: the one at hand, else one drafted from its text and
+   * metered like the distiller. Only an instance with no model key lets the
+   * rule go through without one: the owner writes it on /rules, and the gate
+   * judges the rule by its text meanwhile. A model that was asked and failed
+   * (output it could not parse, an outage, an allowance used up) fails the
+   * call, as the distiller's own failure does, so a retry can draft it.
+   */
+  async #conditionFor(
+    condition: string | null,
+    ruleText: string,
+    ownerId: string
+  ): Promise<string | null> {
+    if (condition) return condition;
+    let draft: AppliesWhenDraft;
+    try {
+      draft = await this.drafter.draft(ruleText, ownerId);
+    } catch (error) {
+      if (!(error instanceof NoModelKeyError)) throw error;
+      this.#logger.warn(
+        'no model key to draft applies_when; rule kept without'
+      );
+      return null;
+    }
+    await this.#meterDistill(draft, ownerId);
+    return draft.applies_when;
+  }
+
   /** Meter one distiller call's tokens (best-effort, service-role). */
   async #meterDistill(
     judgement: Pick<
@@ -601,25 +644,33 @@ export class RuleCandidateDetector {
     >,
     ownerId?: string
   ): Promise<void> {
-    const { error } = await this.client.from('usage_events').insert({
-      event_type: 'llm_extraction',
-      // Whose work this is: upkeep of a corpus is done for its owner, so
-      // it lands on their ledger and their allowance, not the instance's.
-      user_id: ownerId ?? null,
-      quantity: judgement.inputTokens + judgement.outputTokens,
-      unit: 'tokens',
-      agent_name: AGENT_NAME,
-      metadata: {
-        purpose: 'rule_distiller',
-        model: judgement.model,
-        input_tokens: judgement.inputTokens,
-        output_tokens: judgement.outputTokens,
-        ...(judgement.ranOnCallerKey ? { own_key: true } : {}),
-      },
-    });
-    if (error) {
+    // Best-effort: a ledger that fails, by error or by throwing, must not
+    // undo the work it records.
+    let failure: string | null;
+    try {
+      const { error } = await this.client.from('usage_events').insert({
+        event_type: 'llm_extraction',
+        // Whose work this is: upkeep of a corpus is done for its owner, so
+        // it lands on their ledger and their allowance, not the instance's.
+        user_id: ownerId ?? null,
+        quantity: judgement.inputTokens + judgement.outputTokens,
+        unit: 'tokens',
+        agent_name: AGENT_NAME,
+        metadata: {
+          purpose: 'rule_distiller',
+          model: judgement.model,
+          input_tokens: judgement.inputTokens,
+          output_tokens: judgement.outputTokens,
+          ...(judgement.ranOnCallerKey ? { own_key: true } : {}),
+        },
+      });
+      failure = error?.message ?? null;
+    } catch (thrown) {
+      failure = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    if (failure) {
       this.#logger.warn('incubator: distill metering failed', {
-        error: error.message,
+        error: failure,
       });
     }
   }

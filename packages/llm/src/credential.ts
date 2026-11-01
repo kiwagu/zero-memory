@@ -64,6 +64,18 @@ export const CREDENTIAL_RESOLVER = Symbol.for(
 export const injectCredentialResolver = () => inject(CREDENTIAL_RESOLVER);
 
 /**
+ * No key to run a model on: the caller stored none of their own and the
+ * platform has none configured. Typed so a caller that can do without a model
+ * on such an instance tells it apart from a model that was asked and failed.
+ */
+export class NoModelKeyError extends Error {
+  constructor() {
+    super('ANTHROPIC_API_KEY is not set');
+    this.name = 'NoModelKeyError';
+  }
+}
+
+/**
  * The platform's own key, from the environment.
  *
  * Used when nobody supplied one of their own — and it is the only credential
@@ -81,7 +93,7 @@ export class EnvCredentialResolver implements ICredentialResolver {
   resolve(): Promise<ResolvedCredential> {
     const apiKey = this.env['ANTHROPIC_API_KEY'];
     if (apiKey === undefined || apiKey.trim() === '') {
-      throw new Error('ANTHROPIC_API_KEY is not set');
+      throw new NoModelKeyError();
     }
     // Deliberately NO model here. A credential-carried model overrides the
     // model every call names (see effectiveModel), which is right for a

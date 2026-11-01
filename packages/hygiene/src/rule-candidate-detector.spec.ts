@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { AppliesWhenDrafter } from './applies-when.drafter.js';
 import { RuleCandidateDetector } from './rule-candidate-detector.js';
 import type { RuleDistiller } from './rule-distiller.js';
 
@@ -116,6 +117,75 @@ describe('RuleCandidateDetector.detect', () => {
         rule_text: 'Always run the commit guard before committing.',
         applies_when: 'any task that commits to git',
       })
+    );
+  });
+
+  it('drafts a condition for a queued draft the distiller left without one', async () => {
+    const { client, updates } = fakeClient([
+      {
+        memory_id: MEMORY,
+        owner_id: OWNER,
+        kind: 'convention',
+        scope: 'user.usr_000000000000000a_0000000000',
+        content: 'run the commit guard before every commit',
+        useful_sessions: 3,
+        first_used_at: null,
+        last_used_at: null,
+        session_keys: null,
+      },
+    ]);
+    const draft = vi.fn().mockResolvedValue({
+      applies_when: 'any task that makes a commit',
+      model: 'drafter-model',
+      inputTokens: 40,
+      outputTokens: 8,
+      ranOnCallerKey: false,
+    });
+    const detector = new RuleCandidateDetector(
+      client as never,
+      distillerReturning(null),
+      undefined,
+      { draft } as unknown as AppliesWhenDrafter
+    );
+
+    await detector.detect(OWNER);
+
+    expect(draft).toHaveBeenCalledWith(
+      'Always run the commit guard before committing.',
+      OWNER
+    );
+    expect(updates).toContainEqual(
+      expect.objectContaining({ applies_when: 'any task that makes a commit' })
+    );
+  });
+
+  it('queues no draft without a condition when the model fails to draft one', async () => {
+    const { client, updates } = fakeClient([
+      {
+        memory_id: MEMORY,
+        owner_id: OWNER,
+        kind: 'convention',
+        scope: 'user.usr_000000000000000a_0000000000',
+        content: 'run the commit guard before every commit',
+        useful_sessions: 3,
+        first_used_at: null,
+        last_used_at: null,
+        session_keys: null,
+      },
+    ]);
+    const outage = new Error('503 Service Unavailable');
+    const detector = new RuleCandidateDetector(
+      client as never,
+      distillerReturning(null),
+      undefined,
+      {
+        draft: vi.fn().mockRejectedValue(outage),
+      } as unknown as AppliesWhenDrafter
+    );
+
+    await expect(detector.detect(OWNER)).rejects.toBe(outage);
+    expect(updates).not.toContainEqual(
+      expect.objectContaining({ rule_text: expect.any(String) })
     );
   });
 });

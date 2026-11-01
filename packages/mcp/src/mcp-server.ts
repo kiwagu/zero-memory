@@ -2354,8 +2354,8 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         'The imperative text is distilled from the memory (pass rule_text to ' +
         'override), and so is applies_when: the observable task features ' +
         'under which the rule binds (pass it to set your own). With ' +
-        'rule_text nothing is distilled, so pass applies_when too or the ' +
-        'stored one is kept. By default it ' +
+        'rule_text the text is kept as given, and applies_when is drafted ' +
+        'from it unless you pass one or the rule already has one. By default it ' +
         'becomes a GENERAL (user-layer) rule when the memory sits in a ' +
         'personal scope, delivered to every session via ' +
         'the MCP instructions; pass applies_scope to make it a PROJECT rule ' +
