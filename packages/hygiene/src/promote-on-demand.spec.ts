@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AppliesWhenDrafter } from './applies-when.drafter.js';
+import {
+  AppliesWhenDraftError,
+  type AppliesWhenDrafter,
+} from './applies-when.drafter.js';
 import { RuleCandidateDetector } from './rule-candidate-detector.js';
 import { RuleDistiller } from './rule-distiller.js';
 
@@ -285,6 +288,51 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect(out.status).toBe('promoted');
     expect(upserts[0]!.row).toMatchObject({ applies_when: null });
     expect(metered(inserts)).toEqual([]);
+  });
+
+  it('fails the promotion on a malformed draft instead of storing no condition', async () => {
+    const { detector, upserts, drafter } = make(personalMemory);
+    vi.mocked(drafter.draft).mockRejectedValue(
+      new AppliesWhenDraftError('the model wrote no condition')
+    );
+
+    await expect(
+      detector.promoteOnDemand({
+        memoryId: MEMORY,
+        ownerId: OWNER,
+        ruleText: 'always squash',
+      })
+    ).rejects.toBeInstanceOf(AppliesWhenDraftError);
+    expect(upserts).toEqual([]);
+  });
+
+  it('keeps a drafted condition when its metering cannot be written', async () => {
+    const { client, upserts } = fakeClient(personalMemory);
+    const ledgerDown = {
+      from: (table: string) =>
+        table === 'usage_events'
+          ? {
+              insert: () => {
+                throw new Error('ledger down');
+              },
+            }
+          : client.from(table),
+    };
+    const detector = new RuleCandidateDetector(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ledgerDown as any,
+      distillerReturning('unused'),
+      undefined,
+      drafterReturning()
+    );
+
+    await detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'always squash',
+    });
+
+    expect(upserts[0]!.row).toMatchObject({ applies_when: DRAFTED });
   });
 
   it('drafts a condition when the distiller leaves the rule without one', async () => {

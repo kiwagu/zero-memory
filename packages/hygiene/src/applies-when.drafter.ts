@@ -19,6 +19,17 @@ const schema = z.object({
   applies_when: z.string().min(1).max(400),
 });
 
+/**
+ * The model answered, but not with a usable condition. Unlike a model that is
+ * not there to ask, this is a fault to surface, not a reason to go without.
+ */
+export class AppliesWhenDraftError extends Error {
+  constructor(message: string) {
+    super(`applies_when draft: ${message}`);
+    this.name = 'AppliesWhenDraftError';
+  }
+}
+
 export interface AppliesWhenDraft {
   applies_when: string;
   model: string;
@@ -52,9 +63,13 @@ export class AppliesWhenDrafter {
       purpose: 'rule_distiller',
       ...(subjectId ? { subjectId } : {}),
     });
-    const condition = schema.parse(response.input).applies_when.trim();
+    const parsed = schema.safeParse(response.input);
+    if (!parsed.success) {
+      throw new AppliesWhenDraftError(parsed.error.message);
+    }
+    const condition = parsed.data.applies_when.trim();
     if (!condition) {
-      throw new Error('applies_when draft: the model wrote no condition');
+      throw new AppliesWhenDraftError('the model wrote no condition');
     }
     return {
       applies_when: condition,

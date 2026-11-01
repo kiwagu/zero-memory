@@ -20,7 +20,11 @@ import {
   type RuleDistillation,
   type RuleTargetLayer,
 } from './rule-candidate.js';
-import { AppliesWhenDrafter } from './applies-when.drafter.js';
+import {
+  AppliesWhenDraftError,
+  AppliesWhenDrafter,
+  type AppliesWhenDraft,
+} from './applies-when.drafter.js';
 import {
   RuleDistiller,
   type NeighborSnapshot,
@@ -606,9 +610,11 @@ export class RuleCandidateDetector {
 
   /**
    * A rule's condition: the one at hand, else one drafted from its text and
-   * metered like the distiller. Where no model can draft it (an instance
-   * without a model key), the rule still goes through without one: the owner
-   * writes it on /rules, and the gate judges the rule by its text meanwhile.
+   * metered like the distiller. Where no model can be asked (an instance
+   * without a model key, a provider that is down, an allowance used up), the
+   * rule still goes through without one: the owner writes it on /rules, and
+   * the gate judges the rule by its text meanwhile. A model that answered
+   * with no usable condition, or a fault in this code, fails the call.
    */
   async #conditionFor(
     condition: string | null,
@@ -616,16 +622,24 @@ export class RuleCandidateDetector {
     ownerId: string
   ): Promise<string | null> {
     if (condition) return condition;
+    let draft: AppliesWhenDraft;
     try {
-      const draft = await this.drafter.draft(ruleText, ownerId);
-      await this.#meterDistill(draft, ownerId);
-      return draft.applies_when;
+      draft = await this.drafter.draft(ruleText, ownerId);
     } catch (error) {
-      this.#logger.warn('applies_when draft failed; rule kept without one', {
+      if (
+        error instanceof AppliesWhenDraftError ||
+        error instanceof TypeError ||
+        error instanceof ReferenceError
+      ) {
+        throw error;
+      }
+      this.#logger.warn('no model to draft applies_when; rule kept without', {
         error: error instanceof Error ? error.message : String(error),
       });
       return null;
     }
+    await this.#meterDistill(draft, ownerId);
+    return draft.applies_when;
   }
 
   /** Meter one distiller call's tokens (best-effort, service-role). */
@@ -636,25 +650,33 @@ export class RuleCandidateDetector {
     >,
     ownerId?: string
   ): Promise<void> {
-    const { error } = await this.client.from('usage_events').insert({
-      event_type: 'llm_extraction',
-      // Whose work this is: upkeep of a corpus is done for its owner, so
-      // it lands on their ledger and their allowance, not the instance's.
-      user_id: ownerId ?? null,
-      quantity: judgement.inputTokens + judgement.outputTokens,
-      unit: 'tokens',
-      agent_name: AGENT_NAME,
-      metadata: {
-        purpose: 'rule_distiller',
-        model: judgement.model,
-        input_tokens: judgement.inputTokens,
-        output_tokens: judgement.outputTokens,
-        ...(judgement.ranOnCallerKey ? { own_key: true } : {}),
-      },
-    });
-    if (error) {
+    // Best-effort: a ledger that fails, by error or by throwing, must not
+    // undo the work it records.
+    let failure: string | null;
+    try {
+      const { error } = await this.client.from('usage_events').insert({
+        event_type: 'llm_extraction',
+        // Whose work this is: upkeep of a corpus is done for its owner, so
+        // it lands on their ledger and their allowance, not the instance's.
+        user_id: ownerId ?? null,
+        quantity: judgement.inputTokens + judgement.outputTokens,
+        unit: 'tokens',
+        agent_name: AGENT_NAME,
+        metadata: {
+          purpose: 'rule_distiller',
+          model: judgement.model,
+          input_tokens: judgement.inputTokens,
+          output_tokens: judgement.outputTokens,
+          ...(judgement.ranOnCallerKey ? { own_key: true } : {}),
+        },
+      });
+      failure = error?.message ?? null;
+    } catch (thrown) {
+      failure = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    if (failure) {
       this.#logger.warn('incubator: distill metering failed', {
-        error: error.message,
+        error: failure,
       });
     }
   }

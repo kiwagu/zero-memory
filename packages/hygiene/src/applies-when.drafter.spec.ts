@@ -1,7 +1,10 @@
 import { setLlmGateway, type LlmToolCallRequest } from '@workspace/llm';
 import { describe, expect, it, vi } from 'vitest';
 
-import { AppliesWhenDrafter } from './applies-when.drafter.js';
+import {
+  AppliesWhenDraftError,
+  AppliesWhenDrafter,
+} from './applies-when.drafter.js';
 
 const RULE = 'Keep migrations forward-only. Never edit an applied one.';
 
@@ -54,10 +57,14 @@ describe('AppliesWhenDrafter', () => {
 
   it('never answers without a condition: a rule binding every task says so', async () => {
     answering({ applies_when: null });
-    await expect(new AppliesWhenDrafter().draft(RULE)).rejects.toThrow();
+    await expect(new AppliesWhenDrafter().draft(RULE)).rejects.toBeInstanceOf(
+      AppliesWhenDraftError
+    );
 
     answering({ applies_when: '   ' });
-    await expect(new AppliesWhenDrafter().draft(RULE)).rejects.toThrow();
+    await expect(new AppliesWhenDrafter().draft(RULE)).rejects.toBeInstanceOf(
+      AppliesWhenDraftError
+    );
   });
 
   it('rejects a condition longer than 400 characters', async () => {
