@@ -13,7 +13,7 @@ import {
   seedRuleCandidate,
 } from '../helpers/rules.js';
 import { readSeedState } from '../helpers/runtime-state.js';
-import { signInThroughForm } from '../helpers/web.js';
+import { signInThroughForm, waitForHydration } from '../helpers/web.js';
 
 test.describe('rules incubator surface', () => {
   test('@smoke owner sees a pending candidate with draft and evidence', async ({
@@ -156,6 +156,9 @@ test.describe('rules incubator surface', () => {
       });
 
       await page.reload();
+      // The server's HTML already holds the stored values; a key press before
+      // hydration would find no handler and save nothing.
+      await waitForHydration(page);
       await expect(appliesWhen).toHaveValue(
         'any task that writes a git commit'
       );

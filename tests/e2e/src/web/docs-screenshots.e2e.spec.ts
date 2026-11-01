@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
+import { waitForHydration } from '../helpers/web.js';
+
 /** Where the documentation site serves its images from. */
 const imageDir = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -40,23 +42,6 @@ const shotPath = (name: string): string => join(imageDir, `${name}.png`);
 const frameOn = async (subject: Locator, page: Page): Promise<void> => {
   await subject.scrollIntoViewIfNeeded();
   await page.waitForTimeout(SETTLE_MS);
-};
-
-/**
- * Waits for React to hydrate, not merely for the server's HTML to be on screen.
- *
- * Playwright injects `caret-color: transparent` to hide the text caret; landing
- * before hydration, that attribute becomes a genuine hydration mismatch and the
- * `next dev` overlay badges the shot. Shoot after hydration instead.
- *
- * The signal is `next-themes` writing `style="color-scheme: …"` on <html>,
- * which the server-rendered markup never carries. A heading is NOT a signal: it
- * ships in the SSR HTML, so waiting on one can fire mid-hydration.
- */
-const waitForHydration = async (page: Page): Promise<void> => {
-  await page.waitForFunction(() =>
-    document.documentElement.getAttribute('style')?.includes('color-scheme')
-  );
 };
 
 /**
