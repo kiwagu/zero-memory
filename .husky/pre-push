@@ -4,10 +4,19 @@ set -e
 
 # Mandatory before code leaves the machine: the e2e smoke gate. It stands up a
 # dedicated, isolated Supabase CLI stack (project zero-memory-e2e, ports 5533x)
-# + its own server/web, runs the protocol + browser smokes, and tears the stack
-# down — nothing touches the dev/stage stack. Requires Docker to be running.
+# + its own server/web and runs the protocol + browser smokes, leaving the
+# stack up for the next run — nothing touches the dev/stage stack. Requires
+# Docker to be running.
 #
-# Heavy (~1.5 min) by design, which is why it gates push, not every commit.
+# Heavy (several minutes) by design, which is why it gates push, not every
+# commit. It is skipped when the push sends nothing it could still catch:
+# every commit is already on the remote, or its tree already passed the full
+# or the smoke suite on a clean checkout (scripts/push-gate.sh says which).
+# Any other answer from the gate, including its own failure, runs the smoke.
 # Emergency bypass (use sparingly): git push --no-verify
+if bash scripts/push-gate.sh "$1"; then
+  echo "pre-push: nothing new to test, smoke skipped"
+  exit 0
+fi
 echo "pre-push: running e2e smoke gate (isolated Supabase stack)…"
 bun run test:e2e:smoke

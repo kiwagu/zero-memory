@@ -188,6 +188,16 @@ const pwArgs = rawArgs.filter(
   (arg) => !LAUNCHER_FLAGS.has(arg) && !arg.startsWith('--target=')
 );
 
+// Which suite this run is, for the push gate (scripts/push-gate.sh): the whole
+// suite and the @smoke suite each vouch for a tree; any other selection says
+// nothing about a tree as a whole.
+const suite: 'full' | 'smoke' | null =
+  pwArgs.length === 0
+    ? 'full'
+    : ['--grep @smoke', '--grep=@smoke'].includes(pwArgs.join(' '))
+      ? 'smoke'
+      : null;
+
 // Documentation shots overwrite images that ship with the docs site, and the
 // framing of those images is a human decision — a suite run must never touch
 // them as a side effect. They stay capturable on demand (`bun run
@@ -325,6 +335,53 @@ const gitHead = (): string => {
     encoding: 'utf8',
   });
   return (result.stdout ?? '').trim() || 'unknown';
+};
+
+/**
+ * The tree the working copy holds, or null when it holds something no commit
+ * does: a change to a tracked file, or an untracked one.
+ */
+const committedTree = (): string | null => {
+  const status = spawnSync('git', ['status', '--porcelain'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (status.status !== 0 || (status.stdout ?? '').trim() !== '') {
+    return null;
+  }
+  const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  return tree.status === 0 ? (tree.stdout ?? '').trim() || null : null;
+};
+
+/** How many proven trees the push gate's record keeps, newest last. */
+const PROVEN_TREES_KEPT = 200;
+
+/**
+ * Records that a passing run proved a tree. The pre-push gate
+ * (scripts/push-gate.sh) then lets a push of that tree through without running
+ * the smoke again. The record lives in the git directory, never in the tree.
+ */
+const recordProvenTree = (tree: string, proof: 'full' | 'smoke'): void => {
+  const where = spawnSync(
+    'git',
+    ['rev-parse', '--git-path', 'zm-e2e-proven-trees'],
+    { cwd: repoRoot, encoding: 'utf8' }
+  );
+  if (where.status !== 0) {
+    return;
+  }
+  const path = resolve(repoRoot, (where.stdout ?? '').trim());
+  let lines: string[] = [];
+  try {
+    lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  } catch {
+    // No record yet: this is the first.
+  }
+  lines.push(`${tree} ${proof} ${new Date().toISOString()}`);
+  writeFileSync(path, `${lines.slice(-PROVEN_TREES_KEPT).join('\n')}\n`);
 };
 
 /**
@@ -1054,6 +1111,9 @@ const reportStatus = async (): Promise<void> => {
 };
 
 const main = async (): Promise<number> => {
+  // Taken before anything boots from the working copy: the tree a pass of
+  // this run can vouch for.
+  const provingTree = suite ? committedTree() : null;
   if (statusOnly) {
     await reportStatus();
     return 0;
@@ -1144,6 +1204,19 @@ const main = async (): Promise<number> => {
     console.log(
       `\n✓ test stack + apps left up for the next run (fast repeat).` +
         ` Stop with: bun run e2e:down`
+    );
+  }
+  // A pass proves the tree only if the checkout stayed clean and on the same
+  // tree for the whole run.
+  if (
+    result.status === 0 &&
+    suite &&
+    provingTree &&
+    committedTree() === provingTree
+  ) {
+    recordProvenTree(provingTree, suite);
+    console.log(
+      `✓ tree ${provingTree.slice(0, 12)} recorded as proven by the ${suite} suite (the pre-push gate skips it)`
     );
   }
   return result.status ?? 1;
