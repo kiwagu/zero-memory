@@ -299,18 +299,47 @@ the gate's totals; see [Value metering](/docs/platform/value-metering#rule-gate-
 
 ### Guard hooks and refusals
 
-A client-side guard hook that refuses an action can open its refusal reason
-with `[guard:<name>]` (for example `[guard:one_line_commit]`), where the
-name is a lowercase letter followed by 1 to 63 lowercase letters, digits,
-`_` or `-`. When the watcher's hook ingests a Claude Code transcript, it
-reports such refusals with the chunk: the guard's name and the time, never
-the refused command or the reason text. Only the denial itself counts, once
-per denied tool call; the tag in prose, in a tool's input or in a result that
-succeeded is talk about a guard, not a refusal by one.
+Some rules are also enforced mechanically, by a client-side guard: a Claude
+Code `PreToolUse` hook that refuses the tool call breaking the rule, such as a
+commit with a multi-line message. Linking the guard to the rule lets you see
+how often agents still trip the guard while the rule is being delivered.
 
-`/rules` lists the refusals per guard over the last 30 days, and a rule's
-**Enforced by guard** field records which guard backs it, so the guard's
-refusals can be read next to how the rule was delivered.
+To link a guard to a rule:
+
+1. Name the guard: a lowercase letter followed by 1 to 63 lowercase letters,
+   digits, `_` or `-`, for example `one_line_commit`.
+2. Have the guard open its refusal reason with the tag `[guard:<name>]`. For a
+   hook that refuses through its JSON output, the tag is the start of
+   `permissionDecisionReason`:
+
+   ```json
+   {
+     "hookSpecificOutput": {
+       "hookEventName": "PreToolUse",
+       "permissionDecision": "deny",
+       "permissionDecisionReason": "[guard:one_line_commit] A commit message is one subject line."
+     }
+   }
+   ```
+
+3. On `/rules`, type the same name into the rule's **Enforced by guard**
+   field. Clearing the field unlinks the guard.
+
+When the watcher's hook ingests a Claude Code transcript, it reports each
+refusal with the chunk: the guard's name and the time, never the refused
+command or the reason text. Only the denial itself counts, once per denied
+tool call, and only when the tag opens the reason: the tag later in the
+reason, in prose, in a tool's input or in a result that succeeded is talk
+about a guard, not a refusal by one. Transcripts from other clients report no
+refusals.
+
+`/rules` lists the refusals per guard over the last 30 days in one line at
+the foot of the page (**Guard refusals**). The **Enforced by guard** field is
+a label: it changes neither how the rule is delivered nor how the judge sees
+it, and a rule's card does not count its guard's refusals. Read the two side
+by side instead: if a rule mostly arrives by headline or by gate while its
+guard keeps refusing, its **applies when** line likely misses the tasks the
+guard catches. A rule no guard enforces leaves the field empty.
 
 ### Closing the loop
 
