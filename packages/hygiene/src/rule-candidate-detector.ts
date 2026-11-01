@@ -3,6 +3,7 @@ import {
   failure,
   secretContentRejectedMessage,
 } from '@workspace/contracts';
+import { NoModelKeyError } from '@workspace/llm';
 import { createLogger } from '@workspace/logger';
 import { guardTextFields } from '@workspace/memory';
 import {
@@ -21,7 +22,6 @@ import {
   type RuleTargetLayer,
 } from './rule-candidate.js';
 import {
-  AppliesWhenDraftError,
   AppliesWhenDrafter,
   type AppliesWhenDraft,
 } from './applies-when.drafter.js';
@@ -610,11 +610,11 @@ export class RuleCandidateDetector {
 
   /**
    * A rule's condition: the one at hand, else one drafted from its text and
-   * metered like the distiller. Where no model can be asked (an instance
-   * without a model key, a provider that is down, an allowance used up), the
-   * rule still goes through without one: the owner writes it on /rules, and
-   * the gate judges the rule by its text meanwhile. A model that answered
-   * with no usable condition, or a fault in this code, fails the call.
+   * metered like the distiller. Only an instance with no model key lets the
+   * rule go through without one: the owner writes it on /rules, and the gate
+   * judges the rule by its text meanwhile. A model that was asked and failed
+   * (output it could not parse, an outage, an allowance used up) fails the
+   * call, as the distiller's own failure does, so a retry can draft it.
    */
   async #conditionFor(
     condition: string | null,
@@ -626,16 +626,10 @@ export class RuleCandidateDetector {
     try {
       draft = await this.drafter.draft(ruleText, ownerId);
     } catch (error) {
-      if (
-        error instanceof AppliesWhenDraftError ||
-        error instanceof TypeError ||
-        error instanceof ReferenceError
-      ) {
-        throw error;
-      }
-      this.#logger.warn('no model to draft applies_when; rule kept without', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      if (!(error instanceof NoModelKeyError)) throw error;
+      this.#logger.warn(
+        'no model key to draft applies_when; rule kept without'
+      );
       return null;
     }
     await this.#meterDistill(draft, ownerId);

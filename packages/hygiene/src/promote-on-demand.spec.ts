@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { NoModelKeyError } from '@workspace/llm';
+
 import {
   AppliesWhenDraftError,
   type AppliesWhenDrafter,
@@ -275,9 +277,9 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     ]);
   });
 
-  it('still promotes when no model can draft the condition, leaving it for the owner', async () => {
+  it('still promotes on an instance with no model key, leaving the condition for the owner', async () => {
     const { detector, upserts, inserts, drafter } = make(personalMemory);
-    vi.mocked(drafter.draft).mockRejectedValue(new Error('no model key'));
+    vi.mocked(drafter.draft).mockRejectedValue(new NoModelKeyError());
 
     const out = await detector.promoteOnDemand({
       memoryId: MEMORY,
@@ -290,21 +292,35 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect(metered(inserts)).toEqual([]);
   });
 
-  it('fails the promotion on a malformed draft instead of storing no condition', async () => {
-    const { detector, upserts, drafter } = make(personalMemory);
-    vi.mocked(drafter.draft).mockRejectedValue(
-      new AppliesWhenDraftError('the model wrote no condition')
-    );
+  it.each([
+    [
+      'a malformed draft',
+      new AppliesWhenDraftError('the model wrote no condition'),
+    ],
+    // What the model adapter raises when the output fails its schema.
+    [
+      'output the adapter could not parse',
+      new Error(
+        'rule_distiller: the model returned no record_applies_when object.'
+      ),
+    ],
+    ['a provider outage', new Error('503 Service Unavailable')],
+  ])(
+    'fails the promotion on %s instead of storing no condition',
+    async (_, failure) => {
+      const { detector, upserts, drafter } = make(personalMemory);
+      vi.mocked(drafter.draft).mockRejectedValue(failure);
 
-    await expect(
-      detector.promoteOnDemand({
-        memoryId: MEMORY,
-        ownerId: OWNER,
-        ruleText: 'always squash',
-      })
-    ).rejects.toBeInstanceOf(AppliesWhenDraftError);
-    expect(upserts).toEqual([]);
-  });
+      await expect(
+        detector.promoteOnDemand({
+          memoryId: MEMORY,
+          ownerId: OWNER,
+          ruleText: 'always squash',
+        })
+      ).rejects.toBe(failure);
+      expect(upserts).toEqual([]);
+    }
+  );
 
   it('keeps a drafted condition when its metering cannot be written', async () => {
     const { client, upserts } = fakeClient(personalMemory);

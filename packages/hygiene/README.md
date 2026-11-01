@@ -87,8 +87,10 @@ judges a task against. Every rule gets one, pinned or not, and a rule that
 binds every task says so, because a pin can be lifted later and the condition
 is what the gate judges the rule by then. The detector calls it whenever a
 rule would otherwise go out without one (a `promote_rule` with its own text, a
-draft the distiller left without one); where no model can run, the rule goes
-through without one and the owner writes it on `/rules`. The server's
+draft the distiller left without one). Only on an instance with no model key
+does the rule go through without one, for the owner to write on `/rules`; a
+model that is asked and fails fails the call, as a failed distillation does.
+The server's
 `rules:applies-when-draft` command runs it over an owner's promoted rules that
 lack one and stores each drafted line, which the owner reviews and edits on
 `/rules`.

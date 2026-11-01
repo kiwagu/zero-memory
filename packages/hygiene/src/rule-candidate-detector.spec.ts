@@ -158,4 +158,34 @@ describe('RuleCandidateDetector.detect', () => {
       expect.objectContaining({ applies_when: 'any task that makes a commit' })
     );
   });
+
+  it('queues no draft without a condition when the model fails to draft one', async () => {
+    const { client, updates } = fakeClient([
+      {
+        memory_id: MEMORY,
+        owner_id: OWNER,
+        kind: 'convention',
+        scope: 'user.usr_000000000000000a_0000000000',
+        content: 'run the commit guard before every commit',
+        useful_sessions: 3,
+        first_used_at: null,
+        last_used_at: null,
+        session_keys: null,
+      },
+    ]);
+    const outage = new Error('503 Service Unavailable');
+    const detector = new RuleCandidateDetector(
+      client as never,
+      distillerReturning(null),
+      undefined,
+      {
+        draft: vi.fn().mockRejectedValue(outage),
+      } as unknown as AppliesWhenDrafter
+    );
+
+    await expect(detector.detect(OWNER)).rejects.toBe(outage);
+    expect(updates).not.toContainEqual(
+      expect.objectContaining({ rule_text: expect.any(String) })
+    );
+  });
 });
