@@ -27,6 +27,7 @@ import {
 } from '@workspace/ui/components/select';
 import { Markdown } from '@workspace/ui/components/common/markdown';
 import { Input } from '@workspace/ui/components/input';
+import { Label } from '@workspace/ui/components/label';
 import { Switch } from '@workspace/ui/components/switch';
 import { Textarea } from '@workspace/ui/components/textarea';
 import {
@@ -205,13 +206,13 @@ function PromotedRuleDelivery({
   const enforcedBy = item.enforcedBy ?? '';
   const appliesWhenId = `rule-applies-when-${item.id}`;
   const enforcedById = `rule-enforced-by-${item.id}`;
+  // A flex gap, not `space-y`: the label is inline, and an inline element
+  // ignores the vertical margin `space-y` would put on it.
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-4">
       {onAppliesWhen ? (
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor={appliesWhenId}>
-            {labels.appliesWhen.label}
-          </label>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={appliesWhenId}>{labels.appliesWhen.label}</Label>
           <Textarea
             key={appliesWhen}
             id={appliesWhenId}
@@ -236,10 +237,8 @@ function PromotedRuleDelivery({
         </div>
       ) : null}
       {onEnforcedBy ? (
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium" htmlFor={enforcedById}>
-            {labels.enforcedBy.label}
-          </label>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={enforcedById}>{labels.enforcedBy.label}</Label>
           <Input
             key={enforcedBy}
             id={enforcedById}
@@ -750,7 +749,7 @@ export function RuleCandidateQueue({
                   </div>
                 </div>
               ) : item.status === 'promoted' ? (
-                <div className="space-y-2">
+                <div className="flex flex-col gap-4">
                   <PromotedRuleDelivery
                     item={item}
                     busy={busy}
