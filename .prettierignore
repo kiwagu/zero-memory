@@ -29,3 +29,6 @@ next-env.d.ts
 
 # AWS CDK output
 **/cdk.out/
+
+# The local process manager's generated state (git-ignored inside .mcproc/)
+.mcproc/
