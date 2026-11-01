@@ -49,6 +49,13 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import {
+  bootedFromAnotherTree,
+  provenTree,
+  suiteOf,
+  type Suite,
+} from './proof.js';
+
 const repoRoot = resolve(fileURLToPath(import.meta.url), '../../../..');
 const e2eRoot = resolve(repoRoot, 'tests/e2e');
 
@@ -188,15 +195,9 @@ const pwArgs = rawArgs.filter(
   (arg) => !LAUNCHER_FLAGS.has(arg) && !arg.startsWith('--target=')
 );
 
-// Which suite this run is, for the push gate (scripts/push-gate.sh): the whole
-// suite and the @smoke suite each vouch for a tree; any other selection says
-// nothing about a tree as a whole.
-const suite: 'full' | 'smoke' | null =
-  pwArgs.length === 0
-    ? 'full'
-    : ['--grep @smoke', '--grep=@smoke'].includes(pwArgs.join(' '))
-      ? 'smoke'
-      : null;
+// Which suite this run is, for the push gate (scripts/push-gate.sh); null when
+// it cannot vouch for a tree (see proof.ts).
+const suite = suiteOf(pwArgs, Boolean(process.env['CI']));
 
 // Documentation shots overwrite images that ship with the docs site, and the
 // framing of those images is a human decision — a suite run must never touch
@@ -217,6 +218,10 @@ interface AppsState {
   bootedAt?: number;
   /** Commit the tree was on at boot, for the status report. */
   head?: string;
+  /** The committed tree the apps booted from; absent when the checkout held
+   * uncommitted changes then. A pass vouches for a tree only through apps
+   * that booted from it. */
+  tree?: string;
 }
 
 const runtimeDirOf = (contour: Contour): string =>
@@ -364,7 +369,7 @@ const PROVEN_TREES_KEPT = 200;
  * (scripts/push-gate.sh) then lets a push of that tree through without running
  * the smoke again. The record lives in the git directory, never in the tree.
  */
-const recordProvenTree = (tree: string, proof: 'full' | 'smoke'): void => {
+const recordProvenTree = (tree: string, proof: Suite): void => {
   const where = spawnSync(
     'git',
     ['rev-parse', '--git-path', 'zm-e2e-proven-trees'],
@@ -814,14 +819,16 @@ const ensureApps = async (
     const state = readAppsState(contour);
     const stale =
       !contour.serverHotReloads &&
-      (state?.bootedAt === undefined || sourceChangedSinceBoot(state.bootedAt));
+      (state?.bootedAt === undefined ||
+        sourceChangedSinceBoot(state.bootedAt) ||
+        bootedFromAnotherTree(state.tree, committedTree()));
     if (!stale) {
       console.log(`→ [${contour.key}] server + web already up — reusing them.`);
       return;
     }
     console.log(
-      `→ [${contour.key}] server + web are up but the sources moved since they ` +
-        'booted — rebooting them so the run exercises the current tree.'
+      `→ [${contour.key}] server + web are up but the sources or the tree moved ` +
+        'since they booted — rebooting them so the run exercises the current tree.'
     );
   }
 
@@ -937,6 +944,7 @@ const ensureApps = async (
       webPid,
       bootedAt: Date.now(),
       head: gitHead(),
+      tree: committedTree() ?? undefined,
     })
   );
 
@@ -1206,17 +1214,17 @@ const main = async (): Promise<number> => {
         ` Stop with: bun run e2e:down`
     );
   }
-  // A pass proves the tree only if the checkout stayed clean and on the same
-  // tree for the whole run.
-  if (
-    result.status === 0 &&
-    suite &&
-    provingTree &&
-    committedTree() === provingTree
-  ) {
-    recordProvenTree(provingTree, suite);
+  const proven = provenTree({
+    passed: result.status === 0,
+    suite,
+    treeAtStart: provingTree,
+    treeAtEnd: committedTree(),
+    appsTree: readAppsState(test)?.tree,
+  });
+  if (proven && suite) {
+    recordProvenTree(proven, suite);
     console.log(
-      `✓ tree ${provingTree.slice(0, 12)} recorded as proven by the ${suite} suite (the pre-push gate skips it)`
+      `✓ tree ${proven.slice(0, 12)} recorded as proven by the ${suite} suite (the pre-push gate skips it)`
     );
   }
   return result.status ?? 1;

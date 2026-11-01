@@ -1,23 +1,46 @@
 #!/usr/bin/env bash
 # Whether a push still needs the pre-push e2e smoke. Called by .husky/pre-push
-# with the remote's name and the lines git writes on the hook's stdin:
+# with the remote's name and URL, and the lines git writes on the hook's stdin:
 #
 #   <local ref> <local sha> <remote ref> <remote sha>
 #
 # Exits 0 when nothing the push sends needs the smoke, 1 when something does,
 # naming it. A ref needs nothing when:
 #   - it deletes (it sends no code);
-#   - its commit is already on the remote (a remote-tracking ref of that
-#     remote contains it), as for a tag on a published commit;
+#   - its commit is already on the destination (a ref the destination holds
+#     right now contains it, read with ls-remote rather than from this
+#     clone's remote-tracking refs, which can be stale or belong to an earlier
+#     URL), as for a tag on a published commit;
 #   - its tree is one a passing run of the full or the @smoke suite proved on
 #     a clean checkout, as tests/e2e/scripts/run-e2e.ts records it.
 # Anything it cannot judge needs the smoke, and so does any failure of this
 # script: the hook runs the smoke on every exit but 0.
 set -uo pipefail
 
-remote="${1:?usage: push-gate.sh <remote> < pre-push lines}"
+remote="${1:?usage: push-gate.sh <remote> [<url>] < pre-push lines}"
+url="${2:-$1}"
 proven="$(git rev-parse --git-path zm-e2e-proven-trees)"
 need=0
+
+# The commits the destination's refs name, read once and only when a ref is
+# not proven otherwise. Unreadable means unknown, and then nothing counts as
+# published.
+published=""
+published_read=0
+
+on_destination() { # on_destination <commit>
+  local sha
+  if [ "$published_read" -eq 0 ]; then
+    published="$(git ls-remote "$url" 2>/dev/null | awk '{ print $1 }' | sort -u)" \
+      || published=""
+    published_read=1
+  fi
+  for sha in $published; do
+    git cat-file -e "$sha^{commit}" 2>/dev/null || continue
+    git merge-base --is-ancestor "$1" "$sha" 2>/dev/null && return 0
+  done
+  return 1
+}
 
 while read -r local_ref local_sha _remote_ref _remote_sha; do
   [ -n "${local_sha:-}" ] || continue
@@ -30,16 +53,15 @@ while read -r local_ref local_sha _remote_ref _remote_sha; do
     need=1
     continue
   fi
-  if [ -n "$(git for-each-ref --contains "$commit" --count=1 \
-    --format='%(refname)' "refs/remotes/$remote")" ]; then
-    echo "push-gate: $local_ref is already on $remote"
-    continue
-  fi
   tree="$(git rev-parse "$commit^{tree}")"
   if [ -f "$proven" ] && proof="$(awk -v tree="$tree" \
     '$1 == tree { proof = $2 " run of " $3 } END { if (proof == "") exit 1; print proof }' \
     "$proven")"; then
     echo "push-gate: $local_ref has a tree a passing $proof proved"
+    continue
+  fi
+  if on_destination "$commit"; then
+    echo "push-gate: $local_ref is already on $remote"
     continue
   fi
   echo "push-gate: $local_ref ($(git rev-parse --short "$commit")) is not proven by an e2e run"

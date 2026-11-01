@@ -14,7 +14,7 @@ set -e
 # or the smoke suite on a clean checkout (scripts/push-gate.sh says which).
 # Any other answer from the gate, including its own failure, runs the smoke.
 # Emergency bypass (use sparingly): git push --no-verify
-if bash scripts/push-gate.sh "$1"; then
+if bash scripts/push-gate.sh "$1" "$2"; then
   echo "pre-push: nothing new to test, smoke skipped"
   exit 0
 fi

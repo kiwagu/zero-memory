@@ -39,8 +39,12 @@ local_tree="$(git rev-parse HEAD^{tree})"
 zero=0000000000000000000000000000000000000000
 proven="$(git rev-parse --git-path zm-e2e-proven-trees)"
 
-# verdict <stdin lines>: the gate's exit status for a push of those lines
-verdict() { printf '%s' "$1" | bash "$GATE" origin > "$T/out" 2>&1; echo $?; }
+# verdict <stdin lines> [<url>]: the gate's exit status for a push of those
+# lines to origin, at its own URL unless another is given
+verdict() {
+  printf '%s' "$1" | bash "$GATE" origin "${2:-$T/remote.git}" > "$T/out" 2>&1
+  echo $?
+}
 
 # --- commits already on the remote send no new code -------------------------
 expect_eq "a branch already on the remote needs no smoke" 0 \
@@ -82,10 +86,61 @@ expect_eq "a push with one unproven ref needs the smoke" 1 \
 refs/heads/next $(git rev-parse HEAD) refs/heads/next $zero
 ")"
 
+# --- the shortcut reads the destination, not this clone's cached refs -------
+# refs/remotes/origin/main still names `public` after the remote moves to a
+# repository that never received it.
+git init -q --bare "$T/elsewhere.git"
+rm -f "$proven"
+expect_eq "a commit only cached refs of an earlier URL hold needs the smoke" 1 \
+  "$(verdict "refs/heads/main $public refs/heads/main $zero
+" "$T/elsewhere.git")"
+expect_eq "an unreachable destination proves nothing published" 1 \
+  "$(verdict "refs/heads/main $public refs/heads/main $zero
+" "$T/missing.git")"
+
 # --- what cannot be judged runs the smoke ------------------------------------
 expect_eq "a ref that names no commit needs the smoke" 1 \
   "$(verdict "refs/tags/blob $(git rev-parse HEAD:f) refs/tags/blob $zero
 ")"
+
+# --- when a run may record a proof (tests/e2e/scripts/proof.ts) -------------
+cat > "$T/proof-check.ts" <<TS
+import { bootedFromAnotherTree, provenTree, suiteOf } from '$REPO/tests/e2e/scripts/proof.ts';
+const run = { passed: true, suite: 'full' as const, treeAtStart: 'A', treeAtEnd: 'A', appsTree: 'A' };
+const show = (name: string, value: unknown) => console.log(name + '=' + JSON.stringify(value));
+show('ci-full', suiteOf([], true));
+show('ci-smoke', suiteOf(['--grep', '@smoke'], true));
+show('local-full', suiteOf([], false));
+show('selection', suiteOf(['--grep', '@smoke', 'src/web/rules.e2e.spec.ts'], true));
+show('project', suiteOf(['--project=api'], true));
+show('apps-other-tree', bootedFromAnotherTree('A', 'B'));
+show('apps-same-tree', bootedFromAnotherTree('A', 'A'));
+show('apps-unknown-tree', bootedFromAnotherTree(undefined, 'A'));
+show('dirty-checkout', bootedFromAnotherTree('A', null));
+show('proven', provenTree(run));
+show('apps-elsewhere', provenTree({ ...run, appsTree: 'B' }));
+show('tree-moved', provenTree({ ...run, treeAtEnd: 'B' }));
+show('dirty-at-start', provenTree({ ...run, treeAtStart: null, treeAtEnd: null }));
+show('failed', provenTree({ ...run, passed: false }));
+show('no-suite', provenTree({ ...run, suite: null }));
+TS
+proof="$(cd "$REPO" && bun "$T/proof-check.ts" 2>&1)"
+check() { expect_eq "$1" "$2=$3" "$(printf '%s\n' "$proof" | grep "^$2=")"; }
+check "a CI-mode run of the whole suite counts as full" ci-full '"full"'
+check "a CI-mode @smoke run counts as smoke" ci-smoke '"smoke"'
+check "a run outside CI mode (focused tests allowed) proves nothing" local-full null
+check "a selection of specs proves nothing" selection null
+check "a single project proves nothing" project null
+check "apps from another tree are not reused, even with no newer file" apps-other-tree true
+check "apps from the same tree are reused" apps-same-tree false
+check "apps of unknown tree are not reused for a clean checkout" apps-unknown-tree true
+check "a dirty checkout leaves reuse to the file times" dirty-checkout false
+check "a clean pass through apps of that tree proves it" proven '"A"'
+check "apps booted from another tree prove nothing" apps-elsewhere null
+check "a tree that moved during the run proves nothing" tree-moved null
+check "a dirty checkout proves nothing" dirty-at-start null
+check "a failed run proves nothing" failed null
+check "a run of no counting suite proves nothing" no-suite null
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
