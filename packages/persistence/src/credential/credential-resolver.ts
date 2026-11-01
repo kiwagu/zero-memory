@@ -59,25 +59,15 @@ export class SupabaseCredentialResolver implements ICredentialResolver {
         'could not read a stored credential; using the platform key',
         { error: reason }
       );
-      try {
-        return await this.#platform.resolve();
-      } catch (platformError: unknown) {
-        // With no platform key either, the failed lookup is why there is no
-        // key. Reporting a missing key would claim the owner stored none, and
-        // a caller that does without a model on a keyless instance would then
-        // skip one the owner may well have.
-        if (platformError instanceof NoModelKeyError) {
-          throw new Error(`could not read a stored credential: ${reason}`, {
-            cause: platformError,
-          });
-        }
-        throw platformError;
-      }
+      return this.#platformFor(
+        subjectId,
+        `could not read a stored credential: ${reason}`
+      );
     }
 
     const row = Array.isArray(data) ? data[0] : data;
     if (!isCredentialRow(row)) {
-      return this.#platform.resolve();
+      return this.#platformFor(subjectId, null);
     }
 
     return {
@@ -105,6 +95,42 @@ export class SupabaseCredentialResolver implements ICredentialResolver {
     // apply — so the safe answer is "not their own key".
     if (error) return false;
     return data !== null;
+  }
+
+  /**
+   * The platform key, for a subject whose own key did not resolve. With no
+   * platform key either, a missing key is reported only when the subject
+   * stored none: a lookup that failed, or a stored key it could not use (a
+   * vendor this server has no adapter for, a secret gone from the vault), is
+   * reported as itself. Otherwise a caller that does without a model on a
+   * keyless instance would skip one the owner may well have.
+   */
+  async #platformFor(
+    subjectId: string,
+    lookupFailure: string | null
+  ): Promise<ResolvedCredential> {
+    try {
+      return await this.#platform.resolve();
+    } catch (platformError: unknown) {
+      if (!(platformError instanceof NoModelKeyError)) throw platformError;
+      const reason =
+        lookupFailure ?? (await this.#unusableStoredKey(subjectId));
+      if (reason === null) throw platformError;
+      throw new Error(reason, { cause: platformError });
+    }
+  }
+
+  /** Why the subject's stored key cannot be used, or null if they stored none. */
+  async #unusableStoredKey(subjectId: string): Promise<string | null> {
+    const { data, error } = await this.#serviceClient()
+      .from('provider_credentials')
+      .select('subject_id')
+      .eq('subject_id', subjectId)
+      .maybeSingle();
+    if (error) {
+      return `could not check for a stored credential: ${error.message}`;
+    }
+    return data === null ? null : 'the stored credential cannot be used';
   }
 
   #serviceClient(): Client {
