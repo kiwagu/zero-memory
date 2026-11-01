@@ -3,8 +3,8 @@
  * judges a task against a rule's condition, and rules promoted before the
  * distiller wrote one carry only their text. Each drafted condition is stored
  * on the rule and printed; the owner reviews and edits it on /rules, where the
- * condition is editable in place. A rule the model says binds every task is
- * left without one.
+ * condition is editable in place. Every rule gets one: a rule that binds
+ * every task says so.
  *
  *   SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… ANTHROPIC_API_KEY=… \
  *     bun run rules:applies-when-draft -- --owner usr_… --max 50   # from apps/server
@@ -58,7 +58,6 @@ const drafter = new AppliesWhenDrafter();
 let drafted = 0;
 for (const row of rows ?? []) {
   const draft = await drafter.draft(row.rule_text as string, owner);
-  if (!draft.applies_when) continue;
   const { error: upErr } = await client
     .from('rule_candidates')
     .update({ applies_when: draft.applies_when })

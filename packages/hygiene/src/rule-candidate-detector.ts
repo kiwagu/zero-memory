@@ -20,6 +20,7 @@ import {
   type RuleDistillation,
   type RuleTargetLayer,
 } from './rule-candidate.js';
+import { AppliesWhenDrafter } from './applies-when.drafter.js';
 import {
   RuleDistiller,
   type NeighborSnapshot,
@@ -87,7 +88,8 @@ export class RuleCandidateDetector {
   constructor(
     private readonly client: Client = createServiceRoleClient(),
     private readonly distiller: RuleDistiller = new RuleDistiller(),
-    private readonly config: IncubatorConfig = DEFAULT_INCUBATOR_CONFIG
+    private readonly config: IncubatorConfig = DEFAULT_INCUBATOR_CONFIG,
+    private readonly drafter: AppliesWhenDrafter = new AppliesWhenDrafter()
   ) {}
 
   /**
@@ -315,6 +317,11 @@ export class RuleCandidateDetector {
     if (!text) {
       text = memory.content.trim();
     }
+    // Every promoted rule carries its condition, pinned or not: a pin is
+    // lifted at will, and the condition is what the rule gate judges the rule
+    // by once it is. Missing here, it is drafted now, while its source is
+    // at hand.
+    condition = await this.#conditionFor(condition, text, ownerId);
 
     const targetLayer: RuleTargetLayer =
       keptAddress?.targetLayer ??
@@ -537,7 +544,11 @@ export class RuleCandidateDetector {
       .from('rule_candidates')
       .update({
         rule_text: judgement.verdict.rule_text,
-        applies_when: readAppliesWhen(judgement.verdict.applies_when),
+        applies_when: await this.#conditionFor(
+          readAppliesWhen(judgement.verdict.applies_when),
+          judgement.verdict.rule_text,
+          row.owner_id
+        ),
         target_layer: targetLayerForScope(row.scope),
         judge_confidence: judgement.verdict.confidence,
         judge_rationale: judgement.verdict.rationale,
@@ -591,6 +602,30 @@ export class RuleCandidateDetector {
       confidence: judgement.verdict.confidence,
       model: judgement.model,
     });
+  }
+
+  /**
+   * A rule's condition: the one at hand, else one drafted from its text and
+   * metered like the distiller. Where no model can draft it (an instance
+   * without a model key), the rule still goes through without one: the owner
+   * writes it on /rules, and the gate judges the rule by its text meanwhile.
+   */
+  async #conditionFor(
+    condition: string | null,
+    ruleText: string,
+    ownerId: string
+  ): Promise<string | null> {
+    if (condition) return condition;
+    try {
+      const draft = await this.drafter.draft(ruleText, ownerId);
+      await this.#meterDistill(draft, ownerId);
+      return draft.applies_when;
+    } catch (error) {
+      this.#logger.warn('applies_when draft failed; rule kept without one', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   /** Meter one distiller call's tokens (best-effort, service-role). */

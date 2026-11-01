@@ -40,7 +40,8 @@ OBSERVABLE features of a task for which this rule binds — what the task
 description itself shows (which files or systems it touches, what kind of
 work it is), never what will happen later in it. Example: "any task that
 changes files tracked by git, including docs" rather than "when committing".
-Leave applies_when null when the rule binds every task of this owner.
+Always write applies_when: a rule that binds every task of this owner says so
+as its widest feature, for example "any task in any project".
 applies_when is at most 400 characters.
 
 Neighbouring memories, when provided, are context only — distill the SUBJECT

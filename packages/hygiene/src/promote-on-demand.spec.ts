@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { AppliesWhenDrafter } from './applies-when.drafter.js';
 import { RuleCandidateDetector } from './rule-candidate-detector.js';
 import { RuleDistiller } from './rule-distiller.js';
 
@@ -77,6 +78,19 @@ const distillerReturning = (
     }),
   }) as unknown as RuleDistiller;
 
+/** A drafter that writes this condition for any rule. */
+const DRAFTED = 'any task that drafts a condition';
+const drafterReturning = (): AppliesWhenDrafter =>
+  ({
+    draft: vi.fn().mockResolvedValue({
+      applies_when: DRAFTED,
+      model: 'drafter-model',
+      inputTokens: 40,
+      outputTokens: 8,
+      ranOnCallerKey: false,
+    }),
+  }) as unknown as AppliesWhenDrafter;
+
 const make = (
   memory: Record<string, unknown> | null,
   distillText = 'distilled rule',
@@ -85,9 +99,15 @@ const make = (
 ) => {
   const { client, upserts, inserts } = fakeClient(memory, existing);
   const distiller = distillerReturning(distillText, distillAppliesWhen);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const detector = new RuleCandidateDetector(client as any, distiller);
-  return { detector, upserts, inserts, distiller };
+  const drafter = drafterReturning();
+  const detector = new RuleCandidateDetector(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    client as any,
+    distiller,
+    undefined,
+    drafter
+  );
+  return { detector, upserts, inserts, distiller, drafter };
 };
 
 const metered = (inserts: Array<{ table: string }>) =>
@@ -133,7 +153,12 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
   });
 
   it("meters the distiller's tokens on the owner's ledger", async () => {
-    const { detector, inserts } = make(personalMemory);
+    const { detector, inserts } = make(
+      personalMemory,
+      'distilled rule',
+      null,
+      'git tasks'
+    );
 
     await detector.promoteOnDemand({ memoryId: MEMORY, ownerId: OWNER });
 
@@ -165,16 +190,19 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect(upserts[0]!.row.target_layer).toBe('project');
   });
 
-  it('uses an explicit rule_text without calling or metering the distiller', async () => {
-    const { detector, upserts, inserts, distiller } = make(personalMemory);
+  it('uses an explicit rule_text and condition without calling or metering a model', async () => {
+    const { detector, upserts, inserts, distiller, drafter } =
+      make(personalMemory);
 
     const out = await detector.promoteOnDemand({
       memoryId: MEMORY,
       ownerId: OWNER,
       ruleText: '  always run the e2e suite before review  ',
+      appliesWhen: 'any task that asks for a review',
     });
 
     expect(distiller.distill).not.toHaveBeenCalled();
+    expect(drafter.draft).not.toHaveBeenCalled();
     expect(metered(inserts)).toEqual([]);
     expect(out.rule_text).toBe('always run the e2e suite before review');
     expect(upserts[0]!.row.rule_text).toBe(
@@ -216,16 +244,56 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     );
   });
 
-  it('stores a null applies_when when neither the caller nor the distiller gives one', async () => {
-    const { detector, upserts } = make(personalMemory);
+  it('drafts the condition of an explicit rule_text given without one, and meters the draft', async () => {
+    const { detector, upserts, inserts, distiller, drafter } =
+      make(personalMemory);
 
-    await detector.promoteOnDemand({
+    const out = await detector.promoteOnDemand({
       memoryId: MEMORY,
       ownerId: OWNER,
       ruleText: 'always squash',
     });
 
+    expect(distiller.distill).not.toHaveBeenCalled();
+    expect(drafter.draft).toHaveBeenCalledWith('always squash', OWNER);
+    expect(upserts[0]!.row).toMatchObject({ applies_when: DRAFTED });
+    expect(out.applies_when).toBe(DRAFTED);
+    expect(metered(inserts)).toEqual([
+      expect.objectContaining({
+        row: expect.objectContaining({
+          user_id: OWNER,
+          quantity: 48,
+          metadata: expect.objectContaining({
+            purpose: 'rule_distiller',
+            model: 'drafter-model',
+          }),
+        }),
+      }),
+    ]);
+  });
+
+  it('still promotes when no model can draft the condition, leaving it for the owner', async () => {
+    const { detector, upserts, inserts, drafter } = make(personalMemory);
+    vi.mocked(drafter.draft).mockRejectedValue(new Error('no model key'));
+
+    const out = await detector.promoteOnDemand({
+      memoryId: MEMORY,
+      ownerId: OWNER,
+      ruleText: 'always squash',
+    });
+
+    expect(out.status).toBe('promoted');
     expect(upserts[0]!.row).toMatchObject({ applies_when: null });
+    expect(metered(inserts)).toEqual([]);
+  });
+
+  it('drafts a condition when the distiller leaves the rule without one', async () => {
+    const { detector, upserts, drafter } = make(personalMemory);
+
+    await detector.promoteOnDemand({ memoryId: MEMORY, ownerId: OWNER });
+
+    expect(drafter.draft).toHaveBeenCalledWith('distilled rule', OWNER);
+    expect(upserts[0]!.row).toMatchObject({ applies_when: DRAFTED });
   });
 
   it('keeps a stored applies_when on a text-only re-promote; a fresh distillation replaces it', async () => {
@@ -247,6 +315,7 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     );
     // The reply reports the condition the rule now carries, not the input.
     expect(kept.applies_when).toBe('tasks that touch supabase/migrations');
+    expect(textOnly.drafter.draft).not.toHaveBeenCalled();
 
     const redistilled = make(personalMemory, 'distilled', stored, 'git tasks');
     await redistilled.detector.promoteOnDemand({
@@ -256,7 +325,7 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect(redistilled.upserts[0]!.row.applies_when).toBe('git tasks');
   });
 
-  it('trims applies_when and stores a blank one as null', async () => {
+  it('trims applies_when, and drafts one where the distiller left it blank', async () => {
     const explicit = make(personalMemory);
     await explicit.detector.promoteOnDemand({
       memoryId: MEMORY,
@@ -270,7 +339,7 @@ describe('RuleCandidateDetector.promoteOnDemand', () => {
     expect([
       explicit.upserts[0]!.row.applies_when,
       blank.upserts[0]!.row.applies_when,
-    ]).toEqual(['tasks that land a branch', null]);
+    ]).toEqual(['tasks that land a branch', DRAFTED]);
   });
 
   it('refuses an applies_when that carries a secret', async () => {

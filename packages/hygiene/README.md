@@ -82,11 +82,16 @@ place in the standing-rule catalog (a fact recalled with a useful verdict in
 Tuning: `DEFAULT_INCUBATOR_CONFIG` (`rule-candidate.ts`).
 
 `AppliesWhenDrafter` (`applies-when.drafter.ts`) writes the same
-`applies_when` line for a rule that was promoted before the distiller wrote
-one: the condition the rule gate judges a task against. It reads only the
-rule text and answers `null` for a rule that binds every task. The server's
-`rules:applies-when-draft` command runs it over an owner's promoted rules and
-stores each drafted line, which the owner reviews and edits on `/rules`.
+`applies_when` line from a rule's text alone: the condition the rule gate
+judges a task against. Every rule gets one, pinned or not, and a rule that
+binds every task says so, because a pin can be lifted later and the condition
+is what the gate judges the rule by then. The detector calls it whenever a
+rule would otherwise go out without one (a `promote_rule` with its own text, a
+draft the distiller left without one); where no model can run, the rule goes
+through without one and the owner writes it on `/rules`. The server's
+`rules:applies-when-draft` command runs it over an owner's promoted rules that
+lack one and stores each drafted line, which the owner reviews and edits on
+`/rules`.
 
 ## Usage valence: reinforcement and stale suspects
 

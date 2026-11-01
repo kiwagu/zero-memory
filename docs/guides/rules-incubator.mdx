@@ -254,9 +254,14 @@ and passes `judge_rules: false` on the second, so one session start costs one
 judgment; any caller can pass it to have the rules delivered whole.
 
 Each rule carries an **applies when** line — one to three lines of observable
-task features — which is what the judge tests against the task. The distiller
-writes it when it drafts the rule, `promote_rule` takes it as `applies_when`,
-and it is editable on `/rules`. For rules promoted before the line existed,
+task features — which is what the judge tests against the task. Every rule
+gets one at promotion, pinned or not, and a rule that binds every task says
+so: a pin can be lifted later, and the line is what the judge reads then. The
+distiller writes it when it drafts the rule; `promote_rule` takes it as
+`applies_when`, and when a call passes its own `rule_text` without one, the
+server drafts it from that text. On an instance with no model key nothing can
+draft it, so the rule goes through without one. The line is editable on
+`/rules`. For rules promoted before the line existed,
 the server's `rules:applies-when-draft` command, an operator script that runs
 with the service role against a stand, drafts and stores one per rule, which
 the owner then reviews and edits on `/rules`. A rule without one is judged on

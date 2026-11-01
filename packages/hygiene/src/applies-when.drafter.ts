@@ -11,23 +11,28 @@ three short lines naming the OBSERVABLE features of a task for which this rule
 binds — what a task description itself shows (which files or systems it
 touches, what kind of work it is), never what will happen later in it.
 Example: "any task that changes files tracked by git, including docs" rather
-than "when committing". Answer null when the rule binds every task.
+than "when committing". Always write one: a rule that binds every task says
+so as its widest feature, for example "any task in any project".
 Keep code, identifiers and paths verbatim. No preamble.`.trim();
 
 const schema = z.object({
-  applies_when: z.string().max(400).nullable(),
+  applies_when: z.string().min(1).max(400),
 });
 
 export interface AppliesWhenDraft {
-  applies_when: string | null;
+  applies_when: string;
   model: string;
+  inputTokens: number;
+  outputTokens: number;
+  /** True when the call ran on the owner's own key, for metering. */
+  ranOnCallerKey: boolean;
 }
 
 /**
- * Drafts the applicability line of an existing rule from its text: the
- * condition the rule gate judges a task against. Rules promoted before the
- * distiller wrote one get it from here, for the owner to review. Generation,
- * so it stays on the LLM.
+ * Drafts the applicability line of a rule from its text: the condition the
+ * rule gate judges a task against. Every promoted rule carries one, pinned or
+ * not, so a rule that arrives without one gets it from here, for the owner to
+ * review. Generation, so it stays on the LLM.
  */
 export class AppliesWhenDrafter {
   async draft(ruleText: string, subjectId?: string): Promise<AppliesWhenDraft> {
@@ -47,10 +52,16 @@ export class AppliesWhenDrafter {
       purpose: 'rule_distiller',
       ...(subjectId ? { subjectId } : {}),
     });
-    const parsed = schema.parse(response.input);
+    const condition = schema.parse(response.input).applies_when.trim();
+    if (!condition) {
+      throw new Error('applies_when draft: the model wrote no condition');
+    }
     return {
-      applies_when: parsed.applies_when?.trim() || null,
+      applies_when: condition,
       model: response.model,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      ranOnCallerKey: response.ranOnCallerKey,
     };
   }
 }
