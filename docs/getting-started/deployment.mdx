@@ -363,7 +363,10 @@ A release is a version bump in the root `package.json`: when it merges into
 the main branch, the publishing pipeline materializes the tree in the public
 repository and cuts the `v<version>` tag there. **The published repository's
 tags are the authority for what has been released**, and that list is where
-the `[tag]` arguments below come from. An optional SSH deploy hook
+the `[tag]` arguments below come from. A tag publishes images, client bundles
+and a release page only in a repository whose `ZM_PUBLISH_RELEASES` variable
+is `true`; a fork that builds its own images sets it there. An optional SSH
+deploy hook
 (`ZM_DEPLOY_HOST` / `ZM_DEPLOY_KEY` / `ZM_DEPLOY_HOST_KEY`, a forced command
 on the host) can turn a merge into an automatic upgrade; see
 `infra/prod/README.md`.

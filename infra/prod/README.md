@@ -392,15 +392,23 @@ printf 'command="%s",no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwar
 
 In the repository, set:
 
-| Kind     | Name                 | Value                                                  |
-| -------- | -------------------- | ------------------------------------------------------ |
-| variable | `ZM_DEPLOY_HOST`     | ssh target, e.g. `root@203.0.113.10` — enables the job |
-| variable | `ZM_SERVER_URL`      | public MCP URL, for the post-deploy acceptance         |
-| variable | `ZM_WEB_URL`         | public dashboard URL, same                             |
-| secret   | `ZM_DEPLOY_KEY`      | the private key generated above                        |
-| secret   | `ZM_DEPLOY_HOST_KEY` | the host's public key line, pinning its identity       |
+| Kind     | Name                  | Value                                                   |
+| -------- | --------------------- | ------------------------------------------------------- |
+| variable | `ZM_PUBLISH_RELEASES` | `true` — this repository publishes releases (see below) |
+| variable | `ZM_DEPLOY_HOST`      | ssh target, e.g. `root@203.0.113.10` — enables the job  |
+| variable | `ZM_SERVER_URL`       | public MCP URL, for the post-deploy acceptance          |
+| variable | `ZM_WEB_URL`          | public dashboard URL, same                              |
+| secret   | `ZM_DEPLOY_KEY`       | the private key generated above                         |
+| secret   | `ZM_DEPLOY_HOST_KEY`  | the host's public key line, pinning its identity        |
 
 Releasing is then a version bump: `version` in the root `package.json` is
 the release lever — publishing a tree whose version has no tag yet cuts that
 tag, which builds the images, which deploys them, which verifies the
 result.
+
+A version tag publishes only in a repository whose `ZM_PUBLISH_RELEASES`
+variable is `true`: there it builds and pushes the images, the client
+bundles and the release page, and only then can the deploy job run. Any
+other repository that receives the tag runs the test jobs on it and
+publishes nothing, so the same tags can be pushed to a repository that is
+not where releases come from.

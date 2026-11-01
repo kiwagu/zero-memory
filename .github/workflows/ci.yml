@@ -224,7 +224,12 @@ jobs:
   # with nothing installed.
   bundles:
     name: client bundle (${{ matrix.target }})
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Publishing is opt-in per repository: the jobs that publish a release
+    # (client bundles, images and their pruning, the release page) run on a
+    # version tag only where the repository variable ZM_PUBLISH_RELEASES is
+    # `true`. A repository that carries the same tags without being where
+    # releases are published runs the tests on them and publishes nothing.
+    if: startsWith(github.ref, 'refs/tags/v') && vars.ZM_PUBLISH_RELEASES == 'true'
     # Same rule as the images: an artifact is only worth publishing once the
     # acceptance suite has passed on the tree it came from.
     needs: [gates, e2e]
@@ -262,7 +267,7 @@ jobs:
     # the browser-facing Supabase values arrive as runtime environment. The
     # documentation image is the exception: the addresses its pages state are
     # rendered into the HTML at build time and arrive as build arguments below.
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && vars.ZM_PUBLISH_RELEASES == 'true'
     # A released image is only worth publishing once the acceptance suite has
     # passed on it.
     needs: [gates, deployment-artifacts, e2e]
@@ -323,7 +328,7 @@ jobs:
     name: prune untagged image versions
     # Every rebuild leaves the previous digest untagged; without this the
     # registry silently accumulates them.
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && vars.ZM_PUBLISH_RELEASES == 'true'
     needs: images
     runs-on: ubuntu-latest
     permissions:
@@ -343,7 +348,7 @@ jobs:
   # publishes images and no place to download a client from.
   release:
     name: publish the release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && vars.ZM_PUBLISH_RELEASES == 'true'
     # Images first: a release page that offers a client for an instance whose
     # images do not exist yet is worse than one that appears a minute later.
     needs: [bundles, images]
@@ -399,7 +404,7 @@ jobs:
   # the release.
   prune-actions-storage:
     name: prune caches and artifacts of earlier runs
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && vars.ZM_PUBLISH_RELEASES == 'true'
     needs: release
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -416,8 +421,9 @@ jobs:
 
   # A published release lands on the instance by itself. The job exists only
   # where a deployment target is configured (repository variable
-  # ZM_DEPLOY_HOST plus the ZM_DEPLOY_KEY secret), so a fork or a checkout
-  # without an instance simply has no deploy stage.
+  # ZM_DEPLOY_HOST plus the ZM_DEPLOY_KEY secret) in a repository that
+  # publishes releases (ZM_PUBLISH_RELEASES, through the images it needs), so
+  # a fork or a checkout without an instance simply has no deploy stage.
   deploy:
     name: deploy the release
     if: startsWith(github.ref, 'refs/tags/v') && vars.ZM_DEPLOY_HOST != ''
