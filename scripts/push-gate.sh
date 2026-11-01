@@ -22,24 +22,26 @@ url="${2:-$1}"
 proven="$(git rev-parse --git-path zm-e2e-proven-trees)"
 need=0
 
-# The commits the destination's refs name, read once and only when a ref is
-# not proven otherwise. Unreadable means unknown, and then nothing counts as
-# published.
+# The commits the destination's refs name that this clone also has, read once
+# and only when a ref is not proven otherwise. Unreadable means unknown, and
+# then nothing counts as published.
 published=""
 published_read=0
 
 on_destination() { # on_destination <commit>
-  local sha
+  local unpublished
   if [ "$published_read" -eq 0 ]; then
-    published="$(git ls-remote "$url" 2>/dev/null | awk '{ print $1 }' | sort -u)" \
-      || published=""
+    published="$(git ls-remote "$url" 2>/dev/null \
+      | awk '{ print $1 "^{commit}" }' \
+      | git cat-file --batch-check='%(objectname)' 2>/dev/null \
+      | grep -v ' missing$' | sort -u)" || published=""
     published_read=1
   fi
-  for sha in $published; do
-    git cat-file -e "$sha^{commit}" 2>/dev/null || continue
-    git merge-base --is-ancestor "$1" "$sha" 2>/dev/null && return 0
-  done
-  return 1
+  [ -n "$published" ] || return 1
+  # Empty when one of them contains the commit; an error counts as unpublished.
+  # shellcheck disable=SC2086 # one argument per published commit
+  unpublished="$(git rev-list --max-count=1 "$1" --not $published)" || return 1
+  [ -z "$unpublished" ]
 }
 
 while read -r local_ref local_sha _remote_ref _remote_sha; do

@@ -1205,6 +1205,9 @@ const main = async (): Promise<number> => {
     }
   }
 
+  // Read before an --ephemeral teardown removes the apps' state with them.
+  const appsTree = readAppsState(test)?.tree;
+
   if (ephemeral) {
     console.log('→ --ephemeral: tearing the test stack + apps down…');
     teardown(test);
@@ -1219,7 +1222,7 @@ const main = async (): Promise<number> => {
     suite,
     treeAtStart: provingTree,
     treeAtEnd: committedTree(),
-    appsTree: readAppsState(test)?.tree,
+    appsTree,
   });
   if (proven && suite) {
     recordProvenTree(proven, suite);
