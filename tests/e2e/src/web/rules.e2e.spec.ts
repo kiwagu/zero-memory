@@ -13,7 +13,7 @@ import {
   seedRuleCandidate,
 } from '../helpers/rules.js';
 import { readSeedState } from '../helpers/runtime-state.js';
-import { signInThroughForm, waitForHydration } from '../helpers/web.js';
+import { signInThroughForm } from '../helpers/web.js';
 
 test.describe('rules incubator surface', () => {
   test('@smoke owner sees a pending candidate with draft and evidence', async ({
@@ -156,18 +156,19 @@ test.describe('rules incubator surface', () => {
       });
 
       await page.reload();
-      // The server's HTML already holds the stored values; a key press before
-      // hydration would find no handler and save nothing.
-      await waitForHydration(page);
       await expect(appliesWhen).toHaveValue(
         'any task that writes a git commit'
       );
       await expect(enforcedBy).toHaveValue('one_line_commit');
 
-      // Emptying a field clears it.
-      await appliesWhen.fill('');
-      await appliesWhen.press('Enter');
-      await expect(missing).toBeVisible();
+      // Emptying a field clears it. Right after the reload the server's HTML
+      // already shows the field, so a key press can land before React attaches
+      // its handler and save nothing: the edit is repeated until it takes.
+      await expect(async () => {
+        await appliesWhen.fill('');
+        await appliesWhen.press('Enter');
+        await expect(missing).toBeVisible({ timeout: 2_000 });
+      }).toPass();
       await expect.poll(stored).toEqual({
         applies_when: null,
         enforced_by: 'one_line_commit',

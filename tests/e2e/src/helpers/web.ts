@@ -43,21 +43,3 @@ export const hintOf = async (
 export const openBoardHint = async (page: Page): Promise<void> => {
   await hintOf(page, page.getByTestId('board-hint'), 'board-hint-content');
 };
-
-/**
- * Waits for React to hydrate, not merely for the server's HTML to be on screen.
- *
- * An interaction that lands before hydration finds no handler attached: a
- * key press on the server's HTML does nothing. A screenshot taken then also
- * badges a hydration mismatch, as Playwright's injected caret style differs
- * from the server's markup.
- *
- * The signal is `next-themes` writing `style="color-scheme: …"` on <html>,
- * which the server-rendered markup never carries. A heading is NOT a signal: it
- * ships in the SSR HTML, so waiting on one can fire mid-hydration.
- */
-export const waitForHydration = async (page: Page): Promise<void> => {
-  await page.waitForFunction(() =>
-    document.documentElement.getAttribute('style')?.includes('color-scheme')
-  );
-};
