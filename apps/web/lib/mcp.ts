@@ -324,3 +324,21 @@ export async function describeScopeViaServer(
   }
   return result.description;
 }
+
+/**
+ * Promotes one of the user's memories into a rule through the server's
+ * `promote_rule` tool, with its text as given. The server holds the model key,
+ * so it drafts the rule's applies_when there; a memory dismissed as a rule is
+ * refused unless `force`.
+ */
+export async function promoteRuleViaServer(
+  accessToken: string,
+  args: {
+    memory_id: string;
+    rule_text: string;
+    applies_scope?: string;
+    force?: boolean;
+  }
+): Promise<{ status: string; applies_when: string | null }> {
+  return callServerTool(accessToken, 'promote_rule', args);
+}

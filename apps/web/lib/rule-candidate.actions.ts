@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 // The decorator-free subpath: the package root would load the DI container.
 import { guardTextFields } from '@workspace/memory/content-guard';
 
+import { promoteRuleViaServer } from './mcp';
 import { createServerSupabaseClient } from './supabase/server';
 import { currentUserEntityId } from './user';
 
@@ -120,9 +121,11 @@ export async function resolveRuleCandidate(
 
 /**
  * Promote one of the owner's OWN memories straight into a promoted rule from
- * the /memory dashboard. The web tier is LLM-free and cannot INSERT
- * rule_candidates under RLS, so this goes through the SECURITY DEFINER
- * `promote_memory_to_rule` RPC (ownership gated by owns_memory server-side).
+ * the /memory dashboard. The web tier is LLM-free, so a memory that fits a
+ * rule's text goes through the server's `promote_rule`, which also drafts the
+ * rule's applies_when with the model key it holds. A longer memory goes
+ * through the SECURITY DEFINER `promote_memory_to_rule` RPC as before, and its
+ * condition is written on /rules. Ownership is checked server-side either way.
  *
  * Addressing mirrors the /rules promote default: a project-scoped memory is
  * addressed to its own project layer; a personal-scope memory becomes a
@@ -143,10 +146,10 @@ export async function promoteMemoryToRule(
   }
 
   // Read the anchor scope to pick the default addressing. RLS already scopes
-  // this to a memory the caller can see; the RPC re-checks ownership.
+  // this to a memory the caller can see; the server re-checks ownership.
   const { data: memory, error: readError } = await supabase
     .from('memories')
-    .select('scope')
+    .select('scope, content')
     .eq('id', memoryId)
     .maybeSingle();
   if (readError) {
@@ -160,21 +163,59 @@ export async function promoteMemoryToRule(
   const isPersonal = scope === 'user' || scope.startsWith('user.');
   const appliesScope = isPersonal ? null : scope;
 
-  const { error } = await supabase.rpc('promote_memory_to_rule', {
-    p_memory_id: memoryId,
-    p_applies_scope: appliesScope,
-    p_force: force,
+  const failure = await promoteOnServer(supabase, {
+    memory_id: memoryId,
+    rule_text: String(memory.content).trim(),
+    ...(appliesScope ? { applies_scope: appliesScope } : {}),
+    ...(force ? { force: true } : {}),
   });
-  if (error) {
-    // The RPC refuses to revive a deliberately dismissed candidacy without an
-    // explicit override; flag it so the UI can offer "promote anyway".
-    const dismissed = error.message.includes('dismissed as a rule');
-    return { ok: false, error: error.message, dismissed };
+  if (failure !== null) {
+    // A deliberately dismissed candidacy is refused without an explicit
+    // override; flag it so the UI can offer "promote anyway".
+    const dismissed = failure.includes('dismissed as a rule');
+    return { ok: false, error: failure, dismissed };
   }
 
   revalidatePath('/rules');
   revalidatePath(`/memory/${memoryId}`);
   return { ok: true };
+}
+
+/** The longest rule text the server's `promote_rule` takes. */
+const RULE_TEXT_MAX = 2000;
+
+/**
+ * One promotion, as the message of its failure or null. A text the tool takes
+ * goes to the server; one too long for a rule's text keeps the RPC.
+ */
+async function promoteOnServer(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  input: {
+    memory_id: string;
+    rule_text: string;
+    applies_scope?: string;
+    force?: boolean;
+  }
+): Promise<string | null> {
+  if (input.rule_text.length > 0 && input.rule_text.length <= RULE_TEXT_MAX) {
+    const accessToken = (await supabase.auth.getSession()).data.session
+      ?.access_token;
+    if (!accessToken) {
+      return 'Not signed in.';
+    }
+    try {
+      await promoteRuleViaServer(accessToken, input);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+  const { error } = await supabase.rpc('promote_memory_to_rule', {
+    p_memory_id: input.memory_id,
+    p_applies_scope: input.applies_scope ?? null,
+    p_force: input.force ?? false,
+  });
+  return error ? error.message : null;
 }
 
 /** The database bounds applies_when to this many characters. */
