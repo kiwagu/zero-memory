@@ -30,6 +30,7 @@ interface SessionItem {
   ownerUserEntityId: string;
   clientName: string | null;
   defaultScope?: string;
+  resultBudget?: number;
   lastSeenAt: number;
   /** Epoch seconds; the table's TTL attribute. */
   expiresAt: number;
@@ -40,6 +41,7 @@ const toRecord = (item: SessionItem): McpSessionRecord => ({
   ownerUserEntityId: item.ownerUserEntityId,
   clientName: item.clientName ?? null,
   defaultScope: item.defaultScope,
+  resultBudget: item.resultBudget,
   lastSeenAt: item.lastSeenAt,
 });
 
@@ -123,6 +125,24 @@ export class DynamoDbMcpSessionStore implements IMcpSessionStore {
           UpdateExpression: 'SET defaultScope = :scope',
           ConditionExpression: 'attribute_exists(sessionId)',
           ExpressionAttributeValues: { ':scope': scope },
+        })
+      );
+    } catch (error) {
+      if (!(error instanceof ConditionalCheckFailedException)) {
+        throw error;
+      }
+    }
+  }
+
+  async setResultBudget(sessionId: string, chars: number): Promise<void> {
+    try {
+      await this.#db.send(
+        new UpdateCommand({
+          TableName: this.#table,
+          Key: { sessionId },
+          UpdateExpression: 'SET resultBudget = :chars',
+          ConditionExpression: 'attribute_exists(sessionId)',
+          ExpressionAttributeValues: { ':chars': chars },
         })
       );
     } catch (error) {

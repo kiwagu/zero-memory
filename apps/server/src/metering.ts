@@ -1,6 +1,7 @@
 import {
   RESULT_ATTRIBUTED_TOOLS,
   type RememberResultMetering,
+  type ResultFitMetering,
   type ToolErrorMetering,
   type ToolResultMetering,
 } from '@workspace/mcp';
@@ -99,6 +100,33 @@ export const recordResourceRead = (
       tool: 'resource:rule',
       rule_id: metering.ruleId,
       found: metering.found,
+    },
+  });
+};
+
+/**
+ * A read result held to the client's inline budget: cut to fit it, measured
+ * over it, or answering a call that reported the client's own limit
+ * (`max_chars`). Its own event type, not an `mcp_tool_call`: the call was
+ * already counted, and this row is about the result's size. Sizes and counts
+ * only.
+ */
+export const recordResultFit = (
+  recorder: IUsageRecorder,
+  metering: ResultFitMetering
+): void => {
+  recordUsage(recorder, {
+    eventType: 'result_fit',
+    agentName: metering.agentName,
+    metadata: {
+      tool: metering.tool,
+      ...(metering.reported !== null && { reported: metering.reported }),
+      budget: metering.budget,
+      source: metering.source,
+      chars: metering.chars,
+      delivered: metering.delivered,
+      omitted: metering.omitted,
+      clipped: metering.clipped,
     },
   });
 };

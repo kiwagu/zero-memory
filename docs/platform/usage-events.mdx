@@ -49,6 +49,7 @@ derived view.
 | `ingest_chunk`     | The ingest path accepts a chunk; `guard_refusals` names the guard hooks that refused an action in it                                                                                                                                                                                       | `count`  |
 | `session_briefing` | A briefing `build_context` call is delivered                                                                                                                                                                                                                                               | `tokens` |
 | `recall_used`      | A recall outcome is attributed: a later `remember` supersedes or derives from a recalled memory, the usefulness judge credits it, or a `challenge` records the negative counterpart (`valence: misled`)                                                                                    | `count`  |
+| `result_fit`       | A read result was held to the client's inline budget: cut to fit it, measured over it, or answering a call that reported the client's own limit (`max_chars`); metadata carries the tool, the budget and its source, the size before and after, and the rows left out per list             | `count`  |
 
 Emission is centralized on purpose: MCP tool calls are counted once at the
 tool dispatcher, not inside every tool, so adding a tool never requires

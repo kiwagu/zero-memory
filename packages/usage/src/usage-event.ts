@@ -6,8 +6,10 @@
  * `session_briefing` is the SessionStart briefing path. `recall_used` is the
  * recall usefulness signal: a recalled memory that was actually used —
  * emitted in-band when a `remember` supersedes/derives from a recalled id, or
- * out-of-band by the watcher's usefulness judge. The others map to the
- * extraction, embedding, MCP-dispatcher, and ingest emit points.
+ * out-of-band by the watcher's usefulness judge. `result_fit` is a read
+ * result held to the client's inline budget: cut, measured over it, or
+ * answering a call that reported the client's own limit. The others map to
+ * the extraction, embedding, MCP-dispatcher, and ingest emit points.
  */
 export type UsageEventType =
   | 'llm_extraction'
@@ -15,7 +17,8 @@ export type UsageEventType =
   | 'mcp_tool_call'
   | 'ingest_chunk'
   | 'session_briefing'
-  | 'recall_used';
+  | 'recall_used'
+  | 'result_fit';
 
 /** How `quantity` is counted: whole events, or token volume. */
 export type UsageUnit = 'count' | 'tokens';

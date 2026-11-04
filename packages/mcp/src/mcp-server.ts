@@ -110,6 +110,8 @@ import {
   type SessionAttachment,
   writeRefusalReasonOf,
   type WriteRefusalReason,
+  boardCursorOf,
+  type ResultFit,
 } from '@workspace/contracts';
 import type { ICommandBus, IQueryBus } from '@workspace/cqrs';
 import {
@@ -135,7 +137,14 @@ import {
 import { createRoiRunner, type RoiProbeCase } from '@workspace/roi';
 import { z } from 'zod';
 
-import { renderRulesFooter } from './rules-footer.js';
+import {
+  fitResult,
+  renderFitNote,
+  RESOURCE_LINK_CHARS,
+  resultBudgetFor,
+  type FitPlan,
+} from './result-budget.js';
+import { renderRulesFooter, rulesByHeadline } from './rules-footer.js';
 import { toolError, toolErrorFromThrown } from './tool-error.js';
 import {
   InProcessWorkClaims,
@@ -243,6 +252,32 @@ export interface McpSessionScope {
   currentProjectScope: () => string | undefined;
 }
 
+/**
+ * The client's own inline limit, kept with the session once an agent reports
+ * it (`max_chars`). One report is enough: a client's limit does not change
+ * between two calls, and making the agent repeat it would turn feedback back
+ * into trial and error.
+ */
+export interface McpSessionResultBudget {
+  /** The limit an earlier call of this session reported, if any. */
+  current: () => number | undefined;
+  /** Keeps a reported limit for the rest of the session. */
+  report: (chars: number) => void;
+}
+
+/**
+ * What one read result was held to, and what that cost — the feedback that
+ * shows how large results get and where clients actually draw their line.
+ * Emitted when a result was cut or measured over its budget, or when the
+ * caller reported `max_chars`. Sizes and counts only, never content.
+ */
+export interface ResultFitMetering extends ResultFit {
+  tool: string;
+  agentName: string | null;
+  /** `max_chars` as this call reported it; null when it reported none. */
+  reported: number | null;
+}
+
 export interface McpServerDeps {
   commandBus: ICommandBus;
   queryBus: IQueryBus;
@@ -310,6 +345,16 @@ export interface McpServerDeps {
   onRememberResult?: (metering: RememberResultMetering) => void;
   /** When set, a hint-resolved project scope attaches to the session. */
   sessionScope?: McpSessionScope;
+  /**
+   * Where a reported `max_chars` lives between calls. Absent, a report holds
+   * for its own call only.
+   */
+  resultBudget?: McpSessionResultBudget;
+  /**
+   * Result-size feedback (see {@link ResultFitMetering}). Fire-and-forget,
+   * never awaited.
+   */
+  onResultFit?: (metering: ResultFitMetering) => void;
   /**
    * Live read of the caller's promoted rules for the `zm://rules` resource.
    * Supplied by the transport, which holds the session credential; when
@@ -863,6 +908,107 @@ const asToolResult = (
   structuredContent: payload as { [key: string]: unknown },
 });
 
+/** A result's size as the client counts it: its text, plus each link. */
+const resultChars = (result: CallToolResult): number =>
+  result.content.reduce(
+    (sum, block) =>
+      sum +
+      (block.type === 'text'
+        ? block.text.length
+        : block.type === 'resource_link'
+          ? RESOURCE_LINK_CHARS
+          : 0),
+    0
+  );
+
+/**
+ * How each read tool gives way when its result is too large, most
+ * expendable first; a step runs only while the result is still too large. A
+ * memory list keeps its top hits whole as long as it can: what ranks first is
+ * what the agent most needs, and a shortened row still links to its full
+ * text. Nothing is cut without a way back to it: a dropped row has a cursor
+ * or a link, a card's text and attachments continue from where they stop
+ * (`body_next`, `refs_next`), and a standing rule shown by its headline is
+ * one `zm://rules/<id>` read away (see the briefing's compaction steps).
+ */
+const MEMORY_LINK = { rowExtraChars: RESOURCE_LINK_CHARS } as const;
+const FIT_PLANS = {
+  recall: [
+    { clip: 'memories', keepWhole: 3, toChars: 1_200 },
+    { drop: 'related' },
+    { drop: 'memories', floor: 3, ...MEMORY_LINK },
+    { clip: 'memories', keepWhole: 0, toChars: 1_200 },
+  ],
+  build_context: [
+    { drop: 'linked_memories', ...MEMORY_LINK },
+    { drop: 'recent' },
+    { drop: 'edges' },
+    { drop: 'entities' },
+    { drop: 'open_loops', floor: 1 },
+    { drop: 'memories', floor: 3, ...MEMORY_LINK },
+    // The top hits too, before any rule gives way: each keeps its link.
+    { clip: 'memories', keepWhole: 0, toChars: 600 },
+    // Last of all, the structured copy of the rules: their text stays in the
+    // footer, instruction-framed, which is the copy an agent reads.
+    { drop: 'rules' },
+  ],
+  board_list: [{ drop: 'cards', floor: 1 }],
+  // One row of a paged list stays, so its cursor still moves on.
+  board_get: [
+    { drop: 'feed', floor: 1 },
+    { drop: 'events', floor: 1 },
+    { drop: 'refs', floor: 1 },
+    // The card's own text goes last, and in order: a head now, the rest
+    // from `body_next`.
+    { trim: 'card.body', floor: 500 },
+  ],
+  // Nothing to cut: the action still takes the client's reported limit.
+  board_resolve: [],
+  list_conflicts: [{ drop: 'conflicts', floor: 1 }],
+  entities: [{ drop: 'entities', floor: 1 }],
+} as const satisfies Record<string, FitPlan>;
+
+/**
+ * After a board result was cut, its paging fields point past what the agent
+ * received. Moves them back to the last row it kept, or the last character
+ * of the card's text it got: the next read starts there. `from` is where
+ * this read's text and attachments began.
+ */
+const boardPageAfterCut = (
+  payload: BoardOutput,
+  fit: ResultFit,
+  from: { body: number; refs: number }
+): BoardOutput => {
+  const lastCard = payload.cards.at(-1);
+  const lastEvent = payload.events.at(-1);
+  const lastFeed = payload.feed.at(-1);
+  return {
+    ...payload,
+    ...(fit.cut['card.body'] && payload.card
+      ? { body_next: from.body + payload.card.body.length }
+      : {}),
+    ...(fit.omitted.refs ? { refs_next: from.refs + payload.refs.length } : {}),
+    ...(fit.omitted.cards && lastCard
+      ? { has_more: true, next_before: boardCursorOf(lastCard) }
+      : {}),
+    ...(fit.omitted.events && lastEvent
+      ? { has_more: true, next_after_seq: lastEvent.seq }
+      : {}),
+    ...(fit.omitted.feed && lastFeed
+      ? { feed_has_more: true, feed_next_before: lastFeed.memory_id }
+      : {}),
+  };
+};
+
+/** The tools that fit their own result; the size watch leaves them be. */
+const FITTED_TOOLS: ReadonlySet<string> = new Set([
+  'recall',
+  'build_context',
+  'board',
+  'list_conflicts',
+  'entities',
+]);
+
 /**
  * resource_link blocks for the memories a read tool surfaced: every hit is
  * dereferenceable at zm://memory/{id} for its FULL row — recall and briefing
@@ -996,7 +1142,149 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
   const readLinks = (links: ResourceLink[]): ResourceLink[] =>
     resourceLinksForClient(links, clientName());
 
-  server.registerTool(
+  /** The budget this call is held to, after keeping what it reported. */
+  const budgetFor = (reported: number | undefined) => {
+    if (reported !== undefined) {
+      deps.resultBudget?.report(reported);
+    }
+    return resultBudgetFor(reported, deps.resultBudget?.current());
+  };
+
+  /**
+   * A read tool's envelope, fitted to the client (see result-budget.ts):
+   * the payload is cut by the tool's plan, `page` repairs the paging fields
+   * the cut made stale, the footer names what was cut, and the resource links
+   * are built from the rows that stayed. Returns the payload as delivered too,
+   * so metering counts what the agent actually received.
+   */
+  const fitRead = <P extends object>(read: {
+    tool: string;
+    payload: P;
+    reported: number | undefined;
+    plan: FitPlan;
+    /** A function when a step may change it (the briefing's rules). */
+    footer: string | (() => string);
+    linksOf: (payload: P) => ResourceLink[];
+    page?: (payload: P, fit: ResultFit) => P;
+    more?: (payload: P, fit: ResultFit) => string | undefined;
+  }): { result: CallToolResult; delivered: P } => {
+    const { budget, source } = budgetFor(read.reported);
+    const footerNow = (): string =>
+      typeof read.footer === 'function' ? read.footer() : read.footer;
+    const fitted = fitResult({
+      payload: read.payload,
+      budget,
+      source,
+      plan: read.plan,
+      measure: (payload) =>
+        JSON.stringify(payload).length +
+        footerNow().length +
+        read.linksOf(payload).length * RESOURCE_LINK_CHARS,
+    });
+    const payload =
+      fitted.fit && read.page
+        ? read.page(fitted.payload, fitted.fit)
+        : fitted.payload;
+    const compose = (fit: ResultFit | null) => {
+      const delivered = fit ? { ...payload, fit } : payload;
+      const note = renderFitNote(
+        fit,
+        fit ? read.more?.(payload, fit) : undefined
+      );
+      return {
+        delivered,
+        result: asToolResult(
+          delivered,
+          footerOf(note, footerNow()),
+          read.linksOf(payload)
+        ),
+      };
+    };
+    // `delivered` is what actually leaves, marker and note included: the
+    // size the agent's client will judge, and the one the note must not
+    // misstate. Settling it changes a few digits, so it is measured again.
+    let fit = fitted.fit;
+    let out = compose(fit);
+    for (let pass = 0; fit && pass < 3; pass += 1) {
+      const measured = resultChars(out.result);
+      if (measured === fit.delivered) {
+        break;
+      }
+      fit = { ...fit, delivered: measured };
+      out = compose(fit);
+    }
+    if (fit) {
+      deps.onResultFit?.({
+        tool: read.tool,
+        agentName: clientName(),
+        reported: read.reported ?? null,
+        ...fit,
+      });
+      if (fit.delivered > fit.budget) {
+        logger.warn('a read result stays over its budget after fitting', {
+          tool: read.tool,
+          budget: fit.budget,
+          delivered: fit.delivered,
+        });
+      }
+    }
+    return out;
+  };
+
+  /**
+   * Every other tool's result is measured on its way out, never cut: those
+   * results are small by construction, or (an export) meant for a program
+   * that needs all of it. One that grows past the budget is reported, which
+   * is how the next overflowing tool shows up before an agent trips on it.
+   */
+  const watchResultSize = (tool: string, result: CallToolResult): void => {
+    if (FITTED_TOOLS.has(tool) || result.isError) {
+      return;
+    }
+    const chars = resultChars(result);
+    const { budget, source } = resultBudgetFor(
+      undefined,
+      deps.resultBudget?.current()
+    );
+    if (chars <= budget) {
+      return;
+    }
+    logger.warn('a tool result is over the client budget', {
+      tool,
+      chars,
+      budget,
+    });
+    deps.onResultFit?.({
+      tool,
+      agentName: clientName(),
+      reported: null,
+      budget,
+      source,
+      chars,
+      delivered: chars,
+      omitted: {},
+      clipped: 0,
+      cut: {},
+    });
+  };
+
+  // Registration goes through the size watch, so no tool can skip it.
+  const registerTool = ((
+    name: string,
+    config: unknown,
+    callback: (...args: unknown[]) => Promise<CallToolResult>
+  ) =>
+    server.registerTool(
+      name,
+      config as never,
+      (async (...args: unknown[]) => {
+        const result = await callback(...args);
+        watchResultSize(name, result);
+        return result;
+      }) as never
+    )) as unknown as McpServer['registerTool'];
+
+  registerTool(
     'remember',
     {
       title: 'Remember a memory',
@@ -1126,7 +1414,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'scan_hygiene',
     {
       title: 'Scan my memories for duplicates and conflicts',
@@ -1182,7 +1470,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'list_conflicts',
     {
       title: 'List your memory conflicts',
@@ -1206,7 +1494,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
       inputSchema: listConflictsInputSchema.shape,
       outputSchema: listConflictsOutputSchema.shape,
     },
-    async ({ status, verdict, limit }) => {
+    async ({ status, verdict, limit, max_chars }) => {
       try {
         const conflicts = await deps.runInToolContext(() => {
           deps.onToolInvocation?.('list_conflicts');
@@ -1215,7 +1503,16 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
             { status, verdict, limit }
           );
         });
-        return asToolResult({ conflicts });
+        return fitRead({
+          tool: 'list_conflicts',
+          payload: { conflicts },
+          reported: max_chars,
+          plan: FIT_PLANS.list_conflicts,
+          footer: '',
+          linksOf: () => [],
+          more: () =>
+            'Resolve these first, or narrow with `status`, `verdict` or a smaller `limit`.',
+        }).result;
       } catch (error) {
         logger.error('list_conflicts failed', { error: String(error) });
         return toolErrorFromThrown(error);
@@ -1223,7 +1520,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'get_conflict',
     {
       title: 'Read one memory conflict',
@@ -1255,7 +1552,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'challenge',
     {
       title: 'Challenge a memory you believe is wrong or stale',
@@ -1305,7 +1602,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'resolve_conflict',
     {
       title: 'Resolve one memory conflict',
@@ -1365,7 +1662,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'resolve_conflicts',
     {
       title: 'Bulk-resolve memory conflicts (policy or explicit triage list)',
@@ -1451,7 +1748,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
       ? [sourceScope, PERSONAL_SCOPE, CORE_SCOPE]
       : [PERSONAL_SCOPE, CORE_SCOPE];
 
-  server.registerTool(
+  registerTool(
     'benchmark_memory',
     {
       title: 'Benchmark your memory (with vs without)',
@@ -1575,7 +1872,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'recall',
     {
       title: 'Recall memories',
@@ -1620,11 +1917,43 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('recall');
           return deps.queryBus.execute(new RecallQuery(input));
         });
+        // A hint-pinned recall attaches the session exactly like a
+        // hint-pinned briefing — the PROJECT brief line promises "your first
+        // zero-memory call", and recall is often that call.
+        const readElsewhere = mirrorProjectOntoSession(
+          deps.sessionScope,
+          result.project_scope,
+          attachedBefore
+        );
+        const session = sessionState(deps.sessionScope, result.session?.thread);
+        const { result: envelope, delivered } = fitRead({
+          tool: 'recall',
+          payload: { ...result, session },
+          reported: input.max_chars,
+          plan: FIT_PLANS.recall,
+          footer: footerOf(
+            readElsewhere,
+            sessionStateLine(session),
+            REMEMBER_REMINDER
+          ),
+          linksOf: (payload) =>
+            readLinks([
+              ...memoryResourceLinks(payload.memories),
+              // Related memories rank below every hit: they were not matched
+              // by the query, they are offered because a hit is linked to them.
+              ...memoryResourceLinks(payload.related ?? [], 0.2),
+            ]),
+          more: (_payload, fit) =>
+            fit.omitted.memories
+              ? 'Ask for fewer hits with `k`, or narrow with `kinds` or `scopes`.'
+              : undefined,
+        });
         // Recall-hit attribution: recall's single mcp_tool_call is emitted
-        // here with the surfaced mem_ ids (onToolInvocation skips it).
+        // here with the mem_ ids the agent received (onToolInvocation skips
+        // it) — a hit cut to fit was never surfaced.
         deps.onToolResult?.({
           tool: 'recall',
-          returnedIds: result.memories.map((memory) => memory.id),
+          returnedIds: delivered.memories.map((memory) => memory.id),
           briefing: null,
           agentName: clientName(),
           query: input.query,
@@ -1635,28 +1964,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
               attachedBefore
             ),
             sessionScope: attachedBefore ?? null,
-            returnedByScope: scopeCounts(result.memories),
+            returnedByScope: scopeCounts(delivered.memories),
           },
         });
-        // A hint-pinned recall attaches the session exactly like a
-        // hint-pinned briefing — the PROJECT brief line promises "your first
-        // zero-memory call", and recall is often that call.
-        const readElsewhere = mirrorProjectOntoSession(
-          deps.sessionScope,
-          result.project_scope,
-          attachedBefore
-        );
-        const session = sessionState(deps.sessionScope, result.session?.thread);
-        return asToolResult(
-          { ...result, session },
-          footerOf(readElsewhere, sessionStateLine(session), REMEMBER_REMINDER),
-          readLinks([
-            ...memoryResourceLinks(result.memories),
-            // Related memories rank below every hit: they were not matched by
-            // the query, they are offered because a hit is linked to them.
-            ...memoryResourceLinks(result.related ?? [], 0.2),
-          ])
-        );
+        return envelope;
       } catch (error) {
         logger.error('recall failed', { error: String(error) });
         deps.onToolError?.({
@@ -1669,7 +1980,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'forget',
     {
       title: 'Forget a memory',
@@ -1696,7 +2007,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'close_loop',
     {
       title: 'Close an open loop',
@@ -1728,7 +2039,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'restore_memory',
     {
       title: 'Restore a wrongly-invalidated memory',
@@ -1763,7 +2074,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'share',
     {
       title: 'Share a memory with a scope',
@@ -1791,7 +2102,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'move_memories',
     {
       title: 'Move memories to a project scope',
@@ -1823,7 +2134,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'build_context',
     {
       title: 'Build a context briefing',
@@ -1866,56 +2177,6 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('build_context');
           return deps.queryBus.execute(new BuildContextQuery(input));
         });
-        // Result-aware metering: the surfaced mem_ ids and (for a
-        // session-start briefing) the pack size are only knowable post-result,
-        // so this is build_context's single mcp_tool_call emit — the
-        // pre-execution onToolInvocation skips it (RESULT_ATTRIBUTED_TOOLS).
-        // The briefing block is gated on the explicit flag so mid-session calls
-        // do not pollute briefing hit-rate.
-        // open_loops ids are DELIBERATELY absent from returnedIds: loops are
-        // lifecycle reminders, not knowledge — counting them would skew the
-        // top-facts/usefulness metrics the ids feed.
-        deps.onToolResult?.({
-          tool: 'build_context',
-          // recent[] counts as delivered knowledge: its ids feed the same
-          // recall_used attribution as the ranked legs, so reinforcement
-          // (and the usefulness metric) reaches the recency leg too.
-          returnedIds: [
-            ...result.memories,
-            ...result.linked_memories,
-            ...(result.recent ?? []),
-          ].map((memory) => memory.id),
-          briefing:
-            input.briefing === true
-              ? {
-                  topicLen: input.topic.length,
-                  memories:
-                    result.memories.length +
-                    result.linked_memories.length +
-                    (result.recent ?? []).length,
-                  entities: result.entities.length,
-                  kind: input.briefing_kind ?? 'session',
-                  conversationId: input.conversation_id ?? null,
-                  continuationCard: result.work?.continuation?.card?.id ?? null,
-                }
-              : null,
-          agentName: clientName(),
-          query: input.topic,
-          scopes: {
-            mode: readScopeMode(
-              input.scopes,
-              result.project_scope,
-              attachedBefore
-            ),
-            sessionScope: attachedBefore ?? null,
-            returnedByScope: scopeCounts([
-              ...result.memories,
-              ...result.linked_memories,
-              ...(result.recent ?? []),
-            ]),
-          },
-          ruleGate: result.rule_gate ?? null,
-        });
         // A hint-pinned call resolved the project — attach it to the session
         // (mirrored from the thread, see mirrorProjectOntoSession) so the
         // scope-less writes ride the project instead of being refused for
@@ -1935,22 +2196,97 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         // chose: in full, by headline with its condition, or by headline.
         // Pinned rules lead and are marked: the owner guaranteed those reach
         // the session.
-        const briefedRules = result.rules ?? [];
-        const rulesFooter =
-          briefedRules.length > 0
-            ? `${renderRulesFooter(briefedRules)}\n\n${REMEMBER_REMINDER}`
+        // The rules as the footer shows them. When the pack cannot fit, the
+        // last steps show them by headline, every line keeping the id whose
+        // `zm://rules/<id>` read has the whole text: unpinned rules first,
+        // pinned ones only if that was not enough.
+        let shownRules: readonly ContextRule[] = result.rules ?? [];
+        const rulesFooter = (): string =>
+          shownRules.length > 0
+            ? `${renderRulesFooter(shownRules)}\n\n${REMEMBER_REMINDER}`
             : REMEMBER_REMINDER;
         const session = sessionState(deps.sessionScope, result.session?.thread);
-        return asToolResult(
-          { ...result, session },
-          footerOf(readElsewhere, sessionStateLine(session), rulesFooter),
-          readLinks([
-            ...memoryResourceLinks(result.memories),
-            // Graph-linked memories are a secondary set (and the most often
-            // truncated one) — flat priority below every primary hit.
-            ...memoryResourceLinks(result.linked_memories ?? [], 0.3),
-          ])
-        );
+        const footer = (): string =>
+          footerOf(readElsewhere, sessionStateLine(session), rulesFooter());
+        const byHeadline = (pinned: boolean) => (): number => {
+          const before = footer().length;
+          shownRules = rulesByHeadline(shownRules, pinned);
+          return before - footer().length;
+        };
+        const { result: envelope, delivered } = fitRead({
+          tool: 'build_context',
+          payload: { ...result, session },
+          reported: input.max_chars,
+          plan: [
+            ...FIT_PLANS.build_context,
+            { compact: 'rules', apply: byHeadline(false) },
+            { compact: 'pinned rules', apply: byHeadline(true) },
+          ],
+          footer,
+          linksOf: (payload) =>
+            readLinks([
+              ...memoryResourceLinks(payload.memories),
+              // Graph-linked memories are a secondary set (and the most often
+              // truncated one) — flat priority below every primary hit.
+              ...memoryResourceLinks(payload.linked_memories ?? [], 0.3),
+            ]),
+          more: (_payload, fit) =>
+            'Recall a point question for anything the pack left out.' +
+            (fit.omitted.rules
+              ? ' Every standing rule is still in the footer below; only ' +
+                'their structured copy (`rules`) was left out.'
+              : '') +
+            (fit.cut.rules || fit.cut['pinned rules']
+              ? ' Rules marked [headline] arrive by name to fit: read ' +
+                '`zm://rules/<id>` for the whole text before acting on one.'
+              : ''),
+        });
+        // Result-aware metering: the surfaced mem_ ids and (for a
+        // session-start briefing) the pack size are only knowable post-result,
+        // so this is build_context's single mcp_tool_call emit — the
+        // pre-execution onToolInvocation skips it (RESULT_ATTRIBUTED_TOOLS).
+        // It counts what the agent received: a row cut to fit was never
+        // surfaced. The briefing block is gated on the explicit flag so
+        // mid-session calls do not pollute briefing hit-rate.
+        // open_loops ids are DELIBERATELY absent from returnedIds: loops are
+        // lifecycle reminders, not knowledge — counting them would skew the
+        // top-facts/usefulness metrics the ids feed.
+        const surfaced = [
+          ...delivered.memories,
+          ...delivered.linked_memories,
+          // recent[] counts as delivered knowledge: its ids feed the same
+          // recall_used attribution as the ranked legs, so reinforcement
+          // (and the usefulness metric) reaches the recency leg too.
+          ...(delivered.recent ?? []),
+        ];
+        deps.onToolResult?.({
+          tool: 'build_context',
+          returnedIds: surfaced.map((memory) => memory.id),
+          briefing:
+            input.briefing === true
+              ? {
+                  topicLen: input.topic.length,
+                  memories: surfaced.length,
+                  entities: delivered.entities.length,
+                  kind: input.briefing_kind ?? 'session',
+                  conversationId: input.conversation_id ?? null,
+                  continuationCard: result.work?.continuation?.card?.id ?? null,
+                }
+              : null,
+          agentName: clientName(),
+          query: input.topic,
+          scopes: {
+            mode: readScopeMode(
+              input.scopes,
+              result.project_scope,
+              attachedBefore
+            ),
+            sessionScope: attachedBefore ?? null,
+            returnedByScope: scopeCounts(surfaced),
+          },
+          ruleGate: result.rule_gate ?? null,
+        });
+        return envelope;
       } catch (error) {
         logger.error('build_context failed', { error: String(error) });
         deps.onToolError?.({
@@ -1963,7 +2299,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'board',
     {
       title: 'Read the project board',
@@ -1995,7 +2331,66 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('board');
           return deps.queryBus.execute(new BoardQuery(input));
         });
-        return asToolResult(result);
+        const action = input.action ?? 'list';
+        const plan =
+          action === 'list'
+            ? FIT_PLANS.board_list
+            : action === 'get'
+              ? FIT_PLANS.board_get
+              : FIT_PLANS.board_resolve;
+        // A continued card read starts where the previous one stopped: the
+        // text from `body_from`, the attachments from `refs_from`.
+        const from = {
+          body: action === 'get' ? (input.body_from ?? 0) : 0,
+          refs: action === 'get' ? (input.refs_from ?? 0) : 0,
+        };
+        const windowed: BoardOutput =
+          result.card && (from.body > 0 || from.refs > 0)
+            ? {
+                ...result,
+                card: {
+                  ...result.card,
+                  body: result.card.body.slice(from.body),
+                },
+                refs: result.refs.slice(from.refs),
+              }
+            : result;
+        return fitRead({
+          tool: 'board',
+          payload: windowed,
+          reported: input.max_chars,
+          plan,
+          footer: '',
+          linksOf: () => [],
+          // A cut list, history, text or attachment list still continues from
+          // where the agent's copy ends, so the cut never hides anything for
+          // good.
+          page: (payload, fit) => boardPageAfterCut(payload, fit, from),
+          more: (payload) => {
+            if (action === 'list') {
+              return payload.has_more
+                ? `Page on with \`before: "${payload.next_before}"\`, or narrow with \`state\` or \`query\`.`
+                : 'Narrow with `state` or `query`.';
+            }
+            const next = [
+              ...(payload.body_next !== null
+                ? [`the text with \`body_from: ${payload.body_next}\``]
+                : []),
+              ...(payload.refs_next !== null
+                ? [`the attachments with \`refs_from: ${payload.refs_next}\``]
+                : []),
+              ...(payload.has_more
+                ? [`the history with \`after_seq: ${payload.next_after_seq}\``]
+                : []),
+              ...(payload.feed_has_more && payload.feed_next_before
+                ? [
+                    `the feed with \`feed_before: "${payload.feed_next_before}"\``,
+                  ]
+                : []),
+            ];
+            return next.length > 0 ? `Read on: ${next.join(', ')}.` : undefined;
+          },
+        }).result;
       } catch (error) {
         logger.error('board failed', { error: String(error) });
         return toolErrorFromThrown(error);
@@ -2003,7 +2398,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'card',
     {
       title: 'Open or steer a card',
@@ -2057,7 +2452,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'card_log',
     {
       title: "Add to a card's history",
@@ -2094,7 +2489,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'release',
     {
       title: 'Where production stands',
@@ -2132,7 +2527,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'link',
     {
       title: 'Link two entities or two memories',
@@ -2162,7 +2557,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'entities',
     {
       title: 'List known entities',
@@ -2180,7 +2575,15 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           deps.onToolInvocation?.('entities');
           return deps.queryBus.execute(new ListEntitiesQuery(input));
         });
-        return asToolResult(result);
+        return fitRead({
+          tool: 'entities',
+          payload: result,
+          reported: input.max_chars,
+          plan: FIT_PLANS.entities,
+          footer: '',
+          linksOf: () => [],
+          more: () => 'Narrow the list with `query` or `scope`.',
+        }).result;
       } catch (error) {
         logger.error('entities failed', { error: String(error) });
         return toolErrorFromThrown(error);
@@ -2188,7 +2591,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'ingest_conversation',
     {
       title: 'Ingest a conversation chunk',
@@ -2227,7 +2630,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'import_memory',
     {
       title: 'Import a native memory',
@@ -2258,7 +2661,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'session_receipt',
     {
       title: 'Per-session value counters',
@@ -2286,7 +2689,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'export_metrics',
     {
       title: 'Export your effectiveness metrics for a period',
@@ -2315,7 +2718,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'describe_scope',
     {
       title: 'Write a scope description with the model',
@@ -2342,7 +2745,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'promote_rule',
     {
       title: 'Promote a memory into an always-on rule now',
@@ -2398,7 +2801,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     }
   );
 
-  server.registerTool(
+  registerTool(
     'export_memories',
     {
       title: 'Export all accessible memories',

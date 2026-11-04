@@ -42,6 +42,7 @@ import {
   recordResourceRead,
   recordToolError,
   recordToolInvocation,
+  recordResultFit,
   recordToolResult,
 } from './metering.js';
 import { register } from './registry/index.js';
@@ -75,6 +76,7 @@ const main = async (): Promise<void> => {
 
   /** Session default scope: cwd-derived, replaced by the roots handshake. */
   let defaultScope: string | undefined;
+  let resultBudget: number | undefined;
 
   // One stdio process serves exactly one client for its whole lifetime, so a
   // single session id minted at startup groups every tool call it meters —
@@ -158,6 +160,14 @@ const main = async (): Promise<void> => {
       },
       currentProjectScope: () => defaultScope,
     },
+    // One stdio process is one session: a reported limit lives here.
+    resultBudget: {
+      current: () => resultBudget,
+      report: (chars) => {
+        resultBudget = chars;
+      },
+    },
+    onResultFit: (metering) => recordResultFit(usageRecorder, metering),
   });
 
   await server.connect(new StdioServerTransport());

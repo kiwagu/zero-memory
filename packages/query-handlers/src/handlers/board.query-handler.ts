@@ -1,5 +1,6 @@
 import { CardService, cardFailureToErrorCode } from '@workspace/board';
 import {
+  BOARD_LIST_PAGE,
   FailureError,
   boardOutputSchema,
   failure,
@@ -9,6 +10,31 @@ import { queryHandler, type IQueryHandler } from '@workspace/cqrs';
 import { inject, singleton } from '@workspace/di';
 import { ProjectTargetService } from '@workspace/memory';
 import { BoardQuery } from '@workspace/queries';
+
+/**
+ * A list row's last reason, cut to a line. A list is scanned to pick a card,
+ * and one long reason repeated over many cards (a bulk move) filled most of a
+ * page; the whole reason stays on the card, one `get` away.
+ */
+const LIST_REASON_CHARS = 160;
+
+const withShortReason = <
+  C extends { last_event: { reason: string | null } | null },
+>(
+  card: C
+): C => {
+  const reason = card.last_event?.reason;
+  if (!card.last_event || !reason || reason.length <= LIST_REASON_CHARS) {
+    return card;
+  }
+  return {
+    ...card,
+    last_event: {
+      ...card.last_event,
+      reason: `${reason.slice(0, LIST_REASON_CHARS)}…`,
+    },
+  };
+};
 
 const required = (field: string, action: string): never => {
   throw new FailureError(
@@ -79,7 +105,8 @@ export class BoardQueryHandler implements IQueryHandler<
           state: query.state,
           query: query.query,
           includeArchived: query.include_archived,
-          limit: query.limit,
+          limit: query.limit ?? BOARD_LIST_PAGE,
+          before: query.before,
           relatedTo: query.related_to,
           relation: query.relation_filter,
           workedByMe: query.worked_by_me,
@@ -92,8 +119,10 @@ export class BoardQueryHandler implements IQueryHandler<
         }
         const board = listed.unwrap();
         return boardOutputSchema.parse({
-          cards: board.cards,
+          cards: board.cards.map(withShortReason),
           totals: board.totals,
+          has_more: board.hasMore,
+          next_before: board.nextBefore,
         });
       }
     }
