@@ -923,39 +923,42 @@ const resultChars = (result: CallToolResult): number =>
 
 /**
  * How each read tool gives way when its result is too large, most
- * expendable first. A memory list keeps its top hits whole: what ranks first
- * is what the agent most needs, and a shortened row still links to its full
- * text.
+ * expendable first; a step runs only while the result is still too large. A
+ * memory list keeps its top hits whole as long as it can: what ranks first is
+ * what the agent most needs, and a shortened row still links to its full
+ * text. What has no way back is never cut: a card's own text and its
+ * attachments (no cursor reaches past them), and the standing rules, which
+ * always arrive in the footer.
  */
 const MEMORY_LINK = { rowExtraChars: RESOURCE_LINK_CHARS } as const;
 const FIT_PLANS = {
-  recall: {
-    clip: [{ list: 'memories', keepWhole: 3, toChars: 1_200 }],
-    drop: [{ list: 'related' }, { list: 'memories', floor: 3, ...MEMORY_LINK }],
-  },
-  // Rules ride the footer and are never cut: the owner's standing rules are
-  // the one part of a briefing that must arrive.
-  build_context: {
-    drop: [
-      { list: 'linked_memories', ...MEMORY_LINK },
-      { list: 'recent' },
-      { list: 'edges' },
-      { list: 'entities' },
-      { list: 'open_loops', floor: 1 },
-      { list: 'memories', floor: 3, ...MEMORY_LINK },
-    ],
-  },
-  board_list: { drop: [{ list: 'cards', floor: 1 }] },
+  recall: [
+    { clip: 'memories', keepWhole: 3, toChars: 1_200 },
+    { drop: 'related' },
+    { drop: 'memories', floor: 3, ...MEMORY_LINK },
+    { clip: 'memories', keepWhole: 0, toChars: 1_200 },
+  ],
+  build_context: [
+    { drop: 'linked_memories', ...MEMORY_LINK },
+    { drop: 'recent' },
+    { drop: 'edges' },
+    { drop: 'entities' },
+    { drop: 'open_loops', floor: 1 },
+    { drop: 'memories', floor: 3, ...MEMORY_LINK },
+    // Last of all, the structured copy of the rules: their text stays in the
+    // footer, instruction-framed, which is the copy an agent reads.
+    { drop: 'rules' },
+  ],
+  board_list: [{ drop: 'cards', floor: 1 }],
   // One row of a paged list stays, so its cursor still moves on.
-  board_get: {
-    drop: [
-      { list: 'feed', floor: 1 },
-      { list: 'events', floor: 1 },
-      { list: 'refs' },
-    ],
-  },
-  list_conflicts: { drop: [{ list: 'conflicts', floor: 1 }] },
-  entities: { drop: [{ list: 'entities', floor: 1 }] },
+  board_get: [
+    { drop: 'feed', floor: 1 },
+    { drop: 'events', floor: 1 },
+  ],
+  // Nothing to cut: the action still takes the client's reported limit.
+  board_resolve: [],
+  list_conflicts: [{ drop: 'conflicts', floor: 1 }],
+  entities: [{ drop: 'entities', floor: 1 }],
 } as const satisfies Record<string, FitPlan>;
 
 /**
@@ -1162,9 +1165,38 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         read.footer.length +
         read.linksOf(payload).length * RESOURCE_LINK_CHARS,
     });
-    const { fit } = fitted;
     const payload =
-      fit && read.page ? read.page(fitted.payload, fit) : fitted.payload;
+      fitted.fit && read.page
+        ? read.page(fitted.payload, fitted.fit)
+        : fitted.payload;
+    const compose = (fit: ResultFit | null) => {
+      const delivered = fit ? { ...payload, fit } : payload;
+      const note = renderFitNote(
+        fit,
+        fit ? read.more?.(payload, fit) : undefined
+      );
+      return {
+        delivered,
+        result: asToolResult(
+          delivered,
+          footerOf(note, read.footer),
+          read.linksOf(payload)
+        ),
+      };
+    };
+    // `delivered` is what actually leaves, marker and note included: the
+    // size the agent's client will judge, and the one the note must not
+    // misstate. Settling it changes a few digits, so it is measured again.
+    let fit = fitted.fit;
+    let out = compose(fit);
+    for (let pass = 0; fit && pass < 3; pass += 1) {
+      const measured = resultChars(out.result);
+      if (measured === fit.delivered) {
+        break;
+      }
+      fit = { ...fit, delivered: measured };
+      out = compose(fit);
+    }
     if (fit) {
       deps.onResultFit?.({
         tool: read.tool,
@@ -1180,19 +1212,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         });
       }
     }
-    const delivered = fit ? { ...payload, fit } : payload;
-    const note = renderFitNote(
-      fit,
-      fit ? read.more?.(payload, fit) : undefined
-    );
-    return {
-      result: asToolResult(
-        delivered,
-        footerOf(note, read.footer),
-        read.linksOf(payload)
-      ),
-      delivered,
-    };
+    return out;
   };
 
   /**
@@ -2182,7 +2202,12 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
               // truncated one) — flat priority below every primary hit.
               ...memoryResourceLinks(payload.linked_memories ?? [], 0.3),
             ]),
-          more: () => 'Recall a point question for anything the pack left out.',
+          more: (_payload, fit) =>
+            'Recall a point question for anything the pack left out.' +
+            (fit.omitted.rules
+              ? ' Every standing rule is still in the footer below; only ' +
+                'their structured copy (`rules`) was left out.'
+              : ''),
         });
         // Result-aware metering: the surfaced mem_ ids and (for a
         // session-start briefing) the pack size are only knowable post-result,
@@ -2275,24 +2300,30 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
           return deps.queryBus.execute(new BoardQuery(input));
         });
         const action = input.action ?? 'list';
-        if (action === 'resolve') {
-          return asToolResult(result);
-        }
-        const listing = action === 'list';
+        const plan =
+          action === 'list'
+            ? FIT_PLANS.board_list
+            : action === 'get'
+              ? FIT_PLANS.board_get
+              : FIT_PLANS.board_resolve;
         return fitRead({
           tool: 'board',
           payload: result,
           reported: input.max_chars,
-          plan: listing ? FIT_PLANS.board_list : FIT_PLANS.board_get,
+          plan,
           footer: '',
           linksOf: () => [],
           // A cut list or history still pages from where the agent's copy
           // ends, so the cut never hides a card or an event for good.
           page: (payload, fit) => boardPageAfterCut(payload, fit),
           more: (payload) =>
-            listing
-              ? `Page on with \`before: "${payload.next_before}"\`, or narrow with \`state\` or \`query\`.`
-              : 'Continue the history with `after_seq` and the feed with `feed_before`.',
+            action === 'list'
+              ? payload.has_more
+                ? `Page on with \`before: "${payload.next_before}"\`, or narrow with \`state\` or \`query\`.`
+                : 'Narrow with `state` or `query`.'
+              : 'Continue the history with `after_seq` and the feed with ' +
+                "`feed_before`; the card's own text and its attachments are " +
+                'never cut.',
         }).result;
       } catch (error) {
         logger.error('board failed', { error: String(error) });

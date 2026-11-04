@@ -40,10 +40,12 @@ app host connects the returned server to a transport.
 - Results that fit the client (`result-budget.ts`): `recall`,
   `build_context`, `board`, `list_conflicts` and `entities` hold their result
   to a character budget (30,000 unless the agent reported its client's limit
-  with `max_chars`). `fitResult` shortens memory text past the top hits, then
-  drops rows from list tails in each tool's order down to a floor; the result
-  carries `fit` and a footer note naming what was cut and how to page for it.
-  Standing rules are never cut. Every other tool's result is measured on its
+  with `max_chars`). `fitResult` runs each tool's ordered steps (shorten memory
+  text past the top hits, drop rows from a list tail down to a floor) only
+  while the result is still too large; the result carries `fit` and a footer
+  note naming what was cut and how to page for it, or saying plainly that it
+  could not fit. A card's text and attachments and the standing rules' footer
+  text are never cut. Every other tool's result is measured on its
   way out and reported (never cut) when it passes the budget. The optional
   `resultBudget` dep keeps a reported limit for the rest of the session, and
   `onResultFit` meters each fit, sizes and counts only.

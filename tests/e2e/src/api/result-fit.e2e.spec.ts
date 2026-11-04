@@ -184,3 +184,95 @@ test('a result over the reported limit is cut to it, pages on from what it deliv
     await mcp.close();
   }
 });
+
+test("a card read over the reported limit keeps the card's text and attachments, and its history pages on", async () => {
+  const seed = await readSeedState();
+  const mcp = await McpTestClient.connect(await passwordGrantToken(seed.userA));
+  try {
+    const { scope } = await boardWith(mcp, 'card', 0, () => '');
+    const created = firstJson<{ card: { id: string; number: number } }>(
+      await mcp.callTool('card', {
+        action: 'create',
+        scope,
+        title: 'Fit a long history',
+        body: `The goal. ${'b'.repeat(1_000)}`,
+        type: 'task',
+        no_links: 'e2e fixture',
+      })
+    ).card;
+    for (const url of ['https://example.com/one', 'https://example.com/two']) {
+      const attached = await mcp.callTool('card_log', {
+        action: 'attach',
+        card_id: created.id,
+        ref_kind: 'url',
+        ref_target: url,
+      });
+      expect(attached.isError ?? false).toBe(false);
+    }
+    for (let i = 0; i < 8; i += 1) {
+      const noted = await mcp.callTool('card_log', {
+        action: 'note',
+        card_id: created.id,
+        text: `Step ${i}: ${'n'.repeat(500)}`,
+      });
+      expect(noted.isError ?? false).toBe(false);
+    }
+
+    interface CardRead {
+      card: { body: string };
+      refs: unknown[];
+      events: Array<{ seq: number }>;
+      has_more: boolean;
+      next_after_seq: number;
+      fit?: Page['fit'];
+    }
+    const read = async (args: Record<string, unknown>): Promise<CardRead> => {
+      const result = await mcp.callTool('board', {
+        action: 'get',
+        card_id: created.id,
+        ...args,
+      });
+      expect(result.isError ?? false).toBe(false);
+      return firstJson<CardRead>(result);
+    };
+
+    // The whole history, read before any limit was reported.
+    const whole = await read({});
+    expect(whole.fit).toBeUndefined();
+    const allSeqs = whole.events.map((e) => e.seq);
+    expect(allSeqs.length).toBeGreaterThanOrEqual(10);
+
+    const cut = await read({ max_chars: 4_000 });
+    expect(cut.fit?.omitted.events).toBeGreaterThan(0);
+    // No cursor reaches past them, so the text and the attachments stay whole.
+    expect(cut.card.body).toBe(whole.card.body);
+    expect(cut.refs).toHaveLength(2);
+    expect(cut.has_more).toBe(true);
+    expect(cut.next_after_seq).toBe(cut.events.at(-1)?.seq);
+
+    // Paging on from the last event delivered reaches every event once.
+    const seqs = cut.events.map((e) => e.seq);
+    let after = cut.next_after_seq;
+    let more = cut.has_more;
+    while (more) {
+      const page = await read({ after_seq: after });
+      seqs.push(...page.events.map((e) => e.seq));
+      more = page.has_more;
+      after = page.next_after_seq;
+    }
+    expect(seqs).toEqual(allSeqs);
+
+    // Resolving a number takes a reported limit too, and acknowledges it.
+    const resolved = firstJson<{ fit?: Page['fit'] }>(
+      await mcp.callTool('board', {
+        action: 'resolve',
+        scope,
+        number: created.number,
+        max_chars: 8_000,
+      })
+    );
+    expect(resolved.fit).toMatchObject({ budget: 8_000, source: 'call' });
+  } finally {
+    await mcp.close();
+  }
+});

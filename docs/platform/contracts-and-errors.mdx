@@ -102,10 +102,15 @@ file instead, so `recall`, `build_context`, `board`, `list_conflicts` and
 `entities` fit their result to 30,000 characters unless told otherwise. Memory
 text past the top hits is shortened first, marked `truncated`, with the full
 row one `zm://memory/{id}` read away. Then rows leave the tails of the lists in
-an order each tool sets, never below a floor. Standing rules are never cut. A
-cut result carries `fit`: the budget and where it came from, the size before
-and after, and how many rows left each list. Its footer says how to get the
-rest: the next board page, a narrower query. An agent whose client draws its
+an order each tool sets, never below a floor, and each step runs only while the
+result is still too large. What has no way back is never cut: a card's own text
+and its attachments, and the standing rules, whose text always arrives in the
+footer (as a last step a briefing may leave out only their structured copy in
+`rules`). A cut result carries `fit`: the budget and where it came from, the
+size before and as delivered, and how many rows left each list. Its footer says
+how to get the rest: the next board page, the history after `after_seq`, a
+narrower query. A result that still cannot fit says so plainly instead of
+claiming it does. An agent whose client draws its
 line elsewhere passes `max_chars` once, after a result came back too large:
 that call and every later one in the session are held to it, and the report is
 metered as `result_fit`, the feedback that shows where clients really draw
