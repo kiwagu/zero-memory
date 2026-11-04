@@ -37,6 +37,20 @@ app host connects the returned server to a transport.
   serves `zm://rules`, and `readPromotedRule` serves one rule in full at
   `zm://rules/{id}`, each such read metered through `onResourceRead` as a
   `resource:rule` row with the rule id and whether it was found.
+- Results that fit the client (`result-budget.ts`): `recall`,
+  `build_context`, `board`, `list_conflicts` and `entities` hold their result
+  to a character budget (30,000 unless the agent reported its client's limit
+  with `max_chars`). `fitResult` runs each tool's ordered steps (shorten memory
+  text past the top hits, drop rows from a list tail down to a floor) only
+  while the result is still too large; the result carries `fit` and a footer
+  note naming what was cut and how to page for it, or saying plainly that it
+  could not fit. Nothing is cut without a way back: a card read delivers its
+  text and attachments in parts (`body_next` / `refs_next`), and a briefing's
+  last steps show standing rules by headline with the id of their
+  `zm://rules/<id>` read, unpinned before pinned. Every other tool's result is measured on its
+  way out and reported (never cut) when it passes the budget. The optional
+  `resultBudget` dep keeps a reported limit for the rest of the session, and
+  `onResultFit` meters each fit, sizes and counts only.
 - `IWorkClaims` / `InProcessWorkClaims` / `workClaimKey` — one queued or
   running background scan or benchmark per owner. The default holds the
   claims in this process; a deployment whose background work runs on a worker

@@ -141,6 +141,8 @@ export interface ListBoardParams {
   relation?: 'any' | 'above' | 'below' | null;
   /** Only the cards the caller worked on, newest own work first. */
   workedByMe?: boolean;
+  /** Continue past this card: the `nextBefore` a previous page returned. */
+  before?: string | null;
 }
 
 /** A card plus whether the call changed anything or replayed an earlier one. */
@@ -285,6 +287,10 @@ export interface BoardCardView {
 export interface BoardView {
   cards: BoardCardView[];
   totals: Partial<Record<CardState, number>>;
+  /** More cards follow this page. */
+  hasMore: boolean;
+  /** Where the next page starts, when one follows. */
+  nextBefore: string | null;
 }
 
 /**

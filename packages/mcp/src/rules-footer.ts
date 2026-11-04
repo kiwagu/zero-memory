@@ -1,4 +1,4 @@
-import type { ContextRule } from '@workspace/contracts';
+import { ruleHeadline, type ContextRule } from '@workspace/contracts';
 
 /**
  * The STANDING RULES block of a build_context tool result — the channel that
@@ -39,3 +39,27 @@ export const renderRulesFooter = (rules: readonly ContextRule[]): string => {
     note
   );
 };
+
+/**
+ * The rules with the pinned (or unpinned) ones shown by headline, for a
+ * footer that must shrink to fit the client. Only a rule with an id changes:
+ * its line keeps the id whose `zm://rules/<id>` read has the whole text, so
+ * nothing is lost, only deferred. A rule at `gate` already carries its
+ * headline as its text (`ruleHeadline` is not idempotent); a whole rule is
+ * cut to one. The condition goes with the gate line it belonged to.
+ */
+export const rulesByHeadline = (
+  rules: readonly ContextRule[],
+  pinned: boolean
+): ContextRule[] =>
+  rules.map((rule) => {
+    if (rule.pinned !== pinned || !rule.id || rule.level === 'headline') {
+      return rule;
+    }
+    const { applies_when: _condition, ...named } = rule;
+    return {
+      ...named,
+      text: rule.level === 'gate' ? rule.text : ruleHeadline(rule.text),
+      level: 'headline',
+    };
+  });

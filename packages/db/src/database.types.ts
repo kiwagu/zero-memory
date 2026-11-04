@@ -2343,6 +2343,7 @@ export type Database = {
       board_continuation: { Args: { p_scope?: string }; Returns: Json };
       board_list: {
         Args: {
+          p_before?: string;
           p_include_archived?: boolean;
           p_limit?: number;
           p_query?: string;
