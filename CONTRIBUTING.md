@@ -68,6 +68,12 @@ A pre-commit hook regenerates database types when a migration is staged and
 runs `lint:strict` — **a single lint warning blocks the commit**. That is
 deliberate: warnings that survive one commit survive forever.
 
+A pre-push hook runs the smoke suite before code leaves your machine. It
+skips the run when the push sends nothing new to test: every commit is
+already on the remote, or its tree already passed `test:e2e:smoke` or
+`test:e2e:full` on a clean checkout (no uncommitted or untracked changes),
+which the suite records when it passes. The hook prints which case applied.
+
 ## Conventions worth knowing before your first pull request
 
 The full set lives in [`.cursor/rules/`](./.cursor/rules) — those files are

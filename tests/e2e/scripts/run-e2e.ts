@@ -49,6 +49,13 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import {
+  bootedFromAnotherTree,
+  provenTree,
+  suiteOf,
+  type Suite,
+} from './proof.js';
+
 const repoRoot = resolve(fileURLToPath(import.meta.url), '../../../..');
 const e2eRoot = resolve(repoRoot, 'tests/e2e');
 
@@ -188,6 +195,10 @@ const pwArgs = rawArgs.filter(
   (arg) => !LAUNCHER_FLAGS.has(arg) && !arg.startsWith('--target=')
 );
 
+// Which suite this run is, for the push gate (scripts/push-gate.sh); null when
+// it cannot vouch for a tree (see proof.ts).
+const suite = suiteOf(pwArgs, Boolean(process.env['CI']));
+
 // Documentation shots overwrite images that ship with the docs site, and the
 // framing of those images is a human decision — a suite run must never touch
 // them as a side effect. They stay capturable on demand (`bun run
@@ -207,6 +218,10 @@ interface AppsState {
   bootedAt?: number;
   /** Commit the tree was on at boot, for the status report. */
   head?: string;
+  /** The committed tree the apps booted from; absent when the checkout held
+   * uncommitted changes then. A pass vouches for a tree only through apps
+   * that booted from it. */
+  tree?: string;
 }
 
 const runtimeDirOf = (contour: Contour): string =>
@@ -325,6 +340,53 @@ const gitHead = (): string => {
     encoding: 'utf8',
   });
   return (result.stdout ?? '').trim() || 'unknown';
+};
+
+/**
+ * The tree the working copy holds, or null when it holds something no commit
+ * does: a change to a tracked file, or an untracked one.
+ */
+const committedTree = (): string | null => {
+  const status = spawnSync('git', ['status', '--porcelain'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  if (status.status !== 0 || (status.stdout ?? '').trim() !== '') {
+    return null;
+  }
+  const tree = spawnSync('git', ['rev-parse', 'HEAD^{tree}'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  return tree.status === 0 ? (tree.stdout ?? '').trim() || null : null;
+};
+
+/** How many proven trees the push gate's record keeps, newest last. */
+const PROVEN_TREES_KEPT = 200;
+
+/**
+ * Records that a passing run proved a tree. The pre-push gate
+ * (scripts/push-gate.sh) then lets a push of that tree through without running
+ * the smoke again. The record lives in the git directory, never in the tree.
+ */
+const recordProvenTree = (tree: string, proof: Suite): void => {
+  const where = spawnSync(
+    'git',
+    ['rev-parse', '--git-path', 'zm-e2e-proven-trees'],
+    { cwd: repoRoot, encoding: 'utf8' }
+  );
+  if (where.status !== 0) {
+    return;
+  }
+  const path = resolve(repoRoot, (where.stdout ?? '').trim());
+  let lines: string[] = [];
+  try {
+    lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  } catch {
+    // No record yet: this is the first.
+  }
+  lines.push(`${tree} ${proof} ${new Date().toISOString()}`);
+  writeFileSync(path, `${lines.slice(-PROVEN_TREES_KEPT).join('\n')}\n`);
 };
 
 /**
@@ -757,14 +819,16 @@ const ensureApps = async (
     const state = readAppsState(contour);
     const stale =
       !contour.serverHotReloads &&
-      (state?.bootedAt === undefined || sourceChangedSinceBoot(state.bootedAt));
+      (state?.bootedAt === undefined ||
+        sourceChangedSinceBoot(state.bootedAt) ||
+        bootedFromAnotherTree(state.tree, committedTree()));
     if (!stale) {
       console.log(`→ [${contour.key}] server + web already up — reusing them.`);
       return;
     }
     console.log(
-      `→ [${contour.key}] server + web are up but the sources moved since they ` +
-        'booted — rebooting them so the run exercises the current tree.'
+      `→ [${contour.key}] server + web are up but the sources or the tree moved ` +
+        'since they booted — rebooting them so the run exercises the current tree.'
     );
   }
 
@@ -880,6 +944,7 @@ const ensureApps = async (
       webPid,
       bootedAt: Date.now(),
       head: gitHead(),
+      tree: committedTree() ?? undefined,
     })
   );
 
@@ -1054,6 +1119,9 @@ const reportStatus = async (): Promise<void> => {
 };
 
 const main = async (): Promise<number> => {
+  // Taken before anything boots from the working copy: the tree a pass of
+  // this run can vouch for.
+  const provingTree = suite ? committedTree() : null;
   if (statusOnly) {
     await reportStatus();
     return 0;
@@ -1137,6 +1205,9 @@ const main = async (): Promise<number> => {
     }
   }
 
+  // Read before an --ephemeral teardown removes the apps' state with them.
+  const appsTree = readAppsState(test)?.tree;
+
   if (ephemeral) {
     console.log('→ --ephemeral: tearing the test stack + apps down…');
     teardown(test);
@@ -1144,6 +1215,19 @@ const main = async (): Promise<number> => {
     console.log(
       `\n✓ test stack + apps left up for the next run (fast repeat).` +
         ` Stop with: bun run e2e:down`
+    );
+  }
+  const proven = provenTree({
+    passed: result.status === 0,
+    suite,
+    treeAtStart: provingTree,
+    treeAtEnd: committedTree(),
+    appsTree,
+  });
+  if (proven && suite) {
+    recordProvenTree(proven, suite);
+    console.log(
+      `✓ tree ${proven.slice(0, 12)} recorded as proven by the ${suite} suite (the pre-push gate skips it)`
     );
   }
   return result.status ?? 1;
