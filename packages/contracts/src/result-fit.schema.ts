@@ -9,9 +9,10 @@ import { z } from 'zod';
  *
  * A client can say where its own line is (`max_chars`), and that answer
  * outranks the default for the rest of its session. The smallest limit it may
- * report still holds one whole unit of every paged read (a card's longest
- * note, a chunk of its text, one attachment) beside the result's frame, so
- * every read can always move on.
+ * report leaves room for a page of every paged read with ordinary content (a
+ * long note, a chunk of a card's text, an attachment) beside the result's
+ * frame. Content no step can cut to that size goes out whole, and the result
+ * says it did not fit.
  */
 export const RESULT_BUDGET = {
   defaultChars: 30_000,

@@ -946,6 +946,8 @@ const FIT_PLANS = {
     { drop: 'entities' },
     { drop: 'open_loops', floor: 1 },
     { drop: 'memories', floor: 3, ...MEMORY_LINK },
+    // The top hits too, before any rule gives way: each keeps its link.
+    { clip: 'memories', keepWhole: 0, toChars: 600 },
     // Last of all, the structured copy of the rules: their text stays in the
     // footer, instruction-framed, which is the copy an agent reads.
     { drop: 'rules' },

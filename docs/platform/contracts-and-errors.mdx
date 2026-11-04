@@ -115,8 +115,7 @@ delivered, how many rows left each list, and how many characters of a text
 wait for a later read. Its footer says how to get the rest: the next board
 page, the history after `after_seq`, the rest of a card, a narrower query. A
 result that still cannot fit says so plainly instead of claiming it does. An agent whose client draws its
-line elsewhere passes `max_chars` once (8,000 at the least, room for one whole
-part of every paged read), after a result came back too large:
+line elsewhere passes `max_chars` once (8,000 at the least), after a result came back too large:
 that call and every later one in the session are held to it, and the report is
 metered as `result_fit`, the feedback that shows where clients really draw
 their line. Every other tool's result is measured on its way out and reported,
