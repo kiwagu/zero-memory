@@ -96,6 +96,22 @@ router's tail) rather than truncated mid-sentence, and the result records what
 was dropped. Uncapped clients get the full text, including the
 project-attachment note.
 
+A third budget holds each read result to what a client shows inline. A client
+that receives a result past its own line stops showing it and saves it to a
+file instead, so `recall`, `build_context`, `board`, `list_conflicts` and
+`entities` fit their result to 30,000 characters unless told otherwise. Memory
+text past the top hits is shortened first, marked `truncated`, with the full
+row one `zm://memory/{id}` read away. Then rows leave the tails of the lists in
+an order each tool sets, never below a floor. Standing rules are never cut. A
+cut result carries `fit`: the budget and where it came from, the size before
+and after, and how many rows left each list. Its footer says how to get the
+rest: the next board page, a narrower query. An agent whose client draws its
+line elsewhere passes `max_chars` once, after a result came back too large:
+that call and every later one in the session are held to it, and the report is
+metered as `result_fit`, the feedback that shows where clients really draw
+their line. Every other tool's result is measured on its way out and reported,
+never cut, when it passes the budget.
+
 ### Error taxonomy
 
 Every tool error is one of seven codes:

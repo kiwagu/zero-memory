@@ -1,3 +1,3 @@
-# zero-memory-watcher — version 0.35.3 (binary = plugin manifest) — built from git 0fdbdc3-dirty (feature/rule-delivery-judge)  commit=0fdbdc35e364ebcb573721ff15aa7e075a5a775f-dirty
-# build-env: bun=1.3.14  target=linux-x64  arch=x86_64  os=Ubuntu 26.04.1 LTS
-fab87adf3f6bf27ef0ce15a2a7b364cb8703803855d6049e34395d66d3c79210  zero-memory-watcher
+# zero-memory-watcher — version 0.35.4 (binary = plugin manifest) — built from git 0c766c1-dirty (feature/tool-results-fit)  commit=0c766c1af3f1d336b186617cbba531b0175756ba-dirty
+# build-env: bun=1.4.4  target=linux-x64  arch=x86_64  os=Ubuntu 26.04.1 LTS
+307dc7dff3d44cef499870cf90ef7ea46f437a69e8794403e8febab5c741e452  zero-memory-watcher

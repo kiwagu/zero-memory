@@ -229,6 +229,9 @@ const boardViewSchema = z.object({
     )
     .default([]),
   totals: z.record(z.string(), z.number()).default({}),
+  // Paging: a store that predates it lists one page and says nothing more.
+  has_more: z.boolean().default(false),
+  next_before: z.string().nullable().default(null),
 });
 
 /**
@@ -477,6 +480,7 @@ export class SupabaseCardRepository implements ICardRepository {
       p_related_to: params.relatedTo ?? undefined,
       p_relation: params.relation ?? undefined,
       p_worked_by_me: params.workedByMe ?? false,
+      p_before: params.before ?? undefined,
     });
     if (error) {
       throw new Error(`board_list failed: ${error.message}`);
@@ -485,7 +489,12 @@ export class SupabaseCardRepository implements ICardRepository {
     if (parsed.error) {
       return Err(toCardFailure(parsed.error, parsed.message));
     }
-    return Ok({ cards: parsed.cards, totals: parsed.totals } as BoardView);
+    return Ok({
+      cards: parsed.cards,
+      totals: parsed.totals,
+      hasMore: parsed.has_more,
+      nextBefore: parsed.next_before,
+    } as BoardView);
   }
 
   async resolve(

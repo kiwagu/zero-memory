@@ -7,7 +7,26 @@ import {
   memoryKindSchema,
   memoryScopeSchema,
 } from './memory.schema.js';
+import { maxCharsSchema, resultFitSchema } from './result-fit.schema.js';
 import { userIdSchema } from './user.schema.js';
+
+/**
+ * How many cards a board list page holds unless the caller says otherwise. A
+ * page is read to pick work up, so it is the recent end of the board; older
+ * cards are one `before` away.
+ */
+export const BOARD_LIST_PAGE = 25;
+
+/**
+ * Where a board list page ends: the last card's change time and id. The list
+ * is ordered by change time, newest first, with the id breaking ties, so the
+ * pair names one position even when cards changed in the same instant. The
+ * database builds the same string for the pages it cuts.
+ */
+export const boardCursorOf = (card: {
+  updated_at: string;
+  id: string;
+}): string => `${card.updated_at}|${card.id}`;
 
 /**
  * A card id: a branded `crd_` entity id (parsed, never a raw string).
@@ -846,7 +865,26 @@ export const boardInputSchema = z.object({
         'Each card then carries `my_last`, your latest step on it, and its ' +
         '`past_horizon` counts your work instead of its last event.'
     ),
-  limit: z.number().int().positive().max(200).optional(),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .max(200)
+    .optional()
+    .describe(
+      `For list: how many cards a page holds (${BOARD_LIST_PAGE} unless said).`
+    ),
+  before: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .optional()
+    .describe(
+      'For list: continue past this card — the `next_before` a previous page ' +
+        'returned.'
+    ),
+  max_chars: maxCharsSchema,
 });
 export type BoardInput = z.infer<typeof boardInputSchema>;
 
@@ -857,6 +895,10 @@ export const boardOutputSchema = z.object({
   card: cardSchema.nullable().default(null),
   refs: z.array(cardRefViewSchema).default([]),
   events: z.array(cardEventSchema).default([]),
+  /**
+   * More past this page: for get, more history (continue with
+   * `next_after_seq`); for list, more cards (continue with `next_before`).
+   */
   has_more: z.boolean().default(false),
   next_after_seq: z.number().default(0),
   /**
@@ -877,6 +919,13 @@ export const boardOutputSchema = z.object({
   blocked: z.boolean().default(false),
   /** For get: whether anyone ever said how it relates to the board. */
   links_assessed: z.boolean().nullable().default(null),
+  /**
+   * For list: where the next page starts, when `has_more` says there is one.
+   * Pass it back as `before`.
+   */
+  next_before: z.string().nullable().default(null),
+  /** Present when the result was cut to fit the client, or `max_chars` was reported. */
+  fit: resultFitSchema.optional(),
 });
 export type BoardOutput = z.infer<typeof boardOutputSchema>;
 

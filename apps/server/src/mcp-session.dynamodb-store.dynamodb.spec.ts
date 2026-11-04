@@ -39,6 +39,7 @@ describe('DynamoDbMcpSessionStore against DynamoDB Local', () => {
     const opened = record(owner, Date.now());
     await store().open(opened);
     await store().attachScope(opened.sessionId, 'proj.owner.repo');
+    await store().setResultBudget(opened.sessionId, 45_000);
 
     const resumed = await store().resume(
       opened.sessionId,
@@ -48,6 +49,7 @@ describe('DynamoDbMcpSessionStore against DynamoDB Local', () => {
     expect(resumed).toEqual({
       ...opened,
       defaultScope: 'proj.owner.repo',
+      resultBudget: 45_000,
       lastSeenAt: opened.lastSeenAt + 1000,
     });
   });

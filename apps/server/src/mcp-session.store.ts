@@ -14,6 +14,11 @@ export interface McpSessionRecord {
   clientName: string | null;
   /** Project scope a caller's `project_hint` attached to this session. */
   defaultScope?: string;
+  /**
+   * The client's inline limit, in characters, as a call of this session
+   * reported it with `max_chars`. Later results are held to it.
+   */
+  resultBudget?: number;
   /** Epoch milliseconds of the last request. */
   lastSeenAt: number;
 }
@@ -40,6 +45,8 @@ export interface IMcpSessionStore {
   ): Promise<McpSessionRecord | undefined>;
   /** Records the project scope the session attached to. */
   attachScope(sessionId: string, scope: string): Promise<void>;
+  /** Records the inline limit the session's client reported. */
+  setResultBudget(sessionId: string, chars: number): Promise<void>;
   /** Ends the owner's session. False when there was nothing to end. */
   close(sessionId: string, ownerUserEntityId: string): Promise<boolean>;
 }

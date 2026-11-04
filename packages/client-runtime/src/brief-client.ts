@@ -1,4 +1,5 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { RESULT_BUDGET } from '@workspace/contracts';
 import { createAuthedTransport } from '@workspace/mcp-oauth-client';
 
 import { resolveServerUrl } from './server-config.js';
@@ -21,7 +22,10 @@ export const callBuildContext = async (
   try {
     const result = await client.callTool({
       name: 'build_context',
-      arguments: args,
+      // The watcher fits the pack to its own channel (and drains what does
+      // not fit over the next messages), so it reports the largest limit and
+      // takes the whole pack: a cut here would lose rows it delivers later.
+      arguments: { max_chars: RESULT_BUDGET.maxChars, ...args },
     });
     if (result.isError) {
       throw new Error(`build_context failed: ${toolErrorMessage(result)}`);

@@ -25,6 +25,7 @@ import {
   memoryScopeSchema,
   memoryVisibilitySchema,
 } from './memory.schema.js';
+import { maxCharsSchema, resultFitSchema } from './result-fit.schema.js';
 
 /**
  * Special scope value accepted by read tools: search ALL scopes visible to
@@ -296,6 +297,7 @@ export const recallInputSchema = z.object({
   kinds: z.array(memoryKindSchema).optional(),
   k: z.number().int().positive().max(100).optional(),
   include_graph: z.boolean().optional(),
+  max_chars: maxCharsSchema,
   project_hint: z
     .string()
     .min(1)
@@ -343,6 +345,11 @@ export const memorySearchHitSchema = z.object({
   stale_days: z.number().int().nullable().default(null),
   /** Present only when `include_graph` was requested. */
   entities: z.array(contextEntitySchema).optional(),
+  /**
+   * Present, and true, only when `content` was shortened to fit the result
+   * into the client; the full text is one read of zm://memory/{id} away.
+   */
+  truncated: z.boolean().optional(),
 });
 export type MemorySearchHit = z.infer<typeof memorySearchHitSchema>;
 
@@ -365,6 +372,8 @@ export const recallOutputSchema = z.object({
    * still parse.
    */
   related: z.array(relatedMemorySchema).default([]),
+  /** Present when the hits were cut to fit the client, or `max_chars` was reported. */
+  fit: resultFitSchema.optional(),
 });
 export type RecallOutput = z.infer<typeof recallOutputSchema>;
 
@@ -421,11 +430,14 @@ export const listConflictsInputSchema = z.object({
   status: conflictStatusSchema.optional(),
   verdict: conflictVerdictSchema.optional(),
   limit: z.number().int().positive().max(100).optional(),
+  max_chars: maxCharsSchema,
 });
 export type ListConflictsInput = z.infer<typeof listConflictsInputSchema>;
 
 export const listConflictsOutputSchema = z.object({
   conflicts: z.array(conflictSchema),
+  /** Present when the list was cut to fit the client, or `max_chars` was reported. */
+  fit: resultFitSchema.optional(),
 });
 export type ListConflictsOutput = z.infer<typeof listConflictsOutputSchema>;
 
@@ -539,6 +551,7 @@ export const buildContextInputSchema = z.object({
    * id space from the server-minted MCP transport session id.
    */
   conversation_id: z.string().min(1).optional(),
+  max_chars: maxCharsSchema,
 });
 export type BuildContextInput = z.infer<typeof buildContextInputSchema>;
 
@@ -668,6 +681,8 @@ export const buildContextOutputSchema = z.object({
   work: briefingWorkSchema.optional(),
   /** Session attachment state (absent only on older servers). */
   session: sessionAttachmentSchema.optional(),
+  /** Present when the pack was cut to fit the client, or `max_chars` was reported. */
+  fit: resultFitSchema.optional(),
 });
 export type BuildContextOutput = z.infer<typeof buildContextOutputSchema>;
 
@@ -856,11 +871,14 @@ export type RestoreMemoryOutput = z.infer<typeof restoreMemoryOutputSchema>;
 export const entitiesInputSchema = z.object({
   query: z.string().min(1).optional(),
   scope: memoryScopeSchema.optional(),
+  max_chars: maxCharsSchema,
 });
 export type EntitiesInput = z.infer<typeof entitiesInputSchema>;
 
 export const entitiesOutputSchema = z.object({
   entities: z.array(entityHitSchema),
+  /** Present when the list was cut to fit the client, or `max_chars` was reported. */
+  fit: resultFitSchema.optional(),
 });
 export type EntitiesOutput = z.infer<typeof entitiesOutputSchema>;
 

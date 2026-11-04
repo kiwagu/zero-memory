@@ -24,7 +24,8 @@ request id from the ambient context.
   which owns that contract and its test.
 - `UsageEvent`, `UsageEventType`, `UsageUnit` — the event shape and enums
   (`llm_extraction` / `embedding` / `mcp_tool_call` / `ingest_chunk` /
-  `session_briefing` / `recall_used`; unit `count` / `tokens`).
+  `session_briefing` / `recall_used` / `result_fit`; unit `count` /
+  `tokens`).
 
 ## Emit points
 
@@ -36,6 +37,7 @@ request id from the ambient context.
 | `mcp_tool_call`    | MCP dispatcher (composition-level hook) | 1                  |
 | `session_briefing` | `build_context` briefing result         | estimated tokens   |
 | `recall_used`      | usefulness evidence                     | 1                  |
+| `result_fit`       | a read result held to the client budget | 1                  |
 
 Payloads carry counters and identifiers (tool name, token split, model,
 returned ids), never memory content. The deliberate exception is the user's

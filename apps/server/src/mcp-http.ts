@@ -32,6 +32,7 @@ import {
   recordResourceRead,
   recordToolError,
   recordToolInvocation,
+  recordResultFit,
   recordToolResult,
 } from './metering.js';
 import { incrementCounter } from './metrics.js';
@@ -183,6 +184,24 @@ export const createMcpHttpRoutes = (options: McpHttpOptions) => {
         },
         currentProjectScope: () => session.defaultScope,
       },
+      // A client's reported inline limit lives with its session, like the
+      // project: one report holds for every later request, on any instance.
+      resultBudget: {
+        current: () => session.resultBudget,
+        report: (chars) => {
+          if (session.resultBudget === chars) {
+            return;
+          }
+          session.resultBudget = chars;
+          runDetached(
+            () => sessions.setResultBudget(session.sessionId, chars),
+            logger,
+            'failed to keep the client result budget with the session',
+            { sessionId: session.sessionId }
+          );
+        },
+      },
+      onResultFit: (metering) => recordResultFit(usageRecorder, metering),
       // Refused writes are a caller-contract signal, not a server error:
       // the counter answers whether agents attach on the retry or keep
       // hitting the wall, which is the only way to see if the refusal is

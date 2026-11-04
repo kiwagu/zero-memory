@@ -63,6 +63,13 @@ export class InMemoryMcpSessionStore implements IMcpSessionStore {
     }
   }
 
+  async setResultBudget(sessionId: string, chars: number): Promise<void> {
+    const found = this.#sessions.get(sessionId);
+    if (found) {
+      found.resultBudget = chars;
+    }
+  }
+
   async close(sessionId: string, ownerUserEntityId: string): Promise<boolean> {
     const found = this.#sessions.get(sessionId);
     if (!found || found.ownerUserEntityId !== ownerUserEntityId) {
