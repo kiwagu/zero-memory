@@ -144,7 +144,7 @@ import {
   resultBudgetFor,
   type FitPlan,
 } from './result-budget.js';
-import { renderRulesFooter } from './rules-footer.js';
+import { renderRulesFooter, rulesByHeadline } from './rules-footer.js';
 import { toolError, toolErrorFromThrown } from './tool-error.js';
 import {
   InProcessWorkClaims,
@@ -926,9 +926,10 @@ const resultChars = (result: CallToolResult): number =>
  * expendable first; a step runs only while the result is still too large. A
  * memory list keeps its top hits whole as long as it can: what ranks first is
  * what the agent most needs, and a shortened row still links to its full
- * text. What has no way back is never cut: a card's own text and its
- * attachments (no cursor reaches past them), and the standing rules, which
- * always arrive in the footer.
+ * text. Nothing is cut without a way back to it: a dropped row has a cursor
+ * or a link, a card's text and attachments continue from where they stop
+ * (`body_next`, `refs_next`), and a standing rule shown by its headline is
+ * one `zm://rules/<id>` read away (see the briefing's compaction steps).
  */
 const MEMORY_LINK = { rowExtraChars: RESOURCE_LINK_CHARS } as const;
 const FIT_PLANS = {
@@ -954,6 +955,10 @@ const FIT_PLANS = {
   board_get: [
     { drop: 'feed', floor: 1 },
     { drop: 'events', floor: 1 },
+    { drop: 'refs', floor: 1 },
+    // The card's own text goes last, and in order: a head now, the rest
+    // from `body_next`.
+    { trim: 'card.body', floor: 500 },
   ],
   // Nothing to cut: the action still takes the client's reported limit.
   board_resolve: [],
@@ -963,18 +968,24 @@ const FIT_PLANS = {
 
 /**
  * After a board result was cut, its paging fields point past what the agent
- * received. Moves them back to the last row it kept: the next page starts
- * there.
+ * received. Moves them back to the last row it kept, or the last character
+ * of the card's text it got: the next read starts there. `from` is where
+ * this read's text and attachments began.
  */
 const boardPageAfterCut = (
   payload: BoardOutput,
-  fit: ResultFit
+  fit: ResultFit,
+  from: { body: number; refs: number }
 ): BoardOutput => {
   const lastCard = payload.cards.at(-1);
   const lastEvent = payload.events.at(-1);
   const lastFeed = payload.feed.at(-1);
   return {
     ...payload,
+    ...(fit.cut['card.body'] && payload.card
+      ? { body_next: from.body + payload.card.body.length }
+      : {}),
+    ...(fit.omitted.refs ? { refs_next: from.refs + payload.refs.length } : {}),
     ...(fit.omitted.cards && lastCard
       ? { has_more: true, next_before: boardCursorOf(lastCard) }
       : {}),
@@ -1149,12 +1160,15 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
     payload: P;
     reported: number | undefined;
     plan: FitPlan;
-    footer: string;
+    /** A function when a step may change it (the briefing's rules). */
+    footer: string | (() => string);
     linksOf: (payload: P) => ResourceLink[];
     page?: (payload: P, fit: ResultFit) => P;
     more?: (payload: P, fit: ResultFit) => string | undefined;
   }): { result: CallToolResult; delivered: P } => {
     const { budget, source } = budgetFor(read.reported);
+    const footerNow = (): string =>
+      typeof read.footer === 'function' ? read.footer() : read.footer;
     const fitted = fitResult({
       payload: read.payload,
       budget,
@@ -1162,7 +1176,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
       plan: read.plan,
       measure: (payload) =>
         JSON.stringify(payload).length +
-        read.footer.length +
+        footerNow().length +
         read.linksOf(payload).length * RESOURCE_LINK_CHARS,
     });
     const payload =
@@ -1179,7 +1193,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         delivered,
         result: asToolResult(
           delivered,
-          footerOf(note, read.footer),
+          footerOf(note, footerNow()),
           read.linksOf(payload)
         ),
       };
@@ -1248,6 +1262,7 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
       delivered: chars,
       omitted: {},
       clipped: 0,
+      cut: {},
     });
   };
 
@@ -2179,22 +2194,33 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
         // chose: in full, by headline with its condition, or by headline.
         // Pinned rules lead and are marked: the owner guaranteed those reach
         // the session.
-        const briefedRules = result.rules ?? [];
-        const rulesFooter =
-          briefedRules.length > 0
-            ? `${renderRulesFooter(briefedRules)}\n\n${REMEMBER_REMINDER}`
+        // The rules as the footer shows them. When the pack cannot fit, the
+        // last steps show them by headline, every line keeping the id whose
+        // `zm://rules/<id>` read has the whole text: unpinned rules first,
+        // pinned ones only if that was not enough.
+        let shownRules: readonly ContextRule[] = result.rules ?? [];
+        const rulesFooter = (): string =>
+          shownRules.length > 0
+            ? `${renderRulesFooter(shownRules)}\n\n${REMEMBER_REMINDER}`
             : REMEMBER_REMINDER;
         const session = sessionState(deps.sessionScope, result.session?.thread);
+        const footer = (): string =>
+          footerOf(readElsewhere, sessionStateLine(session), rulesFooter());
+        const byHeadline = (pinned: boolean) => (): number => {
+          const before = footer().length;
+          shownRules = rulesByHeadline(shownRules, pinned);
+          return before - footer().length;
+        };
         const { result: envelope, delivered } = fitRead({
           tool: 'build_context',
           payload: { ...result, session },
           reported: input.max_chars,
-          plan: FIT_PLANS.build_context,
-          footer: footerOf(
-            readElsewhere,
-            sessionStateLine(session),
-            rulesFooter
-          ),
+          plan: [
+            ...FIT_PLANS.build_context,
+            { compact: 'rules', apply: byHeadline(false) },
+            { compact: 'pinned rules', apply: byHeadline(true) },
+          ],
+          footer,
           linksOf: (payload) =>
             readLinks([
               ...memoryResourceLinks(payload.memories),
@@ -2207,6 +2233,10 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
             (fit.omitted.rules
               ? ' Every standing rule is still in the footer below; only ' +
                 'their structured copy (`rules`) was left out.'
+              : '') +
+            (fit.cut.rules || fit.cut['pinned rules']
+              ? ' Rules marked [headline] arrive by name to fit: read ' +
+                '`zm://rules/<id>` for the whole text before acting on one.'
               : ''),
         });
         // Result-aware metering: the surfaced mem_ ids and (for a
@@ -2306,24 +2336,58 @@ export const buildMcpServer = (deps: McpServerDeps): McpServer => {
             : action === 'get'
               ? FIT_PLANS.board_get
               : FIT_PLANS.board_resolve;
+        // A continued card read starts where the previous one stopped: the
+        // text from `body_from`, the attachments from `refs_from`.
+        const from = {
+          body: action === 'get' ? (input.body_from ?? 0) : 0,
+          refs: action === 'get' ? (input.refs_from ?? 0) : 0,
+        };
+        const windowed: BoardOutput =
+          result.card && (from.body > 0 || from.refs > 0)
+            ? {
+                ...result,
+                card: {
+                  ...result.card,
+                  body: result.card.body.slice(from.body),
+                },
+                refs: result.refs.slice(from.refs),
+              }
+            : result;
         return fitRead({
           tool: 'board',
-          payload: result,
+          payload: windowed,
           reported: input.max_chars,
           plan,
           footer: '',
           linksOf: () => [],
-          // A cut list or history still pages from where the agent's copy
-          // ends, so the cut never hides a card or an event for good.
-          page: (payload, fit) => boardPageAfterCut(payload, fit),
-          more: (payload) =>
-            action === 'list'
-              ? payload.has_more
+          // A cut list, history, text or attachment list still continues from
+          // where the agent's copy ends, so the cut never hides anything for
+          // good.
+          page: (payload, fit) => boardPageAfterCut(payload, fit, from),
+          more: (payload) => {
+            if (action === 'list') {
+              return payload.has_more
                 ? `Page on with \`before: "${payload.next_before}"\`, or narrow with \`state\` or \`query\`.`
-                : 'Narrow with `state` or `query`.'
-              : 'Continue the history with `after_seq` and the feed with ' +
-                "`feed_before`; the card's own text and its attachments are " +
-                'never cut.',
+                : 'Narrow with `state` or `query`.';
+            }
+            const next = [
+              ...(payload.body_next !== null
+                ? [`the text with \`body_from: ${payload.body_next}\``]
+                : []),
+              ...(payload.refs_next !== null
+                ? [`the attachments with \`refs_from: ${payload.refs_next}\``]
+                : []),
+              ...(payload.has_more
+                ? [`the history with \`after_seq: ${payload.next_after_seq}\``]
+                : []),
+              ...(payload.feed_has_more && payload.feed_next_before
+                ? [
+                    `the feed with \`feed_before: "${payload.feed_next_before}"\``,
+                  ]
+                : []),
+            ];
+            return next.length > 0 ? `Read on: ${next.join(', ')}.` : undefined;
+          },
         }).result;
       } catch (error) {
         logger.error('board failed', { error: String(error) });

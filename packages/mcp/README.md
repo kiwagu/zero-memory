@@ -44,8 +44,10 @@ app host connects the returned server to a transport.
   text past the top hits, drop rows from a list tail down to a floor) only
   while the result is still too large; the result carries `fit` and a footer
   note naming what was cut and how to page for it, or saying plainly that it
-  could not fit. A card's text and attachments and the standing rules' footer
-  text are never cut. Every other tool's result is measured on its
+  could not fit. Nothing is cut without a way back: a card read delivers its
+  text and attachments in parts (`body_next` / `refs_next`), and a briefing's
+  last steps show standing rules by headline with the id of their
+  `zm://rules/<id>` read, unpinned before pinned. Every other tool's result is measured on its
   way out and reported (never cut) when it passes the budget. The optional
   `resultBudget` dep keeps a reported limit for the rest of the session, and
   `onResultFit` meters each fit, sizes and counts only.

@@ -493,8 +493,11 @@ counts: by its last event, or with `worked_by_me` by your own latest step;
 `get` one card with its attachments, its relations and whether it is blocked,
 a page of its history — where `after_seq` reads only what happened since you
 last looked — and a page of its feed, newest first, continued with the
-`feed_before` cursor each page returns; or `resolve` a project-local number —
-42 for `ZM-42` — into its card.
+`feed_before` cursor each page returns. When the card does not fit the
+client's limit at once, its text and its attachments arrive in parts:
+`body_next` and `refs_next` say where each continues, passed back as
+`body_from` and `refs_from`. Or `resolve` a project-local number — 42 for
+`ZM-42` — into its card.
 
 `create`, `promote_loop`, `move`, `land`, `link`, `note` and `attach` accept an
 `idempotency_key`: a retry with the same key after a timeout returns the first

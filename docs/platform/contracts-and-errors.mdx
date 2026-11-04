@@ -103,15 +103,20 @@ file instead, so `recall`, `build_context`, `board`, `list_conflicts` and
 text past the top hits is shortened first, marked `truncated`, with the full
 row one `zm://memory/{id}` read away. Then rows leave the tails of the lists in
 an order each tool sets, never below a floor, and each step runs only while the
-result is still too large. What has no way back is never cut: a card's own text
-and its attachments, and the standing rules, whose text always arrives in the
-footer (as a last step a briefing may leave out only their structured copy in
-`rules`). A cut result carries `fit`: the budget and where it came from, the
-size before and as delivered, and how many rows left each list. Its footer says
-how to get the rest: the next board page, the history after `after_seq`, a
-narrower query. A result that still cannot fit says so plainly instead of
-claiming it does. An agent whose client draws its
-line elsewhere passes `max_chars` once, after a result came back too large:
+result is still too large. Nothing is cut without a way back to it. A card read
+delivers its text and its attachments in parts when they do not fit at once:
+`body_next` and `refs_next` say where each continues, passed back as
+`body_from` and `refs_from`, and the parts join back exactly. A briefing's last
+steps leave out the structured copy of the standing rules (their text stays in
+the footer), then show them by headline, unpinned before pinned, each line
+keeping the id whose `zm://rules/{id}` read has the whole rule. A cut result
+carries `fit`: the budget and where it came from, the size before and as
+delivered, how many rows left each list, and how many characters of a text
+wait for a later read. Its footer says how to get the rest: the next board
+page, the history after `after_seq`, the rest of a card, a narrower query. A
+result that still cannot fit says so plainly instead of claiming it does. An agent whose client draws its
+line elsewhere passes `max_chars` once (8,000 at the least, room for one whole
+part of every paged read), after a result came back too large:
 that call and every later one in the session are held to it, and the report is
 metered as `result_fit`, the feedback that shows where clients really draw
 their line. Every other tool's result is measured on its way out and reported,

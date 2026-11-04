@@ -19,6 +19,8 @@ export class BoardQuery extends Query implements BoardInput {
   public readonly feed_before?: BoardInput['feed_before'];
   public readonly limit?: number;
   public readonly before?: string;
+  public readonly body_from?: number;
+  public readonly refs_from?: number;
   public readonly related_to?: string;
   public readonly relation_filter?: BoardInput['relation_filter'];
   public readonly worked_by_me?: boolean;
@@ -37,6 +39,8 @@ export class BoardQuery extends Query implements BoardInput {
     this.feed_before = props.feed_before;
     this.limit = props.limit;
     this.before = props.before;
+    this.body_from = props.body_from;
+    this.refs_from = props.refs_from;
     this.related_to = props.related_to;
     this.relation_filter = props.relation_filter;
     this.worked_by_me = props.worked_by_me;

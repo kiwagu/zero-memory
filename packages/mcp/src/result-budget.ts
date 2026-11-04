@@ -39,7 +39,19 @@ export type FitStep =
       readonly drop: string;
       readonly floor?: number;
       readonly rowExtraChars?: number;
-    };
+    }
+  /**
+   * Deliver only the head of the text at `trim` (a dotted path), just as
+   * much as fits and never less than `floor` characters. No ellipsis: the
+   * caller hands out where the rest starts, and the parts join back exactly.
+   */
+  | { readonly trim: string; readonly floor: number }
+  /**
+   * Shrink something that rides beside the payload (a footer). `apply`
+   * makes it smaller and returns the characters it saved; what it shortened
+   * must still be reachable another way.
+   */
+  | { readonly compact: string; readonly apply: () => number };
 
 /** A tool's steps, most expendable first. */
 export type FitPlan = readonly FitStep[];
@@ -69,6 +81,40 @@ export interface Fitted<P> {
 }
 
 const ELLIPSIS = '…';
+
+const textAt = (payload: object, path: string): string | null => {
+  let value: unknown = payload;
+  for (const key of path.split('.')) {
+    if (typeof value !== 'object' || value === null) {
+      return null;
+    }
+    value = (value as Record<string, unknown>)[key];
+  }
+  return typeof value === 'string' ? value : null;
+};
+
+/** A copy of `payload` with the text at `path` replaced, nothing mutated. */
+const withTextAt = (
+  payload: Record<string, unknown>,
+  path: string,
+  text: string
+): Record<string, unknown> => {
+  const [key, ...rest] = path.split('.');
+  if (key === undefined) {
+    return payload;
+  }
+  if (rest.length === 0) {
+    return { ...payload, [key]: text };
+  }
+  return {
+    ...payload,
+    [key]: withTextAt(
+      payload[key] as Record<string, unknown>,
+      rest.join('.'),
+      text
+    ),
+  };
+};
 
 const rowsOf = (payload: object, list: string): unknown[] | null => {
   const value = (payload as Record<string, unknown>)[list];
@@ -116,6 +162,7 @@ export const fitResult = <P extends object>(input: FitInput<P>): Fitted<P> => {
     delivered: chars,
     omitted: {},
     clipped: 0,
+    cut: {},
   };
   // A reported limit is answered with the marker, so the marker counts.
   const cost = chars + (source === 'call' ? markerChars(acknowledged) : 0);
@@ -124,13 +171,44 @@ export const fitResult = <P extends object>(input: FitInput<P>): Fitted<P> => {
   }
 
   const target = Math.max(0, budget - FIT_RESERVE_CHARS);
-  const out = { ...payload } as Record<string, unknown>;
+  let out = { ...payload } as Record<string, unknown>;
   const omitted: Record<string, number> = {};
+  const cut: Record<string, number> = {};
   let clipped = 0;
   let size = chars;
   for (const step of plan) {
     if (size <= target) {
       break;
+    }
+    if ('compact' in step) {
+      const saved = step.apply();
+      if (saved > 0) {
+        cut[step.compact] = (cut[step.compact] ?? 0) + saved;
+        size = measure(out as P);
+      }
+      continue;
+    }
+    if ('trim' in step) {
+      const whole = textAt(out, step.trim);
+      if (whole === null) {
+        continue;
+      }
+      // Escaped characters make the JSON longer than the text, so a first
+      // cut can fall short; measure again and cut once more if it did.
+      let kept = whole.length;
+      for (
+        let pass = 0;
+        pass < 3 && size > target && kept > step.floor;
+        pass += 1
+      ) {
+        kept = Math.max(step.floor, kept - (size - target));
+        out = withTextAt(out, step.trim, whole.slice(0, kept));
+        size = measure(out as P);
+      }
+      if (kept < whole.length) {
+        cut[step.trim] = (cut[step.trim] ?? 0) + (whole.length - kept);
+      }
+      continue;
     }
     if ('clip' in step) {
       const rows = rowsOf(out, step.clip);
@@ -181,6 +259,7 @@ export const fitResult = <P extends object>(input: FitInput<P>): Fitted<P> => {
       delivered: measure(fitted),
       omitted,
       clipped,
+      cut,
     },
   };
 };
@@ -221,13 +300,24 @@ export const renderFitNote = (
   const dropped = Object.entries(fit.omitted).map(
     ([list, count]) => `${count} ${list}`
   );
-  if (dropped.length === 0 && fit.clipped === 0 && !over) {
+  const deferred = Object.entries(fit.cut).map(
+    ([text, chars]) => `${formatChars(chars)} characters of ${text}`
+  );
+  if (
+    dropped.length === 0 &&
+    deferred.length === 0 &&
+    fit.clipped === 0 &&
+    !over
+  ) {
     return null;
   }
   const cut = [
     ...(dropped.length > 0 ? [`left out ${dropped.join(', ')}`] : []),
     ...(fit.clipped > 0
       ? [`shortened ${fit.clipped} memories (full text: zm://memory/<id>)`]
+      : []),
+    ...(deferred.length > 0
+      ? [`kept ${deferred.join(', ')} for a later read`]
       : []),
   ].join('; ');
   const head = over

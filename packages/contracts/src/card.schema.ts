@@ -884,6 +884,24 @@ export const boardInputSchema = z.object({
       'For list: continue past this card — the `next_before` a previous page ' +
         'returned.'
     ),
+  body_from: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe(
+      "For get: read the card's text from this character on — the " +
+        '`body_next` a previous read returned.'
+    ),
+  refs_from: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe(
+      "For get: read the card's attachments from this position on — the " +
+        '`refs_next` a previous read returned.'
+    ),
   max_chars: maxCharsSchema,
 });
 export type BoardInput = z.infer<typeof boardInputSchema>;
@@ -924,6 +942,16 @@ export const boardOutputSchema = z.object({
    * Pass it back as `before`.
    */
   next_before: z.string().nullable().default(null),
+  /**
+   * For get: where the card's text continues when only part of it fitted.
+   * Pass it back as `body_from`; null when the text arrived to its end.
+   */
+  body_next: z.number().int().nonnegative().nullable().default(null),
+  /**
+   * For get: where the attachments continue when only some fitted. Pass it
+   * back as `refs_from`; null when they all arrived.
+   */
+  refs_next: z.number().int().nonnegative().nullable().default(null),
   /** Present when the result was cut to fit the client, or `max_chars` was reported. */
   fit: resultFitSchema.optional(),
 });

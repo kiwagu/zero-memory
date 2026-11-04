@@ -65,6 +65,7 @@ describe('fitResult', () => {
       delivered: size(payload),
       omitted: {},
       clipped: 0,
+      cut: {},
     });
   });
 
@@ -151,6 +152,7 @@ describe('fitResult', () => {
       delivered: size(fitted.payload),
       omitted: { secondary: 6, primary: 1 },
       clipped: 0,
+      cut: {},
     });
   });
 
@@ -261,6 +263,91 @@ describe('fitResult', () => {
   });
 });
 
+describe('fitResult — texts and what rides beside the payload', () => {
+  const card = (chars: number) => ({
+    primary: [] as Row[],
+    secondary: [] as Row[],
+    card: { title: 'A card', body: 'b'.repeat(chars) },
+  });
+
+  it('delivers the head of a text, only as much as needs to go, and says how much it kept back', () => {
+    const payload = card(10_000);
+    const budget = 5_000 + FIT_RESERVE_CHARS;
+
+    const fitted = fitResult({
+      payload,
+      budget,
+      source: 'default',
+      plan: [{ trim: 'card.body', floor: 500 }],
+      measure: size,
+    });
+
+    const kept = fitted.payload.card.body;
+    // A plain head, no ellipsis: the next read's part joins on exactly.
+    expect(payload.card.body.startsWith(kept)).toBe(true);
+    expect(size(fitted.payload)).toBeLessThanOrEqual(
+      budget - FIT_RESERVE_CHARS
+    );
+    expect(kept.length).toBeGreaterThan(4_800);
+    expect(fitted.fit?.cut).toEqual({ 'card.body': 10_000 - kept.length });
+    expect(fitted.payload.card.title).toBe('A card');
+    expect(payload.card.body).toHaveLength(10_000);
+  });
+
+  it('never trims a text below its floor', () => {
+    const budget = 1_200;
+    const fitted = fitResult({
+      payload: card(10_000),
+      budget,
+      source: 'default',
+      plan: [{ trim: 'card.body', floor: 500 }],
+      measure: size,
+    });
+
+    // Without the floor it would go down to the target; it stops at 500.
+    expect(fitted.payload.card.body).toHaveLength(500);
+    expect(fitted.fit?.delivered).toBeGreaterThan(budget - FIT_RESERVE_CHARS);
+  });
+
+  it('compacts what rides beside the payload only once the payload steps fell short, and counts what that saved', () => {
+    const run = (secondaryRows: number, footerChars: number) => {
+      let footer = 'f'.repeat(footerChars);
+      const payload = {
+        primary: [] as Row[],
+        secondary: rows('s', secondaryRows, 2_000),
+      };
+      const fitted = fitResult({
+        payload,
+        budget: 7_000 + FIT_RESERVE_CHARS,
+        source: 'default',
+        plan: [
+          { drop: 'secondary' },
+          {
+            compact: 'rules',
+            apply: () => {
+              const before = footer.length;
+              footer = footer.slice(0, 500);
+              return before - footer.length;
+            },
+          },
+        ],
+        measure: (p) => size(p) + footer.length,
+      });
+      return { fitted, footer };
+    };
+
+    // Dropping rows is enough: the footer stays whole.
+    const enough = run(2, 6_000);
+    expect(enough.footer).toHaveLength(6_000);
+    expect(enough.fitted.fit?.cut).toEqual({});
+
+    // A footer too large on its own: compacted, and what it saved counted.
+    const tight = run(0, 9_000);
+    expect(tight.footer).toHaveLength(500);
+    expect(tight.fitted.fit?.cut).toEqual({ rules: 8_500 });
+  });
+});
+
 describe('renderFitNote', () => {
   const fit = {
     budget: 30_000,
@@ -268,6 +355,7 @@ describe('renderFitNote', () => {
     chars: 65_430,
     omitted: { cards: 25 },
     clipped: 0,
+    cut: {},
   };
 
   it('names the cut and how to report a larger limit', () => {

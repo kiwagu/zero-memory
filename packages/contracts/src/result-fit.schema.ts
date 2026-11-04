@@ -8,11 +8,14 @@ import { z } from 'zod';
  * growing store still fit.
  *
  * A client can say where its own line is (`max_chars`), and that answer
- * outranks the default for the rest of its session.
+ * outranks the default for the rest of its session. The smallest limit it may
+ * report still holds one whole unit of every paged read (a card's longest
+ * note, a chunk of its text, one attachment) beside the result's frame, so
+ * every read can always move on.
  */
 export const RESULT_BUDGET = {
   defaultChars: 30_000,
-  minChars: 4_000,
+  minChars: 8_000,
   maxChars: 400_000,
 } as const;
 
@@ -65,5 +68,10 @@ export const resultFitSchema = z.object({
   omitted: z.record(z.string(), z.number().int().positive()).default({}),
   /** Memories whose content was shortened (marked `truncated`). */
   clipped: z.number().int().nonnegative().default(0),
+  /**
+   * Texts delivered in part, per field: how many characters were left for
+   * the next read (a card's text continues from `body_next`).
+   */
+  cut: z.record(z.string(), z.number().int().positive()).default({}),
 });
 export type ResultFit = z.infer<typeof resultFitSchema>;
